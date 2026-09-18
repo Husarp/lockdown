@@ -7,7 +7,7 @@ shared total for all members.
 import customtkinter as ctk
 
 from gui import icons
-from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor
+from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor, SwitchEditor
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from rules import describe_rule, effective_rules, item_block
@@ -15,11 +15,12 @@ from rules import describe_rule, effective_rules, item_block
 MUTED = "gray60"
 ERROR = "#f85149"
 GREEN, ORANGE = "#3fb950", "#d29922"
-CUSTOMIZABLE = ("scheduled", "time_limit", "temporary")
+CUSTOMIZABLE = ("scheduled", "time_limit", "switch_limit", "temporary")
 
 
 def _make_editor(parent, rule_type: str):
-    return LimitEditor(parent, shared=True) if rule_type == "time_limit" else EDITORS[rule_type](parent)
+    shared = {"time_limit": LimitEditor, "switch_limit": SwitchEditor}   # group limits are one shared total
+    return shared[rule_type](parent, shared=True) if rule_type in shared else EDITORS[rule_type](parent)
 
 
 class CustomizeMember(ctk.CTkToplevel):
@@ -54,7 +55,7 @@ class CustomizeMember(ctk.CTkToplevel):
                 editor.pack(anchor="w", padx=12, pady=(0, 10))
             self.parts[t] = (custom, editor)
         if not self.parts:
-            ctk.CTkLabel(body, text="This group has no rules that can be customized (hours, daily limit, temporary).",
+            ctk.CTkLabel(body, text="This group has no rules that can be customized (hours, limits, temporary).",
                          text_color=MUTED).pack(anchor="w")
         self.error = ctk.CTkLabel(body, text="", text_color=ERROR)
         self.error.pack(anchor="w")

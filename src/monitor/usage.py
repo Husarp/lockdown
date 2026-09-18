@@ -10,7 +10,7 @@ import threading
 
 from blocker.hosts import normalize_host
 from db import Database
-from rules import effective_rules, usage_targets
+from rules import effective_rules, switch_targets, usage_targets
 from trusted_time import now_from_db
 
 TICK_SEC = 2
@@ -81,19 +81,26 @@ class UsageTracker(threading.Thread):
     def tick(self, db: Database, sense):
         exe, url, idle_sec = sense()
         now = now_from_db(db)
-        self.record_activity(db, exe, site_of(url), idle_sec, now)
+        switched = self.record_activity(db, exe, site_of(url), idle_sec, now)
         used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, db.list_items())
         if used:
             groups = db.list_groups()
             for item in used:
-                db.add_usage(usage_targets(effective_rules(item, groups), item["id"], now), TICK_SEC, now.date())
+                rules = effective_rules(item, groups)
+                db.add_usage(usage_targets(rules, item["id"], now), TICK_SEC, now.date())
+                if switched:   # you just switched to it: one more opening
+                    db.add_usage(switch_targets(rules, item["id"], now), 1, now.date())
         self.in_use = {i["id"] for i in used}
 
-    def record_activity(self, db: Database, exe: str | None, site: str, idle_sec: float, now):
+    def record_activity(self, db: Database, exe: str | None, site: str, idle_sec: float, now) -> bool:
+        """Screen time + switch log. Returns True if you just switched to another app/site."""
         focus = (exe, site) if exe else None     # None: nothing in front (e.g. locked)
+        switched = False
         if exe:
             db.add_activity(now.strftime("%Y-%m-%d %H:%M"), exe, site, TICK_SEC,
                             TICK_SEC if idle_sec < ACTIVE_IDLE_SEC else 0)
             if self.last_focus is not _UNSET and focus != self.last_focus:
                 db.add_switch(now, exe, site)
+                switched = True
         self.last_focus = focus
+        return switched

@@ -14,7 +14,8 @@ from rules import TIME_FMT
 from trusted_time import now_from_db
 
 AUTOSAVE_KEY = "ui.autosave"
-RULE_FIELDS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "duration_min", "allowance_min")
+RULE_FIELDS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "duration_min", "allowance_min",
+               "daily_switch_limit")
 
 
 def _rule_key(rule: dict) -> tuple:
@@ -148,6 +149,18 @@ class Draft:
         if block_type and item["item_type"] == "app":
             item["block_type"] = block_type
         item["rules"] = [r for r in item["rules"] if r["rule_type"] != rule["rule_type"]] + [rule]
+        self._changed()
+
+    def set_rules(self, item_id: int, rules: list[dict], name: str | None = None, block_type: str | None = None):
+        """Replace all of the item's own rules (an item left with none and in no group is removed)."""
+        item = self.items[item_id]
+        if name:
+            item["display_name"] = name
+        if block_type and item["item_type"] == "app":
+            item["block_type"] = block_type
+        item["rules"] = rules
+        if not rules and not self.groups_of(item_id):
+            del self.items[item_id]
         self._changed()
 
     def remove_rule(self, item_id: int, rule_type: str):

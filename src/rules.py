@@ -4,7 +4,7 @@ from datetime import datetime, time, timedelta
 
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 # When several rules on one item are active, the reason shown is the first in this order.
-REASON_ORDER = ["permanent", "temporary", "limit", "schedule"]
+REASON_ORDER = ["permanent", "temporary", "limit", "switches", "schedule"]
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
 ALLOW, BLOCK = "allow", "block"   # hours rule mode: allow only during the windows / block during them
 
@@ -97,6 +97,10 @@ def day_bucket(now: datetime) -> str:
     return f"day:{now.date().isoformat()}"
 
 
+def switch_bucket(now: datetime) -> str:
+    return f"sw:{now.date().isoformat()}"
+
+
 def allowance_bucket(rule: dict, until: datetime) -> str:
     return f"win:{rule.get('rule_key', '')}:{until:%Y-%m-%dT%H:%M}"
 
@@ -123,8 +127,8 @@ def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
             t = r["rule_type"]
             if t in custom:   # customized for this member: counted for the member alone
                 rule = {**custom[t], "rule_type": t, "usage_owner": me}
-            else:             # inherited: a group daily limit is one shared total
-                rule = {**r, "usage_owner": f"group:{g['id']}" if t == "time_limit" else me}
+            else:             # inherited: a group daily (time or switch) limit is one shared total
+                rule = {**r, "usage_owner": f"group:{g['id']}" if t in ("time_limit", "switch_limit") else me}
             out.append({**rule, "item_owner": me, "rule_key": f"g{g['id']}{t}",
                         "group": {"id": g["id"], "name": g["name"]}})
     return out
@@ -150,7 +154,11 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
     if kind == "time_limit" and rule.get("daily_limit_min") is not None:
         used = usage(_owner(rule), day_bucket(now))
         return ("limit", next_midnight(now)) if used >= rule["daily_limit_min"] * 60 else None
-    return None  # switch_limit: not implemented yet
+    if kind == "switch_limit" and rule.get("daily_switch_limit") is not None:
+        # the openings up to the limit are allowed; the next one is blocked
+        opened = usage(_owner(rule), switch_bucket(now))
+        return ("switches", next_midnight(now)) if opened > rule["daily_switch_limit"] else None
+    return None
 
 
 def item_block(rules: list[dict], now: datetime, usage=no_usage) -> tuple[str, datetime | None, dict] | None:
@@ -172,6 +180,13 @@ def usage_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[s
             until = schedule_until(r["schedule"], now)
             if until:
                 targets.add((me, allowance_bucket(r, until)))
+    return targets
+
+
+def switch_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[str, str]]:
+    """(owner, bucket) pairs to add 1 to when you switch to the item."""
+    targets = {(f"item:{item_id}", switch_bucket(now))}
+    targets |= {(_owner(r), switch_bucket(now)) for r in rules if r["rule_type"] == "switch_limit"}
     return targets
 
 
@@ -247,4 +262,8 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
         used = usage(_owner(rule), day_bucket(now))
         shared = " (shared)" if _owner(rule).startswith("group:") else ""
         return f"Limit{shared}: {duration_text(used)} / {duration_text(rule['daily_limit_min'] * 60)} today"
+    if kind == "switch_limit":
+        opened = usage(_owner(rule), switch_bucket(now))
+        shared = " (shared)" if _owner(rule).startswith("group:") else ""
+        return f"Switches{shared}: opened {opened} / {rule['daily_switch_limit']} times today"
     return kind

@@ -1172,32 +1172,34 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] "Block started" notification (on/off)
 - [x] Group warnings/notifications combined into one ("Night schedule starts in 5 min: Discord, Steam, YouTube")
 
-**Added 2026-09-19:**
+**Added 2026-09-18 (evening):**
 - [x] Remove buttons: click twice (turns into a red "Confirm" for 3 s) instead of a confirmation dialog
 - [x] Apps started while blocked are killed immediately (checked 4x per second); the polite 10 s close is only for apps already open when their block begins
 - [x] Apps: "Minimize" block option (keep running, minimize whenever it comes to the front) + "Also block its internet"
 - [x] Temporary blocks: custom duration (minutes / hours / days, max 30 days)
 - [x] Auto-save on by default; Save/Discard hidden while it's on
 - [x] Design brief: design/DESIGN.md + screenshots (Dashboard + Screen Time first)
-- [ ] Proposal (awaiting approval): stop blocked apps from starting at all (Windows "Image File Execution Options" registry entry, set/removed by the service)
-- [ ] Proposal (awaiting approval): Blocking page with fewer tabs — "Sites & Apps" (list + sort + one editor where block types combine) and "Groups"
-- [ ] Hours editor: only show "Remove window" when a rule has 2+ time windows (awaiting approval, part of the rework)
-- [ ] Design brief update for the Blocking page — after the Blocking rework is decided
 
-**Ideas added 2026-09-18 (not scheduled yet):**
-- [ ] Weekly block calendar: a week view (like a Teams calendar, but) with colored bars per app/site showing when each is blocked; see at a glance when everything is blocked — visual only
-- [ ] Dashboard: list of everything with a minute limit (or opening limit) with progress bars, time left / percentage used
+### Phase 3b — Blocking page rework (approved 2026-09-18)
+- [x] Blocking has 3 tabs: **Overview** (everything, sortable: date added / next block / blocked now / name; Edit + Remove), **Groups**, **Add** (pick a site/app, then tick any number of blockers at once: hours, limit, switches, permanent, temporary); Edit from Overview opens the Add form with the item loaded
+- [x] Hours editor: no "Remove window" button — a time window with no days ticked is ignored
+- [x] Switch limits: "max N openings per day" for a site/app (group: shared total); the next opening after the limit is blocked
+- [x] Design brief: add the new Blocking page
+- Dropped (2026-09-18): "prevent blocked apps from starting at all" (IFEO registry) — the instant kill on launch is enough
 
-### Phase 4 — Screen Time & Stats
+### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
 - [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
 - [x] Switch counting data (`switch_events` table)
 - [ ] Overall screen time calculation
+- [ ] Screen Time page: Overview / Apps / Websites / Switches tabs (per design/DESIGN.md)
 - [ ] Per-app usage graphs (bar chart, pie chart)
 - [ ] Daily/weekly/monthly trend line graphs
 - [ ] Category breakdown (productive/neutral/distracting)
 - [ ] Screen time limits (warning, soft lock, hard lock)
 - [ ] Dashboard with stat cards and graphs
+- [ ] Dashboard: "limits today" list — every time/switch limit with a progress bar, time left and % used (requested 2026-09-18)
+- [ ] Weekly block calendar: week view with coloured bars per site/app showing when each is blocked (requested 2026-09-18)
 
 ### Phase 5 — Network Logging
 - [ ] Connection enumeration with `psutil`

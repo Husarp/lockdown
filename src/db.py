@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS group_rules (
     daily_limit_min INTEGER,      -- a group daily limit is one shared total
     schedule TEXT,
     temp_until DATETIME,
-    allowance_min INTEGER
+    allowance_min INTEGER,
+    daily_switch_limit INTEGER    -- a group switch limit is one shared total
 );
 
 CREATE TABLE IF NOT EXISTS group_members (
@@ -110,8 +111,8 @@ CREATE TABLE IF NOT EXISTS site_history (
 
 # Columns added after a table was first released: (table, column, definition)
 MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path", "TEXT"),
-              ("block_rules", "allowance_min", "INTEGER")]
-RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min")
+              ("block_rules", "allowance_min", "INTEGER"), ("group_rules", "daily_switch_limit", "INTEGER")]
+RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "daily_switch_limit")
 USAGE_DAYS_LOADED = 2
 
 
@@ -158,7 +159,8 @@ class Database:
     def _insert_rules(self, table: str, owner_col: str, owner_id: int, rules: list[dict]):
         for r in rules:
             self.conn.execute(
-                f"INSERT INTO {table} ({owner_col}, {', '.join(RULE_COLUMNS)}) VALUES (?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO {table} ({owner_col}, {', '.join(RULE_COLUMNS)}) "
+                f"VALUES ({', '.join('?' * (len(RULE_COLUMNS) + 1))})",
                 (owner_id, *(r.get(c) for c in RULE_COLUMNS)))
 
     def update_item(self, item_id: int, display_name: str, targets: list[str], notify: str | None,

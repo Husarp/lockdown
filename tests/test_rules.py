@@ -154,3 +154,13 @@ def test_duration_text_days():
     from rules import duration_text
     assert duration_text(90 * 60) == "1h 30m"
     assert duration_text(3 * 86400 + 2 * 3600) == "3d 2h"
+
+
+def test_switch_limit():
+    rule = {"rule_type": "switch_limit", "daily_switch_limit": 3, "usage_owner": "item:1"}
+    assert rule_block(rule, at(0, 12), used(3)) is None                  # 3 openings allowed
+    assert rule_block(rule, at(0, 12), used(4)) == ("switches", at(1, 0))
+    assert describe_rule(rule, at(0, 12), used(2)) == "Switches: opened 2 / 3 times today"
+    from rules import switch_targets
+    group_rule = {**rule, "usage_owner": "group:7"}
+    assert switch_targets([group_rule], 1, at(0, 12)) == {("item:1", "sw:2026-09-14"), ("group:7", "sw:2026-09-14")}

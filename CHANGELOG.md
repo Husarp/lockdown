@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — 2026-09-18 22:15
+- Blocking page reworked into 3 tabs: **Overview** (everything, sort by blocked now / next block / date added / name; Edit + Remove), **Groups**, **Add** (pick a site or app, tick any number of blockers at once); Edit from Overview opens the Add form; adding something that's already in the list loads it for editing
+- Switch limits: "open at most N times per day" (every switch to the app/site counts; the next opening is blocked; shared total in groups; own alert reason)
+- Hours editor: "Remove window" button removed - a time window with no days ticked is ignored
+- Temporary blocks being edited offer "Keep (Xh left)" so saving doesn't restart the timer
+- PLAN.md: every request scheduled (Phase 3b done; Phase 4 gets the Screen Time page, Dashboard limits list, weekly block calendar); "prevent apps from starting" dropped
+- Design brief: Blocking page section + new screenshots
+- 94 tests passing
+
 ## 0.6.0 — 2026-09-18 22:02
 - Apps: new block option "Minimize" (keeps the app running - e.g. a browser with many tabs - but the tray agent minimizes it whenever it comes to the front, checked 4x per second); "When blocked" is now Close app / Minimize / Only block internet + "Also block its internet" checkbox
 - Temporary blocks: "Custom..." duration (number + minutes / hours / days, up to 30 days); durations of a day or more shown as "3d 2h"

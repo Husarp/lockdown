@@ -80,14 +80,30 @@ Tabs: **Overview · Apps · Websites · Switches** (Goals and Limits later).
 - **Service not running:** blocking isn't enforced — a clear but calm warning banner.
 - **Loading:** lists that load in the background (e.g. the app list takes a few seconds).
 
-## 5. Later (don't design yet)
+## 5. Next: the Blocking page (structure is final, visuals are not)
 
-- **Blocking page:** being restructured (fewer tabs: "Sites & Apps" with one editor where block types combine,
-  plus "Groups"). Screenshots 01–05 show the current version for reference only.
+Three tabs (see screenshots 01–05):
+- **Overview:** every blocked site/app — icon, name, what it is (hostnames or `app · discord.exe · closed`), all its
+  rules (its own + the ones from groups, e.g. "[Night schedule] Blocked: Every day 22:00-07:00"), status
+  (Blocked now / Allowed now / Not applied), per-item alerts dropdown, Edit, Remove (two clicks). Sort by: blocked
+  now first / next block / date added / name. "+ Add" button.
+- **Groups:** list of groups (name, members, rules, "2 of 3 blocked now") + a group editor (name, rules that can be
+  combined, members, per-member "Customize").
+- **Add:** choose a site (with suggestions, "+ Popular sites" with icons) or an app ("Browse apps" with icons);
+  for apps "When blocked: Close app / Minimize / Only block internet" + "Also block its internet". Then tick any
+  number of **blockers**, each with its own small settings: By hours (allow-only / block-during, time windows per
+  day, minutes still allowed during blocked hours), Daily time limit, Daily switch limit, Permanent, Temporary
+  (preset or custom duration). The same form edits an existing item.
+
+The editor can get long when several blockers are ticked — a cleaner layout (e.g. collapsible sections or
+chips/cards per blocker) would help.
+
+## 6. Later (don't design yet)
+
 - **Weekly block calendar** (idea): a week view with coloured bars per site/app showing when each is blocked.
 - Anti-Bypass, Network Log, Modes, Settings pages.
 
-## 6. What I'd like back
+## 7. What I'd like back
 
 1. Mockups (dark + light) of Dashboard and each Screen Time tab, at 1100 × 720.
 2. Colour tokens (background, surface, border, text, muted text, accent, green/orange/red status) and the type
@@ -95,13 +111,13 @@ Tabs: **Overview · Apps · Websites · Switches** (Goals and Limits later).
 3. Spacing rules (padding inside cards, gaps between cards) and corner radius.
 4. The chosen icon for each sidebar page.
 
-## 7. Screenshots (current app)
+## 8. Screenshots (current app)
 
 | File | Shows |
 |---|---|
-| `screenshots/01_blocking_all.png` | Blocking → All: every blocked site/app with its rules, status, alerts, Edit/Remove |
+| `screenshots/01_blocking_overview.png` | Blocking → Overview: everything blocked, rules, status, alerts, Edit/Remove, sort |
 | `screenshots/02_blocking_groups.png` | Blocking → Groups list |
-| `screenshots/03_group_editor.png` | Group editor: name, combined rules, members |
-| `screenshots/04_hours_editor.png` | Hours rule editor: allow/block switch, time windows per day, allowance |
-| `screenshots/05_temporary_custom.png` | Temporary block with a custom duration |
+| `screenshots/03_add_multiple_blockers.png` | Blocking → Add: site + several blockers ticked (hours with allowance + temporary) |
+| `screenshots/04_edit_item.png` | Blocking → Add in edit mode (an item's blockers loaded) |
+| `screenshots/05_group_editor.png` | Group editor: name, combined rules, members |
 | `screenshots/06_notifications.png` | Notifications settings |

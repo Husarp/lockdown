@@ -1,47 +1,52 @@
-"""Blocking page.
+"""Blocking page - three tabs:
 
-Each rule tab (By Hours / By Limit / Permanent / Temporary) has its own add/edit form and lists the sites
-and apps that have that kind of rule. "All" is an overview of everything with all its rules (own + groups);
-Edit jumps to the rule's tab (or the group), Remove deletes the item (after a confirmation). "Groups" holds
-shared rule sets. All edits go into the draft (see draft.py).
+- Overview: every blocked site/app with all its rules (own + groups), sortable; Edit opens it in "Add",
+  Remove deletes it (two clicks).
+- Groups: shared rule sets (see groups.py).
+- Add: pick a site or app, then tick any number of blockers at once (hours, time limit, switch limit,
+  permanent, temporary). Also used to edit an existing item.
+All edits go into the draft (see draft.py).
 """
 import tkinter as tk
+from datetime import datetime
 
 import customtkinter as ctk
 
 from gui import app_browser, icons
 from gui.groups import GroupsTab
-from gui.rule_editors import EDITORS
+from gui.rule_editors import EDITORS, RULE_NAMES
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import describe_rule, effective_rules, item_block
+from rules import describe_rule, effective_rules, item_block, next_block
 from trusted_time import now_from_db
 
-TABS = ["All", "Groups", "By Hours", "By Limit", "By Switches", "Permanent", "Temporary"]
-TAB_RULE = {"By Hours": "scheduled", "By Limit": "time_limit", "Permanent": "permanent", "Temporary": "temporary"}
-RULE_TAB = {v: k for k, v in TAB_RULE.items()}
-RULE_NAME = {"scheduled": "hours rule", "time_limit": "daily limit", "permanent": "permanent block",
-             "temporary": "temporary block"}
+TABS = ["Overview", "Groups", "Add"]
+SORTS = ["Blocked now first", "Next block", "Date added", "Name"]
+SORT_KEY = "ui.blocking.sort"
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
 REFRESH_MS = 30_000
-HIGHLIGHT_MS = 2500
 MUTED = "gray60"
 ERROR = "#f85149"
 GREEN, ORANGE = "#3fb950", "#d29922"
-HIGHLIGHT = ("#dbe9ff", "#1f3a5f")
-COLS = [220, 270, 140]   # name + targets, rules, status (then action buttons)
+COLS = [220, 290, 140]   # name + targets, rules, status (then action buttons)
 
 
-# ---------------------------------------------------------------- shared list helpers
+# ---------------------------------------------------------------- shared helpers
+
+def saved_block(draft, item: dict, now, usage):
+    """The block that's enforced now (from the SAVED state), or None."""
+    saved = draft.saved_items.get(item["id"])
+    if saved is None:
+        return None
+    return item_block(effective_rules(saved, list(draft.saved_groups.values())), now, usage)
+
 
 def status_of(page, item: dict, now, usage) -> dict:
-    """Status from the SAVED state (that's what is enforced)."""
     draft = page.draft
     if draft.item_not_applied(item["id"]):
         return {"text": "○ Not applied\n(unsaved)", "text_color": ORANGE}
-    saved = draft.saved_items[item["id"]]
-    if not item_block(effective_rules(saved, list(draft.saved_groups.values())), now, usage):
+    if not saved_block(draft, item, now, usage):
         return {"text": "○ Allowed now", "text_color": MUTED}
     if not page.app.service_running:
         return {"text": "○ Pending - service\nnot running", "text_color": ORANGE}
@@ -80,146 +85,56 @@ def header_row(parent, titles):
         ctk.CTkLabel(row, text=title, text_color=MUTED).grid(row=0, column=col, padx=8, pady=(6, 0), sticky="w")
 
 
-# ---------------------------------------------------------------- tabs
+# ---------------------------------------------------------------- Overview
 
-class RuleTab(ctk.CTkScrollableFrame):
-    """Add/edit form + list for one rule type."""
-
-    def __init__(self, master, page, rule_type: str):
-        super().__init__(master, fg_color="transparent")
-        self.page, self.draft, self.rule_type = page, page.draft, rule_type
-        self.edit_id: int | None = None
-        self.rows: dict[int, ctk.CTkFrame] = {}
-        self._build_form()
-        self.list_title = ctk.CTkLabel(self, font=ctk.CTkFont(size=16, weight="bold"))
-        self.list_title.pack(anchor="w", padx=10, pady=(4, 6))
-        self.list_box = ctk.CTkFrame(self)
-        self.list_box.pack(fill="x")
-
-    def _build_form(self):
-        box = ctk.CTkFrame(self)
-        box.pack(fill="x", pady=(0, 12))
-        self.form_title = ctk.CTkLabel(box, font=ctk.CTkFont(size=16, weight="bold"))
-        self.form_title.pack(anchor="w", padx=16, pady=(12, 8))
-        self.picker = TargetPicker(box, self.page.app.db)
-        self.picker.pack(anchor="w", padx=16)
-        self.picker.entry.bind("<Return>", lambda e: self._submit(), add="+")
-        self.submit_btn = ctk.CTkButton(self.picker.buttons, width=90, command=self._submit)
-        self.submit_btn.pack(side="left", padx=4)
-        self.cancel_btn = ctk.CTkButton(self.picker.buttons, text="Cancel", width=80, fg_color="transparent",
-                                        border_width=1, command=self.reset_form)
-        self.editor = EDITORS[self.rule_type](box)
-        if self.rule_type != "permanent":
-            self.editor.pack(anchor="w", padx=16, pady=(10, 0))
-        self.error = ctk.CTkLabel(box, text="", text_color=ERROR)
-        self.error.pack(anchor="w", padx=16, pady=(4, 8))
-        self.reset_form()
-
-    def reset_form(self):
-        self.edit_id = None
-        self.form_title.configure(text="Add Site or App")
-        self.submit_btn.configure(text="+ Add")
-        self.cancel_btn.pack_forget()
-        self.picker.reset()
-        self.error.configure(text="")
-        self.editor.load(None)
-
-    def edit(self, item_id: int):
-        item = self.draft.items[item_id]
-        rule = next(r for r in item["rules"] if r["rule_type"] == self.rule_type)
-        self.edit_id = item_id
-        self.form_title.configure(text=f"Edit {item['display_name']}")
-        self.submit_btn.configure(text="Update")
-        self.cancel_btn.pack(side="left", padx=4)
-        self.picker.load_item(item)
-        self.error.configure(text="")
-        self.editor.load(rule)
-        self._parent_canvas.yview_moveto(0)
-        self.highlight(item_id)
-
-    def _submit(self):
-        self.picker.entry.hide()
-        if self.edit_id is not None and self.edit_id not in self.draft.items:  # expired meanwhile
-            self.reset_form()
-            return
-        try:
-            rule = self.editor.value()
-            if self.edit_id is not None:
-                # identical values leave the draft clean (Save stays grey)
-                name = self.picker.name.get().strip() or self.draft.items[self.edit_id]["display_name"]
-                self.draft.set_rule(self.edit_id, rule, name, self.picker.selected_block_type())
-                self.reset_form()
-                return
-            target = self.picker.get()
-        except ValueError as e:
-            self.error.configure(text=str(e))
-            return
-        existing = self.draft.find_item(target["targets"][0])
-        if existing and any(r["rule_type"] == self.rule_type for r in existing["rules"]):
-            self.error.configure(text=f"{existing['display_name']} already has a {RULE_NAME[self.rule_type]} - use Edit.")
-            return
-        if existing is None:
-            existing = self.draft.add_item(target["name"], target["targets"], target["source"], target["kind"],
-                                           target["block_type"], target["app_path"])
-        self.draft.set_rule(existing["id"], rule, block_type=target["block_type"])
-        self.reset_form()
-
-    def highlight(self, item_id: int):
-        row = self.rows.get(item_id)
-        if row and row.winfo_exists():
-            row.configure(fg_color=HIGHLIGHT)
-            self.after(HIGHLIGHT_MS, lambda: row.winfo_exists() and row.configure(fg_color="transparent"))
-
-    def refresh(self, now, usage):
-        items = [i for i in self.draft.sorted_items() if any(r["rule_type"] == self.rule_type for r in i["rules"])]
-        self.list_title.configure(text=f"{RULE_TAB[self.rule_type]} ({len(items)})")
-        for w in self.list_box.winfo_children():
-            w.destroy()
-        self.rows = {}
-        if not items:
-            ctk.CTkLabel(self.list_box, text="Nothing here yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
-            return
-        header_row(self.list_box, ["Name", "Rule", "Status"])
-        groups = list(self.draft.groups.values())
-        for item in items:
-            rule = next(r for r in effective_rules(item, groups) if r["rule_type"] == self.rule_type and not r["group"])
-            row = make_row(self.list_box)
-            self.rows[item["id"]] = row
-            name_cell(row, item)
-            ctk.CTkLabel(row, text=describe_rule(rule, now, usage), wraplength=COLS[1] - 16,
-                         justify="left", anchor="w").grid(row=0, column=1, padx=8, sticky="w")
-            ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left").grid(
-                row=0, column=2, padx=8, sticky="w")
-            ctk.CTkButton(row, text="Edit", width=60, command=lambda i=item["id"]: self.edit(i)).grid(
-                row=0, column=3, padx=4)
-            ConfirmButton(row, lambda it=item: self._remove(it), width=70).grid(row=0, column=4, padx=4)
-
-    def _remove(self, item):
-        if self.edit_id == item["id"]:
-            self.reset_form()
-        self.draft.remove_rule(item["id"], self.rule_type)
-
-
-class AllTab(ctk.CTkScrollableFrame):
-    """Overview of every site/app with all its rules. Edit jumps to the rule's tab or group."""
-
+class OverviewTab(ctk.CTkScrollableFrame):
     def __init__(self, master, page):
         super().__init__(master, fg_color="transparent")
         self.page, self.draft = page, page.draft
-        self.title = ctk.CTkLabel(self, font=ctk.CTkFont(size=16, weight="bold"))
-        self.title.pack(anchor="w", padx=10, pady=(4, 2))
-        ctk.CTkLabel(self, text="To add sites or apps, open the tab for the kind of block you want (By Hours, "
-                                "By Limit, ...) or put them in a group.", text_color=MUTED).pack(anchor="w", padx=10, pady=(0, 8))
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(fill="x", padx=10, pady=(4, 8))
+        self.title = ctk.CTkLabel(top, font=ctk.CTkFont(size=16, weight="bold"))
+        self.title.pack(side="left")
+        ctk.CTkButton(top, text="+ Add", width=80, command=lambda: page.show_tab("Add")).pack(side="left", padx=16)
+        self.sort = ctk.CTkOptionMenu(top, values=SORTS, width=170, command=self._sort_changed)
+        self.sort.set(page.app.db.get_setting(SORT_KEY, SORTS[0]))
+        self.sort.pack(side="right")
+        ctk.CTkLabel(top, text="Sort by", text_color=MUTED).pack(side="right", padx=8)
         self.list_box = ctk.CTkFrame(self)
         self.list_box.pack(fill="x")
 
+    def _sort_changed(self, value: str):
+        self.page.app.db.set_setting(SORT_KEY, value)
+        self.page.refresh()
+
+    def _sorted(self, items: list[dict], now, usage) -> list[dict]:
+        how = self.sort.get()
+        if how == "Name":
+            return sorted(items, key=lambda i: i["display_name"].lower())
+        if how == "Date added":   # newest first; unsaved ones on top
+            return sorted(items, key=lambda i: i.get("created_at") or "~", reverse=True)
+        groups = list(self.draft.saved_groups.values())
+
+        def next_time(item) -> datetime:
+            """datetime.min = blocked now; datetime.max = nothing coming up."""
+            if saved_block(self.draft, item, now, usage):
+                return datetime.min
+            saved = self.draft.saved_items.get(item["id"])
+            nb = next_block(effective_rules(saved, groups), now, usage) if saved else None
+            return nb[0] if nb else datetime.max
+        times = {i["id"]: next_time(i) for i in items}
+        if how == "Next block":   # soonest first, the ones blocked already after them
+            return sorted(items, key=lambda i: (times[i["id"]] == datetime.min, times[i["id"]]))
+        return sorted(items, key=lambda i: (times[i["id"]] != datetime.min, i["display_name"].lower()))
+
     def refresh(self, now, usage):
-        items = self.draft.sorted_items()
-        self.title.configure(text=f"All Blocked Sites & Apps ({len(items)})")
+        items = self._sorted(self.draft.sorted_items(), now, usage)
+        self.title.configure(text=f"Everything blocked ({len(items)})")
         for w in self.list_box.winfo_children():
             w.destroy()
         if not items:
-            ctk.CTkLabel(self.list_box, text="Nothing blocked yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
+            ctk.CTkLabel(self.list_box, text="Nothing blocked yet - use + Add.", text_color=MUTED).pack(
+                anchor="w", padx=16, pady=12)
             return
         header_row(self.list_box, ["Name", "Rules", "Status", "Alerts"])
         groups = list(self.draft.groups.values())
@@ -240,8 +155,7 @@ class AllTab(ctk.CTkScrollableFrame):
                                        command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
             alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
             alerts.grid(row=0, column=3, padx=4)
-            choices = [(f"Edit {RULE_NAME[r['rule_type']]}", lambda i=item["id"], t=r["rule_type"]: self.page.edit_rule(i, t))
-                       for r in item["rules"] if r["rule_type"] in RULE_TAB]
+            choices = [("Edit its blockers", lambda i=item["id"]: self.page.edit_item(i))]
             choices += [(f"Edit group {g['name']}", lambda g=g["id"]: self.page.edit_group(g))
                         for g in self.draft.groups_of(item["id"])]
             edit_btn = ctk.CTkButton(row, text="Edit ▾" if len(choices) > 1 else "Edit", width=70)
@@ -260,6 +174,125 @@ class AllTab(ctk.CTkScrollableFrame):
         menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
 
 
+# ---------------------------------------------------------------- Add / edit
+
+class AddTab(ctk.CTkScrollableFrame):
+    """Pick a site or app, tick any number of blockers. Also edits an existing item."""
+
+    def __init__(self, master, page):
+        super().__init__(master, fg_color="transparent")
+        self.page, self.draft = page, page.draft
+        self.edit_id: int | None = None
+        box = ctk.CTkFrame(self)
+        box.pack(fill="x")
+        self.title = ctk.CTkLabel(box, font=ctk.CTkFont(size=16, weight="bold"))
+        self.title.pack(anchor="w", padx=16, pady=(12, 8))
+        self.picker = TargetPicker(box, page.app.db)
+        self.picker.pack(anchor="w", padx=16)
+        self.picker.entry.bind("<Return>", lambda e: self._submit(), add="+")
+        self.info = ctk.CTkLabel(box, text="", text_color=MUTED)
+        self.info.pack(anchor="w", padx=16)
+
+        ctk.CTkLabel(box, text="Blockers (tick any number)", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=16, pady=(12, 2))
+        self.parts = {}
+        for t in EDITORS:
+            check = ctk.CTkCheckBox(box, text=RULE_NAMES[t], command=lambda t=t: self._toggle(t))
+            check.pack(anchor="w", padx=16, pady=(6, 2))
+            self.parts[t] = (check, EDITORS[t](box))
+
+        self.error = ctk.CTkLabel(box, text="", text_color=ERROR)
+        self.error.pack(anchor="w", padx=16, pady=(6, 0))
+        buttons = ctk.CTkFrame(box, fg_color="transparent")
+        buttons.pack(anchor="w", padx=16, pady=(4, 14))
+        self.submit_btn = ctk.CTkButton(buttons, width=110, command=self._submit)
+        self.submit_btn.pack(side="left", padx=(0, 8))
+        ctk.CTkButton(buttons, text="Cancel", width=80, fg_color="transparent", border_width=1,
+                      command=self.cancel).pack(side="left")
+        self.reset()
+
+    def _toggle(self, t: str):
+        check, editor = self.parts[t]
+        if check.get() and t != "permanent":
+            editor.pack(anchor="w", padx=44, pady=(0, 6), after=check)
+        else:
+            editor.pack_forget()
+
+    def _load_rules(self, rules: list[dict]):
+        by_type = {r["rule_type"]: r for r in rules}
+        for t, (check, editor) in self.parts.items():
+            editor.load(by_type.get(t))
+            check.select() if t in by_type else check.deselect()
+            self._toggle(t)
+
+    def reset(self):
+        self.edit_id = None
+        self.title.configure(text="Add a site or app")
+        self.submit_btn.configure(text="+ Add")
+        self.picker.reset()
+        self.info.configure(text="")
+        self.error.configure(text="")
+        self._load_rules([])
+
+    def cancel(self):
+        editing = self.edit_id is not None
+        self.reset()
+        if editing:
+            self.page.show_tab("Overview")
+
+    def edit(self, item_id: int):
+        item = self.draft.items[item_id]
+        self.edit_id = item_id
+        self.title.configure(text=f"Edit {item['display_name']}")
+        self.submit_btn.configure(text="Save")
+        self.picker.load_item(item)
+        groups = ", ".join(g["name"] for g in self.draft.groups_of(item_id))
+        self.info.configure(text=f"Also in groups: {groups} (edit those in the Groups tab)" if groups else "")
+        self.error.configure(text="")
+        self._load_rules(item["rules"])
+        self._parent_canvas.yview_moveto(0)
+
+    def _rules(self) -> list[dict]:
+        return [editor.value() for t, (check, editor) in self.parts.items() if check.get()]
+
+    def _submit(self):
+        self.picker.entry.hide()
+        if self.edit_id is not None and self.edit_id not in self.draft.items:  # expired meanwhile
+            self.reset()
+            return
+        try:
+            rules = self._rules()
+            target = self.picker.get() if self.edit_id is None else None
+        except ValueError as e:
+            self.error.configure(text=str(e))
+            return
+        if target:
+            existing = self.draft.find_item(target["targets"][0])
+            if existing:   # already in the list: load it for editing instead of adding a duplicate
+                self.edit(existing["id"])
+                self.info.configure(text=f"{existing['display_name']} is already in the list - its blockers are "
+                                         "loaded, change them and Save.")
+                return
+            if not rules:
+                self.error.configure(text="Tick at least one blocker.")
+                return
+            item = self.draft.add_item(target["name"], target["targets"], target["source"], target["kind"],
+                                       target["block_type"], target["app_path"])
+            self.draft.set_rules(item["id"], rules, block_type=target["block_type"])
+            self.reset()
+            return
+        item = self.draft.items[self.edit_id]
+        if not rules and not self.draft.groups_of(self.edit_id):
+            self.error.configure(text="Tick at least one blocker (or remove it in Overview).")
+            return
+        name = self.picker.name.get().strip() or item["display_name"]
+        self.draft.set_rules(self.edit_id, rules, name, self.picker.selected_block_type())
+        self.reset()
+        self.page.show_tab("Overview")
+
+
+# ---------------------------------------------------------------- page
+
 class BlockingPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
@@ -272,18 +305,12 @@ class BlockingPage(ctk.CTkFrame):
         holder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         holder.grid_columnconfigure(0, weight=1)
         holder.grid_rowconfigure(0, weight=1)
-        self.tabs = {"All": AllTab(holder, self), "Groups": GroupsTab(holder, self)}
-        for tab, rule_type in TAB_RULE.items():
-            self.tabs[tab] = RuleTab(holder, self, rule_type)
-        switches = ctk.CTkFrame(holder, fg_color="transparent")
-        ctk.CTkLabel(switches, text="Switch limits are coming in a later phase.", text_color=MUTED).pack(
-            anchor="w", padx=10, pady=10)
-        self.tabs["By Switches"] = switches
+        self.tabs = {"Overview": OverviewTab(holder, self), "Groups": GroupsTab(holder, self),
+                     "Add": AddTab(holder, self)}
         icons.prefetch([hosts[0] for sites in POPULAR_SITES.values() for hosts in sites.values()]
                        + [i["target"].split()[0] for i in self.draft.items.values() if i["item_type"] == "site"])
         app_browser.preload()
-        self.tab_bar.set("All")
-        self.show_tab("All")
+        self.show_tab("Overview")
         self.after(REFRESH_MS, self._auto_refresh)
 
     def show_tab(self, tab: str):
@@ -294,11 +321,9 @@ class BlockingPage(ctk.CTkFrame):
         self.tabs[tab].grid(row=0, column=0, sticky="nsew")
         self.refresh()
 
-    def edit_rule(self, item_id: int, rule_type: str):
-        """From the All tab: open the rule's tab with the item loaded in the form."""
-        tab = RULE_TAB[rule_type]
-        self.show_tab(tab)
-        self.tabs[tab].edit(item_id)
+    def edit_item(self, item_id: int):
+        self.show_tab("Add")
+        self.tabs["Add"].edit(item_id)
 
     def edit_group(self, group_id: int):
         self.show_tab("Groups")

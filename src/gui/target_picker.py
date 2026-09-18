@@ -47,7 +47,8 @@ class TargetPicker(ctk.CTkFrame):
                       command=lambda: PopularSitesPopup(self, self._fill_site)).pack(side="left", padx=4)
         ctk.CTkButton(self.pickers, text="Browse apps", width=110, fg_color="transparent", border_width=1,
                       command=lambda: AppBrowser(self, self._fill_app)).pack(side="left", padx=4)
-        self.buttons = ctk.CTkFrame(row, fg_color="transparent")
+        # optional slot for Add/Update buttons; tiny when empty (an empty frame would default to 200x200)
+        self.buttons = ctk.CTkFrame(row, fg_color="transparent", width=1, height=1)
         self.buttons.pack(side="left")
         self.block_row = ctk.CTkFrame(self, fg_color="transparent")
         line = ctk.CTkFrame(self.block_row, fg_color="transparent")

@@ -1,8 +1,10 @@
 """Editors for one rule each (used by the rule tabs, the group editor and member customization).
 Uniform interface: load(rule or None), value() -> rule dict (raises ValueError with a user-facing message)."""
+from datetime import datetime
+
 import customtkinter as ctk
 
-from rules import ALLOW, BLOCK, DAY_NAMES, load_schedule, make_schedule
+from rules import ALLOW, BLOCK, DAY_NAMES, TIME_FMT, duration_text, load_schedule, make_schedule
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
@@ -24,7 +26,9 @@ def _minutes(text: str, low: int, high: int, what: str) -> int:
 
 
 class WindowRow(ctk.CTkFrame):
-    def __init__(self, master, days, start, end, on_remove):
+    """One time window: days + from/to. A window with no days ticked is ignored."""
+
+    def __init__(self, master, days, start, end):
         super().__init__(master, border_width=1, corner_radius=6)
         # no Tk variables here: rows get destroyed, and orphaned variables warn when collected off the Tk thread
         day_line = ctk.CTkFrame(self, fg_color="transparent")
@@ -46,8 +50,6 @@ class WindowRow(ctk.CTkFrame):
         self.end = ctk.CTkEntry(time_line, width=64)
         self.end.insert(0, end)
         self.end.pack(side="left")
-        ctk.CTkButton(time_line, text="✕ Remove window", width=120, fg_color="transparent", border_width=1,
-                      command=lambda: on_remove(self)).pack(side="left", padx=12)
 
     def value(self):
         return [i for i, b in enumerate(self.day_boxes) if b.get()], self.start.get(), self.end.get()
@@ -60,7 +62,8 @@ class HoursEditor(ctk.CTkFrame):
         top.pack(anchor="w")
         self.mode = ctk.CTkSegmentedButton(top, values=list(MODES))
         self.mode.pack(side="left")
-        ctk.CTkLabel(top, text="these hours (end before start = overnight)", text_color=MUTED).pack(side="left", padx=10)
+        ctk.CTkLabel(top, text="these hours (end before start = overnight; untick all days to drop a window)",
+                     text_color=MUTED).pack(side="left", padx=10)
         self.rows_box = ctk.CTkFrame(self, fg_color="transparent")
         self.rows_box.pack(anchor="w", pady=4)
         ctk.CTkButton(self, text="+ Add time window", width=140, fg_color="transparent", border_width=1,
@@ -76,13 +79,9 @@ class HoursEditor(ctk.CTkFrame):
         self.load(None)
 
     def _add_row(self, days, start, end):
-        row = WindowRow(self.rows_box, days, start, end, self._remove_row)
+        row = WindowRow(self.rows_box, days, start, end)
         row.pack(anchor="w", pady=2)
         self.rows.append(row)
-
-    def _remove_row(self, row):
-        row.destroy()
-        self.rows.remove(row)
 
     def load(self, rule: dict | None):
         for row in self.rows:
@@ -101,7 +100,10 @@ class HoursEditor(ctk.CTkFrame):
 
     def value(self) -> dict:
         allowance = _minutes(self.allowance.get(), 0, 1440, "Allowance")
-        return {"rule_type": "scheduled", "schedule": make_schedule(MODES[self.mode.get()], [r.value() for r in self.rows]),
+        windows = [w for w in (r.value() for r in self.rows) if w[0]]   # windows without days are ignored
+        if not windows:
+            raise ValueError("Tick at least one day.")
+        return {"rule_type": "scheduled", "schedule": make_schedule(MODES[self.mode.get()], windows),
                 "allowance_min": allowance or None}
 
 
@@ -124,11 +126,36 @@ class LimitEditor(ctk.CTkFrame):
         return {"rule_type": "time_limit", "daily_limit_min": _minutes(self.minutes.get(), 1, 1440, "Daily limit")}
 
 
+class SwitchEditor(ctk.CTkFrame):
+    def __init__(self, master, shared: bool = False):
+        super().__init__(master, fg_color="transparent")
+        ctk.CTkLabel(self, text="Open at most").pack(side="left")
+        self.times = ctk.CTkEntry(self, width=56)
+        self.times.pack(side="left", padx=8)
+        note = "times per day" + (" for all members together" if shared else "") + \
+            " - every switch to it counts (alt-tab, clicking its tab); the next opening after that is blocked"
+        ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=560, justify="left").pack(side="left")
+        self.load(None)
+
+    def load(self, rule: dict | None):
+        self.times.delete(0, "end")
+        self.times.insert(0, str((rule or {}).get("daily_switch_limit") or 10))
+
+    def value(self) -> dict:
+        try:
+            times = int(self.times.get().strip())
+        except ValueError:
+            times = -1
+        if not 0 <= times <= 1000:
+            raise ValueError("Openings per day must be 0-1000.")
+        return {"rule_type": "switch_limit", "daily_switch_limit": times}
+
+
 class TemporaryEditor(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="Block for").pack(side="left")
-        self.duration = ctk.CTkOptionMenu(self, values=[*DURATIONS, CUSTOM], width=110, command=self._chosen)
+        self.duration = ctk.CTkOptionMenu(self, values=[*DURATIONS, CUSTOM], width=130, command=self._chosen)
         self.duration.pack(side="left", padx=8)
         self.custom = ctk.CTkFrame(self, fg_color="transparent")
         self.amount = ctk.CTkEntry(self.custom, width=64)
@@ -137,6 +164,8 @@ class TemporaryEditor(ctk.CTkFrame):
         self.unit.pack(side="left", padx=(6, 0))
         self.note = ctk.CTkLabel(self, text="starting when saved", text_color=MUTED)
         self.note.pack(side="left", padx=8)
+        self.keep_until: str | None = None   # running block being edited: "Keep" leaves its end time alone
+        self.keep_label = ""
         self.load(None)
 
     def _chosen(self, choice: str):
@@ -144,10 +173,19 @@ class TemporaryEditor(ctk.CTkFrame):
             self.custom.pack(side="left", before=self.note)
         else:
             self.custom.pack_forget()
+        self.note.configure(text="" if choice == self.keep_label else "starting when saved")
 
     def load(self, rule: dict | None):
-        minutes = (rule or {}).get("duration_min")
+        rule = rule or {}
+        minutes = rule.get("duration_min")
         preset = next((k for k, v in DURATIONS.items() if v == minutes), None)
+        self.keep_until = rule.get("temp_until")
+        values = [*DURATIONS, CUSTOM]
+        if self.keep_until:
+            left = datetime.strptime(self.keep_until, TIME_FMT) - datetime.now()
+            self.keep_label = f"Keep ({duration_text(left.total_seconds())} left)"
+            values.insert(0, self.keep_label)
+        self.duration.configure(values=values)
         self.amount.delete(0, "end")
         if minutes and not preset:   # a custom duration: show it in the biggest whole unit
             unit = next(u for u, m in UNITS.items() if minutes % m == 0)
@@ -157,12 +195,15 @@ class TemporaryEditor(ctk.CTkFrame):
         else:
             self.amount.insert(0, "1")
             self.unit.set("hours")
-            self.duration.set(preset or "1 hour")
+            self.duration.set(self.keep_label if self.keep_until else (preset or "1 hour"))
         self._chosen(self.duration.get())
 
     def value(self) -> dict:
-        if self.duration.get() != CUSTOM:
-            return {"rule_type": "temporary", "duration_min": DURATIONS[self.duration.get()]}
+        choice = self.duration.get()
+        if self.keep_until and choice == self.keep_label:
+            return {"rule_type": "temporary", "temp_until": self.keep_until}
+        if choice != CUSTOM:
+            return {"rule_type": "temporary", "duration_min": DURATIONS[choice]}
         try:
             minutes = int(self.amount.get().strip()) * UNITS[self.unit.get()]
         except ValueError:
@@ -184,6 +225,7 @@ class PermanentEditor(ctk.CTkFrame):
         return {"rule_type": "permanent"}
 
 
-EDITORS = {"scheduled": HoursEditor, "time_limit": LimitEditor, "permanent": PermanentEditor,
-           "temporary": TemporaryEditor}
-RULE_NAMES = {"scheduled": "Hours", "time_limit": "Daily limit", "permanent": "Permanent", "temporary": "Temporary"}
+EDITORS = {"scheduled": HoursEditor, "time_limit": LimitEditor, "switch_limit": SwitchEditor,
+           "permanent": PermanentEditor, "temporary": TemporaryEditor}
+RULE_NAMES = {"scheduled": "By hours", "time_limit": "Daily time limit", "switch_limit": "Daily switch limit",
+              "permanent": "Permanent", "temporary": "Temporary"}

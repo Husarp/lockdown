@@ -8,12 +8,14 @@ REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
     "schedule": ("Outside its allowed hours", "blocked at this time"),
     "limit": ("Over its daily limit", "over its daily limit"),
+    "switches": ("Opened too often today", "opened too many times today"),
     "temporary": ("Temporarily blocked", "temporarily blocked"),
 }
 DEFAULT_MESSAGES = {
     "permanent": "{site} is permanently blocked.",
     "schedule": "{site} is blocked until {until}.",
     "limit": "{site}: daily limit reached - blocked until {until}.",
+    "switches": "{site}: opened too many times today - blocked until {until}.",
     "temporary": "{site} is blocked for now - until {until}.",
 }
 FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "Both"}
@@ -141,7 +143,8 @@ class BlockWatcher:
     @staticmethod
     def _started(e: dict, now: datetime) -> str:
         until = f" until {_when_text(e['until'], now)}" if e["until"] else ""
-        why = {"limit": " - daily limit reached", "temporary": " (temporary block)"}.get(e["reason"], "")
+        why = {"limit": " - daily limit reached", "switches": " - opened too many times today",
+               "temporary": " (temporary block)"}.get(e["reason"], "")
         if e["rule"].get("group"):
             return f"{e['rule']['group']['name']} started: {_names(e['names'])} blocked{until}{why}."
         return f"{_names(e['names'])} is now blocked{until}{why}."
