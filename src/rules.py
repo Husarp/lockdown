@@ -85,9 +85,54 @@ def next_midnight(now: datetime) -> datetime:
     return datetime.combine(now.date() + timedelta(days=1), time(0, 0))
 
 
-def rule_block(rule: dict, now: datetime, used_sec: int = 0) -> tuple[str, datetime | None] | None:
+# ---------- usage buckets ----------
+# Usage is stored per (owner, bucket): owner "item:<id>" or "group:<id>" (shared group limit);
+# bucket "day:YYYY-MM-DD" (daily limits) or "win:<rule key>:<end of blocked stretch>" (allowance in blocked hours).
+
+def no_usage(owner: str, bucket: str) -> int:
+    return 0
+
+
+def day_bucket(now: datetime) -> str:
+    return f"day:{now.date().isoformat()}"
+
+
+def allowance_bucket(rule: dict, until: datetime) -> str:
+    return f"win:{rule.get('rule_key', '')}:{until:%Y-%m-%dT%H:%M}"
+
+
+def _owner(rule: dict) -> str:
+    return rule.get("usage_owner", "item")
+
+
+def _item_owner(rule: dict) -> str:
+    return rule.get("item_owner", _owner(rule))
+
+
+def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
+    """The item's own rules + the rules of every group it's in (with per-member customizations applied).
+    Each rule gets: usage_owner (whose time counts), item_owner, rule_key (stable id), group (None or {id, name})."""
+    me = f"item:{item['id']}"
+    out = [{**r, "usage_owner": me, "item_owner": me, "rule_key": f"i{item['id']}{r['rule_type']}", "group": None}
+           for r in item["rules"]]
+    for g in groups:
+        if item["id"] not in g["members"]:
+            continue
+        custom = g["members"][item["id"]] or {}
+        for r in g["rules"]:
+            t = r["rule_type"]
+            if t in custom:   # customized for this member: counted for the member alone
+                rule = {**custom[t], "rule_type": t, "usage_owner": me}
+            else:             # inherited: a group daily limit is one shared total
+                rule = {**r, "usage_owner": f"group:{g['id']}" if t == "time_limit" else me}
+            out.append({**rule, "item_owner": me, "rule_key": f"g{g['id']}{t}",
+                        "group": {"id": g["id"], "name": g["name"]}})
+    return out
+
+
+def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime | None] | None:
     """(reason, until) if this rule blocks at `now`, else None. until=None means indefinitely.
-    used_sec: today's usage of the item (for time_limit rules)."""
+    usage(owner, bucket) -> seconds used."""
     kind = rule["rule_type"]
     if kind == "permanent":
         return "permanent", None
@@ -98,17 +143,66 @@ def rule_block(rule: dict, now: datetime, used_sec: int = 0) -> tuple[str, datet
         until = schedule_until(rule["schedule"], now)
         if until is None:
             return None
+        allowance = rule.get("allowance_min") or 0
+        if allowance and usage(_item_owner(rule), allowance_bucket(rule, until)) < allowance * 60:
+            return None   # still has allowance left in this blocked stretch
         return "schedule", (None if until == datetime.max else until)
     if kind == "time_limit" and rule.get("daily_limit_min") is not None:
-        return ("limit", next_midnight(now)) if used_sec >= rule["daily_limit_min"] * 60 else None
+        used = usage(_owner(rule), day_bucket(now))
+        return ("limit", next_midnight(now)) if used >= rule["daily_limit_min"] * 60 else None
     return None  # switch_limit: not implemented yet
 
 
-def item_block(rules: list[dict], now: datetime, used_sec: int = 0) -> tuple[str, datetime | None] | None:
-    active = [b for b in (rule_block(r, now, used_sec) for r in rules) if b]
+def item_block(rules: list[dict], now: datetime, usage=no_usage) -> tuple[str, datetime | None, dict] | None:
+    """(reason, until, rule) for the rule that blocks the item now (most important reason first), else None."""
+    active = [(*b, r) for r in rules if (b := rule_block(r, now, usage))]
     if not active:
         return None
     return min(active, key=lambda b: REASON_ORDER.index(b[0]))
+
+
+def usage_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[str, str]]:
+    """(owner, bucket) pairs to add time to while the item is being used."""
+    me = f"item:{item_id}"
+    targets = {(me, day_bucket(now))}
+    for r in rules:
+        if r["rule_type"] == "time_limit":
+            targets.add((_owner(r), day_bucket(now)))
+        elif r["rule_type"] == "scheduled" and r.get("allowance_min"):
+            until = schedule_until(r["schedule"], now)
+            if until:
+                targets.add((me, allowance_bucket(r, until)))
+    return targets
+
+
+def _schedule_next_start(schedule_json: str, now: datetime) -> datetime | None:
+    """When the next blocked stretch starts (the rule isn't blocking now)."""
+    s = load_schedule(schedule_json)
+    if s["mode"] == BLOCK:
+        return next_window_start(s["windows"], now)
+    ends = [u for u in (window_until(w, now) for w in s["windows"]) if u]
+    return min(ends) if ends else None
+
+
+def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = False) -> tuple[datetime, dict] | None:
+    """(when, rule) of the next block for an item that isn't blocked now, or None.
+    Usage-based blocks (daily limit, allowance) are only predicted while the item is in use."""
+    found = []
+    for r in rules:
+        kind = r["rule_type"]
+        if kind == "scheduled" and r.get("schedule"):
+            until = schedule_until(r["schedule"], now)
+            if until is None:
+                start = _schedule_next_start(r["schedule"], now)
+                if start:
+                    found.append((start, r))
+            elif in_use and r.get("allowance_min"):   # inside the stretch, using the allowance
+                left = r["allowance_min"] * 60 - usage(_item_owner(r), allowance_bucket(r, until))
+                found.append((now + timedelta(seconds=max(0, left)), r))
+        elif kind == "time_limit" and in_use and r.get("daily_limit_min") is not None:
+            left = r["daily_limit_min"] * 60 - usage(_owner(r), day_bucket(now))
+            found.append((now + timedelta(seconds=max(0, left)), r))
+    return min(found, key=lambda f: f[0]) if found else None
 
 
 def days_text(days: list[int]) -> str:
@@ -130,19 +224,24 @@ def duration_text(seconds: float) -> str:
     return f"{h}h {m:02d}m" if h else f"{m}m"
 
 
-def describe_rule(rule: dict, now: datetime, used_sec: int = 0) -> str:
+def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
     kind = rule["rule_type"]
     if kind == "permanent":
         return "Permanent"
     if kind == "scheduled":
         s = load_schedule(rule["schedule"])
         label = "Allowed only" if s["mode"] == ALLOW else "Blocked"
-        return f"{label}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
+        text = f"{label}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
+        if rule.get("allowance_min"):
+            text += f"\n+ {rule['allowance_min']} min allowed during blocked hours"
+        return text
     if kind == "temporary":
         if rule.get("temp_until"):
             left = datetime.strptime(rule["temp_until"], TIME_FMT) - now
             return f"Temporary: {duration_text(left.total_seconds())} left"
         return f"Temporary: {duration_text(rule['duration_min'] * 60)} (starts when saved)"
     if kind == "time_limit":
-        return f"Limit: {duration_text(used_sec)} / {duration_text(rule['daily_limit_min'] * 60)} today"
+        used = usage(_owner(rule), day_bucket(now))
+        shared = " (shared)" if _owner(rule).startswith("group:") else ""
+        return f"Limit{shared}: {duration_text(used)} / {duration_text(rule['daily_limit_min'] * 60)} today"
     return kind

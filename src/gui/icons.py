@@ -65,6 +65,82 @@ def _download(domain: str):
         pass   # offline / not found: the letter icon is used
 
 
+def _exe_icon(path: str) -> Image.Image | None:
+    """The exe's own icon (32x32 RGBA) via ExtractIconEx + DrawIconEx, or None."""
+    import ctypes
+    from ctypes import wintypes
+    shell32, user32, gdi32 = ctypes.windll.shell32, ctypes.windll.user32, ctypes.windll.gdi32
+    for fn in (gdi32.CreateCompatibleDC, gdi32.CreateDIBSection, gdi32.SelectObject):
+        fn.restype = wintypes.HANDLE
+    gdi32.CreateCompatibleDC.argtypes = [wintypes.HANDLE]
+    gdi32.CreateDIBSection.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.UINT,
+                                       ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD]
+    gdi32.SelectObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+    gdi32.DeleteDC.argtypes = [wintypes.HANDLE]
+    user32.DrawIconEx.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int, wintypes.HANDLE, ctypes.c_int,
+                                  ctypes.c_int, wintypes.UINT, wintypes.HANDLE, wintypes.UINT]
+    user32.DestroyIcon.argtypes = [wintypes.HANDLE]
+    large = wintypes.HANDLE()
+    if shell32.ExtractIconExW(path, 0, ctypes.byref(large), None, 1) < 1 or not large.value:
+        return None
+    size = 32
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+                    ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                    ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
+                    ("biClrImportant", wintypes.DWORD)]
+
+    hdr = BITMAPINFOHEADER(biSize=ctypes.sizeof(BITMAPINFOHEADER), biWidth=size, biHeight=-size, biPlanes=1,
+                           biBitCount=32)
+    bits = ctypes.c_void_p()
+    dc = gdi32.CreateCompatibleDC(None)
+    bmp = gdi32.CreateDIBSection(dc, ctypes.byref(hdr), 0, ctypes.byref(bits), None, 0)
+    try:
+        gdi32.SelectObject(dc, bmp)
+        user32.DrawIconEx(dc, 0, 0, large, size, size, 0, None, 3)   # DI_NORMAL
+        raw = ctypes.string_at(bits, size * size * 4)
+    finally:
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(dc)
+        user32.DestroyIcon(large)
+    img = Image.frombuffer("RGBA", (size, size), raw, "raw", "BGRA", 0, 1)
+    if img.getextrema()[3][1] == 0:   # old icons without alpha: make drawn pixels opaque
+        img.putalpha(Image.eval(img.convert("L"), lambda v: 255 if v else 0))
+    return img.copy()
+
+
+def get_app(exe: str, path: str | None, size: int = 20) -> ctk.CTkImage:
+    """Icon for an app: its exe icon (cached), else a letter icon. Never raises."""
+    key = (f"app:{exe}", size)
+    if key in _memory:
+        return _memory[key]
+    cached = CACHE_DIR / f"app_{exe}.png"
+    img = None
+    try:
+        if cached.exists():
+            img = Image.open(cached).convert("RGBA")
+        elif path:
+            img = _exe_icon(path)
+            if img:
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                img.save(cached)
+    except Exception:
+        img = None
+    if img is None:
+        return ctk.CTkImage(_letter_icon(exe), size=(size, size))
+    _memory[key] = ctk.CTkImage(img, size=(size, size))
+    return _memory[key]
+
+
+def for_item(item: dict, size: int = 20) -> ctk.CTkImage:
+    if item.get("item_type") == "app":
+        return get_app(item["target"].lower(), item.get("app_path"), size)
+    return get(item["target"].split()[0], size)
+
+
 def prefetch(domains):
     """Download missing favicons in the background."""
     missing = [d for d in dict.fromkeys(domains) if not _cached_file(d).exists()]

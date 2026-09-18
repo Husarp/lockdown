@@ -31,7 +31,7 @@ class NotificationsPage(ctk.CTkFrame):
         box.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(box, text="Blocked Visit Alerts", font=ctk.CTkFont(size=16, weight="bold")).grid(
             row=0, column=0, columnspan=2, padx=16, pady=(12, 2), sticky="w")
-        ctk.CTkLabel(box, text="Notify me when I try to open a site that is:", text_color=MUTED).grid(
+        ctk.CTkLabel(box, text="Notify me when I try to open a site (or start an app) that is:", text_color=MUTED).grid(
             row=1, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
 
         self.enabled_vars: dict[str, ctk.BooleanVar] = {}
@@ -67,6 +67,39 @@ class NotificationsPage(ctk.CTkFrame):
         self.fmt.pack(side="left", padx=8)
         ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > All.", text_color=MUTED).grid(
             row=row + 3, column=0, columnspan=2, padx=16, pady=(4, 12), sticky="w")
+        self._build_warnings(parent)
+
+    def _build_warnings(self, parent):
+        box = ctk.CTkFrame(parent)
+        box.pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(box, text="Upcoming Blocks", font=ctk.CTkFont(size=16, weight="bold")).pack(
+            anchor="w", padx=16, pady=(12, 6))
+        warn = ctk.CTkFrame(box, fg_color="transparent")
+        warn.pack(anchor="w", padx=16, pady=4)
+        self.warn_switch = ctk.CTkSwitch(warn, text="Warn me", command=lambda: self.draft.set_setting(
+            "notify.warn.enabled", "1" if self.warn_switch.get() else "0"))
+        self.warn_switch.pack(side="left")
+        self.warn_minutes = ctk.CTkOptionMenu(warn, width=90, values=[f"{m} min" for m in alerts.WARN_MINUTE_OPTIONS],
+                                              command=lambda v: self.draft.set_setting("notify.warn.minutes", v.split()[0]))
+        self.warn_minutes.pack(side="left", padx=8)
+        ctk.CTkLabel(warn, text="before a site/app gets blocked (hours, daily limit, allowance)").pack(side="left")
+        repeat = ctk.CTkFrame(box, fg_color="transparent")
+        repeat.pack(anchor="w", padx=16, pady=4)
+        ctk.CTkLabel(repeat, text="While I'm using it, remind me again every").pack(side="left")
+        self.repeat = ctk.CTkOptionMenu(repeat, width=90, values=[self._repeat_label(m) for m in alerts.REPEAT_OPTIONS],
+                                        command=lambda v: self.draft.set_setting(
+                                            "notify.warn.repeat_min", "0" if v == "never" else v.split()[0]))
+        self.repeat.pack(side="left", padx=8)
+        ctk.CTkLabel(repeat, text="until it's blocked", text_color=MUTED).pack(side="left")
+        self.started_switch = ctk.CTkSwitch(box, text="Notify me when a block starts", command=lambda: self.draft.set_setting(
+            "notify.started.enabled", "1" if self.started_switch.get() else "0"))
+        self.started_switch.pack(anchor="w", padx=16, pady=(4, 6))
+        ctk.CTkLabel(box, text="Blocks from the same group are announced together (\"Night schedule starts in 5 min: ...\").",
+                     text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 12))
+
+    @staticmethod
+    def _repeat_label(minutes: int) -> str:
+        return "never" if minutes == 0 else f"{minutes} min"
 
     def load(self):
         """Show the draft's values (on start and after Discard)."""
@@ -78,6 +111,10 @@ class NotificationsPage(ctk.CTkFrame):
             entry.insert(0, s[f"notify.msg.{reason}"])
         self.cooldown.set(f"{s['notify.cooldown_min']} min")
         self.fmt.set(alerts.FORMATS[s["notify.format"]])
+        self.warn_switch.select() if s["notify.warn.enabled"] == "1" else self.warn_switch.deselect()
+        self.warn_minutes.set(f"{s['notify.warn.minutes']} min")
+        self.repeat.set(self._repeat_label(int(s["notify.warn.repeat_min"])))
+        self.started_switch.select() if s["notify.started.enabled"] == "1" else self.started_switch.deselect()
 
     def refresh(self):
         for w in self.visits_box.winfo_children():

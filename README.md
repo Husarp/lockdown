@@ -15,6 +15,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 - **Phase 2 done:** blocking by hours (allow-only or block-during, several time windows with their own days),
   daily time limits, temporary blocks, stacked rules, locked browser DoH/QUIC policies, closing open connections on block,
   blocked-visit notifications, tray agent at login, single instance, clock-change protection.
+- **Phase 3 done:** app blocking (close politely then force after 10 s / block internet via firewall / both),
+  app browser with icons, daily limits for apps, groups with shared rules + per-member customization,
+  "N minutes allowed during blocked hours", warnings before blocks + reminders while in use + "block started".
 - **Blocking UI:** one tab per kind of block (By Hours / By Limit / Permanent / Temporary) with its own add/edit form;
   "All" is the overview (Edit jumps to the right tab, Remove asks first). Site suggestions while typing,
   "+ Popular sites" picker with site icons. Changes are staged until you press **Save changes** (top right),
@@ -33,6 +36,11 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   - keeps browser policies set that turn off DNS-over-HTTPS and QUIC in Chrome, Edge, Brave and Firefox
     (browsers then show "managed by your organization") — otherwise browsers could skip the hosts file;
   - closes already-open connections to a site right after it gets blocked.
+- Apps are matched by exe name. The service checks running processes every second: a blocked app is asked to close
+  by the tray agent (like clicking X) and force-closed after 10 s; "Block internet" adds a Windows Firewall rule.
+  Windows' own processes can't be blocked.
+- Groups (Blocking > Groups) hold shared rules; members inherit them, a member can be customized, and a group
+  daily limit is one total for all members. Warnings/reminders are set on the Notifications page.
 - Daily limits: the tray agent reads the active browser tab's address (Windows UI Automation — Chrome, Edge, Brave,
   Firefox, no extension needed) and counts time on limited sites; the service blocks the site once the limit is used up,
   until midnight.

@@ -1153,11 +1153,28 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] Clock-change protection: service keeps its own trusted time (network time + tick counter), so changing the Windows clock doesn't unlock anything; clock changes are logged
 - [x] Notification format default = Windows notification only (choice stays on the Notifications page)
 
-### Phase 3 — App Blocking
-- [ ] Process monitoring (detect running blocked apps)
-- [ ] Kill blocked processes
-- [ ] Firewall rules for app-level internet blocking
-- [ ] Visual app browser in GUI (registry query, icons, search)
+### Phase 3 — App Blocking + Groups + Warnings (decisions 2026-09-18)
+- [x] Apps are blocked items like sites (same tabs + rules); matched by exe name (survives app updates)
+- [x] Per app "block type": Close app / Block internet (Windows Firewall rule) / Both — default Close app
+- [x] Closing: polite first (tray agent sends a normal close, so the app can save), force-kill by the service after 10 s
+- [x] Process monitoring every ~1 s in the service; launching a blocked app closes it again; "app closed" alert
+- [x] App browser popup ("Browse apps" next to "+ Popular sites"): Start Menu apps + running apps, icons from the exe, search
+- [x] Daily limits for apps: time counted while the app is in the foreground (tray agent)
+- [x] Hours rules: optional allowance "during blocked hours allow N minutes" (e.g. messenger free all day, 5 min in the night schedule); allowance resets each blocked window
+- [x] Groups (new "Groups" tab): named group (e.g. "Night schedule", "Games") with any combination of rules (hours + shared daily limit + permanent + temporary); sites/apps as members
+  - members inherit the group's rules; editing the group changes all members
+  - per-member customization (e.g. one "emergency" app gets a 5-min allowance in the night block)
+  - a group daily limit is one shared total for all members
+  - an item can be in many groups and have own rules; blocked when ANY rule/group blocks it
+  - All tab shows each item's groups
+- [x] Warnings before a block starts: notification N minutes before (default 5, configurable, can be turned off)
+- [x] While you're using the app/site inside the warning window: repeat the reminder every X minutes ("closes in 12 min")
+- [x] "Block started" notification (on/off)
+- [x] Group warnings/notifications combined into one ("Night schedule starts in 5 min: Discord, Steam, YouTube")
+
+**Ideas added 2026-09-18 (not scheduled yet):**
+- [ ] Weekly block calendar: a week view (like a Teams calendar, but) with colored bars per app/site showing when each is blocked; see at a glance when everything is blocked — visual only
+- [ ] Dashboard: list of everything with a minute limit (or opening limit) with progress bars, time left / percentage used
 
 ### Phase 4 — Screen Time & Stats
 - [ ] Foreground window tracking (per-app time)
@@ -1241,12 +1258,13 @@ Lockdown/
 │   │   ├── browser_policy.py  # Locked browser policies (DoH off, QUIC off)
 │   │   ├── connections.py     # Close open TCP connections to blocked sites
 │   │   ├── listener.py        # 127.0.0.1:80/443 blocked-visit listener
-│   │   ├── apps.py            # App/process blocking
+│   │   ├── apps.py            # Process list / terminate (service)
 │   │   └── firewall.py        # Firewall rule management
 │   ├── monitor/
 │   │   ├── network.py         # Network connection logging
 │   │   ├── dns.py             # DNS query monitoring
 │   │   ├── browser_url.py     # Active tab URL via UI Automation
+│   │   ├── win.py             # Foreground app, idle time, polite app close (tray agent)
 │   │   ├── usage.py           # Time on limited sites (tray agent)
 │   │   ├── screentime.py      # Foreground window + activity tracking
 │   │   └── applist.py         # Installed app enumeration (registry)
@@ -1255,6 +1273,9 @@ Lockdown/
 │   │   ├── dashboard.py       # Dashboard / Home view
 │   │   ├── blocking.py        # Unified blocking view (sub-tabs by type)
 │   │   ├── app_browser.py     # App browser popup (for adding apps)
+│   │   ├── groups.py          # Groups tab (group editor, member customization)
+│   │   ├── rule_editors.py    # Hours / limit / temporary / permanent editors
+│   │   ├── target_picker.py   # Site-or-app input (suggestions, popular, browse apps)
 │   │   ├── antibypass.py      # Anti-bypass / Lock settings view
 │   │   ├── screentime.py      # Screen time, switches, goals views
 │   │   ├── limits.py          # Usage limits view
@@ -1318,6 +1339,7 @@ CREATE TABLE blocked_items (
     note TEXT,                    -- user's personal note
     source TEXT,                  -- manual, import, quick-list
     notify TEXT,                  -- blocked-visit alerts override: NULL = default, 'on', 'off'
+    app_path TEXT,                -- apps: exe path (firewall rule, icon); target = exe name
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1330,6 +1352,7 @@ CREATE TABLE block_rules (
     daily_switch_limit INTEGER,   -- for switch_limit
     schedule TEXT,                -- JSON: days + hours for scheduled
     temp_until DATETIME,          -- for temporary
+    allowance_min INTEGER,        -- scheduled: minutes still allowed during blocked hours
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1344,13 +1367,21 @@ CREATE TABLE block_events (
     until DATETIME
 );
 
--- Seconds spent per site per day (tray agent writes, service enforces daily limits)
-CREATE TABLE site_usage (
-    date TEXT NOT NULL,
-    item_id INTEGER NOT NULL,
+-- Seconds used per owner ("item:<id>" / "group:<id>") and bucket ("day:<date>" / "win:<rule>:<end of blocked stretch>")
+CREATE TABLE usage (
+    owner TEXT NOT NULL,
+    bucket TEXT NOT NULL,
     seconds INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (date, item_id)
+    day TEXT NOT NULL,
+    PRIMARY KEY (owner, bucket)
 );
+
+-- Groups: shared rule sets; members inherit them (with optional per-member customizations)
+CREATE TABLE block_groups (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at DATETIME);
+CREATE TABLE group_rules (id INTEGER PRIMARY KEY, group_id INTEGER REFERENCES block_groups(id), rule_type TEXT,
+                          daily_limit_min INTEGER, schedule TEXT, temp_until DATETIME, allowance_min INTEGER);
+CREATE TABLE group_members (group_id INTEGER, item_id INTEGER, overrides TEXT,   -- JSON {rule_type: rule}
+                            PRIMARY KEY (group_id, item_id));
 
 -- Sites blocked before (add-site suggestions; clearable)
 CREATE TABLE site_history (

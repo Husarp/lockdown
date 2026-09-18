@@ -1,9 +1,11 @@
-from types import SimpleNamespace
+from datetime import datetime
 
 from db import Database
-from monitor.usage import UsageTracker, match_item
+from monitor.usage import UsageTracker, items_in_use, match_item
 
-ITEMS = [{"id": 1, "target": "youtube.com youtu.be"}, {"id": 2, "target": "reddit.com"}]
+ITEMS = [{"id": 1, "target": "youtube.com youtu.be", "item_type": "site"},
+         {"id": 2, "target": "reddit.com", "item_type": "site"},
+         {"id": 3, "target": "discord.exe", "item_type": "app"}]
 
 
 def test_match_item():
@@ -13,19 +15,24 @@ def test_match_item():
     assert match_item("notyoutube.com", ITEMS) is None
 
 
-def fake_browser(url, idle=0):
-    return SimpleNamespace(foreground_browser_url=lambda: url, idle_seconds=lambda: idle)
+def test_items_in_use():
+    assert [i["id"] for i in items_in_use("discord.exe", None, True, ITEMS)] == [3]       # apps count when idle
+    assert [i["id"] for i in items_in_use("brave.exe", "youtube.com/watch", False, ITEMS)] == [1]
+    assert items_in_use("brave.exe", "youtube.com/watch", True, ITEMS) == []              # away from the PC
+    assert items_in_use("brave.exe", "hunger games", False, ITEMS) == []                  # search text
+    assert items_in_use(None, None, True, ITEMS) == []
 
 
-def test_tick_counts_only_limited_sites(tmp_path):
+def test_tick_adds_to_item_group_and_allowance_buckets(tmp_path):
     db = Database(tmp_path / "t.db")
-    yt = db.add_site("YouTube", ["youtube.com"], rules=[{"rule_type": "time_limit", "daily_limit_min": 30}])
-    db.add_site("Reddit", ["reddit.com"])  # permanent only -> not counted
-    UsageTracker.tick(db, fake_browser("https://www.youtube.com/watch?v=x"))
-    UsageTracker.tick(db, fake_browser("youtube.com/feed"))
-    UsageTracker.tick(db, fake_browser("reddit.com"))
-    UsageTracker.tick(db, fake_browser("youtube.com", idle=3600))   # away
-    UsageTracker.tick(db, fake_browser("hunger games"))              # search text
-    UsageTracker.tick(db, fake_browser(None))                        # no browser in front
-    usage = db.conn.execute("SELECT item_id, seconds FROM site_usage").fetchall()
-    assert [tuple(r) for r in usage] == [(yt, 4)]
+    discord = db.add_item("Discord", ["discord.exe"], "app")
+    gid = db.add_group("Games", [{"rule_type": "time_limit", "daily_limit_min": 60}], {discord: {}})
+    tracker = UsageTracker()
+    tracker.tick(db, lambda: ("discord.exe", None, False))
+    tracker.tick(db, lambda: ("discord.exe", None, False))
+    tracker.tick(db, lambda: ("notepad.exe", None, False))
+    usage = db.usage_lookup(datetime.now())
+    today = f"day:{datetime.now().date().isoformat()}"
+    assert usage(f"item:{discord}", today) == 4
+    assert usage(f"group:{gid}", today) == 4          # shared group limit counts too
+    assert tracker.in_use == set()

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — 2026-09-19 00:10
+- Phase 3 — app blocking:
+  - Apps are blocked items like sites (all tabs/rules); matched by exe name; Windows/Lockdown processes are protected
+  - Per app: Close app / Block internet / Both. Closing: tray agent sends a normal close, service force-kills after 10 s; process check every second (`blocker/apps.py`, `monitor/win.py`)
+  - Block internet: Windows Firewall rules added/removed by the service (`blocker/firewall.py`); exe path learned from the running app if unknown
+  - "Browse apps" popup: Start Menu apps + apps with an open window, exe icons, search, "Other .exe..." (`gui/app_browser.py`, `monitor/applist.py`)
+  - Daily limits count app time while the app is in front (games count even without keyboard/mouse input)
+- Groups (new Blocking > Groups tab): any combination of rules, shared daily limit, members inherit rules, per-member customization (e.g. 5-min allowance for one app), items can be in several groups; All tab shows group rules; "Edit ▾" can jump to a group (`gui/groups.py`, `block_groups`/`group_rules`/`group_members` tables)
+- Hours rules: "During blocked hours, still allow N minutes" (allowance, resets each blocked period)
+- Warnings: N min before a block starts (default 5, configurable, can be off), repeat reminders while you're using the item, "block started" notification; group blocks announced together (`alerts.BlockWatcher`)
+- Usage storage generalized (`usage` table: owner + bucket) with migration from `site_usage`
+- Shared editors/pickers: `gui/rule_editors.py`, `gui/target_picker.py`
+- Fixed a possible hang: COM libraries are imported on the main thread, and garbage collection runs only on the Tk thread
+- 85 tests passing
+
 ## 0.3.1 — 2026-09-18 22:35
 - Full day names everywhere: rules ("Monday–Friday 09:00-17:00", "Monday, Wednesday"), hours editor checkboxes, alert messages ("until Tuesday 07:00")
 - Hours editor: each time window is a box with the days on one line and from/to + "Remove window" below

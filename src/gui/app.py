@@ -1,6 +1,11 @@
 """Main window (sidebar navigation + content area) and tray agent duties (blocked-visit notifications)."""
+import gc
 import queue
 import time
+
+# Import COM libraries on the main thread: background threads importing them at the same time can deadlock.
+import comtypes.client  # noqa: F401
+import uiautomation  # noqa: F401
 
 import customtkinter as ctk
 
@@ -10,6 +15,7 @@ from gui.blocking import BlockingPage
 from gui.draft import Draft
 from gui.notifications import NotificationsPage, Popup
 from gui.tray import Tray
+from monitor import win
 from monitor.usage import UsageTracker
 from service import HEARTBEAT_KEY
 from trusted_time import now_from_db
@@ -27,11 +33,17 @@ PAGES = [
 ]
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
+WATCH_MS = 5000
+GC_MS = 2000
 
 
 class LockdownApp(ctk.CTk):
     def __init__(self, events: queue.Queue, start_hidden: bool = False):
         super().__init__()
+        # Tk objects may only be touched from this thread. Automatic garbage collection can run in any thread
+        # (and then free a Tk font/image there -> hang), so collect here, periodically, instead.
+        gc.disable()
+        self._collect_garbage()
         ctk.set_appearance_mode("dark")
         self.title("Lockdown")
         self.geometry("1100x720")
@@ -73,8 +85,14 @@ class LockdownApp(ctk.CTk):
         self._poll_events()
         self._poll_status()
         self._poll_block_events()
-        self.usage_tracker = UsageTracker()   # counts time on sites with a daily limit
+        self.usage_tracker = UsageTracker()   # counts time on blocked sites/apps (limits, allowances)
         self.usage_tracker.start()
+        self.watcher = alerts.BlockWatcher()
+        self._poll_watcher()
+
+    def _collect_garbage(self):
+        gc.collect()
+        self.after(GC_MS, self._collect_garbage)
 
     def _build_save_bar(self, parent):
         bar = ctk.CTkFrame(parent, fg_color="transparent")
@@ -170,7 +188,7 @@ class LockdownApp(ctk.CTk):
         self.status_label.configure(
             text=("● Service running" if running else "● Service not running"),
             text_color=("#3fb950" if running else "#f85149"))
-        self.tray.update(running, f"{blocked} sites blocked")
+        self.tray.update(running, f"{blocked} sites/apps blocked")
         self.after(3000, self._poll_status)
 
     def _poll_block_events(self):
@@ -179,6 +197,8 @@ class LockdownApp(ctk.CTk):
             self.last_event_id = events[-1]["id"]
             notify_override = {i["id"]: i["notify"] for i in self.db.list_items()}
             for event in events:
+                if event["hostname"].endswith(".exe"):
+                    win.close_app(event["hostname"])   # ask nicely; the service force-closes after 10 s
                 self._alert(event, notify_override.get(event["item_id"]))
             if "Notifications" in self.pages:
                 self.pages["Notifications"].refresh()
@@ -191,7 +211,20 @@ class LockdownApp(ctk.CTk):
         if not alerts.should_notify(event, item_notify, enabled, self.last_alert.get(event["item_id"]), now, cooldown):
             return
         self.last_alert[event["item_id"]] = now
-        message = alerts.format_message(alerts.get(self.db, f"notify.msg.{event['reason']}"), event, now_from_db(self.db))
+        self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{event['reason']}"), event, now_from_db(self.db)))
+
+    def _poll_watcher(self):
+        """Warnings before blocks start, reminders while in use, "block started" notices."""
+        try:
+            now = now_from_db(self.db)
+            settings = {k: alerts.get(self.db, k) for k in alerts.DEFAULTS}
+            for message in self.watcher.check(self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now),
+                                              now, self.usage_tracker.in_use, settings):
+                self._show(message)
+        finally:
+            self.after(WATCH_MS, self._poll_watcher)
+
+    def _show(self, message: str):
         fmt = alerts.get(self.db, "notify.format")
         if fmt in ("toast", "both"):
             self.tray.notify(message)

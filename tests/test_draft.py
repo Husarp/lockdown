@@ -78,3 +78,40 @@ def test_save_skips_items_removed_by_service(draft):
     draft.db.remove_item(iid)      # e.g. expired temporary block cleaned up by the service
     draft.save()                   # must not crash / resurrect
     assert draft.db.list_items() == []
+
+
+def test_group_with_new_members_saves_and_maps_ids(draft):
+    steam = draft.add_item("Steam", ["steam.exe"], "app-browser", "app", "kill", r"C:\\Steam\\steam.exe")
+    yt = draft.add_item("YouTube", ["youtube.com"], "manual")
+    gid = draft.set_group(None, "Games", [{"rule_type": "time_limit", "daily_limit_min": 60}],
+                          {steam["id"]: {}, yt["id"]: {"time_limit": {"daily_limit_min": 10}}})
+    assert draft.dirty and draft.item_not_applied(steam["id"])
+    draft.save()
+    assert not draft.dirty
+    [g] = draft.db.list_groups()
+    items = {i["display_name"]: i for i in draft.db.list_items()}
+    assert set(g["members"]) == {items["Steam"]["id"], items["YouTube"]["id"]}
+    assert g["members"][items["YouTube"]["id"]]["time_limit"]["daily_limit_min"] == 10
+    assert items["Steam"]["block_type"] == "kill" and items["Steam"]["item_type"] == "app"
+
+
+def test_removing_group_drops_items_only_in_it(draft):
+    a = draft.add_item("Steam", ["steam.exe"], "manual", "app", "kill")
+    b = draft.add_item("Reddit", ["reddit.com"], "manual")
+    draft.set_rule(b["id"], {"rule_type": "permanent"})
+    gid = draft.set_group(None, "G", [{"rule_type": "permanent"}], {a["id"]: {}, b["id"]: {}})
+    draft.save()
+    gid = next(iter(draft.groups))
+    draft.remove_group(gid)
+    assert [i["display_name"] for i in draft.items.values()] == ["Reddit"]
+    draft.save()
+    assert [i["display_name"] for i in draft.db.list_items()] == ["Reddit"]
+
+
+def test_edit_group_same_values_not_dirty(draft):
+    a = draft.add_item("Steam", ["steam.exe"], "manual", "app", "kill")
+    draft.set_group(None, "G", [{"rule_type": "permanent"}], {a["id"]: {}})
+    draft.save()
+    g = next(iter(draft.groups.values()))
+    draft.set_group(g["id"], "G", [{"rule_type": "permanent"}], {i: {} for i in g["members"]})
+    assert not draft.dirty

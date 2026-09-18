@@ -78,11 +78,15 @@ def test_temporary():
     assert describe_rule(rule, at(0, 12)) == "Temporary: 1h 30m left"
 
 
+def used(seconds):
+    return lambda owner, bucket: seconds
+
+
 def test_time_limit():
     rule = {"rule_type": "time_limit", "daily_limit_min": 30}
-    assert rule_block(rule, at(0, 12), used_sec=29 * 60) is None
-    assert rule_block(rule, at(0, 12), used_sec=30 * 60) == ("limit", at(1, 0))
-    assert describe_rule(rule, at(0, 12), used_sec=12 * 60) == "Limit: 12m / 30m today"
+    assert rule_block(rule, at(0, 12), used(29 * 60)) is None
+    assert rule_block(rule, at(0, 12), used(30 * 60)) == ("limit", at(1, 0))
+    assert describe_rule(rule, at(0, 12), used(12 * 60)) == "Limit: 12m / 30m today"
 
 
 def test_allow_mode_reports_schedule_reason():
@@ -102,3 +106,45 @@ def test_days_text():
     assert days_text(list(range(7))) == "Every day"
     assert days_text([0, 2, 5, 6]) == "Monday, Wednesday, Saturday–Sunday"
     assert days_text([0, 1, 2, 4]) == "Monday–Wednesday, Friday"
+
+
+# ---------- groups / allowance / next block ----------
+from rules import effective_rules, item_block, next_block, usage_targets
+
+NIGHT = make_schedule(BLOCK, [(list(range(7)), "21:00", "07:00")])
+
+
+def test_effective_rules_inherit_and_override():
+    item = {"id": 1, "rules": [{"rule_type": "permanent"}]}
+    groups = [{"id": 5, "name": "Night", "rules": [{"rule_type": "scheduled", "schedule": NIGHT},
+                                                   {"rule_type": "time_limit", "daily_limit_min": 60}],
+               "members": {1: {"scheduled": {"schedule": NIGHT, "allowance_min": 5}}}},
+              {"id": 6, "name": "Other", "rules": [{"rule_type": "permanent"}], "members": {2: {}}}]
+    rules = effective_rules(item, groups)
+    assert [(r["rule_type"], (r["group"] or {}).get("name")) for r in rules] == \
+        [("permanent", None), ("scheduled", "Night"), ("time_limit", "Night")]
+    assert rules[1]["allowance_min"] == 5                  # member customization
+    assert rules[2]["usage_owner"] == "group:5"            # shared group limit
+
+
+def test_allowance_in_blocked_hours():
+    rule = {"rule_type": "scheduled", "schedule": NIGHT, "allowance_min": 5, "rule_key": "k", "item_owner": "item:1"}
+    assert rule_block(rule, at(0, 22), used(4 * 60)) is None
+    assert rule_block(rule, at(0, 22), used(5 * 60)) == ("schedule", at(1, 7))
+    assert rule_block(rule, at(0, 12), used(999)) is None          # outside blocked hours: free
+    assert ("item:1", "win:k:2026-09-15T07:00") in usage_targets([rule], 1, at(0, 22))
+
+
+def test_next_block_schedule_and_limit():
+    allow = {"rule_type": "scheduled", "schedule": ALLOW_WORK}
+    assert next_block([allow], at(0, 16, 50))[0] == at(0, 17)       # allowed window ends at 17:00
+    block = {"rule_type": "scheduled", "schedule": NIGHT}
+    assert next_block([block], at(0, 20, 40))[0] == at(0, 21)
+    limit = {"rule_type": "time_limit", "daily_limit_min": 30, "usage_owner": "item:1"}
+    assert next_block([limit], at(0, 12), used(20 * 60)) is None                    # not in use: unknown
+    assert next_block([limit], at(0, 12), used(20 * 60), in_use=True)[0] == at(0, 12, 10)
+
+
+def test_item_block_returns_rule():
+    rule = {"rule_type": "permanent", "group": {"id": 1, "name": "G"}}
+    assert item_block([rule], at(0, 0))[2]["group"]["name"] == "G"

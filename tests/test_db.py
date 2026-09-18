@@ -89,14 +89,54 @@ def test_update_item_replaces_rules(tmp_path):
 def test_time_limit_uses_usage(tmp_path):
     db = Database(tmp_path / "t.db")
     iid = db.add_site("Reddit", ["reddit.com"], rules=[{"rule_type": "time_limit", "daily_limit_min": 1}])
-    db.add_usage(iid, MON_12.date(), 30)
+    me = [(f"item:{iid}", "day:2026-09-14")]
+    db.add_usage(me, 30, MON_12.date())
     assert db.blocked_hostnames(MON_12) == []
-    db.add_usage(iid, MON_12.date(), 30)
-    assert db.usage_on(MON_12.date()) == {iid: 60}
+    db.add_usage(me, 30, MON_12.date())
+    assert db.usage_lookup(MON_12)(f"item:{iid}", "day:2026-09-14") == 60
     block = db.active_blocks(MON_12)["reddit.com"]
     assert block["reason"] == "limit" and block["until"] == datetime(2026, 9, 15, 0, 0)
     # next day starts fresh
     assert db.blocked_hostnames(datetime(2026, 9, 15, 0, 1)) == []
+
+
+def test_groups_shared_limit_and_membership(tmp_path):
+    db = Database(tmp_path / "t.db")
+    steam = db.add_item("Steam", ["steam.exe"], "app", block_type="kill")
+    yt = db.add_item("YouTube", ["youtube.com"], "site")
+    gid = db.add_group("Games", [{"rule_type": "time_limit", "daily_limit_min": 1}], {steam: {}, yt: {}})
+    [g] = db.list_groups()
+    assert g["name"] == "Games" and set(g["members"]) == {steam, yt}
+    db.add_usage([(f"group:{gid}", "day:2026-09-14")], 60, MON_12.date())   # shared total used up
+    assert {b["item"]["display_name"] for b in db.blocks(MON_12)} == {"Steam", "YouTube"}
+    assert db.blocks(MON_12)[0]["rule"]["group"]["name"] == "Games"
+    # items only in a group survive the cleanup of rule-less items
+    assert db.delete_expired_temporary(MON_12) == 0
+    db.remove_group(gid)
+    assert db.blocks(MON_12) == []
+    assert db.delete_expired_temporary(MON_12) == 2
+
+
+def test_member_override(tmp_path):
+    db = Database(tmp_path / "t.db")
+    night = make_schedule("block", [(list(range(7)), "21:00", "07:00")])
+    a = db.add_item("Discord", ["discord.exe"], "app")
+    b = db.add_item("Signal", ["signal.exe"], "app")
+    db.add_group("Night", [{"rule_type": "scheduled", "schedule": night}],
+                 {a: {}, b: {"scheduled": {"schedule": night, "allowance_min": 5}}})
+    assert {x["item"]["display_name"] for x in db.blocks(MON_22)} == {"Discord"}   # Signal has 5 min left
+
+
+def test_migrates_old_usage_table(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE site_usage (date TEXT, item_id INTEGER, seconds INTEGER, PRIMARY KEY (date, item_id))")
+    old.execute("INSERT INTO site_usage VALUES ('2026-09-14', 7, 120)")
+    old.commit()
+    old.close()
+    db = Database(path)
+    assert db.usage_lookup(MON_12)("item:7", "day:2026-09-14") == 120
 
 
 def test_history(tmp_path):

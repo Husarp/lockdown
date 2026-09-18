@@ -4,6 +4,8 @@ Every few seconds: evaluate block rules (permanent / hours / temporary / daily l
 clock (changing the Windows clock has no effect), make the hosts file match
 (repairing manual edits), keep browser DoH/QUIC locked off, and close open connections to newly blocked
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
+Blocked apps: the tray agent is asked to close them politely, they are force-killed after 10 s; apps with
+block type firewall/both get a Windows Firewall rule.
 Needs admin/SYSTEM rights.
 
 Usage:
@@ -12,6 +14,7 @@ Usage:
     python src/service.py remove-policies  # undo the browser policies (used on uninstall)
 """
 import ctypes
+import json
 import logging
 import sys
 import threading
@@ -19,7 +22,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from blocker import browser_policy, connections, hosts
+from blocker import apps, browser_policy, connections, firewall, hosts
 from blocker.listener import BlockListener
 from db import Database
 from paths import DATA_DIR, LOG_PATH
@@ -31,6 +34,9 @@ HEARTBEAT_KEY = "service_heartbeat"
 # Keep closing connections to a newly blocked site for this long (browsers cache DNS ~1 min).
 CLOSE_CONNECTIONS_FOR = timedelta(minutes=3)
 VISIT_DEDUPE_SEC = 10
+APP_CHECK_SEC = 1
+APP_GRACE_SEC = 10          # the tray agent asks the app to close; force-kill after this
+FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
 
 log = logging.getLogger("lockdown.service")
 
@@ -59,6 +65,9 @@ class Enforcer:
         self.visit_db = None                    # separate connection for listener threads
         self.visit_lock = threading.Lock()
         self.last_visit: dict[str, float] = {}
+        self.app_blocks: dict[str, dict] = {}   # exe -> block, for blocked apps (read by the app thread)
+        self.app_first_seen: dict[int, float] = {}
+        self.firewalled: dict[str, str] = json.loads(db.get_setting(FIREWALL_KEY, "{}"))
 
     def update_clock(self) -> datetime:
         """Trusted now; publishes the offset to the system clock and logs clock changes."""
@@ -77,7 +86,15 @@ class Enforcer:
         now = self.update_clock()
         if self.db.delete_expired_temporary(now):
             log.info("Removed expired temporary blocks")
-        blocks = self.db.active_blocks(now)
+        all_blocks = self.db.blocks(now)
+        blocks = {}
+        for b in all_blocks:
+            if b["item"]["item_type"] == "site":
+                for h in b["item"]["target"].split():
+                    blocks.setdefault(h, b)
+        self.app_blocks = {b["item"]["target"].lower(): b for b in all_blocks
+                           if b["item"]["item_type"] == "app" and b["item"]["target"].lower() not in apps.PROTECTED}
+        self.update_firewall()
 
         newly_blocked = sorted(set(blocks) - set(self.blocks))
         if newly_blocked:
@@ -105,17 +122,74 @@ class Enforcer:
         """Called by listener threads when a browser tries to open a blocked hostname."""
         blocks = self.blocks
         block = blocks.get(hostname) or blocks.get(hostname.removeprefix("www."))
-        if not block:
-            return
+        if block:
+            self.record_event(hostname, block)
+
+    def record_event(self, key: str, block: dict):
+        """Write a block event for the tray agent (at most once per VISIT_DEDUPE_SEC per key)."""
         with self.visit_lock:
-            if time.time() - self.last_visit.get(hostname, 0) < VISIT_DEDUPE_SEC:
+            if time.time() - self.last_visit.get(key, 0) < VISIT_DEDUPE_SEC:
                 return
-            self.last_visit[hostname] = time.time()
+            self.last_visit[key] = time.time()
             if self.visit_db is None:
                 self.visit_db = Database()
             item = block["item"]
-            self.visit_db.add_block_event(hostname, item["id"], item["display_name"], block["reason"], block["until"],
+            self.visit_db.add_block_event(key, item["id"], item["display_name"], block["reason"], block["until"],
                                           now=self.clock.now())
+
+    # ---------- apps ----------
+
+    def enforce_apps(self):
+        """Blocked app running: tell the tray agent (it closes the app politely), force-kill after the grace time."""
+        targets = {exe: b for exe, b in self.app_blocks.items() if (b["item"]["block_type"] or "kill") in ("kill", "both")}
+        seen = {}
+        for pid, exe in apps.list_processes():
+            block = targets.get(exe)
+            if not block:
+                continue
+            first = seen[pid] = self.app_first_seen.get(pid, time.time())
+            if pid not in self.app_first_seen:
+                self.record_event(exe, block)
+            elif time.time() - first >= APP_GRACE_SEC and apps.terminate(pid):
+                log.info("Force-closed blocked app %s (pid %d)", exe, pid)
+        self.app_first_seen = seen
+
+    def update_firewall(self):
+        """Firewall rules for blocked apps with block type 'firewall'/'both'; remove the rest."""
+        wanted = {}
+        for exe, b in self.app_blocks.items():
+            if b["item"]["block_type"] in ("firewall", "both"):
+                path = b["item"]["app_path"] or self._learn_path(exe, b["item"]["id"])
+                if path:
+                    wanted[exe] = path
+        if wanted == self.firewalled:
+            return
+        for exe in set(self.firewalled) - set(wanted):
+            firewall.remove(exe)
+            log.info("Firewall rule removed: %s", exe)
+        for exe, path in wanted.items():
+            if self.firewalled.get(exe) != path:
+                firewall.add(exe, path)
+                log.info("Firewall rule added: %s (%s)", exe, path)
+        self.firewalled = wanted
+        self.db.set_setting(FIREWALL_KEY, json.dumps(wanted))
+
+    def _learn_path(self, exe: str, item_id: int) -> str | None:
+        """Exe path of a running copy of the app (for apps added by name only)."""
+        for pid, name in apps.list_processes():
+            if name == exe and (path := apps.process_path(pid)):
+                self.db.set_app_path(item_id, path)
+                return path
+        return None
+
+
+def app_loop(enforcer: Enforcer):
+    while True:
+        try:
+            enforcer.enforce_apps()
+        except Exception:
+            log.exception("App enforcement failed")
+        time.sleep(APP_CHECK_SEC)
 
 
 def main():
@@ -137,6 +211,7 @@ def main():
         return 0
     log.info("Service started")
     BlockListener(enforcer.on_visit, log).start()
+    threading.Thread(target=app_loop, args=(enforcer,), daemon=True).start()
     while True:
         try:
             enforcer.enforce_once()
