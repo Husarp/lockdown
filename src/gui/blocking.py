@@ -58,7 +58,8 @@ def make_row(parent) -> ctk.CTkFrame:
 
 def targets_text(item: dict) -> str:
     if item["item_type"] == "app":
-        how = {"firewall": "internet blocked", "both": "closed + internet blocked"}.get(item.get("block_type"), "closed")
+        how = {"firewall": "internet blocked", "both": "closed + internet blocked", "minimize": "minimized",
+               "minimize_fw": "minimized + internet blocked"}.get(item.get("block_type"), "closed")
         return f"app · {item['target']} · {how}"
     return ", ".join(item["target"].split())
 

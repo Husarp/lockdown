@@ -15,6 +15,26 @@ PROTECTED = {"system", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "
              "rundll32.exe", "dllhost.exe", "msiexec.exe", "consent.exe", "logonui.exe"}
 
 
+# What happens to a blocked app (blocked_items.block_type). None = "kill" (the default).
+ACTIONS = ("close", "minimize", "internet")   # internet = keep it open, only cut its internet
+_COMPOSE = {("close", False): "kill", ("close", True): "both", ("minimize", False): "minimize",
+            ("minimize", True): "minimize_fw", ("internet", True): "firewall", ("internet", False): "firewall"}
+KILL_TYPES = {"kill", "both"}
+MINIMIZE_TYPES = {"minimize", "minimize_fw"}
+FIREWALL_TYPES = {"firewall", "both", "minimize_fw"}
+
+
+def compose_block_type(action: str, internet: bool) -> str:
+    return _COMPOSE[(action, internet)]
+
+
+def split_block_type(block_type: str | None) -> tuple[str, bool]:
+    """block_type -> (action, also block internet?)."""
+    block_type = block_type or "kill"
+    action = "close" if block_type in KILL_TYPES else "minimize" if block_type in MINIMIZE_TYPES else "internet"
+    return action, block_type in FIREWALL_TYPES
+
+
 class PROCESSENTRY32W(ctypes.Structure):
     _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
                 ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),

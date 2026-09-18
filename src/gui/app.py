@@ -10,6 +10,7 @@ import uiautomation  # noqa: F401
 import customtkinter as ctk
 
 import alerts
+from blocker.apps import MINIMIZE_TYPES
 from db import Database
 from gui.blocking import BlockingPage
 from gui.draft import Draft
@@ -17,6 +18,7 @@ from gui.notifications import NotificationsPage, Popup
 from gui.tray import Tray
 from monitor import win
 from monitor.usage import UsageTracker
+from rules import TIME_FMT
 from service import HEARTBEAT_KEY
 from trusted_time import now_from_db
 
@@ -34,6 +36,7 @@ PAGES = [
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
 WATCH_MS = 5000
+MINIMIZE_MS = 250
 GC_MS = 2000
 
 
@@ -88,7 +91,9 @@ class LockdownApp(ctk.CTk):
         self.usage_tracker = UsageTracker()   # counts time on blocked sites/apps (limits, allowances)
         self.usage_tracker.start()
         self.watcher = alerts.BlockWatcher()
+        self.minimize_blocks: dict[str, dict] = {}   # exe -> block, for apps blocked with "Minimize"
         self._poll_watcher()
+        self._poll_minimize()
 
     def _collect_garbage(self):
         gc.collect()
@@ -100,7 +105,6 @@ class LockdownApp(ctk.CTk):
         self.autosave_var = ctk.BooleanVar(value=self.draft.autosave)
         ctk.CTkSwitch(bar, text="Auto-save", variable=self.autosave_var, command=self._toggle_autosave).pack(
             side="left", padx=(0, 16))
-        self.saved_label = ctk.CTkLabel(bar, text="Changes are saved automatically", text_color="gray60")
         self.discard_btn = ctk.CTkButton(bar, text="Discard", width=80, fg_color="transparent", border_width=1,
                                          command=self.draft.discard)
         self.save_btn = ctk.CTkButton(bar, text="Save changes", width=120, command=self.draft.save)
@@ -111,10 +115,9 @@ class LockdownApp(ctk.CTk):
         self._update_save_bar()
 
     def _update_save_bar(self):
-        for w in (self.saved_label, *self.save_widgets):
+        for w in self.save_widgets:
             w.pack_forget()
-        if self.draft.autosave:
-            self.saved_label.pack(side="left")
+        if self.draft.autosave:   # every change is saved at once: no Save/Discard needed
             return
         dirty = self.draft.dirty
         if dirty:
@@ -221,8 +224,24 @@ class LockdownApp(ctk.CTk):
             for message in self.watcher.check(self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now),
                                               now, self.usage_tracker.in_use, settings):
                 self._show(message)
+            self.minimize_blocks = {b["item"]["target"].lower(): b for b in self.db.blocks(now)
+                                    if b["item"]["item_type"] == "app" and b["item"]["block_type"] in MINIMIZE_TYPES}
         finally:
             self.after(WATCH_MS, self._poll_watcher)
+
+    def _poll_minimize(self):
+        """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front."""
+        try:
+            if self.minimize_blocks:
+                _hwnd, exe = win.foreground()
+                block = self.minimize_blocks.get(exe)
+                if block and win.minimize_app(exe):
+                    item = block["item"]
+                    until = block["until"].strftime(TIME_FMT) if block["until"] else None
+                    self._alert({"item_id": item["id"], "display_name": item["display_name"], "reason": block["reason"],
+                                 "until": until}, item["notify"])
+        finally:
+            self.after(MINIMIZE_MS, self._poll_minimize)
 
     def _show(self, message: str):
         fmt = alerts.get(self.db, "notify.format")

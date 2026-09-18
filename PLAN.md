@@ -1175,10 +1175,14 @@ General app settings (lock and notification settings have moved to their own tab
 **Added 2026-09-19:**
 - [x] Remove buttons: click twice (turns into a red "Confirm" for 3 s) instead of a confirmation dialog
 - [x] Apps started while blocked are killed immediately (checked 4x per second); the polite 10 s close is only for apps already open when their block begins
+- [x] Apps: "Minimize" block option (keep running, minimize whenever it comes to the front) + "Also block its internet"
+- [x] Temporary blocks: custom duration (minutes / hours / days, max 30 days)
+- [x] Auto-save on by default; Save/Discard hidden while it's on
+- [x] Design brief: design/DESIGN.md + screenshots (Dashboard + Screen Time first)
 - [ ] Proposal (awaiting approval): stop blocked apps from starting at all (Windows "Image File Execution Options" registry entry, set/removed by the service)
 - [ ] Proposal (awaiting approval): Blocking page with fewer tabs — "Sites & Apps" (list + sort + one editor where block types combine) and "Groups"
 - [ ] Hours editor: only show "Remove window" when a rule has 2+ time windows (awaiting approval, part of the rework)
-- [ ] Design brief for Claude Design (screens, components, data, states) — after the Blocking rework is decided
+- [ ] Design brief update for the Blocking page — after the Blocking rework is decided
 
 **Ideas added 2026-09-18 (not scheduled yet):**
 - [ ] Weekly block calendar: a week view (like a Teams calendar, but) with colored bars per app/site showing when each is blocked; see at a glance when everything is blocked — visual only

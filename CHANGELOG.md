@@ -1,12 +1,20 @@
 # Changelog
 
-## 0.5.0 — 2026-09-19 00:50
+## 0.6.0 — 2026-09-18 22:02
+- Apps: new block option "Minimize" (keeps the app running - e.g. a browser with many tabs - but the tray agent minimizes it whenever it comes to the front, checked 4x per second); "When blocked" is now Close app / Minimize / Only block internet + "Also block its internet" checkbox
+- Temporary blocks: "Custom..." duration (number + minutes / hours / days, up to 30 days); durations of a day or more shown as "3d 2h"
+- Auto-save is on by default; while it's on, the Save/Discard buttons are hidden
+- Design brief for the designer: `design/DESIGN.md` + reference screenshots in `design/screenshots/` (start with Dashboard + Screen Time)
+- Fixed: changelog timestamps corrected to the real commit times (several were estimated and in the future)
+- 92 tests passing
+
+## 0.5.0 — 2026-09-18 21:51
 - Remove buttons need two clicks (first click turns the button into a red "Confirm" for 3 s) instead of a confirmation dialog (`gui/widgets.py`)
 - Apps started while blocked are killed immediately; process check 4x per second (was 1x); polite 10 s close only for apps already open when their block begins
 - Phase 4 data collection (no UI yet): per-minute screen time per app and browser site with active/idle split (`activity` table), switch counting (`switch_events` table)
 - 88 tests passing
 
-## 0.4.0 — 2026-09-19 00:10
+## 0.4.0 — 2026-09-18 21:22
 - Phase 3 — app blocking:
   - Apps are blocked items like sites (all tabs/rules); matched by exe name; Windows/Lockdown processes are protected
   - Per app: Close app / Block internet / Both. Closing: tray agent sends a normal close, service force-kills after 10 s; process check every second (`blocker/apps.py`, `monitor/win.py`)
@@ -21,12 +29,12 @@
 - Fixed a possible hang: COM libraries are imported on the main thread, and garbage collection runs only on the Tk thread
 - 85 tests passing
 
-## 0.3.1 — 2026-09-18 22:35
+## 0.3.1 — 2026-09-18 20:49
 - Full day names everywhere: rules ("Monday–Friday 09:00-17:00", "Monday, Wednesday"), hours editor checkboxes, alert messages ("until Tuesday 07:00")
 - Hours editor: each time window is a box with the days on one line and from/to + "Remove window" below
 - Blocking > All: Edit button moved next to Remove; with several rules it's "Edit ▾" and asks which rule to edit
 
-## 0.3.0 — 2026-09-18 22:10
+## 0.3.0 — 2026-09-18 20:36
 - Hours rules: "Allow only during" (default) / "Block during" switch; several time windows per rule, each with its own days (custom hours per day). Old rules keep working as "Block during".
 - Daily time limits: tray agent reads the active tab URL via UI Automation (Chrome/Edge/Brave/Firefox), counts time on limited sites (not while idle 15+ min); service blocks until midnight when used up; "limit reached" alert reason (`monitor/browser_url.py`, `monitor/usage.py`, `site_usage` table)
 - Clock-change protection: service uses its own trusted clock (NTP + tick counter); the GUI uses the published offset; clock changes logged (`trusted_time.py`)
@@ -38,7 +46,7 @@
 - Fixed: Blocking sub-tabs didn't switch visibly (scrollable frames can't be raised)
 - `uiautomation` added to requirements; 66 tests passing
 
-## 0.2.0 — 2026-09-18 20:40
+## 0.2.0 — 2026-09-18 19:56
 - Phase 2 (except daily time limits):
   - Block by hours: pick days + from/to time, overnight windows supported (`src/rules.py`)
   - Temporary blocks: 15 min to 24 h, expired ones cleaned up automatically
@@ -53,19 +61,19 @@
   - 41 tests passing
 - PLAN.md: session-0 rule + architecture split (service = enforcement, tray agent = desktop work), tray relaunch + Exit challenge added to Phase 7, Phase 2 items marked
 
-## 0.1.4 — 2026-09-18 20:10
+## 0.1.4 — 2026-09-18 19:33
 - PLAN.md: added blocked-visit notifications (reason: permanent / limit reached / outside hours; customizable per reason, message, cooldown, format, per-item override) — section 1.1, Notifications screen 3.10, Phase 2 checklist
 
-## 0.1.3 — 2026-09-18 19:58
+## 0.1.3 — 2026-09-18 19:30
 - Added `scripts/create_shortcut.ps1`: creates double-click `Lockdown.lnk` shortcuts (Desktop + project folder) that start the GUI without a console window; `*.lnk` git-ignored
 
-## 0.1.2 — 2026-09-18 19:45
+## 0.1.2 — 2026-09-18 19:30
 - PLAN.md: added DoH lock, QUIC disable and closing open connections on block (section 1.1 + Phase 2 checklist)
 
-## 0.1.1 — 2026-09-18 19:35
+## 0.1.1 — 2026-09-18 19:30
 - Install/uninstall instructions (README + script headers) now run the script directly with a process-scoped execution policy, so they work from any folder and don't depend on `powershell.exe` being on PATH
 
-## 0.1.0 — 2026-09-18 19:20
+## 0.1.0 — 2026-09-18 19:28
 - Phase 1 (MVP) implemented:
   - Project setup: Python 3.13 venv, `requirements.txt`, `pytest.ini`, git repo
   - `src/db.py`: SQLite layer (`blocked_items`, `block_rules`, `settings`), shared DB in `C:\ProgramData\Lockdown\`

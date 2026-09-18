@@ -148,3 +148,9 @@ def test_next_block_schedule_and_limit():
 def test_item_block_returns_rule():
     rule = {"rule_type": "permanent", "group": {"id": 1, "name": "G"}}
     assert item_block([rule], at(0, 0))[2]["group"]["name"] == "G"
+
+
+def test_duration_text_days():
+    from rules import duration_text
+    assert duration_text(90 * 60) == "1h 30m"
+    assert duration_text(3 * 86400 + 2 * 3600) == "3d 2h"

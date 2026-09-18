@@ -6,6 +6,9 @@ from rules import ALLOW, BLOCK, DAY_NAMES, load_schedule, make_schedule
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
+CUSTOM = "Custom..."
+UNITS = {"days": 1440, "hours": 60, "minutes": 1}   # biggest first (used to display a custom duration)
+MAX_TEMPORARY_MIN = 30 * 1440
 MODES = {"Allow only during": ALLOW, "Block during": BLOCK}
 MUTED = "gray60"
 
@@ -125,17 +128,48 @@ class TemporaryEditor(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
         ctk.CTkLabel(self, text="Block for").pack(side="left")
-        self.duration = ctk.CTkOptionMenu(self, values=list(DURATIONS), width=110)
+        self.duration = ctk.CTkOptionMenu(self, values=[*DURATIONS, CUSTOM], width=110, command=self._chosen)
         self.duration.pack(side="left", padx=8)
-        ctk.CTkLabel(self, text="starting when saved", text_color=MUTED).pack(side="left")
+        self.custom = ctk.CTkFrame(self, fg_color="transparent")
+        self.amount = ctk.CTkEntry(self.custom, width=64)
+        self.amount.pack(side="left")
+        self.unit = ctk.CTkOptionMenu(self.custom, values=list(UNITS), width=100)
+        self.unit.pack(side="left", padx=(6, 0))
+        self.note = ctk.CTkLabel(self, text="starting when saved", text_color=MUTED)
+        self.note.pack(side="left", padx=8)
         self.load(None)
+
+    def _chosen(self, choice: str):
+        if choice == CUSTOM:
+            self.custom.pack(side="left", before=self.note)
+        else:
+            self.custom.pack_forget()
 
     def load(self, rule: dict | None):
         minutes = (rule or {}).get("duration_min")
-        self.duration.set(next((k for k, v in DURATIONS.items() if v == minutes), "1 hour"))
+        preset = next((k for k, v in DURATIONS.items() if v == minutes), None)
+        self.amount.delete(0, "end")
+        if minutes and not preset:   # a custom duration: show it in the biggest whole unit
+            unit = next(u for u, m in UNITS.items() if minutes % m == 0)
+            self.amount.insert(0, str(minutes // UNITS[unit]))
+            self.unit.set(unit)
+            self.duration.set(CUSTOM)
+        else:
+            self.amount.insert(0, "1")
+            self.unit.set("hours")
+            self.duration.set(preset or "1 hour")
+        self._chosen(self.duration.get())
 
     def value(self) -> dict:
-        return {"rule_type": "temporary", "duration_min": DURATIONS[self.duration.get()]}
+        if self.duration.get() != CUSTOM:
+            return {"rule_type": "temporary", "duration_min": DURATIONS[self.duration.get()]}
+        try:
+            minutes = int(self.amount.get().strip()) * UNITS[self.unit.get()]
+        except ValueError:
+            minutes = 0
+        if not 1 <= minutes <= MAX_TEMPORARY_MIN:
+            raise ValueError("Custom duration must be between 1 minute and 30 days.")
+        return {"rule_type": "temporary", "duration_min": minutes}
 
 
 class PermanentEditor(ctk.CTkFrame):

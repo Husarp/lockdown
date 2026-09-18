@@ -4,6 +4,7 @@ from ctypes import wintypes
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WM_CLOSE = 0x0010
+SW_MINIMIZE = 6
 
 _user32 = ctypes.windll.user32
 _kernel32 = ctypes.windll.kernel32
@@ -64,6 +65,16 @@ def close_app(exe: str) -> int:
     for hwnd, _title, path in top_windows():
         if exe_name(path) == exe.lower():
             _user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+            count += 1
+    return count
+
+
+def minimize_app(exe: str) -> int:
+    """Minimize every window of the app (it keeps running). Returns how many windows were minimized."""
+    count = 0
+    for hwnd, _title, path in top_windows():
+        if exe_name(path) == exe.lower() and not _user32.IsIconic(hwnd):
+            _user32.ShowWindow(hwnd, SW_MINIMIZE)
             count += 1
     return count
 

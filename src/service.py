@@ -6,7 +6,7 @@ clock (changing the Windows clock has no effect), make the hosts file match
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
 Blocked apps (checked 4x per second): started while blocked -> killed at once; already open when the block
 began -> the tray agent asks them to close, force-killed after 10 s. Block type firewall/both adds a Windows
-Firewall rule.
+Firewall rule. Block type "minimize" is handled by the tray agent (it can see the desktop).
 Needs admin/SYSTEM rights.
 
 Usage:
@@ -146,7 +146,7 @@ class Enforcer:
         """Blocked app launched while blocked: killed at once. Already open when the block began: the tray
         agent asks it to close (so you can save), force-killed after the grace time."""
         now = time.time()
-        targets = {exe: b for exe, b in self.app_blocks.items() if (b["item"]["block_type"] or "kill") in ("kill", "both")}
+        targets = {exe: b for exe, b in self.app_blocks.items() if (b["item"]["block_type"] or "kill") in apps.KILL_TYPES}
         self.block_since = {exe: self.block_since.get(exe, now) for exe in targets}
         seen = {}
         for pid, exe in apps.list_processes():
@@ -168,7 +168,7 @@ class Enforcer:
         """Firewall rules for blocked apps with block type 'firewall'/'both'; remove the rest."""
         wanted = {}
         for exe, b in self.app_blocks.items():
-            if b["item"]["block_type"] in ("firewall", "both"):
+            if b["item"]["block_type"] in apps.FIREWALL_TYPES:
                 path = b["item"]["app_path"] or self._learn_path(exe, b["item"]["id"])
                 if path:
                     wanted[exe] = path

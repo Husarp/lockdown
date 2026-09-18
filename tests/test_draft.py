@@ -10,6 +10,7 @@ from rules import TIME_FMT
 def draft(tmp_path):
     from gui.draft import Draft
     db = Database(tmp_path / "t.db")
+    db.set_setting("ui.autosave", "0")   # most tests check the manual Save flow
     return Draft(db)
 
 
@@ -115,3 +116,8 @@ def test_edit_group_same_values_not_dirty(draft):
     g = next(iter(draft.groups.values()))
     draft.set_group(g["id"], "G", [{"rule_type": "permanent"}], {i: {} for i in g["members"]})
     assert not draft.dirty
+
+
+def test_autosave_on_by_default(tmp_path):
+    from gui.draft import Draft
+    assert Draft(Database(tmp_path / "fresh.db")).autosave

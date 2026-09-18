@@ -67,3 +67,19 @@ def test_start_time_real():
     import os, time
     started = apps.start_time(os.getpid())
     assert started and 0 < time.time() - started < 3600
+
+
+def test_minimize_apps_are_left_to_the_tray_agent(monkeypatch):
+    monkeypatch.setattr(apps, "list_processes", lambda: [(10, "discord.exe")])
+    e = make_enforcer("minimize")
+    e.enforce_apps()
+    assert e.events == []
+
+
+def test_block_type_compose_split():
+    for action in apps.ACTIONS:
+        for internet in (False, True):
+            bt = apps.compose_block_type(action, internet)
+            got = apps.split_block_type(bt)
+            assert got == (action, True if action == "internet" else internet)
+    assert apps.split_block_type(None) == ("close", False)

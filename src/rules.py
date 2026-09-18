@@ -221,6 +221,9 @@ def days_text(days: list[int]) -> str:
 def duration_text(seconds: float) -> str:
     minutes = max(0, int(seconds // 60))
     h, m = divmod(minutes, 60)
+    d, h = divmod(h, 24)
+    if d:
+        return f"{d}d {h}h"
     return f"{h}h {m:02d}m" if h else f"{m}m"
 
 

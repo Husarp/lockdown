@@ -1,4 +1,4 @@
-"""Unsaved-changes layer for the GUI.
+﻿"""Unsaved-changes layer for the GUI.
 
 Pages edit this draft (blocked items + their rules, groups, notification settings). Nothing is enforced
 until save() writes it to the database - or immediately, when auto-save is on. `dirty` is a real comparison
@@ -69,7 +69,7 @@ class Draft:
 
     @property
     def autosave(self) -> bool:
-        return self.db.get_setting(AUTOSAVE_KEY, "0") == "1"
+        return self.db.get_setting(AUTOSAVE_KEY, "1") == "1"   # on by default
 
     @autosave.setter
     def autosave(self, on: bool):
