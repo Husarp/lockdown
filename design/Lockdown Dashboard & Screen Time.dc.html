@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/colors.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/typography.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/effects.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/styles.css">
+<script src="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/_ds_bundle.js"></script>
+<style>
+body { margin:0; background:#0C0F13; }
+a { color:#DB5126; text-decoration:none; }
+a:hover { color:#B33D18; }
+</style>
+</helmet>
+
+<section style="display:flex;flex-direction:column;gap:28px;padding:40px 40px 0 40px;font-family:Inter,sans-serif">
+  <div style="display:flex;align-items:baseline;gap:16px;color:#fff">
+    <div style="font:700 34px 'Barlow Condensed',sans-serif;letter-spacing:-0.02em">BLOCKING — reworked page</div>
+    <div style="font:400 13px Inter,sans-serif;color:#93A0AE">Overview · Groups · Add — rules as chips, blockers as collapsible cards</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start">
+
+    <!-- 2a OVERVIEW -->
+    <div id="2a" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">2a</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Overview — dark (last row shows the two-click Remove)</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--sb:#0F1319;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navBlockDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Blocking</div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ blkTabsOverview }}" as="t" hint-placeholder-count="3">
+                <div style="padding:6px 18px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font:400 12px Inter,sans-serif;color:var(--mut)">Sort by</span>
+              <div style="display:flex;align-items:center;gap:10px;border:1.5px solid var(--bd);border-radius:4px;padding:6px 10px;font:500 12px Inter,sans-serif;color:var(--tx)">Blocked now first <span style="color:var(--mut)">▾</span></div>
+              <div style="font:600 12.5px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:4px;padding:8px 16px">+ Add</div>
+            </div>
+          </div>
+
+          <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:0 16px;flex:1;display:flex;flex-direction:column;min-height:0">
+            <div style="display:flex;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid var(--bd);font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">
+              <div style="width:250px">Item</div>
+              <div style="flex:1">Rules</div>
+              <div style="width:104px">Status</div>
+              <div style="width:86px">Alerts</div>
+              <div style="width:144px"></div>
+            </div>
+            <sc-for list="{{ blockRows }}" as="r" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid #222A33">
+                <div style="width:250px;display:flex;gap:10px;align-items:flex-start;min-width:0">
+                  <div style="width:22px;height:22px;border-radius:4px;background:{{ r.icon }};flex-shrink:0"></div>
+                  <div style="min-width:0">
+                    <div style="font:600 13.5px Inter,sans-serif">{{ r.name }}</div>
+                    <div style="font:400 11px Inter,sans-serif;color:var(--mut);line-height:1.45">{{ r.sub }}</div>
+                  </div>
+                </div>
+                <div style="flex:1;display:flex;flex-wrap:wrap;gap:6px;min-width:0">
+                  <sc-for list="{{ r.chips }}" as="c" hint-placeholder-count="2">
+                    <div style="font:500 11.5px Inter,sans-serif;padding:4px 9px;border-radius:2px;color:{{ c.c }};background:{{ c.bg }}">{{ c.t }}</div>
+                  </sc-for>
+                </div>
+                <div style="width:104px;display:flex;align-items:center;gap:7px;font:500 12px Inter,sans-serif;color:{{ r.sc }}">
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ r.dot }}"></span>{{ r.status }}
+                </div>
+                <div style="width:86px"><div style="display:flex;align-items:center;justify-content:space-between;border:1.5px solid var(--bd);border-radius:4px;padding:5px 8px;font:500 11.5px Inter,sans-serif">{{ r.alert }}<span style="color:var(--mut)">▾</span></div></div>
+                <div style="width:144px;display:flex;gap:8px;justify-content:flex-end">
+                  <div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:6px 14px">Edit</div>
+                  <div style="font:600 12px Inter,sans-serif;border:1.5px solid {{ r.rmc }};background:{{ r.rmc }};color:{{ r.rmf }};border-radius:4px;padding:6px 14px">{{ r.rm }}</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="flex:1"></div>
+            <div style="font:400 11.5px Inter,sans-serif;color:var(--mut);padding:12px 0">Rules from a group are marked with <span style="color:var(--ac)">→</span> and can only be changed in Groups.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2b GROUPS -->
+    <div id="2b" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">2b</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Groups, with the group editor open</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--sb:#0F1319;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navBlockDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Blocking</div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ blkTabsGroups }}" as="t" hint-placeholder-count="3">
+                <div style="padding:6px 18px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="font:600 12.5px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:4px;padding:8px 16px">+ New group</div>
+          </div>
+
+          <div style="display:flex;gap:12px;flex:1;min-height:0">
+            <div style="width:224px;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+              <sc-for list="{{ groupRows }}" as="g" hint-placeholder-count="2">
+                <div style="border-radius:4px;padding:10px 12px;background:{{ g.bg }};border-left:3px solid {{ g.bd }}">
+                  <div style="font:600 13.5px Inter,sans-serif">{{ g.name }}</div>
+                  <div style="font:400 11px Inter,sans-serif;color:var(--mut);margin:2px 0 6px 0">{{ g.members }}</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ g.rule }}</div>
+                  <div style="font:500 11.5px Inter,sans-serif;color:{{ g.sc }};margin-top:6px">{{ g.status }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 16px;display:flex;flex-direction:column;gap:9px;min-width:0">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div style="font:700 20px 'Barlow Condensed',sans-serif;border-left:4px solid var(--ac);padding-left:10px">Edit group</div>
+                <div style="display:flex;gap:8px">
+                  <div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:6px 14px">Remove group</div>
+                  <div style="font:600 12px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:4px;padding:7px 16px">Done</div>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:12px">
+                <div style="font:500 12.5px Inter,sans-serif;color:var(--mut);width:52px">Name</div>
+                <div style="flex:1;border:1.5px solid var(--bd);border-radius:4px;padding:8px 12px;font:400 13px Inter,sans-serif;background:#161B21">Night schedule</div>
+              </div>
+
+              <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">Blockers — tick any number</div>
+
+              <div style="border:1px solid var(--bd);border-left:3px solid var(--ac);border-radius:4px;background:#1F252D">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 13px">
+                  <div style="width:16px;height:16px;border-radius:2px;background:var(--ac);display:flex;align-items:center;justify-content:center;font:700 11px Inter,sans-serif;color:#fff">✓</div>
+                  <div style="font:600 13px Inter,sans-serif;flex:1">By hours</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">Blocked every day 22:00–07:00</div>
+                  <div style="color:var(--mut);font:400 12px Inter,sans-serif">▴</div>
+                </div>
+                <div style="padding:0 13px 10px 39px;display:flex;flex-direction:column;gap:7px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="display:flex;background:var(--s2);border-radius:4px;padding:2px">
+                      <div style="padding:5px 12px;border-radius:3px;font:500 11.5px Inter,sans-serif;color:var(--mut)">Allow only during</div>
+                      <div style="padding:5px 12px;border-radius:3px;font:500 11.5px Inter,sans-serif;background:var(--ac);color:#fff">Block during</div>
+                    </div>
+                    <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">these hours · end before start = overnight</div>
+                  </div>
+                  <div style="border:1px solid var(--bd);border-radius:4px;padding:9px 11px;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+                    <sc-for list="{{ daysAll }}" as="d" hint-placeholder-count="7">
+                      <div style="font:500 11.5px Inter,sans-serif;padding:5px 8px;border-radius:2px;border:1px solid {{ d.bd }};background:{{ d.bg }};color:{{ d.fg }}">{{ d.d }}</div>
+                    </sc-for>
+                    <div style="display:flex;align-items:center;gap:8px;width:100%">
+                      <div style="border:1.5px solid var(--bd);border-radius:4px;padding:5px 11px;font:400 12.5px Inter,sans-serif;background:#161B21">22:00</div>
+                      <span style="font:400 12px Inter,sans-serif;color:var(--mut)">to</span>
+                      <div style="border:1.5px solid var(--bd);border-radius:4px;padding:5px 11px;font:400 12.5px Inter,sans-serif;background:#161B21">07:00</div>
+                      <div style="flex:1"></div>
+                      <div style="font:500 11.5px Inter,sans-serif;color:var(--mut)">✕ Remove window</div>
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div style="font:500 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:6px 12px">+ Add time window</div>
+                    <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">Still allow</div>
+                    <div style="border:1.5px solid var(--bd);border-radius:4px;padding:6px 12px;font:400 12px Inter,sans-serif;background:#161B21">0</div>
+                    <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">min during blocked hours</div>
+                  </div>
+                </div>
+              </div>
+
+              <sc-for list="{{ groupBlockers }}" as="b" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--bd);border-left:3px solid {{ b.bar }};border-radius:4px;padding:7px 13px">
+                  <div style="width:16px;height:16px;border-radius:2px;border:1.5px solid {{ b.bxb }};background:{{ b.box }}"></div>
+                  <div style="font:500 13px Inter,sans-serif;flex:1;color:{{ b.tc }}">{{ b.name }}</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ b.sum }}</div>
+                  <div style="color:var(--mut);font:400 12px Inter,sans-serif">▾</div>
+                </div>
+              </sc-for>
+
+              <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);margin-top:2px">Members</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <sc-for list="{{ groupMembers }}" as="m" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--bd);border-radius:4px;padding:6px 10px">
+                    <div style="width:16px;height:16px;border-radius:3px;background:{{ m.icon }}"></div>
+                    <div style="font:500 12.5px Inter,sans-serif">{{ m.name }}</div>
+                    <div style="font:400 11px Inter,sans-serif;color:var(--ac)">{{ m.note }}</div>
+                    <div style="font:400 12px Inter,sans-serif;color:var(--mut)">✕</div>
+                  </div>
+                </sc-for>
+                <div style="font:500 12.5px Inter,sans-serif;border:1.5px dashed var(--bd);color:var(--mut);border-radius:4px;padding:6px 12px">+ Add member</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2c ADD -->
+    <div id="2c" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">2c</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Add / Edit — blockers as collapsible cards</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--sb:#0F1319;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navBlockDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 0 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Blocking</div>
+
+          <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px;align-self:flex-start;margin-bottom:12px">
+            <sc-for list="{{ blkTabsAdd }}" as="t" hint-placeholder-count="3">
+              <div style="padding:6px 18px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+            </sc-for>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden">
+
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:12px 16px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <div style="font:700 20px 'Barlow Condensed',sans-serif;border-left:4px solid var(--ac);padding-left:10px">Add a site or app</div>
+                <div style="display:flex;background:var(--s2);border-radius:4px;padding:2px">
+                  <sc-for list="{{ kindTabs }}" as="t" hint-placeholder-count="2">
+                    <div style="padding:5px 16px;border-radius:3px;font:500 11.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <div style="flex:1.4;border:1.5px solid var(--ac);border-radius:4px;padding:9px 12px;font:400 13px Inter,sans-serif;background:#161B21">youtube.com</div>
+                <div style="flex:1;border:1.5px solid var(--bd);border-radius:4px;padding:9px 12px;font:400 13px Inter,sans-serif;background:#161B21">YouTube</div>
+                <div style="font:500 12.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:8px 14px">+ Popular sites</div>
+                <div style="font:500 12.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:8px 14px">Browse apps</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="font:400 12px Inter,sans-serif;color:var(--mut)">When blocked</div>
+                <sc-for list="{{ appBehaviour }}" as="b" hint-placeholder-count="3">
+                  <div style="font:500 11.5px Inter,sans-serif;padding:6px 12px;border-radius:2px;border:1px solid {{ b.bd }};background:{{ b.bg }};color:{{ b.fg }}">{{ b.n }}</div>
+                </sc-for>
+                <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">· applies to apps only</div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">Blockers — tick any number, they combine</div>
+              <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">3 of 5 on · blocked when any of them applies</div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0">
+
+              <div style="border:1px solid var(--bd);border-left:3px solid var(--ac);border-radius:4px;background:#1F252D">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 13px">
+                  <div style="width:16px;height:16px;border-radius:2px;background:var(--ac);display:flex;align-items:center;justify-content:center;font:700 11px Inter,sans-serif;color:#fff">✓</div>
+                  <div style="font:600 13px Inter,sans-serif;flex:1">By hours</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">Allowed only 09:00–17:00 Mon–Fri · +10 min</div>
+                  <div style="color:var(--mut);font:400 12px Inter,sans-serif">▴</div>
+                </div>
+                <div style="padding:0 13px 11px 39px;display:flex;flex-direction:column;gap:8px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="display:flex;background:var(--s2);border-radius:4px;padding:2px">
+                      <div style="padding:5px 12px;border-radius:3px;font:500 11.5px Inter,sans-serif;background:var(--ac);color:#fff">Allow only during</div>
+                      <div style="padding:5px 12px;border-radius:3px;font:500 11.5px Inter,sans-serif;color:var(--mut)">Block during</div>
+                    </div>
+                    <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">these hours · untick all days to drop a window</div>
+                  </div>
+                  <div style="border:1px solid var(--bd);border-radius:4px;padding:9px 11px;display:flex;align-items:center;gap:9px">
+                    <sc-for list="{{ daysWeek }}" as="d" hint-placeholder-count="7">
+                      <div style="font:500 11.5px Inter,sans-serif;padding:5px 9px;border-radius:2px;border:1px solid {{ d.bd }};background:{{ d.bg }};color:{{ d.fg }}">{{ d.d }}</div>
+                    </sc-for>
+                    <div style="width:6px"></div>
+                    <div style="border:1.5px solid var(--bd);border-radius:4px;padding:5px 11px;font:400 12.5px Inter,sans-serif;background:#161B21">09:00</div>
+                    <span style="font:400 12px Inter,sans-serif;color:var(--mut)">to</span>
+                    <div style="border:1.5px solid var(--bd);border-radius:4px;padding:5px 11px;font:400 12.5px Inter,sans-serif;background:#161B21">17:00</div>
+                    <div style="flex:1"></div>
+                    <div style="font:500 11.5px Inter,sans-serif;color:var(--mut)">✕</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div style="font:500 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:6px 12px">+ Add time window</div>
+                    <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">Still allow</div>
+                    <div style="border:1.5px solid var(--bd);border-radius:4px;padding:6px 12px;font:400 12px Inter,sans-serif;background:#161B21">10</div>
+                    <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">min during blocked hours</div>
+                  </div>
+                </div>
+              </div>
+
+              <sc-for list="{{ addBlockers }}" as="b" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--bd);border-left:3px solid {{ b.bar }};border-radius:4px;padding:10px 13px">
+                  <div style="width:16px;height:16px;border-radius:2px;border:1.5px solid {{ b.bxb }};background:{{ b.box }};display:flex;align-items:center;justify-content:center;font:700 11px Inter,sans-serif;color:{{ b.tick }}">✓</div>
+                  <div style="font:500 13px Inter,sans-serif;flex:1;color:{{ b.tc }}">{{ b.name }}</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ b.sum }}</div>
+                  <div style="color:var(--mut);font:400 12px Inter,sans-serif">▾</div>
+                </div>
+              </sc-for>
+
+              <div style="border:1px solid var(--bd);border-left:3px solid var(--ac);border-radius:4px;background:#1F252D;display:flex;align-items:center;gap:9px;padding:8px 13px">
+                <div style="width:16px;height:16px;border-radius:2px;background:var(--ac);display:flex;align-items:center;justify-content:center;font:700 11px Inter,sans-serif;color:#fff">✓</div>
+                <div style="font:600 13px Inter,sans-serif">Temporary</div>
+                <div style="font:400 12px Inter,sans-serif;color:var(--mut);margin-left:6px">Block for</div>
+                <sc-for list="{{ tempPresets }}" as="p" hint-placeholder-count="4">
+                  <div style="font:500 11.5px Inter,sans-serif;padding:5px 11px;border-radius:2px;border:1px solid {{ p.bd }};background:{{ p.bg }};color:{{ p.fg }}">{{ p.n }}</div>
+                </sc-for>
+                <div style="flex:1"></div>
+                <div style="color:var(--mut);font:400 12px Inter,sans-serif">▴</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--bd);padding:12px 0;margin-top:2px">
+            <div style="font:400 11.5px Inter,sans-serif;color:var(--mut);flex:1">YouTube will be blocked outside 09:00–17:00 on weekdays, after 1 h 30 m, after 15 opens, and for the next hour.</div>
+            <div style="font:600 12.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:4px;padding:8px 18px">Cancel</div>
+            <div style="font:600 12.5px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:4px;padding:9px 22px">+ Add</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:28px;padding:40px;font-family:Inter,sans-serif">
+
+  <div style="display:flex;align-items:baseline;gap:16px;color:#fff">
+    <div style="font:700 34px 'Barlow Condensed',sans-serif;letter-spacing:-0.02em">LOCKDOWN — Dashboard &amp; Screen Time</div>
+    <div style="font:400 13px Inter,sans-serif;color:#93A0AE">1100 × 720 · customtkinter-buildable · dark + light</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start">
+
+    <!-- ============ 1a  FOUNDATIONS ============ -->
+    <div id="1a" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1a</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Foundations — tokens, type, spacing, icons</span></div>
+
+      <div style="width:1100px;background:#FFFFFF;color:#1A1A1A;border-radius:8px;padding:28px 32px;display:flex;flex-direction:column;gap:24px">
+
+        <div style="display:flex;gap:32px">
+          <div style="flex:1">
+            <div style="font:600 11px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B;border-left:4px solid #DB5126;padding-left:10px;margin-bottom:14px">Colour tokens — dark (default)</div>
+            <sc-for list="{{ tokDark }}" as="t" hint-placeholder-count="10">
+              <div style="display:flex;align-items:center;gap:12px;padding:5px 0;border-bottom:1px solid #EDEDED">
+                <div style="width:26px;height:26px;border-radius:4px;border:1px solid #E0E0E0;background:{{ t.hex }}"></div>
+                <div style="flex:1;font:500 12.5px Inter,sans-serif">{{ t.name }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:#6B6B6B">{{ t.use }}</div>
+                <div style="font:700 12px 'Barlow Condensed',sans-serif;letter-spacing:.04em;width:74px;text-align:right">{{ t.hex }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex:1">
+            <div style="font:600 11px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B;border-left:4px solid #DB5126;padding-left:10px;margin-bottom:14px">Colour tokens — light</div>
+            <sc-for list="{{ tokLight }}" as="t" hint-placeholder-count="10">
+              <div style="display:flex;align-items:center;gap:12px;padding:5px 0;border-bottom:1px solid #EDEDED">
+                <div style="width:26px;height:26px;border-radius:4px;border:1px solid #E0E0E0;background:{{ t.hex }}"></div>
+                <div style="flex:1;font:500 12.5px Inter,sans-serif">{{ t.name }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:#6B6B6B">{{ t.use }}</div>
+                <div style="font:700 12px 'Barlow Condensed',sans-serif;letter-spacing:.04em;width:74px;text-align:right">{{ t.hex }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:32px">
+          <div style="flex:1.2">
+            <div style="font:600 11px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B;border-left:4px solid #DB5126;padding-left:10px;margin-bottom:12px">Type scale</div>
+            <sc-for list="{{ typeScale }}" as="t" hint-placeholder-count="8">
+              <div style="display:flex;align-items:baseline;gap:14px;padding:5px 0;border-bottom:1px solid #EDEDED">
+                <div style="width:150px;font:500 11.5px Inter,sans-serif;color:#6B6B6B">{{ t.role }}</div>
+                <div style="flex:1;font:{{ t.css }}">{{ t.sample }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:#6B6B6B">{{ t.spec }}</div>
+              </div>
+            </sc-for>
+            <div style="font:400 12px Inter,sans-serif;color:#6B6B6B;margin-top:10px;line-height:1.6">Two TTFs ship with the app: <b>Barlow Condensed</b> (600/700/800 — page titles, big numerals, chart labels) and <b>Inter</b> (400/500/600 — everything else). If only one font can ship, use Inter throughout and set titles in 600 at the same sizes.</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:18px">
+            <div>
+              <div style="font:600 11px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B;border-left:4px solid #DB5126;padding-left:10px;margin-bottom:12px">Spacing — 4 px base</div>
+              <sc-for list="{{ spacing }}" as="s" hint-placeholder-count="7">
+                <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
+                  <div style="width:150px;font:500 12px Inter,sans-serif">{{ s.name }}</div>
+                  <div style="height:8px;border-radius:2px;background:#DB5126;width:{{ s.w }}"></div>
+                  <div style="font:700 12px 'Barlow Condensed',sans-serif;color:#6B6B6B">{{ s.px }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div>
+              <div style="font:600 11px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B;border-left:4px solid #DB5126;padding-left:10px;margin-bottom:12px">Corner radius</div>
+              <div style="display:flex;gap:14px">
+                <sc-for list="{{ radii }}" as="r" hint-placeholder-count="4">
+                  <div style="text-align:center">
+                    <div style="width:58px;height:44px;background:#F5F5F5;border:1.5px solid #DB5126;border-radius:{{ r.r }}"></div>
+                    <div style="font:700 13px 'Barlow Condensed',sans-serif;margin-top:5px">{{ r.r }}</div>
+                    <div style="font:400 10.5px Inter,sans-serif;color:#6B6B6B;width:58px;line-height:1.35">{{ r.use }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font:600 11px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#6B6B6B;border-left:4px solid #DB5126;padding-left:10px;margin-bottom:12px">Sidebar icons — Lucide, 18 px, 1.75 stroke</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <sc-for list="{{ iconSpec }}" as="p" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:10px;background:#F5F5F5;border-radius:4px;padding:9px 12px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#DB5126" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+                <div style="font:500 12.5px Inter,sans-serif;flex:1">{{ p.name }}</div>
+                <div style="font:400 11px Inter,sans-serif;color:#6B6B6B">{{ p.icon }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ============ 1b  DASHBOARD DARK ============ -->
+    <div id="1b" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1b</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Dashboard — dark</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--wrn:#E0A02A;--red:#C0392B;--sb:#0F1319;--tr:#262E38;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navDashDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 14px 0">
+            <div style="font:700 28px 'Barlow Condensed',sans-serif;letter-spacing:-0.01em">Dashboard</div>
+            <div style="font:400 12px Inter,sans-serif;color:var(--mut)">Wednesday, 18 September · tracking since 07:42</div>
+          </div>
+
+          <div style="display:flex;gap:12px;margin-bottom:12px">
+            <sc-for list="{{ statsDark }}" as="c" hint-placeholder-count="4">
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:2px">
+                <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ c.label }}</div>
+                <div style="font:800 30px 'Barlow Condensed',sans-serif;letter-spacing:-0.01em;line-height:1.05">{{ c.value }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:{{ c.dc }}">{{ c.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:12px;flex:1;min-height:0">
+
+            <div style="flex:1.55;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <div style="font:600 14px Inter,sans-serif">Limits today</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">4 active →</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ limits }}" as="l" hint-placeholder-count="4">
+                    <div>
+                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <div style="width:14px;height:14px;border-radius:3px;background:{{ l.icon }}"></div>
+                        <div style="font:500 12.5px Inter,sans-serif;flex:1">{{ l.name }}</div>
+                        <div style="font:400 12px Inter,sans-serif;color:var(--mut)">{{ l.used }} of {{ l.total }}</div>
+                        <div style="font:600 12px Inter,sans-serif;color:{{ l.lc }};width:78px;text-align:right">{{ l.left }}</div>
+                      </div>
+                      <div style="height:6px;border-radius:3px;background:var(--tr);overflow:hidden">
+                        <div style="height:6px;border-radius:3px;background:{{ l.lc }};width:{{ l.pct }}"></div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <div style="font:600 14px Inter,sans-serif">Today</div>
+                  <div style="display:flex;gap:12px;font:400 11px Inter,sans-serif;color:var(--mut)">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#DB5126;margin-right:5px"></span>Distracting</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#27AE60;margin-right:5px"></span>Productive</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#5C6875;margin-right:5px"></span>Neutral</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#262E38;margin-right:5px"></span>Idle</span>
+                  </div>
+                </div>
+                <div style="display:flex;height:22px;border-radius:4px;overflow:hidden">
+                  <sc-for list="{{ timeline }}" as="s" hint-placeholder-count="14">
+                    <div style="flex:{{ s.f }};background:{{ s.c }}"></div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;justify-content:space-between;font:400 10.5px Inter,sans-serif;color:var(--mut);margin-top:5px">
+                  <span>06:00</span><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                  <div style="font:600 14px Inter,sans-serif">Last 7 days</div>
+                  <div style="font:400 11px Inter,sans-serif;color:var(--mut)">— — daily goal 5 h</div>
+                </div>
+                <div style="flex:1;display:flex;align-items:flex-end;gap:10px;position:relative;min-height:70px">
+                  <div style="position:absolute;left:0;right:0;bottom:44%;border-top:1px dashed #5C6875"></div>
+                  <sc-for list="{{ week }}" as="b" hint-placeholder-count="7">
+                    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+                      <div style="width:100%;border-radius:3px 3px 0 0;background:{{ b.c }};height:{{ b.h }}"></div>
+                      <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ b.d }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+            </div>
+
+            <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">Coming up</div>
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ coming }}" as="c" hint-placeholder-count="3">
+                    <div style="display:flex;gap:9px;align-items:flex-start">
+                      <div style="font:700 14px 'Barlow Condensed',sans-serif;color:var(--ac);width:40px;flex-shrink:0">{{ c.t }}</div>
+                      <div style="min-width:0">
+                        <div style="font:500 12.5px Inter,sans-serif">{{ c.txt }}</div>
+                        <div style="font:400 11px Inter,sans-serif;color:var(--mut)">{{ c.sub }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">
+                  <div style="font:600 14px Inter,sans-serif">Blocked visits today</div>
+                  <div style="font:800 18px 'Barlow Condensed',sans-serif;color:var(--ac)">9</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:7px">
+                  <sc-for list="{{ visits }}" as="v" hint-placeholder-count="3">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div style="width:14px;height:14px;border-radius:3px;background:{{ v.icon }}"></div>
+                      <div style="flex:1;font:400 12.5px Inter,sans-serif">{{ v.name }}</div>
+                      <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ v.n }} attempts</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">At a glance</div>
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ glance }}" as="g" hint-placeholder-count="3">
+                    <div>
+                      <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ g.label }}</div>
+                      <div style="display:flex;align-items:baseline;gap:7px">
+                        <div style="font:500 13px Inter,sans-serif">{{ g.name }}</div>
+                        <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ g.sub }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1c  DASHBOARD LIGHT ============ -->
+    <div id="1c" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1c</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Dashboard — light, with “service not running” banner</span></div>
+      <div style="--bg:#F2F2F2;--s:#FFFFFF;--s2:#F5F5F5;--bd:#E2E2E2;--tx:#1A1A1A;--mut:#6B6B6B;--ac:#DB5126;--grn:#27AE60;--wrn:#E0A02A;--red:#C0392B;--sb:#EBEBEB;--tr:#E6E6E6;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navDashLight }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--red)"><span style="width:8px;height:8px;border-radius:50%;background:var(--red)"></span>Service not running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin:2px 0 12px 0">
+            <div style="font:700 28px 'Barlow Condensed',sans-serif;letter-spacing:-0.01em">Dashboard</div>
+            <div style="font:400 12px Inter,sans-serif;color:var(--mut)">Wednesday, 18 September · tracking since 07:42</div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px;background:#FBEFE9;border:1px solid #F0C9B8;border-left:4px solid var(--wrn);border-radius:6px;padding:10px 14px;margin-bottom:12px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#B37514" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;flex-shrink:0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+            <div style="flex:1">
+              <div style="font:600 12.5px Inter,sans-serif">Blocking isn’t being enforced right now</div>
+              <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">The Lockdown service stopped at 09:14. Screen time is still being recorded.</div>
+            </div>
+            <div style="font:600 12px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:4px;padding:7px 14px">Start service</div>
+          </div>
+
+          <div style="display:flex;gap:12px;margin-bottom:12px">
+            <sc-for list="{{ statsLight }}" as="c" hint-placeholder-count="4">
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:2px">
+                <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ c.label }}</div>
+                <div style="font:800 30px 'Barlow Condensed',sans-serif;letter-spacing:-0.01em;line-height:1.05">{{ c.value }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:{{ c.dc }}">{{ c.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:12px;flex:1;min-height:0">
+            <div style="flex:1.55;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <div style="font:600 14px Inter,sans-serif">Limits today</div>
+                  <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">4 active →</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ limits }}" as="l" hint-placeholder-count="4">
+                    <div>
+                      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <div style="width:14px;height:14px;border-radius:3px;background:{{ l.icon }}"></div>
+                        <div style="font:500 12.5px Inter,sans-serif;flex:1">{{ l.name }}</div>
+                        <div style="font:400 12px Inter,sans-serif;color:var(--mut)">{{ l.used }} of {{ l.total }}</div>
+                        <div style="font:600 12px Inter,sans-serif;color:{{ l.lc }};width:78px;text-align:right">{{ l.left }}</div>
+                      </div>
+                      <div style="height:6px;border-radius:3px;background:var(--tr);overflow:hidden">
+                        <div style="height:6px;border-radius:3px;background:{{ l.lc }};width:{{ l.pct }}"></div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <div style="font:600 14px Inter,sans-serif">Today</div>
+                  <div style="display:flex;gap:12px;font:400 11px Inter,sans-serif;color:var(--mut)">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#DB5126;margin-right:5px"></span>Distracting</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#27AE60;margin-right:5px"></span>Productive</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#A8AFB7;margin-right:5px"></span>Neutral</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#E6E6E6;margin-right:5px"></span>Idle</span>
+                  </div>
+                </div>
+                <div style="display:flex;height:22px;border-radius:4px;overflow:hidden">
+                  <sc-for list="{{ timelineLight }}" as="s" hint-placeholder-count="14">
+                    <div style="flex:{{ s.f }};background:{{ s.c }}"></div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;justify-content:space-between;font:400 10.5px Inter,sans-serif;color:var(--mut);margin-top:5px">
+                  <span>06:00</span><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                  <div style="font:600 14px Inter,sans-serif">Last 7 days</div>
+                  <div style="font:400 11px Inter,sans-serif;color:var(--mut)">— — daily goal 5 h</div>
+                </div>
+                <div style="flex:1;display:flex;align-items:flex-end;gap:10px;position:relative;min-height:60px">
+                  <div style="position:absolute;left:0;right:0;bottom:44%;border-top:1px dashed #A8AFB7"></div>
+                  <sc-for list="{{ week }}" as="b" hint-placeholder-count="7">
+                    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+                      <div style="width:100%;border-radius:3px 3px 0 0;background:{{ b.cl }};height:{{ b.h }}"></div>
+                      <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ b.d }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0">
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">Coming up</div>
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ coming }}" as="c" hint-placeholder-count="3">
+                    <div style="display:flex;gap:9px;align-items:flex-start">
+                      <div style="font:700 14px 'Barlow Condensed',sans-serif;color:var(--ac);width:40px;flex-shrink:0">{{ c.t }}</div>
+                      <div style="min-width:0">
+                        <div style="font:500 12.5px Inter,sans-serif">{{ c.txt }}</div>
+                        <div style="font:400 11px Inter,sans-serif;color:var(--mut)">{{ c.sub }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">
+                  <div style="font:600 14px Inter,sans-serif">Blocked visits today</div>
+                  <div style="font:800 18px 'Barlow Condensed',sans-serif;color:var(--ac)">9</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:7px">
+                  <sc-for list="{{ visits }}" as="v" hint-placeholder-count="3">
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div style="width:14px;height:14px;border-radius:3px;background:{{ v.icon }}"></div>
+                      <div style="flex:1;font:400 12.5px Inter,sans-serif">{{ v.name }}</div>
+                      <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ v.n }} attempts</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">At a glance</div>
+                <div style="display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ glance }}" as="g" hint-placeholder-count="3">
+                    <div>
+                      <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ g.label }}</div>
+                      <div style="display:flex;align-items:baseline;gap:7px">
+                        <div style="font:500 13px Inter,sans-serif">{{ g.name }}</div>
+                        <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ g.sub }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1d  SCREEN TIME / OVERVIEW DARK ============ -->
+    <div id="1d" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1d</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Screen Time → Overview — dark</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--wrn:#E0A02A;--red:#C0392B;--sb:#0F1319;--tr:#262E38;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navStDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Screen Time</div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ stTabsOverview }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 16px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ rangeTabs }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 13px;border-radius:4px;font:500 12px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;margin-bottom:12px">
+            <sc-for list="{{ stStatsDark }}" as="c" hint-placeholder-count="4">
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:12px 14px">
+                <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ c.label }}</div>
+                <div style="font:800 28px 'Barlow Condensed',sans-serif;line-height:1.1">{{ c.value }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ c.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:12px;flex:1;min-height:0">
+            <div style="flex:1.5;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">Day timeline</div>
+                <div style="display:flex;height:20px;border-radius:4px;overflow:hidden">
+                  <sc-for list="{{ timeline }}" as="s" hint-placeholder-count="14">
+                    <div style="flex:{{ s.f }};background:{{ s.c }}"></div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;justify-content:space-between;font:400 10.5px Inter,sans-serif;color:var(--mut);margin-top:5px"><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">Active hours — last 7 days</div>
+                <div style="display:flex;flex-direction:column;gap:3px;flex:1;justify-content:center">
+                  <div style="display:flex;gap:3px;padding-left:34px">
+                    <sc-for list="{{ hourLabels }}" as="h" hint-placeholder-count="12">
+                      <div style="flex:1;text-align:center;font:400 9px Inter,sans-serif;color:var(--mut)">{{ h }}</div>
+                    </sc-for>
+                  </div>
+                  <sc-for list="{{ heat }}" as="row" hint-placeholder-count="7">
+                    <div style="display:flex;align-items:center;gap:3px">
+                      <div style="width:31px;font:400 10px Inter,sans-serif;color:var(--mut)">{{ row.day }}</div>
+                      <sc-for list="{{ row.cells }}" as="c" hint-placeholder-count="24">
+                        <div style="flex:1;height:13px;border-radius:2px;background:{{ c.c }}"></div>
+                      </sc-for>
+                    </div>
+                  </sc-for>
+                  <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:6px;font:400 10px Inter,sans-serif;color:var(--mut)">
+                    <span>less</span>
+                    <sc-for list="{{ heatLegend }}" as="c" hint-placeholder-count="5">
+                      <div style="width:13px;height:13px;border-radius:2px;background:{{ c.c }}"></div>
+                    </sc-for>
+                    <span>more</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0">
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font:600 14px Inter,sans-serif">Last 7 days</div>
+                  <div style="font:400 11px Inter,sans-serif;color:var(--mut)">avg 4 h 26 m</div>
+                </div>
+                <div style="flex:1;display:flex;align-items:flex-end;gap:8px;position:relative;min-height:60px">
+                  <div style="position:absolute;left:0;right:0;bottom:44%;border-top:1px dashed #5C6875"></div>
+                  <sc-for list="{{ week }}" as="b" hint-placeholder-count="7">
+                    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+                      <div style="width:100%;border-radius:3px 3px 0 0;background:{{ b.c }};height:{{ b.h }}"></div>
+                      <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ b.d }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:10px">Categories</div>
+                <div style="display:flex;align-items:center;gap:16px">
+                  <div style="width:96px;height:96px;border-radius:50%;background:conic-gradient(#27AE60 0 48%,#5C6875 48% 75%,#DB5126 75% 100%);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                    <div style="width:60px;height:60px;border-radius:50%;background:var(--s);display:flex;flex-direction:column;align-items:center;justify-content:center">
+                      <div style="font:800 17px 'Barlow Condensed',sans-serif;line-height:1">4h12</div>
+                      <div style="font:400 9.5px Inter,sans-serif;color:var(--mut)">total</div>
+                    </div>
+                  </div>
+                  <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+                    <sc-for list="{{ cats }}" as="c" hint-placeholder-count="3">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div style="width:9px;height:9px;border-radius:2px;background:{{ c.c }}"></div>
+                        <div style="flex:1;font:400 12.5px Inter,sans-serif">{{ c.name }}</div>
+                        <div style="font:600 12.5px Inter,sans-serif">{{ c.time }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1e  SCREEN TIME / OVERVIEW LIGHT ============ -->
+    <div id="1e" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1e</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Screen Time → Overview — light</span></div>
+      <div style="--bg:#F2F2F2;--s:#FFFFFF;--s2:#EBEBEB;--bd:#E2E2E2;--tx:#1A1A1A;--mut:#6B6B6B;--ac:#DB5126;--grn:#27AE60;--red:#C0392B;--sb:#EBEBEB;--tr:#E6E6E6;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navStLight }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Screen Time</div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ stTabsOverviewL }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 16px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ rangeTabsL }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 13px;border-radius:4px;font:500 12px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;margin-bottom:12px">
+            <sc-for list="{{ stStatsDark }}" as="c" hint-placeholder-count="4">
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:12px 14px">
+                <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ c.label }}</div>
+                <div style="font:800 28px 'Barlow Condensed',sans-serif;line-height:1.1">{{ c.value }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ c.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:12px;flex:1;min-height:0">
+            <div style="flex:1.5;display:flex;flex-direction:column;gap:12px;min-width:0">
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">Day timeline</div>
+                <div style="display:flex;height:20px;border-radius:4px;overflow:hidden">
+                  <sc-for list="{{ timelineLight }}" as="s" hint-placeholder-count="14">
+                    <div style="flex:{{ s.f }};background:{{ s.c }}"></div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;justify-content:space-between;font:400 10.5px Inter,sans-serif;color:var(--mut);margin-top:5px"><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:9px">Active hours — last 7 days</div>
+                <div style="display:flex;flex-direction:column;gap:3px;flex:1;justify-content:center">
+                  <div style="display:flex;gap:3px;padding-left:34px">
+                    <sc-for list="{{ hourLabels }}" as="h" hint-placeholder-count="12">
+                      <div style="flex:1;text-align:center;font:400 9px Inter,sans-serif;color:var(--mut)">{{ h }}</div>
+                    </sc-for>
+                  </div>
+                  <sc-for list="{{ heatLight }}" as="row" hint-placeholder-count="7">
+                    <div style="display:flex;align-items:center;gap:3px">
+                      <div style="width:31px;font:400 10px Inter,sans-serif;color:var(--mut)">{{ row.day }}</div>
+                      <sc-for list="{{ row.cells }}" as="c" hint-placeholder-count="24">
+                        <div style="flex:1;height:13px;border-radius:2px;background:{{ c.c }}"></div>
+                      </sc-for>
+                    </div>
+                  </sc-for>
+                  <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:6px;font:400 10px Inter,sans-serif;color:var(--mut)">
+                    <span>less</span>
+                    <sc-for list="{{ heatLegendLight }}" as="c" hint-placeholder-count="5">
+                      <div style="width:13px;height:13px;border-radius:2px;background:{{ c.c }}"></div>
+                    </sc-for>
+                    <span>more</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="flex:1;display:flex;flex-direction:column;gap:12px;min-width:0">
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font:600 14px Inter,sans-serif">Last 7 days</div>
+                  <div style="font:400 11px Inter,sans-serif;color:var(--mut)">avg 4 h 26 m</div>
+                </div>
+                <div style="flex:1;display:flex;align-items:flex-end;gap:8px;position:relative;min-height:60px">
+                  <div style="position:absolute;left:0;right:0;bottom:44%;border-top:1px dashed #A8AFB7"></div>
+                  <sc-for list="{{ week }}" as="b" hint-placeholder-count="7">
+                    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px">
+                      <div style="width:100%;border-radius:3px 3px 0 0;background:{{ b.cl }};height:{{ b.h }}"></div>
+                      <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ b.d }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px">
+                <div style="font:600 14px Inter,sans-serif;margin-bottom:10px">Categories</div>
+                <div style="display:flex;align-items:center;gap:16px">
+                  <div style="width:96px;height:96px;border-radius:50%;background:conic-gradient(#27AE60 0 48%,#A8AFB7 48% 75%,#DB5126 75% 100%);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                    <div style="width:60px;height:60px;border-radius:50%;background:var(--s);display:flex;flex-direction:column;align-items:center;justify-content:center">
+                      <div style="font:800 17px 'Barlow Condensed',sans-serif;line-height:1">4h12</div>
+                      <div style="font:400 9.5px Inter,sans-serif;color:var(--mut)">total</div>
+                    </div>
+                  </div>
+                  <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+                    <sc-for list="{{ catsLight }}" as="c" hint-placeholder-count="3">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div style="width:9px;height:9px;border-radius:2px;background:{{ c.c }}"></div>
+                        <div style="flex:1;font:400 12.5px Inter,sans-serif">{{ c.name }}</div>
+                        <div style="font:600 12.5px Inter,sans-serif">{{ c.time }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1f  APPS ============ -->
+    <div id="1f" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1f</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Screen Time → Apps — dark</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--sb:#0F1319;--tr:#262E38;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navStDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Screen Time</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ stTabsApps }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 16px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ rangeTabs }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 13px;border-radius:4px;font:500 12px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:0 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bd);font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">
+              <div style="width:22px"></div>
+              <div style="flex:1">App</div>
+              <div style="width:240px">Share of day</div>
+              <div style="width:70px;text-align:right">Time</div>
+              <div style="width:66px;text-align:right">Switches</div>
+              <div style="width:96px;text-align:right">Category</div>
+            </div>
+            <sc-for list="{{ apps }}" as="a" hint-placeholder-count="9">
+              <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #222A33">
+                <div style="width:22px;height:22px;border-radius:4px;background:{{ a.icon }}"></div>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 13px Inter,sans-serif">{{ a.name }}</div>
+                  <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ a.exe }}</div>
+                </div>
+                <div style="width:240px;height:8px;border-radius:3px;background:var(--tr);overflow:hidden">
+                  <div style="height:8px;border-radius:3px;background:{{ a.bc }};width:{{ a.pct }}"></div>
+                </div>
+                <div style="width:70px;text-align:right;font:700 14px 'Barlow Condensed',sans-serif">{{ a.time }}</div>
+                <div style="width:66px;text-align:right;font:400 12px Inter,sans-serif;color:var(--mut)">{{ a.sw }}</div>
+                <div style="width:96px;display:flex;justify-content:flex-end">
+                  <div style="font:500 11px Inter,sans-serif;padding:3px 9px;border-radius:2px;color:{{ a.cc }};border:1px solid {{ a.cc }}">{{ a.cat }}</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="display:flex;align-items:center;gap:12px;padding:12px 0;color:var(--mut);font:400 12.5px Inter,sans-serif">
+              <div style="width:22px;height:22px;border-radius:4px;background:var(--s2)"></div>
+              <div style="width:130px;height:9px;border-radius:3px;background:var(--s2)"></div>
+              <div style="flex:1"></div>
+              <span>Loading the rest of today’s apps…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1g  WEBSITES ============ -->
+    <div id="1g" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1g</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Screen Time → Websites — dark</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--sb:#0F1319;--tr:#262E38;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navStDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Screen Time</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ stTabsSites }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 16px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ rangeTabs7 }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 13px;border-radius:4px;font:500 12px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:0 15px;flex:1;display:flex;flex-direction:column;min-height:0">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bd);font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">
+              <div style="width:22px"></div>
+              <div style="flex:1">Website</div>
+              <div style="width:240px">Share of browsing</div>
+              <div style="width:70px;text-align:right">Time</div>
+              <div style="width:66px;text-align:right">Visits</div>
+              <div style="width:96px;text-align:right">Category</div>
+            </div>
+            <sc-for list="{{ sites }}" as="a" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #222A33">
+                <div style="width:22px;height:22px;border-radius:4px;background:{{ a.icon }}"></div>
+                <div style="flex:1;min-width:0">
+                  <div style="font:500 13px Inter,sans-serif">{{ a.name }}</div>
+                  <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ a.exe }}</div>
+                </div>
+                <div style="width:240px;height:8px;border-radius:3px;background:var(--tr);overflow:hidden">
+                  <div style="height:8px;border-radius:3px;background:{{ a.bc }};width:{{ a.pct }}"></div>
+                </div>
+                <div style="width:70px;text-align:right;font:700 14px 'Barlow Condensed',sans-serif">{{ a.time }}</div>
+                <div style="width:66px;text-align:right;font:400 12px Inter,sans-serif;color:var(--mut)">{{ a.sw }}</div>
+                <div style="width:96px;display:flex;justify-content:flex-end">
+                  <div style="font:500 11px Inter,sans-serif;padding:3px 9px;border-radius:2px;color:{{ a.cc }};border:1px solid {{ a.cc }}">{{ a.cat }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1h  SWITCHES ============ -->
+    <div id="1h" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1h</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Screen Time → Switches — dark</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--wrn:#E0A02A;--sb:#0F1319;--tr:#262E38;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navStDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 10px 0">Screen Time</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ stTabsSwitches }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 16px;border-radius:4px;font:500 12.5px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;background:var(--s2);border-radius:6px;padding:3px;gap:2px">
+              <sc-for list="{{ rangeTabs }}" as="t" hint-placeholder-count="4">
+                <div style="padding:6px 13px;border-radius:4px;font:500 12px Inter,sans-serif;background:{{ t.bg }};color:{{ t.fg }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;margin-bottom:12px">
+            <sc-for list="{{ swStats }}" as="c" hint-placeholder-count="3">
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:12px 14px">
+                <div style="font:600 10.5px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)">{{ c.label }}</div>
+                <div style="font:800 28px 'Barlow Condensed',sans-serif;line-height:1.1">{{ c.value }}</div>
+                <div style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ c.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:12px;flex:1;min-height:0">
+            <div style="flex:1.15;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;display:flex;flex-direction:column;min-width:0">
+              <div style="font:600 14px Inter,sans-serif;margin-bottom:4px">Switches per hour</div>
+              <div style="font:400 11.5px Inter,sans-serif;color:var(--mut);margin-bottom:10px">Peak between 14:00 and 15:00 — 24 switches.</div>
+              <div style="flex:1;display:flex;align-items:flex-end;gap:4px;min-height:0">
+                <sc-for list="{{ swHours }}" as="b" hint-placeholder-count="16">
+                  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end">
+                    <div style="width:100%;border-radius:2px 2px 0 0;background:{{ b.c }};height:{{ b.h }}"></div>
+                    <div style="font:400 9px Inter,sans-serif;color:var(--mut)">{{ b.t }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;padding:13px 15px;display:flex;flex-direction:column;min-width:0">
+              <div style="font:600 14px Inter,sans-serif;margin-bottom:4px">Most switched to</div>
+              <div style="font:400 11.5px Inter,sans-serif;color:var(--mut);margin-bottom:10px">Many switches with very short visits usually means checking out of habit.</div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <sc-for list="{{ mostSwitched }}" as="m" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:4px;background:{{ m.bg }};border-left:3px solid {{ m.bar }}">
+                    <div style="width:20px;height:20px;border-radius:4px;background:{{ m.icon }}"></div>
+                    <div style="flex:1;min-width:0">
+                      <div style="font:500 12.5px Inter,sans-serif">{{ m.name }}</div>
+                      <div style="font:400 10.5px Inter,sans-serif;color:{{ m.nc }}">{{ m.note }}</div>
+                    </div>
+                    <div style="text-align:right">
+                      <div style="font:700 15px 'Barlow Condensed',sans-serif">{{ m.sw }}</div>
+                      <div style="font:400 10px Inter,sans-serif;color:var(--mut)">avg {{ m.avg }}</div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1i  EMPTY STATE ============ -->
+    <div id="1i" style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#000;background:#DB5126;padding:2px 8px;border-radius:2px">1i</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Empty state — first day, no data yet</span></div>
+      <div style="--bg:#14181D;--s:#1B2027;--s2:#232A33;--bd:#2E3742;--tx:#E8ECF1;--mut:#93A0AE;--ac:#DB5126;--grn:#27AE60;--sb:#0F1319;--tr:#262E38;width:1100px;height:720px;display:flex;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:8px">
+        <div style="width:190px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:4px;flex-shrink:0">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+          <sc-for list="{{ navDashDark }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="width:8px;height:8px;border-radius:50%;background:var(--grn)"></span>Service running</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;padding:14px 22px 18px 22px;min-width:0">
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:26px">
+            <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+            <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+          </div>
+          <div style="font:700 28px 'Barlow Condensed',sans-serif;margin:2px 0 14px 0">Dashboard</div>
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:0 60px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#DB5126" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:40px;height:40px"><path d="M5 22h14"></path><path d="M5 2h14"></path><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"></path><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"></path></svg>
+            <div style="font:700 26px 'Barlow Condensed',sans-serif">Tracking started</div>
+            <div style="font:400 13.5px Inter,sans-serif;color:var(--mut);max-width:460px;line-height:1.6;text-wrap:pretty">Your first numbers show up here in a few minutes, and the 7-day chart fills in as the week goes on. Nothing to do in the meantime.</div>
+            <div style="display:flex;gap:10px;margin-top:4px">
+              <div style="font:600 12.5px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:4px;padding:9px 18px">Set up your first block</div>
+              <div style="font:600 12.5px Inter,sans-serif;color:var(--tx);border:1.5px solid var(--bd);border-radius:4px;padding:8px 18px">Choose categories for your apps</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  icon(name) {
+    const P = {
+      "layout-dashboard": '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+      "ban": '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+      "shield-check": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+      "bar-chart-3": '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+      "activity": '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+      "sliders-horizontal": '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>',
+      "bell": '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+      "settings": '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'
+    };
+    return { __html: P[name] || "" };
+  }
+
+  nav(active, dark) {
+    const pages = [
+      ["Dashboard", "layout-dashboard"], ["Blocking", "ban"], ["Anti-Bypass", "shield-check"],
+      ["Screen Time", "bar-chart-3"], ["Network Log", "activity"], ["Modes", "sliders-horizontal"],
+      ["Notifications", "bell"], ["Settings", "settings"]
+    ];
+    return pages.map(([name, icon]) => {
+      const on = name === active;
+      return {
+        name, icon, svg: this.icon(icon),
+        bg: on ? (dark ? "#232A33" : "#FFFFFF") : "transparent",
+        fg: on ? (dark ? "#FFFFFF" : "#1A1A1A") : (dark ? "#93A0AE" : "#6B6B6B"),
+        bl: on ? "#DB5126" : "transparent"
+      };
+    });
+  }
+
+  seg(names, active, dark) {
+    return names.map(n => ({
+      name: n,
+      bg: n === active ? "#DB5126" : "transparent",
+      fg: n === active ? "#FFFFFF" : (dark ? "#93A0AE" : "#6B6B6B")
+    }));
+  }
+
+  renderVals() {
+    const D = { ac: "#DB5126", grn: "#27AE60", mut: "#5C6875", idle: "#262E38" };
+    const seg = (c, f) => ({ f, c });
+    const timeline = [
+      seg(D.idle, 6), seg(D.grn, 9), seg(D.mut, 2), seg(D.grn, 7), seg(D.ac, 3), seg(D.idle, 4),
+      seg(D.grn, 8), seg(D.mut, 3), seg(D.ac, 5), seg(D.grn, 6), seg(D.idle, 3), seg(D.mut, 4),
+      seg(D.ac, 6), seg(D.idle, 8)
+    ];
+    const timelineLight = timeline.map(s => ({ f: s.f, c: s.c === "#262E38" ? "#E6E6E6" : (s.c === "#5C6875" ? "#A8AFB7" : s.c) }));
+
+    const week = [["Thu", 62], ["Fri", 78], ["Sat", 95], ["Sun", 88], ["Mon", 54], ["Tue", 70], ["Wed", 58]]
+      .map(([d, h], i) => ({
+        d, h: h + "%",
+        c: i === 6 ? "#DB5126" : (h > 85 ? "#8C4A31" : "#3C4753"),
+        cl: i === 6 ? "#DB5126" : (h > 85 ? "#EBB49E" : "#C9CED4")
+      }));
+
+    const heatRow = (day, vals, dark) => ({
+      day,
+      cells: vals.map(v => ({
+        c: dark
+          ? ["#20262E", "#4A2A1C", "#8A3F20", "#C04A22", "#DB5126"][v]
+          : ["#EFEFEF", "#F6D9CD", "#EEB79E", "#E4886A", "#DB5126"][v]
+      }))
+    });
+    const pattern = [
+      ["Mon", [0,0,0,0,0,0,1,2,3,4,4,3,2,4,4,3,3,2,2,3,2,1,0,0]],
+      ["Tue", [0,0,0,0,0,0,1,3,4,4,3,2,3,4,4,4,3,2,1,2,3,1,0,0]],
+      ["Wed", [0,0,0,0,0,0,2,3,4,3,3,2,2,4,4,3,2,2,3,3,2,1,0,0]],
+      ["Thu", [0,0,0,0,0,0,1,2,3,4,4,2,2,3,4,4,3,1,1,2,2,1,0,0]],
+      ["Fri", [0,0,0,0,0,0,1,2,3,3,3,2,1,3,3,2,2,3,4,4,3,2,1,0]],
+      ["Sat", [0,0,0,0,0,0,0,0,1,2,3,3,2,2,3,3,4,4,4,4,3,2,1,0]],
+      ["Sun", [0,0,0,0,0,0,0,1,1,2,2,2,2,3,3,3,4,4,3,3,2,1,0,0]]
+    ];
+
+    const cat = (n, t, c) => ({ name: n, time: t, c });
+
+    const row = (name, exe, time, pct, sw, catName) => {
+      const cc = catName === "Productive" ? "#27AE60" : (catName === "Distracting" ? "#DB5126" : "#93A0AE");
+      return { name, exe, time, pct: pct + "%", sw, cat: catName, cc, bc: cc, icon: cc };
+    };
+
+    const chip = (t, kind) => {
+      const k = { g: ["#DB5126", "#2A1E19"], n: ["#93A0AE", "#1F252D"], w: ["#E0A02A", "#241E15"], ok: ["#27AE60", "#16241C"] }[kind || "n"];
+      return { t, c: k[0], bg: k[1] };
+    };
+    const days = (on) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => ({
+      d, bg: on.indexOf(d) > -1 ? "#DB5126" : "transparent",
+      fg: on.indexOf(d) > -1 ? "#FFFFFF" : "#93A0AE",
+      bd: on.indexOf(d) > -1 ? "#DB5126" : "#2E3742"
+    }));
+
+    return {
+      navBlockDark: this.nav("Blocking", true),
+      blkTabsOverview: this.seg(["Overview", "Groups", "Add"], "Overview", true),
+      blkTabsGroups: this.seg(["Overview", "Groups", "Add"], "Groups", true),
+      blkTabsAdd: this.seg(["Overview", "Groups", "Add"], "Add", true),
+
+      blockRows: [
+        {
+          name: "Discord", sub: "app · discord.exe · closes when blocked", icon: "#5865F2",
+          chips: [chip("Time limit  23 m / 1 h", "w"), chip("Opens  6 / 15 today", "n"), chip("→ Night schedule  22:00–07:00", "g")],
+          status: "Allowed now", sc: "#93A0AE", dot: "#5C6875", alert: "Default", rm: "Remove", rmc: "#2E3742", rmf: "#E8ECF1"
+        },
+        {
+          name: "Notepad", sub: "app · notepad.exe · minimises + internet blocked", icon: "#4FA3D1",
+          chips: [chip("→ Night schedule  22:00–07:00", "g")],
+          status: "Allowed now", sc: "#93A0AE", dot: "#5C6875", alert: "Default", rm: "Remove", rmc: "#2E3742", rmf: "#E8ECF1"
+        },
+        {
+          name: "Reddit", sub: "reddit.com · old.reddit.com · redd.it", icon: "#FF4500",
+          chips: [chip("Permanent", "ok"), chip("Opens  0 / 10 today", "n")],
+          status: "Blocked now", sc: "#27AE60", dot: "#27AE60", alert: "Off", rm: "Remove", rmc: "#2E3742", rmf: "#E8ECF1"
+        },
+        {
+          name: "YouTube", sub: "youtube.com · m.youtube.com · youtu.be", icon: "#FF0000",
+          chips: [chip("Allowed 09:00–17:00  Mon–Fri", "n"), chip("+10 min allowance", "n"), chip("Temporary  59 m left", "w")],
+          status: "Blocked now", sc: "#27AE60", dot: "#27AE60", alert: "Custom", rm: "Confirm?", rmc: "#C0392B", rmf: "#FFFFFF"
+        }
+      ],
+
+      groupRows: [
+        { name: "Night schedule", members: "3 members · Discord, Notepad, YouTube", rule: "Blocked every day 22:00–07:00", status: "2 of 3 blocked now", sc: "#27AE60", bg: "#232A33", bd: "#DB5126" },
+        { name: "Games", members: "4 members · Steam, Rocket League, +2", rule: "2 h per day, shared · opens 18 / 20", status: "Allowed now · 48 m left", sc: "#93A0AE", bg: "transparent", bd: "transparent" }
+      ],
+      groupMembers: [
+        { name: "Discord", icon: "#5865F2", note: "group rules" },
+        { name: "Notepad", icon: "#4FA3D1", note: "group rules" },
+        { name: "YouTube", icon: "#FF0000", note: "customised" }
+      ],
+      daysAll: days(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+      daysWeek: days(["Mon", "Tue", "Wed", "Thu", "Fri"]),
+
+      groupBlockers: [
+        { name: "Daily time limit", sum: "not used", on: false, bar: "transparent", tc: "#93A0AE", box: "transparent", bxb: "#3C4753", tick: "transparent" },
+        { name: "Daily switch limit", sum: "not used", on: false, bar: "transparent", tc: "#93A0AE", box: "transparent", bxb: "#3C4753", tick: "transparent" },
+        { name: "Permanent", sum: "not used", on: false, bar: "transparent", tc: "#93A0AE", box: "transparent", bxb: "#3C4753", tick: "transparent" },
+        { name: "Temporary", sum: "not used", on: false, bar: "transparent", tc: "#93A0AE", box: "transparent", bxb: "#3C4753", tick: "transparent" }
+      ],
+      addBlockers: [
+        { name: "Daily time limit", sum: "1 h 30 m per day · 48 m used", on: true, bar: "#DB5126", tc: "#E8ECF1", box: "#DB5126", bxb: "#DB5126", tick: "#FFFFFF" },
+        { name: "Daily switch limit", sum: "15 opens per day", on: true, bar: "#DB5126", tc: "#E8ECF1", box: "#DB5126", bxb: "#DB5126", tick: "#FFFFFF" },
+        { name: "Permanent", sum: "off", on: false, bar: "transparent", tc: "#93A0AE", box: "transparent", bxb: "#3C4753", tick: "transparent" }
+      ],
+      tempPresets: ["30 min", "1 hour", "Rest of today", "Custom…"].map(n => ({
+        n, bg: n === "1 hour" ? "#DB5126" : "transparent",
+        fg: n === "1 hour" ? "#FFFFFF" : "#93A0AE",
+        bd: n === "1 hour" ? "#DB5126" : "#2E3742"
+      })),
+      appBehaviour: ["Close app", "Minimise", "Only block internet"].map(n => ({
+        n, bg: n === "Close app" ? "#DB5126" : "transparent",
+        fg: n === "Close app" ? "#FFFFFF" : "#93A0AE",
+        bd: n === "Close app" ? "#DB5126" : "#2E3742"
+      })),
+      kindTabs: this.seg(["Website", "App"], "Website", true),
+
+      navDashDark: this.nav("Dashboard", true),
+      navDashLight: this.nav("Dashboard", false),
+      navStDark: this.nav("Screen Time", true),
+      navStLight: this.nav("Screen Time", false),
+
+      stTabsOverview: this.seg(["Overview", "Apps", "Websites", "Switches"], "Overview", true),
+      stTabsOverviewL: this.seg(["Overview", "Apps", "Websites", "Switches"], "Overview", false),
+      stTabsApps: this.seg(["Overview", "Apps", "Websites", "Switches"], "Apps", true),
+      stTabsSites: this.seg(["Overview", "Apps", "Websites", "Switches"], "Websites", true),
+      stTabsSwitches: this.seg(["Overview", "Apps", "Websites", "Switches"], "Switches", true),
+      rangeTabs: this.seg(["Today", "Yesterday", "7 days", "30 days"], "Today", true),
+      rangeTabsL: this.seg(["Today", "Yesterday", "7 days", "30 days"], "Today", false),
+      rangeTabs7: this.seg(["Today", "Yesterday", "7 days", "30 days"], "7 days", true),
+
+      statsDark: [
+        { label: "Screen time today", value: "4 h 12 m", delta: "38 m more than yesterday", dc: "#E0A02A" },
+        { label: "Blocked now", value: "3 of 7", delta: "Night schedule not active yet", dc: "#93A0AE" },
+        { label: "Switches today", value: "142", delta: "12 fewer than your average", dc: "#27AE60" },
+        { label: "Time saved", value: "1 h 05 m", delta: "9 blocked visits turned away", dc: "#93A0AE" }
+      ],
+      statsLight: [
+        { label: "Screen time today", value: "4 h 12 m", delta: "38 m more than yesterday", dc: "#B37514" },
+        { label: "Blocked now", value: "0 of 7", delta: "Service stopped — nothing enforced", dc: "#C0392B" },
+        { label: "Switches today", value: "142", delta: "12 fewer than your average", dc: "#1E8449" },
+        { label: "Time saved", value: "1 h 05 m", delta: "9 blocked visits turned away", dc: "#6B6B6B" }
+      ],
+      stStatsDark: [
+        { label: "Active", value: "4 h 12 m", delta: "of 5 h 19 m at the PC" },
+        { label: "Idle", value: "1 h 07 m", delta: "screen on, no input" },
+        { label: "Longest focus", value: "52 m", delta: "Visual Studio Code, 09:40" },
+        { label: "Sessions", value: "18", delta: "avg 14 m each" }
+      ],
+      swStats: [
+        { label: "Switches today", value: "142", delta: "12 fewer than your average" },
+        { label: "Average time per visit", value: "1 m 46 s", delta: "shorter than last week" },
+        { label: "Short visits (< 30 s)", value: "47", delta: "mostly Discord and Reddit" }
+      ],
+
+      limits: [
+        { name: "Discord", used: "23 min", total: "1 h", left: "37 min left", pct: "38%", lc: "#27AE60", icon: "#5865F2" },
+        { name: "YouTube", used: "48 min", total: "1 h 30 m", left: "42 min left", pct: "53%", lc: "#27AE60", icon: "#FF0000" },
+        { name: "Games (group)", used: "1 h 12 m", total: "2 h", left: "48 min left", pct: "60%", lc: "#E0A02A", icon: "#7A5AF8" },
+        { name: "Reddit — opens", used: "9 opens", total: "10 today", left: "1 left", pct: "90%", lc: "#DB5126", icon: "#FF4500" }
+      ],
+      timeline, timelineLight, week,
+
+      coming: [
+        { t: "17:00", txt: "YouTube allowed window opens", sub: "until 22:00, Monday–Friday" },
+        { t: "22:00", txt: "Night schedule starts", sub: "Discord · Notepad · YouTube" },
+        { t: "Today", txt: "Reddit limit will be reached", sub: "about 5 minutes of use left" }
+      ],
+      visits: [
+        { name: "reddit.com", n: 5, icon: "#FF4500" },
+        { name: "Discord", n: 3, icon: "#5865F2" },
+        { name: "youtube.com", n: 1, icon: "#FF0000" }
+      ],
+      glance: [
+        { label: "Top app today", name: "Visual Studio Code", sub: "1 h 48 m" },
+        { label: "Most switched to", name: "Discord", sub: "38 switches · avg 42 s per visit" },
+        { label: "Quietest hour", name: "09:00 – 10:00", sub: "2 switches" }
+      ],
+
+      hourLabels: ["00", "02", "04", "06", "08", "10", "12", "14", "16", "18", "20", "22"],
+      heat: pattern.map(([d, v]) => heatRow(d, v, true)),
+      heatLight: pattern.map(([d, v]) => heatRow(d, v, false)),
+      heatLegend: ["#20262E", "#4A2A1C", "#8A3F20", "#C04A22", "#DB5126"].map(c => ({ c })),
+      heatLegendLight: ["#EFEFEF", "#F6D9CD", "#EEB79E", "#E4886A", "#DB5126"].map(c => ({ c })),
+
+      cats: [cat("Productive", "2 h 01 m", "#27AE60"), cat("Neutral", "1 h 08 m", "#5C6875"), cat("Distracting", "1 h 03 m", "#DB5126")],
+      catsLight: [cat("Productive", "2 h 01 m", "#27AE60"), cat("Neutral", "1 h 08 m", "#A8AFB7"), cat("Distracting", "1 h 03 m", "#DB5126")],
+
+      apps: [
+        row("Visual Studio Code", "Code.exe", "1 h 48 m", 100, 22, "Productive"),
+        row("Google Chrome", "chrome.exe", "1 h 06 m", 61, 54, "Neutral"),
+        row("Discord", "Discord.exe", "27 m", 25, 38, "Distracting"),
+        row("Slack", "slack.exe", "21 m", 19, 16, "Productive"),
+        row("Steam", "steam.exe", "14 m", 13, 7, "Distracting"),
+        row("Explorer", "explorer.exe", "9 m", 8, 19, "Neutral"),
+        row("Spotify", "Spotify.exe", "5 m", 5, 6, "Neutral"),
+        row("Notepad", "notepad.exe", "3 m", 3, 4, "Neutral")
+      ],
+      sites: [
+        row("youtube.com", "48 m today · limit 1 h 30 m", "48 m", 100, 31, "Distracting"),
+        row("github.com", "code review, issues", "34 m", 71, 24, "Productive"),
+        row("reddit.com", "blocked after 1 h", "29 m", 60, 41, "Distracting"),
+        row("stackoverflow.com", "", "18 m", 37, 12, "Productive"),
+        row("news.ycombinator.com", "", "11 m", 23, 15, "Neutral"),
+        row("mail.google.com", "", "8 m", 17, 22, "Neutral"),
+        row("docs.python.org", "", "6 m", 12, 5, "Productive")
+      ],
+      swHours: [
+        ["07", 14], ["08", 30], ["09", 22], ["10", 46], ["11", 38], ["12", 54], ["13", 40],
+        ["14", 96], ["15", 72], ["16", 58], ["17", 44], ["18", 30], ["19", 62], ["20", 50], ["21", 34], ["22", 12]
+      ].map(([t, h]) => ({ t, h: h + "%", c: h >= 90 ? "#DB5126" : (h >= 60 ? "#8C4A31" : "#3C4753") })),
+      mostSwitched: [
+        { name: "Discord", sw: 38, avg: "42 s", note: "Short visits — often just checking", nc: "#E0A02A", bg: "#221C18", bar: "#E0A02A", icon: "#5865F2" },
+        { name: "reddit.com", sw: 31, avg: "56 s", note: "Short visits — often just checking", nc: "#E0A02A", bg: "#221C18", bar: "#E0A02A", icon: "#FF4500" },
+        { name: "Google Chrome", sw: 54, avg: "1 m 13 s", note: "Mixed use", nc: "#93A0AE", bg: "#1F252D", bar: "#2E3742", icon: "#4285F4" },
+        { name: "Visual Studio Code", sw: 22, avg: "4 m 55 s", note: "Long, focused stretches", nc: "#27AE60", bg: "#1F252D", bar: "#27AE60", icon: "#0078D4" },
+        { name: "Slack", sw: 16, avg: "1 m 18 s", note: "Mixed use", nc: "#93A0AE", bg: "#1F252D", bar: "#2E3742", icon: "#4A154B" }
+      ],
+
+      tokDark: [
+        { name: "bg", hex: "#14181D", use: "window / page" },
+        { name: "sidebar", hex: "#0F1319", use: "left rail" },
+        { name: "surface", hex: "#1B2027", use: "cards, list frames" },
+        { name: "surface-2", hex: "#232A33", use: "segmented bg, active nav" },
+        { name: "border", hex: "#2E3742", use: "1 px hairline" },
+        { name: "track", hex: "#262E38", use: "progress / bar track" },
+        { name: "text", hex: "#E8ECF1", use: "primary text" },
+        { name: "text-muted", hex: "#93A0AE", use: "labels, secondary" },
+        { name: "accent", hex: "#DB5126", use: "brand, active, focus" },
+        { name: "accent-press", hex: "#B33D18", use: "hover / pressed" },
+        { name: "success", hex: "#27AE60", use: "blocked now, running" },
+        { name: "warning", hex: "#E0A02A", use: "pending, not applied" },
+        { name: "danger", hex: "#C0392B", use: "errors, Confirm remove" }
+      ],
+      tokLight: [
+        { name: "bg", hex: "#F2F2F2", use: "window / page" },
+        { name: "sidebar", hex: "#EBEBEB", use: "left rail" },
+        { name: "surface", hex: "#FFFFFF", use: "cards, list frames" },
+        { name: "surface-2", hex: "#EBEBEB", use: "segmented bg" },
+        { name: "border", hex: "#E2E2E2", use: "1 px hairline" },
+        { name: "track", hex: "#E6E6E6", use: "progress / bar track" },
+        { name: "text", hex: "#1A1A1A", use: "primary text" },
+        { name: "text-muted", hex: "#6B6B6B", use: "labels, secondary" },
+        { name: "accent", hex: "#DB5126", use: "brand, active, focus" },
+        { name: "accent-press", hex: "#B33D18", use: "hover / pressed" },
+        { name: "success", hex: "#1E8449", use: "blocked now, running" },
+        { name: "warning", hex: "#B37514", use: "pending, not applied" },
+        { name: "danger", hex: "#B32E22", use: "errors, Confirm remove" }
+      ],
+      typeScale: [
+        { role: "Page title", css: "700 28px 'Barlow Condensed',sans-serif", sample: "Screen Time", spec: "28 / 34 · -1%" },
+        { role: "Big numeral", css: "800 30px 'Barlow Condensed',sans-serif", sample: "4 h 12 m", spec: "30 / 32" },
+        { role: "Card title", css: "600 14px Inter,sans-serif", sample: "Limits today", spec: "14 / 20" },
+        { role: "Body", css: "400 13px Inter,sans-serif", sample: "Discord · 23 min of 1 h", spec: "13 / 20" },
+        { role: "Body small", css: "400 12px Inter,sans-serif", sample: "38 switches, avg 42 s", spec: "12 / 18" },
+        { role: "Label / eyebrow", css: "600 10.5px Inter,sans-serif", sample: "SCREEN TIME TODAY", spec: "10.5 · caps · 0.09em" },
+        { role: "Caption / axis", css: "400 10px Inter,sans-serif", sample: "06:00   12:00   18:00", spec: "10 / 14" }
+      ],
+      spacing: [
+        { name: "Window padding", px: "22 px", w: "44px" },
+        { name: "Card padding", px: "13 / 15 px", w: "30px" },
+        { name: "Gap between cards", px: "12 px", w: "24px" },
+        { name: "Gap inside card", px: "8–10 px", w: "18px" },
+        { name: "List row height", px: "40 px", w: "80px" },
+        { name: "Sidebar width", px: "190 px", w: "120px" },
+        { name: "Sidebar item", px: "8 / 10 px", w: "18px" }
+      ],
+      radii: [
+        { r: "6px", use: "cards, frames, nav items" },
+        { r: "4px", use: "buttons, inputs, tabs" },
+        { r: "3px", use: "progress bars, chart bars" },
+        { r: "2px", use: "category chips, dots" }
+      ],
+      iconSpec: [
+        { name: "Dashboard", icon: "layout-dashboard" },
+        { name: "Blocking", icon: "ban" },
+        { name: "Anti-Bypass", icon: "shield-check" },
+        { name: "Screen Time", icon: "bar-chart-3" },
+        { name: "Network Log", icon: "activity" },
+        { name: "Modes", icon: "sliders-horizontal" },
+        { name: "Notifications", icon: "bell" },
+        { name: "Settings", icon: "settings" }
+      ].map(p => ({ ...p, svg: this.icon(p.icon) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

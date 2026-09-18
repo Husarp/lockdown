@@ -92,9 +92,14 @@ Three tabs (see screenshots 01–05):
 - **Add:** choose a site (with suggestions, "+ Popular sites" with icons) or an app ("Browse apps" with icons);
   for apps "When blocked": checkboxes Close app / Minimize / Block internet (Close and Minimize exclude each other). Then tick any
   number of **blockers**, each with its own small settings: By hours (allow-only / block-during, time windows per
-  day, minutes still allowed during blocked hours), Daily time limit, Daily opening limit (launches / new visits, or every
-  switch), Permanent, Temporary
+  day, minutes still allowed during blocked hours), Time limit (per day / week / month, stackable), Opening limit
+  (per day / week / month; launches / new visits, or every switch), Permanent, Temporary
   (preset or custom duration). The same form edits an existing item.
+
+Overview also has an **Emergency unlock** button: a panel listing everything blocked right now with checkboxes,
+"2 of 3 left this week", and "Unlock for 20 min" (two clicks to confirm). Unlocked items show a blue
+"Emergency unlock - 12m left" status. Graphs should later mark when emergency unlocks were used.
+A **Settings** page exists too (limit reset time, emergency-unlock settings).
 
 The editor can get long when several blockers are ticked — a cleaner layout (e.g. collapsible sections or
 chips/cards per blocker) would help.

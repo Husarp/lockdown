@@ -163,7 +163,7 @@ def test_switch_limit():
     assert describe_rule(rule, at(0, 12), used(2)) == "Switches: 2 / 3 today"
     from rules import switch_targets
     group_rule = {**rule, "usage_owner": "group:7"}
-    assert switch_targets([group_rule], 1, at(0, 12)) == {("item:1", "sw:2026-09-14"), ("group:7", "sw:2026-09-14")}
+    assert switch_targets([group_rule], 1, at(0, 12)) == {("item:1", "sw:2026-09-14"), ("group:7", "op::2026-09-14")}
 
 
 def test_opening_limit_visit_mode():

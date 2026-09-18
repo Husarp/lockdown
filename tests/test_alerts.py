@@ -83,5 +83,16 @@ def test_limit_warning_while_in_use():
     item = {**app(1, "Discord"), "rules": [{"rule_type": "time_limit", "daily_limit_min": 30}]}
     w = BlockWatcher()
     msgs = w.check([item], [], lambda o, b: 26 * 60, datetime(2026, 9, 14, 12, 0), {1}, SETTINGS)
-    assert msgs == ["Discord: 4 min of the daily limit left."]
+    assert msgs == ["Discord: 4 min of the time limit left."]
     assert w.check([item], [], lambda o, b: 26 * 60, datetime(2026, 9, 14, 12, 0), set(), SETTINGS) == []
+
+
+def test_unlock_end_warning():
+    from rules import Usage
+    items = [{"id": 1, "display_name": "YouTube", "rules": [{"rule_type": "permanent"}]},
+             {"id": 2, "display_name": "Discord", "rules": [{"rule_type": "permanent"}]}]
+    end = datetime(2026, 9, 14, 12, 20)
+    usage = Usage(unlocks={"item:1": end, "item:2": end})
+    w = BlockWatcher()
+    msgs = w.check(items, [], usage, datetime(2026, 9, 14, 12, 16), set(), SETTINGS)
+    assert msgs == ["Emergency unlock ends in 4 min: Discord, YouTube will be blocked again."]

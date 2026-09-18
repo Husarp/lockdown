@@ -15,6 +15,7 @@ from db import Database
 from gui.blocking import BlockingPage
 from gui.draft import Draft
 from gui.notifications import NotificationsPage, Popup
+from gui.settings import SettingsPage
 from gui.tray import Tray
 from monitor import win
 from monitor.usage import UsageTracker
@@ -31,7 +32,7 @@ PAGES = [
     ("Network Log", 5),
     ("Modes", 6),
     ("Notifications", NotificationsPage),
-    ("Settings", 8),
+    ("Settings", SettingsPage),
 ]
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000

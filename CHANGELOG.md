@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 — 2026-09-18 23:07
+- **Limit reset time** (Settings): limits start over at a chosen time instead of midnight (weekly limits on Monday, monthly on the 1st, at that time). A change never ends the current limit day early - that day gets longer instead - and the time can be changed once a week. Screen-time stats keep normal calendar days
+- **Weekly and monthly limits**: "Time limit" and "Opening limit" (renamed from "Daily ...") take per day / per week / per month, in any combination (e.g. 2h a day but at most 8h a week); each blocks until its own period ends. Time can be typed as 45m, 2h, 1h30
+- **Emergency unlock**: button at the top of Blocking > Overview lists everything blocked right now; tick one or more, confirm, and they're unblocked for 20 min. Unlocking several at once is one use; default 3 uses per week. Settings: on/off, duration, uses per day/week. Overview shows "Emergency unlock - 12m left"; a warning comes before it ends; every unlock is recorded (for the future graphs)
+- New Settings page
+- Alert texts: "daily limit" -> "time limit"
+- 108 tests passing
+
 ## 0.8.1 — 2026-09-18 22:37
 - Fix: the grey hint text ("site (reddit.com) or app.exe", "Display name", group name) didn't show until the field was clicked (customtkinter treats a new field as focused until its first focus-out)
 - Blocking: a short green confirmation next to the tabs after adding or saving ("✓ YouTube blocker added", "✓ YouTube saved", "✓ Group Night added"); with auto-save off it adds "press Save changes to apply"; disappears after 5 s

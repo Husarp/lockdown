@@ -92,6 +92,7 @@ class UsageTracker(threading.Thread):
         used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, items)
         used_ids = {i["id"] for i in used}
         groups = db.list_groups()
+        clock = db.limit_clock()
         now_ts = now.timestamp()
         for item in items:
             is_app = item["item_type"] == "app"
@@ -102,12 +103,12 @@ class UsageTracker(threading.Thread):
             last = self.last_used.get(item["id"])
             away = None if last is None else now_ts - last
             # opening limits in "launches / new visits" mode
-            db.add_usage(visit_targets(rules, item, now, app_launched, away), 1, now.date())
+            db.add_usage(visit_targets(rules, item, now, app_launched, away, clock), 1, now.date())
         for item in used:
             rules = effective_rules(item, groups)
-            db.add_usage(usage_targets(rules, item["id"], now), TICK_SEC, now.date())
+            db.add_usage(usage_targets(rules, item["id"], now, clock), TICK_SEC, now.date())
             if switched:   # you just switched to it (opening limits in "every switch" mode)
-                db.add_usage(switch_targets(rules, item["id"], now), 1, now.date())
+                db.add_usage(switch_targets(rules, item["id"], now, clock), 1, now.date())
             self.last_used[item["id"]] = now_ts
         self.in_use = used_ids
 

@@ -7,15 +7,15 @@ from rules import DAY_NAMES, TIME_FMT, effective_rules, item_block, next_block
 REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
     "schedule": ("Outside its allowed hours", "blocked at this time"),
-    "limit": ("Over its daily limit", "over its daily limit"),
-    "switches": ("Opened too often today", "opened too many times today"),
+    "limit": ("Over its time limit", "over its time limit"),
+    "switches": ("Opened too often", "opened too many times"),
     "temporary": ("Temporarily blocked", "temporarily blocked"),
 }
 DEFAULT_MESSAGES = {
     "permanent": "{site} is permanently blocked.",
     "schedule": "{site} is blocked until {until}.",
-    "limit": "{site}: daily limit reached - blocked until {until}.",
-    "switches": "{site}: opened too many times today - blocked until {until}.",
+    "limit": "{site}: time limit reached - blocked until {until}.",
+    "switches": "{site}: opened too many times - blocked until {until}.",
     "temporary": "{site} is blocked for now - until {until}.",
 }
 FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "Both"}
@@ -81,6 +81,8 @@ class BlockWatcher:
         source = ("group", rule["group"]["id"]) if rule.get("group") else ("item", item["id"])
         if rule["rule_type"] == "time_limit":      # usage-based: the predicted time drifts, key by day
             return source, "limit", when.date()
+        if rule["rule_type"] == "unlock":          # items unlocked together are announced together
+            return "unlock", when
         if rule.get("allowance_min") and rule["rule_type"] == "scheduled":
             return source, "allowance", when.strftime("%Y%m%d")
         return source, "schedule", when.strftime("%Y%m%d%H%M")
@@ -133,7 +135,9 @@ class BlockWatcher:
         rule, names = e["rule"], _names(e["names"])
         if rule["rule_type"] == "time_limit":
             scope = f"{rule['group']['name']} ({names})" if rule.get("group") else names
-            return f"{scope}: {minutes} min of the daily limit left."
+            return f"{scope}: {minutes} min of the time limit left."
+        if rule["rule_type"] == "unlock":
+            return f"Emergency unlock ends in {minutes} min: {names} will be blocked again."
         if rule.get("allowance_min"):
             return f"{names}: {minutes} min of your allowance left - then it's blocked."
         if rule.get("group"):
@@ -143,7 +147,7 @@ class BlockWatcher:
     @staticmethod
     def _started(e: dict, now: datetime) -> str:
         until = f" until {_when_text(e['until'], now)}" if e["until"] else ""
-        why = {"limit": " - daily limit reached", "switches": " - opened too many times today",
+        why = {"limit": " - time limit reached", "switches": " - opened too many times",
                "temporary": " (temporary block)"}.get(e["reason"], "")
         if e["rule"].get("group"):
             return f"{e['rule']['group']['name']} started: {_names(e['names'])} blocked{until}{why}."

@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from paths import DB_PATH
-from rules import TIME_FMT, effective_rules, item_block
+from rules import RESET_KEY, TIME_FMT, LimitClock, Usage, effective_rules, item_block
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS blocked_items (
@@ -25,8 +25,12 @@ CREATE TABLE IF NOT EXISTS block_rules (
     id INTEGER PRIMARY KEY,
     item_id INTEGER NOT NULL REFERENCES blocked_items(id) ON DELETE CASCADE,
     rule_type TEXT NOT NULL,      -- permanent, scheduled, time_limit, switch_limit, temporary
-    daily_limit_min INTEGER,
-    daily_switch_limit INTEGER,
+    daily_limit_min INTEGER,      -- time_limit: minutes per day / week / month (any combination)
+    weekly_limit_min INTEGER,
+    monthly_limit_min INTEGER,
+    daily_switch_limit INTEGER,   -- switch_limit: openings per day / week / month (any combination)
+    weekly_switch_limit INTEGER,
+    monthly_switch_limit INTEGER,
     schedule TEXT,                -- JSON {"mode": "allow"|"block", "windows": [{"days", "start", "end"}]}
     temp_until DATETIME,          -- local time, "YYYY-MM-DD HH:MM:SS"
     allowance_min INTEGER,        -- scheduled: minutes allowed during blocked hours
@@ -52,7 +56,11 @@ CREATE TABLE IF NOT EXISTS group_rules (
     allowance_min INTEGER,
     daily_switch_limit INTEGER,   -- a group opening limit is one shared total
     switch_mode TEXT,
-    visit_gap_min INTEGER
+    visit_gap_min INTEGER,
+    weekly_limit_min INTEGER,
+    monthly_limit_min INTEGER,
+    weekly_switch_limit INTEGER,
+    monthly_switch_limit INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS group_members (
@@ -105,6 +113,15 @@ CREATE TABLE IF NOT EXISTS switch_events (
     site TEXT
 );
 
+-- Emergency unlocks: the chosen items are not blocked until `until` (one use, however many items)
+CREATE TABLE IF NOT EXISTS emergency_unlocks (
+    id INTEGER PRIMARY KEY,
+    started DATETIME,             -- trusted local time
+    until DATETIME,
+    item_ids TEXT NOT NULL,       -- JSON list
+    names TEXT NOT NULL           -- JSON list of display names (kept for history / graphs)
+);
+
 -- Sites the user has blocked before (for suggestions; clearable)
 CREATE TABLE IF NOT EXISTS site_history (
     hostname TEXT PRIMARY KEY,
@@ -118,9 +135,12 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("block_rules", "allowance_min", "INTEGER"), ("group_rules", "daily_switch_limit", "INTEGER"),
               ("block_rules", "switch_mode", "TEXT"), ("block_rules", "visit_gap_min", "INTEGER"),
               ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER")]
+MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
+               for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
 RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "daily_switch_limit",
-                "switch_mode", "visit_gap_min")
-USAGE_DAYS_LOADED = 2
+                "switch_mode", "visit_gap_min", "weekly_limit_min", "monthly_limit_min", "weekly_switch_limit",
+                "monthly_switch_limit")
+USAGE_DAYS_LOADED = 40   # monthly limits (+ a long day after a reset-time change)
 
 
 class Database:
@@ -290,12 +310,38 @@ class Database:
                     "ON CONFLICT(owner, bucket) DO UPDATE SET seconds = seconds + excluded.seconds",
                     (owner, bucket, seconds, day.isoformat()))
 
-    def usage_lookup(self, now: datetime):
-        """usage(owner, bucket) -> seconds, over recently written rows."""
+    def usage_lookup(self, now: datetime) -> Usage:
+        """usage(owner, bucket) -> seconds, over recently written rows; with the limit clock and active unlocks."""
         since = (now.date() - timedelta(days=USAGE_DAYS_LOADED)).isoformat()
         data = {(r["owner"], r["bucket"]): r["seconds"] for r in self.conn.execute(
             "SELECT owner, bucket, seconds FROM usage WHERE day >= ?", (since,))}
-        return lambda owner, bucket: data.get((owner, bucket), 0)
+        return Usage(data, self.limit_clock(), {f"item:{i}": u for i, u in self.active_unlocks(now).items()})
+
+    def limit_clock(self) -> LimitClock:
+        return LimitClock(self.get_setting(RESET_KEY))
+
+    # ---------- emergency unlocks ----------
+
+    def add_unlock(self, item_ids: list[int], names: list[str], start: datetime, until: datetime):
+        with self.conn:
+            self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names) VALUES (?, ?, ?, ?)",
+                              (start.strftime(TIME_FMT), until.strftime(TIME_FMT), json.dumps(item_ids),
+                               json.dumps(names)))
+
+    def unlocks_since(self, since: datetime) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM emergency_unlocks WHERE until > ? ORDER BY started",
+                                 (since.strftime(TIME_FMT),))
+        return [{"started": datetime.strptime(r["started"], TIME_FMT), "until": datetime.strptime(r["until"], TIME_FMT),
+                 "item_ids": json.loads(r["item_ids"]), "names": json.loads(r["names"])} for r in rows]
+
+    def active_unlocks(self, now: datetime) -> dict[int, datetime]:
+        """item id -> until, for items in an emergency unlock right now."""
+        out = {}
+        for u in self.unlocks_since(now):
+            if u["started"] <= now:
+                for i in u["item_ids"]:
+                    out[i] = max(out.get(i, u["until"]), u["until"])
+        return out
 
     def add_history(self, hostname: str, display_name: str):
         with self.conn:

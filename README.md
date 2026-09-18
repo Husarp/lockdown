@@ -22,6 +22,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   tick any number of blockers: hours, daily time limit, daily switch limit, permanent, temporary). Site suggestions while typing,
   "+ Popular sites" picker with site icons. **Auto-save** is on by default; turn it off to stage changes until you
   press **Save changes** (unsaved items then show "Not applied").
+- **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week), a configurable **limit reset
+  time** (Settings; a change never ends the current limit day early, once a week), and **Emergency unlock**
+  (Blocking > Overview: unblock chosen items for 20 min; 3 uses per week by default, configurable in Settings).
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
@@ -29,7 +32,7 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
 
 - The **GUI + tray agent** (runs as you, starts hidden at login) writes the blocklist to `C:\ProgramData\Lockdown\config.db`
   and shows notifications.
-- The **enforcement service** (runs as SYSTEM) every 5 s:
+- The **enforcement service** (runs as SYSTEM) every 2 s:
   - evaluates the rules (permanent / by hours / temporary) and rewrites a marked `# >>> Lockdown` section in
     `C:\Windows\System32\drivers\etc\hosts`, redirecting blocked hostnames to `127.0.0.1`.
     Manual edits are repaired; the rest of the hosts file is never touched (backup: `C:\ProgramData\Lockdown\hosts.backup`);
@@ -44,7 +47,7 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   daily limit is one total for all members. Warnings/reminders are set on the Notifications page.
 - Daily limits: the tray agent reads the active browser tab's address (Windows UI Automation — Chrome, Edge, Brave,
   Firefox, no extension needed) and counts time on limited sites; the service blocks the site once the limit is used up,
-  until midnight.
+  until the limit period ends (at the limit reset time).
 - The service keeps its own trusted time (internet time + the Windows tick counter), so changing the Windows clock
   doesn't unlock anything; clock changes are logged.
 - Site icons are downloaded once from Google's favicon service and cached in `%LOCALAPPDATA%\Lockdown\icons`

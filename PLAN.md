@@ -1193,6 +1193,15 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] Fix: grey hint text in the site/app and Display name fields (and group name) missing until the field was clicked
 - [x] Short confirmation next to the tabs after adding/saving ("✓ YouTube blocker added", "✓ Group Night added"), gone after 5 s
 
+### Phase 3c — Limit reset time, emergency unlock, weekly/monthly limits (approved 2026-09-18)
+- [x] Setting: when limits reset (e.g. 04:00 instead of midnight); only limits - stats keep calendar days;
+  weeks start Monday / months on the 1st at that time
+  - a change never gives a free reset: the current limit day gets longer, never shorter; can be changed once a week
+- [x] Emergency unlock: button at the top of Overview → list of everything blocked right now → tick one or more
+  (= one use) → confirm → unblocked. Settings: on/off, duration (default 20 min), uses (default 3 per week; per day/week)
+  - dropped: "time used during an unlock counts toward limits" option (not needed)
+- [x] Time limits and opening limits per day / week / month, stackable (e.g. 2 h a day + max 8 h a week)
+
 ### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
 - [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
@@ -1206,6 +1215,7 @@ General app settings (lock and notification settings have moved to their own tab
 - [ ] Dashboard with stat cards and graphs
 - [ ] Dashboard: "limits today" list — every time/switch limit with a progress bar, time left and % used (requested 2026-09-18)
 - [ ] Weekly block calendar: week view with coloured bars per site/app showing when each is blocked (requested 2026-09-18)
+- [ ] Graphs (weekly / history): mark when emergency unlocks were used (requested 2026-09-18; data: emergency_unlocks table)
 
 ### Phase 5 — Network Logging
 - [ ] Connection enumeration with `psutil`
@@ -1234,6 +1244,8 @@ General app settings (lock and notification settings have moved to their own tab
 - [ ] Clock protection hardening: time-zone changes, clock rolled back while offline across a reboot
 - [ ] Convert enforcement scheduled task into a real Windows Service (pywin32, easier once packaged with PyInstaller)
 - [ ] Lock down `C:\ProgramData\Lockdown\` ACLs (currently Users: modify)
+- [ ] Lock the limit reset time and the emergency-unlock settings (uses, duration) behind the anti-bypass
+  (requested 2026-09-18)
 - [ ] Watchdog service
 - [ ] Scheduled task backup
 - [ ] Uninstall protection

@@ -4,8 +4,10 @@ from datetime import datetime
 
 import customtkinter as ctk
 
-from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, SWITCH, TIME_FMT, VISIT, duration_text,
-                   load_schedule, make_schedule)
+import re
+
+from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS, SWITCH, TIME_FMT,
+                   TIME_LIMIT_FIELDS, VISIT, duration_text, load_schedule, make_schedule)
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
@@ -15,6 +17,27 @@ MAX_TEMPORARY_MIN = 30 * 1440
 MODES = {"Allow only during": ALLOW, "Block during": BLOCK}
 SWITCH_MODES = {"Launches / new visits": VISIT, "Every switch": SWITCH}
 MUTED = "gray60"
+PERIOD_LABELS = {"day": "per day", "week": "per week", "month": "per month"}
+PERIOD_MAX_MIN = {"day": 1440, "week": 7 * 1440, "month": 31 * 1440}
+
+
+def parse_duration(text: str) -> int | None:
+    """'45' / '45m' / '2h' / '2h30' / '2h 30m' / '1:30' -> minutes; '' -> None. Raises ValueError."""
+    text = text.strip().lower().replace(" ", "")
+    if not text:
+        return None
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m?)?", text) or re.fullmatch(r"(\d+):(\d{2})", text)
+    if not m or not any(m.groups()):
+        raise ValueError(f"Can't read {text!r} - write e.g. 45m, 2h or 1h30.")
+    hours, minutes = (int(g or 0) for g in m.groups())
+    return hours * 60 + minutes
+
+
+def format_duration(minutes: int | None) -> str:
+    if not minutes:
+        return ""
+    h, m = divmod(minutes, 60)
+    return f"{h}h{m:02d}" if h and m else f"{h}h" if h else f"{m}m"
 
 
 def _minutes(text: str, low: int, high: int, what: str) -> int:
@@ -109,37 +132,61 @@ class HoursEditor(ctk.CTkFrame):
                 "allowance_min": allowance or None}
 
 
+def _period_entries(parent, label: str, width: int) -> dict:
+    """"<label> [ ] per day  [ ] per week  [ ] per month" - any of them may be left empty."""
+    line = ctk.CTkFrame(parent, fg_color="transparent")
+    line.pack(anchor="w")
+    ctk.CTkLabel(line, text=label).pack(side="left", padx=(0, 8))
+    entries = {}
+    for p in PERIODS:
+        entries[p] = ctk.CTkEntry(line, width=width)
+        entries[p].pack(side="left")
+        ctk.CTkLabel(line, text=PERIOD_LABELS[p]).pack(side="left", padx=(4, 14))
+    return entries
+
+
+def _set(entry, text: str):
+    entry.delete(0, "end")
+    entry.insert(0, text)
+
+
 class LimitEditor(ctk.CTkFrame):
+    """Time limit per day / week / month - any combination; each one blocks until its period ends."""
+
     def __init__(self, master, shared: bool = False):
         super().__init__(master, fg_color="transparent")
-        ctk.CTkLabel(self, text="Shared daily limit" if shared else "Daily limit").pack(side="left")
-        self.minutes = ctk.CTkEntry(self, width=64)
-        self.minutes.pack(side="left", padx=8)
-        note = ("minutes for all members together" if shared else "minutes") + \
-            " - counted while the app is in front / the site is the active browser tab; resets at midnight"
-        ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=560, justify="left").pack(side="left")
+        self.entries = _period_entries(self, "Shared limit" if shared else "At most", 64)
+        note = ("For all members together. " if shared else "") + \
+            "E.g. 45m, 2h, 1h30; leave empty for no limit. Counted while the app is in front / the site is the " \
+            "active browser tab; resets at the limit reset time (Settings)."
+        ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
         self.load(None)
 
     def load(self, rule: dict | None):
-        self.minutes.delete(0, "end")
-        self.minutes.insert(0, str((rule or {}).get("daily_limit_min") or 30))
+        rule = rule or {"daily_limit_min": 30}
+        for p, entry in self.entries.items():
+            _set(entry, format_duration(rule.get(TIME_LIMIT_FIELDS[p])))
 
     def value(self) -> dict:
-        return {"rule_type": "time_limit", "daily_limit_min": _minutes(self.minutes.get(), 1, 1440, "Daily limit")}
+        rule = {"rule_type": "time_limit"}
+        for p, entry in self.entries.items():
+            minutes = parse_duration(entry.get())
+            if minutes is not None and not 1 <= minutes <= PERIOD_MAX_MIN[p]:
+                raise ValueError(f"The limit {PERIOD_LABELS[p]} must be between 1m and {PERIOD_MAX_MIN[p] // 60}h.")
+            rule[TIME_LIMIT_FIELDS[p]] = minutes
+        if not any(rule[f] for f in TIME_LIMIT_FIELDS.values()):
+            raise ValueError("Fill in at least one time limit (per day, week or month).")
+        return rule
 
 
 class SwitchEditor(ctk.CTkFrame):
-    """Opening limit: how many times per day it may be opened, and what counts as opening it."""
+    """Opening limit per day / week / month (any combination), and what counts as opening it."""
 
     def __init__(self, master, shared: bool = False):
         super().__init__(master, fg_color="transparent")
-        line = ctk.CTkFrame(self, fg_color="transparent")
-        line.pack(anchor="w")
-        ctk.CTkLabel(line, text="Open at most").pack(side="left")
-        self.times = ctk.CTkEntry(line, width=56)
-        self.times.pack(side="left", padx=8)
-        ctk.CTkLabel(line, text="times per day" + (" (all members together)" if shared else "") +
-                     " - the next opening is blocked", text_color=MUTED).pack(side="left")
+        self.entries = _period_entries(self, "Open at most", 52)
+        ctk.CTkLabel(self, text=("All members together. " if shared else "") + "Leave empty for no limit; "
+                     "the next opening after a limit is blocked.", text_color=MUTED).pack(anchor="w", pady=(4, 0))
         line = ctk.CTkFrame(self, fg_color="transparent")
         line.pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(line, text="What counts").pack(side="left", padx=(0, 8))
@@ -161,24 +208,30 @@ class SwitchEditor(ctk.CTkFrame):
         (self.switch_note if visit else self.visit_line).pack_forget()
 
     def load(self, rule: dict | None):
-        rule = rule or {}
-        self.times.delete(0, "end")
-        self.times.insert(0, str(rule.get("daily_switch_limit") or 10))
-        self.gap.delete(0, "end")
-        self.gap.insert(0, str(rule.get("visit_gap_min") or DEFAULT_VISIT_GAP_MIN))
+        rule = rule or {"daily_switch_limit": 10}
+        for p, entry in self.entries.items():
+            value = rule.get(OPEN_LIMIT_FIELDS[p])
+            _set(entry, "" if value is None else str(value))
+        _set(self.gap, str(rule.get("visit_gap_min") or DEFAULT_VISIT_GAP_MIN))
         mode = rule.get("switch_mode") or VISIT
         self.mode.set(next(k for k, v in SWITCH_MODES.items() if v == mode))
         self._mode_changed()
 
     def value(self) -> dict:
-        try:
-            times = int(self.times.get().strip())
-        except ValueError:
-            times = -1
-        if not 0 <= times <= 1000:
-            raise ValueError("Openings per day must be 0-1000.")
+        rule = {"rule_type": "switch_limit"}
+        for p, entry in self.entries.items():
+            text = entry.get().strip()
+            try:
+                times = int(text) if text else None
+            except ValueError:
+                times = -1
+            if times is not None and not 0 <= times <= 10000:
+                raise ValueError(f"Openings {PERIOD_LABELS[p]} must be a number 0-10000.")
+            rule[OPEN_LIMIT_FIELDS[p]] = times
+        if all(rule[f] is None for f in OPEN_LIMIT_FIELDS.values()):
+            raise ValueError("Fill in at least one opening limit (per day, week or month).")
         mode = SWITCH_MODES[self.mode.get()]
-        rule = {"rule_type": "switch_limit", "daily_switch_limit": times, "switch_mode": mode}
+        rule["switch_mode"] = mode
         if mode == VISIT:
             rule["visit_gap_min"] = _minutes(self.gap.get(), 1, 1440, "Minutes away")
         return rule
@@ -260,5 +313,5 @@ class PermanentEditor(ctk.CTkFrame):
 
 EDITORS = {"scheduled": HoursEditor, "time_limit": LimitEditor, "switch_limit": SwitchEditor,
            "permanent": PermanentEditor, "temporary": TemporaryEditor}
-RULE_NAMES = {"scheduled": "By hours", "time_limit": "Daily time limit", "switch_limit": "Daily opening limit",
+RULE_NAMES = {"scheduled": "By hours", "time_limit": "Time limit", "switch_limit": "Opening limit",
               "permanent": "Permanent", "temporary": "Temporary"}

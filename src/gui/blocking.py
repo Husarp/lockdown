@@ -12,6 +12,7 @@ from datetime import datetime
 
 import customtkinter as ctk
 
+import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons
 from gui.groups import GroupsTab
@@ -19,7 +20,7 @@ from gui.rule_editors import EDITORS, RULE_NAMES
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import describe_rule, effective_rules, item_block, next_block
+from rules import DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block
 from trusted_time import now_from_db
 
 TABS = ["Overview", "Groups", "Add"]
@@ -31,7 +32,7 @@ LIVE_MS = 2_000       # in-place update of counters / countdowns / status
 NOTICE_MS = 5_000     # how long "✓ ... added" stays
 MUTED = "gray60"
 ERROR = "#f85149"
-GREEN, ORANGE, RED = "#3fb950", "#d29922", "#f85149"
+GREEN, ORANGE, RED, BLUE = "#3fb950", "#d29922", "#f85149", "#58a6ff"
 COLS = [220, 290, 140]   # name + targets, rules, status (then action buttons)
 
 
@@ -49,6 +50,10 @@ def status_of(page, item: dict, now, usage) -> dict:
     draft = page.draft
     if draft.item_not_applied(item["id"]):
         return {"text": "○ Not applied\n(unsaved)", "text_color": ORANGE}
+    unlocked = getattr(usage, "unlocks", {}).get(f"item:{item['id']}")
+    if unlocked and now < unlocked:
+        return {"text": f"◐ Emergency unlock\n{duration_text((unlocked - now).total_seconds())} left",
+                "text_color": BLUE}
     if not saved_block(draft, item, now, usage):
         return {"text": "○ Allowed now", "text_color": GREEN}
     if not page.app.service_running:
@@ -100,12 +105,73 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.title = ctk.CTkLabel(top, font=ctk.CTkFont(size=16, weight="bold"))
         self.title.pack(side="left")
         ctk.CTkButton(top, text="+ Add", width=80, command=lambda: page.show_tab("Add")).pack(side="left", padx=16)
+        self.unlock_btn = ctk.CTkButton(top, text="Emergency unlock", width=140, fg_color="transparent",
+                                        border_width=1, border_color=ORANGE, command=self._toggle_unlock)
         self.sort = ctk.CTkOptionMenu(top, values=SORTS, width=170, command=self._sort_changed)
         self.sort.set(page.app.db.get_setting(SORT_KEY, SORTS[0]))
         self.sort.pack(side="right")
         ctk.CTkLabel(top, text="Sort by", text_color=MUTED).pack(side="right", padx=8)
+        self.unlock_panel = ctk.CTkFrame(self, border_width=1, border_color=ORANGE)
         self.list_box = ctk.CTkFrame(self)
         self.list_box.pack(fill="x")
+
+    # ---------- emergency unlock ----------
+
+    def _toggle_unlock(self):
+        if self.unlock_panel.winfo_ismapped():
+            self.unlock_panel.pack_forget()
+        else:
+            self._build_unlock_panel()
+            self.unlock_panel.pack(fill="x", pady=(0, 10), before=self.list_box)
+
+    def _build_unlock_panel(self):
+        """Everything blocked right now, with checkboxes; unlocking any number of them is one use."""
+        panel, db = self.unlock_panel, self.page.app.db
+        for w in panel.winfo_children():
+            w.destroy()
+        now = now_from_db(db)
+        left, allowed, reset = emergency.uses_left(db, now)
+        minutes = int(emergency.get(db, "emergency.minutes"))
+        per = emergency.PERIODS[emergency.get(db, "emergency.per")]
+        ctk.CTkLabel(panel, text="Emergency unlock", font=ctk.CTkFont(size=14, weight="bold")).pack(
+            anchor="w", padx=14, pady=(10, 0))
+        ctk.CTkLabel(panel, text=f"{left} of {allowed} left {per} (resets {DAY_NAMES[reset.weekday()]} {reset:%H:%M}). "
+                                 f"Pick what to unblock for {minutes} min - several at once still count as one use.",
+                     text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
+        blocked = sorted((b["item"] for b in db.blocks(now)), key=lambda i: i["display_name"].lower())
+        boxes = []
+        for item in blocked:
+            line = ctk.CTkFrame(panel, fg_color="transparent")
+            line.pack(anchor="w", padx=14, pady=2)
+            box = ctk.CTkCheckBox(line, text="", width=24)
+            box.pack(side="left")
+            ctk.CTkLabel(line, text=f"  {item['display_name']}", image=icons.for_item(item, 16),
+                         compound="left").pack(side="left")
+            boxes.append((box, item))
+        if not blocked:
+            ctk.CTkLabel(panel, text="Nothing is blocked right now.").pack(anchor="w", padx=14, pady=4)
+        error = ctk.CTkLabel(panel, text="", text_color=ERROR)
+        error.pack(anchor="w", padx=14)
+        buttons = ctk.CTkFrame(panel, fg_color="transparent")
+        buttons.pack(anchor="w", padx=14, pady=(0, 10))
+        if blocked and left:
+            ConfirmButton(buttons, lambda: self._unlock([i for b, i in boxes if b.get()], error),
+                          text=f"Unlock for {minutes} min", confirm_text=f"Confirm - uses 1 of {left}",
+                          width=170).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(buttons, text="Close", width=80, fg_color="transparent", border_width=1,
+                      command=self._toggle_unlock).pack(side="left")
+
+    def _unlock(self, items: list[dict], error):
+        db = self.page.app.db
+        try:
+            until = emergency.unlock(db, items, now_from_db(db))
+        except ValueError as e:
+            error.configure(text=str(e))
+            return
+        self.unlock_panel.pack_forget()
+        names = ", ".join(i["display_name"] for i in items)
+        self.page.confirm(f"{names} unlocked until {until:%H:%M}", immediate=True)
+        self.page.refresh()
 
     def _sort_changed(self, value: str):
         self.page.app.db.set_setting(SORT_KEY, value)
@@ -132,6 +198,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
         return sorted(items, key=lambda i: (times[i["id"]] != datetime.min, i["display_name"].lower()))
 
     def refresh(self, now, usage):
+        if emergency.get(self.page.app.db, "emergency.enabled") == "1":
+            self.unlock_btn.pack(side="left")
+        else:
+            self.unlock_btn.pack_forget()
+            self.unlock_panel.pack_forget()
         items = self._sorted(self.draft.sorted_items(), now, usage)
         self.title.configure(text=f"Everything blocked ({len(items)})")
         for w in self.list_box.winfo_children():
@@ -353,8 +424,8 @@ class BlockingPage(ctk.CTkFrame):
         self.tabs[tab].grid(row=0, column=0, sticky="nsew")
         self.refresh()
 
-    def confirm(self, text: str):
-        if not self.draft.autosave:
+    def confirm(self, text: str, immediate: bool = False):
+        if not immediate and not self.draft.autosave:
             text += " - press Save changes to apply"
         self.notice.configure(text=f"✓ {text}")
         if self._notice_job:

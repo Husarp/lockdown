@@ -9,6 +9,13 @@ TIME_FMT = "%Y-%m-%d %H:%M:%S"
 ALLOW, BLOCK = "allow", "block"   # hours rule mode: allow only during the windows / block during them
 VISIT, SWITCH = "visit", "switch"  # opening limit counts: launches / new visits (default), or every switch to it
 DEFAULT_VISIT_GAP_MIN = 5
+# Limits can be set per day, week and month, in any combination (they stack).
+PERIODS = ("day", "week", "month")
+PERIOD_WORDS = {"day": "today", "week": "this week", "month": "this month"}
+TIME_LIMIT_FIELDS = {"day": "daily_limit_min", "week": "weekly_limit_min", "month": "monthly_limit_min"}
+OPEN_LIMIT_FIELDS = {"day": "daily_switch_limit", "week": "weekly_switch_limit", "month": "monthly_switch_limit"}
+RESET_KEY = "limits.reset"   # setting: JSON written by change_reset()
+RESET_CHANGE_DAYS = 7        # the reset time can be changed once a week
 
 
 def parse_hhmm(text: str) -> time:
@@ -83,16 +90,105 @@ def schedule_until(schedule_json: str, now: datetime) -> datetime | None:
     return next_window_start(s["windows"], now) or datetime.max
 
 
-def next_midnight(now: datetime) -> datetime:
-    return datetime.combine(now.date() + timedelta(days=1), time(0, 0))
+# ---------- limit periods ----------
+
+def _parse_dt(text: str | None) -> datetime | None:
+    return datetime.strptime(text, TIME_FMT) if text else None
+
+
+class LimitClock:
+    """When limit periods start and end. A limit day starts at the reset time (default midnight); a week starts
+    on Monday and a month on the 1st, at that time (with a reset at 12:00 or later, the evening before: a day
+    belongs to the date most of it falls on). Screen-time stats keep normal calendar days.
+
+    After the reset time is changed, the day that was running goes on until the new time comes round after its
+    normal end: that day is longer, never shorter, so changing the time never resets limits early."""
+
+    def __init__(self, config: str | None = None):
+        c = json.loads(config) if config else {}
+        self.time = parse_hhmm(c.get("time", "00:00"))
+        self.carry_start = _parse_dt(c.get("day_start"))   # the day running when the time was changed ...
+        self.carry_until = _parse_dt(c.get("switch"))      # ... lasts until here
+        self.changed = _parse_dt(c.get("changed"))
+
+    def day(self, now: datetime) -> tuple[datetime, datetime]:
+        """(start, end) of the limit day containing now."""
+        if self.carry_until and self.carry_start <= now < self.carry_until:
+            return self.carry_start, self.carry_until
+        start = datetime.combine(now.date(), self.time)
+        if start > now:
+            start -= timedelta(days=1)
+        return start, start + timedelta(days=1)
+
+    def period(self, kind: str, now: datetime) -> tuple[str, datetime]:
+        """(key, end) of the day / week / month limit period containing now."""
+        start, end = self.day(now)
+        if kind == "day":   # midnight days keep the plain date (the keys used before reset times existed)
+            return (start.date().isoformat() if start.time() == time(0) else f"{start:%Y-%m-%dT%H:%M}"), end
+        d = (start + timedelta(hours=12)).date()
+        if kind == "week":
+            first = d - timedelta(days=d.weekday())
+            following, key = first + timedelta(days=7), f"w{first.isoformat()}"
+        else:
+            first = d.replace(day=1)
+            following, key = (first + timedelta(days=32)).replace(day=1), f"m{d:%Y-%m}"
+        boundary = datetime.combine(following, self.time)
+        if self.time >= time(12):   # late reset: the period starts the evening before
+            boundary -= timedelta(days=1)
+        return key, max(end, boundary)
+
+    def next_change(self) -> datetime | None:
+        """When the reset time may be changed again (None = any time)."""
+        return self.changed + timedelta(days=RESET_CHANGE_DAYS) if self.changed else None
+
+
+DEFAULT_CLOCK = LimitClock()
+
+
+def change_reset(config: str | None, new_time: str, now: datetime) -> str:
+    """New RESET_KEY value for a changed reset time. Raises ValueError (bad time / changed too recently)."""
+    clock = LimitClock(config)
+    try:
+        new = parse_hhmm(new_time)
+    except ValueError:
+        raise ValueError("The time must look like 04:00.") from None
+    if (again := clock.next_change()) and now < again:
+        raise ValueError(f"The reset time can be changed once a week - next on {DAY_NAMES[again.weekday()]} "
+                         f"{again:%Y-%m-%d %H:%M}.")
+    start, end = clock.day(now)
+    switch = datetime.combine(end.date(), new)
+    if switch < end:
+        switch += timedelta(days=1)
+    return json.dumps({"time": f"{new:%H:%M}", "day_start": start.strftime(TIME_FMT),
+                       "switch": switch.strftime(TIME_FMT), "changed": now.strftime(TIME_FMT)})
+
+
+class Usage:
+    """usage(owner, bucket) -> seconds (or openings) used. Also carries what the rules need besides usage:
+    the limit clock and the active emergency unlocks ({"item:<id>": until})."""
+
+    def __init__(self, data: dict | None = None, clock: LimitClock = DEFAULT_CLOCK, unlocks: dict | None = None):
+        self.data, self.clock, self.unlocks = data or {}, clock, unlocks or {}
+
+    def __call__(self, owner: str, bucket: str) -> int:
+        return self.data.get((owner, bucket), 0)
+
+
+def _clock(usage) -> LimitClock:
+    return getattr(usage, "clock", DEFAULT_CLOCK)
+
+
+def _unlocked_until(rules: list[dict], now: datetime, usage) -> datetime | None:
+    until = getattr(usage, "unlocks", {}).get(rules[0].get("item_owner")) if rules else None
+    return until if until and now < until else None
 
 
 # ---------- usage buckets ----------
-# Usage is stored per (owner, bucket): owner "item:<id>" or "group:<id>" (shared group limit);
-# bucket "day:YYYY-MM-DD" (daily limits) or "win:<rule key>:<end of blocked stretch>" (allowance in blocked hours).
+# Usage is stored per (owner, bucket): owner "item:<id>" or "group:<id>" (shared group limit); bucket
+# "day:<limit day>" / "week:w<monday>" / "month:m<YYYY-MM>" (time limits), "op:<rule key>:<period>" (opening
+# limits), "win:<rule key>:<end of blocked stretch>" (allowance in blocked hours), "sw:<date>" (switch stats).
 
-def no_usage(owner: str, bucket: str) -> int:
-    return 0
+no_usage = Usage()
 
 
 def day_bucket(now: datetime) -> str:
@@ -107,11 +203,17 @@ def switch_mode(rule: dict) -> str:
     return rule.get("switch_mode") or VISIT
 
 
-def opening_bucket(rule: dict, now: datetime) -> str:
-    """Where an opening limit's count lives: every switch ("sw:<date>") or launches / new visits (per rule)."""
-    if switch_mode(rule) == SWITCH:
-        return switch_bucket(now)
-    return f"op:{rule.get('rule_key', '')}:{now.date().isoformat()}"
+def limits(rule: dict, fields: dict) -> dict[str, int]:
+    """{period: limit} for the periods the rule sets."""
+    return {p: rule[f] for p, f in fields.items() if rule.get(f) is not None}
+
+
+def time_bucket(period: str, now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> str:
+    return f"{period}:{clock.period(period, now)[0]}"
+
+
+def opening_bucket(rule: dict, period: str, now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> str:
+    return f"op:{rule.get('rule_key', '')}:{clock.period(period, now)[0]}"
 
 
 def allowance_bucket(rule: dict, until: datetime) -> str:
@@ -164,31 +266,37 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
         if allowance and usage(_item_owner(rule), allowance_bucket(rule, until)) < allowance * 60:
             return None   # still has allowance left in this blocked stretch
         return "schedule", (None if until == datetime.max else until)
-    if kind == "time_limit" and rule.get("daily_limit_min") is not None:
-        used = usage(_owner(rule), day_bucket(now))
-        return ("limit", next_midnight(now)) if used >= rule["daily_limit_min"] * 60 else None
-    if kind == "switch_limit" and rule.get("daily_switch_limit") is not None:
-        # the openings up to the limit are allowed; the next one is blocked
-        opened = usage(_owner(rule), opening_bucket(rule, now))
-        return ("switches", next_midnight(now)) if opened > rule["daily_switch_limit"] else None
+    clock = _clock(usage)
+    if kind == "time_limit":   # blocked until the end of every period whose limit is used up
+        ends = [clock.period(p, now)[1] for p, limit in limits(rule, TIME_LIMIT_FIELDS).items()
+                if usage(_owner(rule), time_bucket(p, now, clock)) >= limit * 60]
+        return ("limit", max(ends)) if ends else None
+    if kind == "switch_limit":  # the openings up to the limit are allowed; the next one is blocked
+        ends = [clock.period(p, now)[1] for p, limit in limits(rule, OPEN_LIMIT_FIELDS).items()
+                if usage(_owner(rule), opening_bucket(rule, p, now, clock)) > limit]
+        return ("switches", max(ends)) if ends else None
     return None
 
 
 def item_block(rules: list[dict], now: datetime, usage=no_usage) -> tuple[str, datetime | None, dict] | None:
-    """(reason, until, rule) for the rule that blocks the item now (most important reason first), else None."""
+    """(reason, until, rule) for the rule that blocks the item now (most important reason first), else None.
+    Nothing blocks during an emergency unlock."""
+    if _unlocked_until(rules, now, usage):
+        return None
     active = [(*b, r) for r in rules if (b := rule_block(r, now, usage))]
     if not active:
         return None
     return min(active, key=lambda b: REASON_ORDER.index(b[0]))
 
 
-def usage_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[str, str]]:
+def usage_targets(rules: list[dict], item_id: int, now: datetime,
+                  clock: LimitClock = DEFAULT_CLOCK) -> set[tuple[str, str]]:
     """(owner, bucket) pairs to add time to while the item is being used."""
     me = f"item:{item_id}"
     targets = {(me, day_bucket(now))}
     for r in rules:
         if r["rule_type"] == "time_limit":
-            targets.add((_owner(r), day_bucket(now)))
+            targets |= {(_owner(r), time_bucket(p, now, clock)) for p in limits(r, TIME_LIMIT_FIELDS)}
         elif r["rule_type"] == "scheduled" and r.get("allowance_min"):
             until = schedule_until(r["schedule"], now)
             if until:
@@ -196,16 +304,22 @@ def usage_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[s
     return targets
 
 
-def switch_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[str, str]]:
+def _opening_targets(rule: dict, now: datetime, clock: LimitClock) -> set[tuple[str, str]]:
+    return {(_owner(rule), opening_bucket(rule, p, now, clock)) for p in limits(rule, OPEN_LIMIT_FIELDS)}
+
+
+def switch_targets(rules: list[dict], item_id: int, now: datetime,
+                   clock: LimitClock = DEFAULT_CLOCK) -> set[tuple[str, str]]:
     """(owner, bucket) pairs to add 1 to when you switch to the item."""
     targets = {(f"item:{item_id}", switch_bucket(now))}
-    targets |= {(_owner(r), switch_bucket(now)) for r in rules
-                if r["rule_type"] == "switch_limit" and switch_mode(r) == SWITCH}
+    for r in rules:
+        if r["rule_type"] == "switch_limit" and switch_mode(r) == SWITCH:
+            targets |= _opening_targets(r, now, clock)
     return targets
 
 
 def visit_targets(rules: list[dict], item: dict, now: datetime, launched: bool,
-                  away_sec: float | None) -> set[tuple[str, str]]:
+                  away_sec: float | None, clock: LimitClock = DEFAULT_CLOCK) -> set[tuple[str, str]]:
     """(owner, bucket) pairs to add 1 to for "launches / new visits" opening limits.
     Apps: counts when the program was just started. Sites: counts when it's in use again after being away
     for at least the rule's gap (away_sec None = not used before)."""
@@ -219,7 +333,7 @@ def visit_targets(rules: list[dict], item: dict, now: datetime, launched: bool,
             gap = (r.get("visit_gap_min") or DEFAULT_VISIT_GAP_MIN) * 60
             opened = away_sec is None or away_sec >= gap
         if opened:
-            targets.add((_owner(r), opening_bucket(r, now)))
+            targets |= _opening_targets(r, now, clock)
     return targets
 
 
@@ -234,7 +348,11 @@ def _schedule_next_start(schedule_json: str, now: datetime) -> datetime | None:
 
 def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = False) -> tuple[datetime, dict] | None:
     """(when, rule) of the next block for an item that isn't blocked now, or None.
-    Usage-based blocks (daily limit, allowance) are only predicted while the item is in use."""
+    Usage-based blocks (time limit, allowance) are only predicted while the item is in use.
+    During an emergency unlock: its end, if the item is blocked then (rule {"rule_type": "unlock"})."""
+    if until := _unlocked_until(rules, now, usage):
+        after = Usage(getattr(usage, "data", {}), _clock(usage))
+        return (until, {"rule_type": "unlock", "group": None}) if item_block(rules, until, after) else None
     found = []
     for r in rules:
         kind = r["rule_type"]
@@ -247,8 +365,8 @@ def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = 
             elif in_use and r.get("allowance_min"):   # inside the stretch, using the allowance
                 left = r["allowance_min"] * 60 - usage(_item_owner(r), allowance_bucket(r, until))
                 found.append((now + timedelta(seconds=max(0, left)), r))
-        elif kind == "time_limit" and in_use and r.get("daily_limit_min") is not None:
-            left = r["daily_limit_min"] * 60 - usage(_owner(r), day_bucket(now))
+        elif kind == "time_limit" and in_use and (lims := limits(r, TIME_LIMIT_FIELDS)):
+            left = min(limit * 60 - usage(_owner(r), time_bucket(p, now, _clock(usage))) for p, limit in lims.items())
             found.append((now + timedelta(seconds=max(0, left)), r))
     return min(found, key=lambda f: f[0]) if found else None
 
@@ -291,13 +409,15 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
             left = datetime.strptime(rule["temp_until"], TIME_FMT) - now
             return f"Temporary: {duration_text(left.total_seconds())} left"
         return f"Temporary: {duration_text(rule['duration_min'] * 60)} (starts when saved)"
+    clock = _clock(usage)
+    shared = " (shared)" if _owner(rule).startswith("group:") else ""
     if kind == "time_limit":
-        used = usage(_owner(rule), day_bucket(now))
-        shared = " (shared)" if _owner(rule).startswith("group:") else ""
-        return f"Limit{shared}: {duration_text(used)} / {duration_text(rule['daily_limit_min'] * 60)} today"
+        parts = [f"{duration_text(usage(_owner(rule), time_bucket(p, now, clock)))} / {duration_text(limit * 60)} "
+                 f"{PERIOD_WORDS[p]}" for p, limit in limits(rule, TIME_LIMIT_FIELDS).items()]
+        return f"Limit{shared}: " + "\n".join(parts)
     if kind == "switch_limit":
-        opened = usage(_owner(rule), opening_bucket(rule, now))
-        shared = " (shared)" if _owner(rule).startswith("group:") else ""
+        parts = [f"{usage(_owner(rule), opening_bucket(rule, p, now, clock))} / {limit} {PERIOD_WORDS[p]}"
+                 for p, limit in limits(rule, OPEN_LIMIT_FIELDS).items()]
         what = "Switches" if switch_mode(rule) == SWITCH else "Openings"
-        return f"{what}{shared}: {opened} / {rule['daily_switch_limit']} today"
+        return f"{what}{shared}: " + "\n".join(parts)
     return kind
