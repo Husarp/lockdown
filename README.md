@@ -11,16 +11,26 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 
 ## Status
 
-**Phase 1 (MVP) done:** permanent website blocking via the hosts file, enforcement service, GUI with blocklist + popular-sites quick-list, system tray.
+- **Phase 1 (MVP) done:** permanent website blocking via the hosts file, enforcement service, GUI with blocklist + popular-sites quick-list, system tray.
+- **Phase 2 (mostly done):** blocking by hours (days + time window, overnight supported), temporary blocks, stacked rules,
+  locked browser DoH/QUIC policies, closing open connections on block, blocked-visit notifications, tray agent at login, single instance.
+  Daily time limits are still to come.
+
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
 ## How it works
 
-- The **GUI** (runs as you) writes the blocklist to `C:\ProgramData\Lockdown\config.db`.
-- The **enforcement service** (runs as SYSTEM) checks the database every 5 s and rewrites a marked
-  `# >>> Lockdown` section in `C:\Windows\System32\drivers\etc\hosts`, redirecting blocked hostnames to `127.0.0.1`.
-  Manual edits to that section are repaired automatically. The rest of the hosts file is never touched;
-  a backup of the original is kept at `C:\ProgramData\Lockdown\hosts.backup`.
+- The **GUI + tray agent** (runs as you, starts hidden at login) writes the blocklist to `C:\ProgramData\Lockdown\config.db`
+  and shows notifications.
+- The **enforcement service** (runs as SYSTEM) every 5 s:
+  - evaluates the rules (permanent / by hours / temporary) and rewrites a marked `# >>> Lockdown` section in
+    `C:\Windows\System32\drivers\etc\hosts`, redirecting blocked hostnames to `127.0.0.1`.
+    Manual edits are repaired; the rest of the hosts file is never touched (backup: `C:\ProgramData\Lockdown\hosts.backup`);
+  - keeps browser policies set that turn off DNS-over-HTTPS and QUIC in Chrome, Edge, Brave and Firefox
+    (browsers then show "managed by your organization") — otherwise browsers could skip the hosts file;
+  - closes already-open connections to a site right after it gets blocked.
+- The service also listens on `127.0.0.1:80/443`: when a browser tries to open a blocked site, it records which
+  site and why; the tray agent turns that into a notification (configurable on the Notifications page).
 - Service log: `C:\ProgramData\Lockdown\lockdown.log`.
 
 ## Setup
@@ -39,7 +49,7 @@ re-run after changing service code):
 Set-ExecutionPolicy -Scope Process Bypass -Force; & "<project folder>\scripts\install_service.ps1"
 ```
 
-Remove it with `scripts\uninstall_service.ps1` (clear the blocklist first so the hosts entries are removed).
+Remove it with `scripts\uninstall_service.ps1` (also removes the browser policies; clear the blocklist first so the hosts entries are removed).
 
 ## Usage
 
@@ -52,8 +62,10 @@ Or from a terminal in the project folder:
 .\.venv\Scripts\pythonw.exe src\main.py
 ```
 
-Closing the window minimizes it to the tray; use the tray icon's **Exit** to quit.
-Tray icon: green = service enforcing, red = service not running.
+- The app registers itself to start hidden in the tray at login (`HKCU\...\Run\Lockdown`).
+- Only one copy runs; launching it again just shows the window.
+- Closing the window minimizes it to the tray; use the tray icon's **Exit** to quit.
+- Tray icon: green = service enforcing, red = service not running.
 
 ## Development
 
@@ -66,6 +78,7 @@ Set `LOCKDOWN_DATA_DIR` to use a different data folder (e.g. for testing).
 ## Known limitations
 
 - The hosts file has no wildcards: blocking `reddit.com` also blocks `www.reddit.com`, but not other subdomains
-  unless they are listed (the quick-list includes the common ones).
-- Browsers with DNS-over-HTTPS enabled may skip the hosts file, and already-open connections can keep working
-  for a while after blocking.
+  unless they are listed (the quick-list, and typing a known site's domain, include the common ones).
+- Closing open connections works for IPv4 TCP only, and uses the site's IPs as resolved at block time
+  (big sites on CDNs may use other IPs too).
+- Anything is still easy to undo until the anti-bypass phase (7).

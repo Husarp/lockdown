@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 — 2026-09-18 20:40
+- Phase 2 (except daily time limits):
+  - Block by hours: pick days + from/to time, overnight windows supported (`src/rules.py`)
+  - Temporary blocks: 15 min to 24 h, expired ones cleaned up automatically
+  - Rules stack on one item (e.g. by hours + temporary); add form has block-type checkboxes; By Hours / Permanent / Temporary sub-tabs show filtered lists; status shows "Blocked now" / "Allowed now", refreshed every 30 s
+  - Typing a known site's domain (e.g. reddit.com) blocks all its common hostnames
+  - Service: locked browser policies turn off DNS-over-HTTPS + QUIC (Chrome, Edge, Brave, Firefox) — `blocker/browser_policy.py`; removed again by the uninstall script
+  - Service: closes open TCP connections to newly blocked sites for 3 min — `blocker/connections.py`
+  - Service: blocked-visit listener on 127.0.0.1:80/443 (reads HTTP Host / HTTPS SNI) — `blocker/listener.py`, new `block_events` table
+  - Tray agent: notifications for blocked visits (Windows notification / Lockdown popup / both); new Notifications page with per-reason on/off + custom messages (`{site}` `{reason}` `{until}`), repeat cooldown, format, recent visits list; per-site Alerts override (Default/On/Off) on the Blocking page
+  - GUI starts hidden in the tray at login (HKCU Run key) and runs as a single instance
+  - `blocked_items.notify` column added with automatic migration
+  - 41 tests passing
+- PLAN.md: session-0 rule + architecture split (service = enforcement, tray agent = desktop work), tray relaunch + Exit challenge added to Phase 7, Phase 2 items marked
+
 ## 0.1.4 — 2026-09-18 20:10
 - PLAN.md: added blocked-visit notifications (reason: permanent / limit reached / outside hours; customizable per reason, message, cooldown, format, per-item override) — section 1.1, Notifications screen 3.10, Phase 2 checklist
 

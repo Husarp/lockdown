@@ -1014,10 +1014,24 @@ General app settings (lock and notification settings have moved to their own tab
 
 ## 5. Architecture
 
+> **Session 0 rule:** the service runs as SYSTEM in Windows' isolated "session 0" — it has no access to the
+> user's desktop. So it **cannot** show notifications/popups, see the foreground window, or detect mouse/keyboard
+> activity. Everything that needs the desktop lives in the **tray agent** (the GUI process, running as the user,
+> auto-started at login). The service does enforcement; the tray agent does tracking + notifications and
+> reports to the service through `config.db`.
+
 ```
 ┌─────────────────────────────────────────────────┐
-│              GUI App                            │
-│  (customtkinter — runs as user)                 │
+│       GUI App + Tray Agent (one process)        │
+│  (customtkinter — runs as user, starts at login,│
+│   single instance, window hides to tray)        │
+│                                                 │
+│   Tray agent (always running):                  │
+│   - Shows notifications (blocked visits, limits)│
+│   - Tracks foreground window + switches         │
+│   - Tracks mouse/keyboard activity (idle)       │
+│   - Fires reminders (sleep/break/custom)        │
+│   - Shows lock/limit overlays                   │
 │                                                 │
 │  ┌─────────┐ ┌───────┐ ┌──────┐ ┌───────────┐  │
 │  │Dashboard│ │Block  │ │Screen│ │  Network  │  │
@@ -1039,14 +1053,16 @@ General app settings (lock and notification settings have moved to their own tab
         │   (SYSTEM account)                      │
         │                                         │
         │   - Enforces hosts file                 │
+        │   - Locks browser DoH/QUIC policies     │
+        │   - Closes connections to blocked sites │
+        │   - Blocked-visit listener (127.0.0.1)  │
         │   - Kills blocked processes             │
         │   - Monitors connections (psutil)       │
-        │   - Tracks foreground window            │
-        │   - Tracks mouse/keyboard activity      │
         │   - Logs network activity               │
         │   - Guards config file                  │
-        │   - Fires reminders (sleep/break)       │
         │   - Enforces screen time limits         │
+        │     (decides; tray agent shows overlay) │
+        │   - Relaunches tray agent if killed     │
         │   - Auto-restarts on kill               │
         └───────────┬─────────────────────────────┘
                     │
@@ -1116,13 +1132,14 @@ General app settings (lock and notification settings have moved to their own tab
 **Phase 1 decisions:** data in `C:\ProgramData\Lockdown\` (Users get modify rights for now, locked down in Phase 7); only Permanent rules; unblocking is instant (no challenge) until Phase 7; hosts file has no wildcards, so sites list their hostnames explicitly (`www.` added automatically).
 
 ### Phase 2 — Scheduling & Limits
-- [ ] DoH lock: disable DNS-over-HTTPS in Chrome/Edge/Firefox via locked policies, re-applied by the service
-- [ ] Disable QUIC/HTTP3 in Chrome/Edge via policy (so connections can be closed)
-- [ ] Close open connections to a site when it gets blocked (resolve real IPs, `SetTcpEntry`)
-- [ ] Blocked visit notifications (localhost listener + reason: permanent / limit / outside hours; customizable per reason, cooldown, format, per-item override)
-- [ ] Schedule-based blocking (time ranges, days of week)
-- [ ] Daily time limits per site
-- [ ] Temporary blocks (block for X hours)
+- [x] DoH lock: disable DNS-over-HTTPS in Chrome/Edge/Brave/Firefox via locked policies, re-applied by the service
+- [x] Disable QUIC/HTTP3 in Chrome/Edge/Brave (+ Firefox via locked pref) so connections can be closed
+- [x] Close open connections to a site when it gets blocked (resolve real IPs, `SetTcpEntry`; keeps closing for 3 min)
+- [x] Blocked visit notifications (localhost listener + reason: permanent / outside hours / temporary; customizable per reason, cooldown, format, per-item override) — "limit reached" reason comes with daily limits
+- [x] Tray agent auto-starts at login (hidden in tray) + single instance (second launch just shows the window)
+- [x] Schedule-based blocking (time ranges, days of week, overnight windows)
+- [ ] Daily time limits per site — **on hold: open question how to measure time on a site** (see conversation)
+- [x] Temporary blocks (block for 15 min … 24 h; expired ones removed automatically)
 
 ### Phase 3 — App Blocking
 - [ ] Process monitoring (detect running blocked apps)
@@ -1162,6 +1179,8 @@ General app settings (lock and notification settings have moved to their own tab
 - [ ] Type-a-phrase challenge
 - [ ] Math problem challenge
 - [ ] Service permission lockdown
+- [ ] Service relaunches the tray agent if it's closed/killed (and logs the attempt)
+- [ ] Tray "Exit" requires the anti-bypass challenge (closing the window still just hides to tray)
 - [ ] Convert enforcement scheduled task into a real Windows Service (pywin32, easier once packaged with PyInstaller)
 - [ ] Lock down `C:\ProgramData\Lockdown\` ACLs (currently Users: modify)
 - [ ] Watchdog service
@@ -1201,8 +1220,13 @@ Lockdown/
 │   ├── service.py             # Enforcement service
 │   ├── watchdog.py            # Watchdog service
 │   ├── db.py                  # SQLite database layer
+│   ├── rules.py               # Block rule evaluation (permanent / scheduled / temporary)
+│   ├── alerts.py              # Blocked-visit alert settings + message formatting
 │   ├── blocker/
 │   │   ├── hosts.py           # Hosts file manipulation
+│   │   ├── browser_policy.py  # Locked browser policies (DoH off, QUIC off)
+│   │   ├── connections.py     # Close open TCP connections to blocked sites
+│   │   ├── listener.py        # 127.0.0.1:80/443 blocked-visit listener
 │   │   ├── apps.py            # App/process blocking
 │   │   └── firewall.py        # Firewall rule management
 │   ├── monitor/
@@ -1224,6 +1248,7 @@ Lockdown/
 │   │   ├── settings.py        # Global settings view
 │   │   ├── charts.py          # Chart/graph widgets
 │   │   ├── page_settings.py   # Per-page display settings panel
+│   │   ├── single_instance.py # One GUI/tray process only
 │   │   └── tray.py            # System tray icon
 │   ├── lock/
 │   │   ├── challenges.py      # Type-phrase, math problems, grid challenge
@@ -1273,6 +1298,7 @@ CREATE TABLE blocked_items (
     block_type TEXT,              -- kill, firewall, both (apps only)
     note TEXT,                    -- user's personal note
     source TEXT,                  -- manual, import, quick-list
+    notify TEXT,                  -- blocked-visit alerts override: NULL = default, 'on', 'off'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1286,6 +1312,17 @@ CREATE TABLE block_rules (
     schedule TEXT,                -- JSON: days + hours for scheduled
     temp_until DATETIME,          -- for temporary
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Attempts to open a blocked site (service listener writes, tray agent notifies)
+CREATE TABLE block_events (
+    id INTEGER PRIMARY KEY,
+    timestamp DATETIME,
+    hostname TEXT,
+    item_id INTEGER,
+    display_name TEXT,
+    reason TEXT,                  -- permanent, schedule, temporary
+    until DATETIME
 );
 
 -- Network log

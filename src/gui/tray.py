@@ -32,6 +32,10 @@ class Tray:
     def stop(self):
         self.icon.stop()
 
+    def notify(self, message: str):
+        """Windows notification (toast) from the tray icon."""
+        self.icon.notify(message, "Lockdown")
+
     def update(self, running: bool, status_text: str):
         self.status_text = status_text
         if running != self.running:
