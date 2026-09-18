@@ -15,7 +15,6 @@ PERIOD_WORDS = {"day": "today", "week": "this week", "month": "this month"}
 TIME_LIMIT_FIELDS = {"day": "daily_limit_min", "week": "weekly_limit_min", "month": "monthly_limit_min"}
 OPEN_LIMIT_FIELDS = {"day": "daily_switch_limit", "week": "weekly_switch_limit", "month": "monthly_switch_limit"}
 RESET_KEY = "limits.reset"   # setting: JSON written by change_reset()
-RESET_CHANGE_DAYS = 7        # the reset time can be changed once a week
 
 
 def parse_hhmm(text: str) -> time:
@@ -102,14 +101,15 @@ class LimitClock:
     belongs to the date most of it falls on). Screen-time stats keep normal calendar days.
 
     After the reset time is changed, the day that was running goes on until the new time comes round after its
-    normal end: that day is longer, never shorter, so changing the time never resets limits early."""
+    normal end: that day is longer, never shorter. The running week and month are held the same way (they don't
+    end before they would have). So changing the time - any number of times - never resets limits early."""
 
     def __init__(self, config: str | None = None):
         c = json.loads(config) if config else {}
         self.time = parse_hhmm(c.get("time", "00:00"))
         self.carry_start = _parse_dt(c.get("day_start"))   # the day running when the time was changed ...
         self.carry_until = _parse_dt(c.get("switch"))      # ... lasts until here
-        self.changed = _parse_dt(c.get("changed"))
+        self.holds = {k: (key, _parse_dt(until)) for k, (key, until) in c.get("hold", {}).items()}
 
     def day(self, now: datetime) -> tuple[datetime, datetime]:
         """(start, end) of the limit day containing now."""
@@ -122,6 +122,14 @@ class LimitClock:
 
     def period(self, kind: str, now: datetime) -> tuple[str, datetime]:
         """(key, end) of the day / week / month limit period containing now."""
+        key, end = self._natural_period(kind, now)
+        if kind in self.holds:   # the week / month running when the time was changed doesn't end early
+            hold_key, until = self.holds[kind]
+            if now < until and key != hold_key:
+                return hold_key, until
+        return key, end
+
+    def _natural_period(self, kind: str, now: datetime) -> tuple[str, datetime]:
         start, end = self.day(now)
         if kind == "day":   # midnight days keep the plain date (the keys used before reset times existed)
             return (start.date().isoformat() if start.time() == time(0) else f"{start:%Y-%m-%dT%H:%M}"), end
@@ -137,30 +145,27 @@ class LimitClock:
             boundary -= timedelta(days=1)
         return key, max(end, boundary)
 
-    def next_change(self) -> datetime | None:
-        """When the reset time may be changed again (None = any time)."""
-        return self.changed + timedelta(days=RESET_CHANGE_DAYS) if self.changed else None
-
 
 DEFAULT_CLOCK = LimitClock()
 
 
 def change_reset(config: str | None, new_time: str, now: datetime) -> str:
-    """New RESET_KEY value for a changed reset time. Raises ValueError (bad time / changed too recently)."""
+    """New RESET_KEY value for a changed reset time. Raises ValueError for a badly written time."""
     clock = LimitClock(config)
     try:
         new = parse_hhmm(new_time)
     except ValueError:
         raise ValueError("The time must look like 04:00.") from None
-    if (again := clock.next_change()) and now < again:
-        raise ValueError(f"The reset time can be changed once a week - next on {DAY_NAMES[again.weekday()]} "
-                         f"{again:%Y-%m-%d %H:%M}.")
     start, end = clock.day(now)
     switch = datetime.combine(end.date(), new)
     if switch < end:
         switch += timedelta(days=1)
+    hold = {}
+    for kind in ("week", "month"):
+        key, until = clock.period(kind, now)
+        hold[kind] = [key, until.strftime(TIME_FMT)]
     return json.dumps({"time": f"{new:%H:%M}", "day_start": start.strftime(TIME_FMT),
-                       "switch": switch.strftime(TIME_FMT), "changed": now.strftime(TIME_FMT)})
+                       "switch": switch.strftime(TIME_FMT), "hold": hold})
 
 
 class Usage:

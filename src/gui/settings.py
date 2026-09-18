@@ -108,18 +108,12 @@ class SettingsPage(ctk.CTkFrame):
     def load(self):
         now = now_from_db(self.db)
         clock = self.db.limit_clock()
-        self.reset_entry.configure(state="normal")
         self.reset_entry.delete(0, "end")
         self.reset_entry.insert(0, f"{clock.time:%H:%M}")
-        locked = bool((again := clock.next_change()) and now < again)
-        self.reset_entry.configure(state="disabled" if locked else "normal")
-        self.reset_btn.configure(state="disabled" if locked else "normal")
         _start, end = clock.day(now)
         info = f"The current limit day runs until {when_text(end)}."
         if clock.carry_until and now < clock.carry_until:
             info += " It's longer than usual because the time was changed - a change never starts a new day early."
-        if locked:
-            info +=f"\nThe time can be changed once a week - next on {when_text(again)}."
         self.reset_info.configure(text=info)
         self.reset_error.configure(text="")
 

@@ -1196,7 +1196,8 @@ General app settings (lock and notification settings have moved to their own tab
 ### Phase 3c — Limit reset time, emergency unlock, weekly/monthly limits (approved 2026-09-18)
 - [x] Setting: when limits reset (e.g. 04:00 instead of midnight); only limits - stats keep calendar days;
   weeks start Monday / months on the 1st at that time
-  - a change never gives a free reset: the current limit day gets longer, never shorter; can be changed once a week
+  - a change never gives a free reset: the current limit day gets longer, never shorter (the running week/month
+    are held too); can be changed any number of times (once-a-week lock removed 2026-09-18)
 - [x] Emergency unlock: button at the top of Overview → list of everything blocked right now → tick one or more
   (= one use) → confirm → unblocked. Settings: on/off, duration (default 20 min), uses (default 3 per week; per day/week)
   - dropped: "time used during an unlock counts toward limits" option (not needed)

@@ -23,7 +23,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   "+ Popular sites" picker with site icons. **Auto-save** is on by default; turn it off to stage changes until you
   press **Save changes** (unsaved items then show "Not applied").
 - **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week), a configurable **limit reset
-  time** (Settings; a change never ends the current limit day early, once a week), and **Emergency unlock**
+  time** (Settings; a change never ends the current limit day, week or month early), and **Emergency unlock**
   (Blocking > Overview: unblock chosen items for 20 min; 3 uses per week by default, configurable in Settings).
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.

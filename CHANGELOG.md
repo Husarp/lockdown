@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.9.1 — 2026-09-18 23:14
+- Limit reset time can be changed any number of times (no once-a-week lock); the running week and month are now also held, so a change can't start a new week/month early (before: up to 12 h early)
+
 ## 0.9.0 — 2026-09-18 23:07
 - **Limit reset time** (Settings): limits start over at a chosen time instead of midnight (weekly limits on Monday, monthly on the 1st, at that time). A change never ends the current limit day early - that day gets longer instead - and the time can be changed once a week. Screen-time stats keep normal calendar days
 - **Weekly and monthly limits**: "Time limit" and "Opening limit" (renamed from "Daily ...") take per day / per week / per month, in any combination (e.g. 2h a day but at most 8h a week); each blocks until its own period ends. Time can be typed as 45m, 2h, 1h30

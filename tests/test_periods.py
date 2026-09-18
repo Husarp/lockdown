@@ -49,11 +49,18 @@ def test_change_never_shortens_the_day():
     assert LimitClock(cfg).day(at(1, 1)) == (at(0, 0), at(1, 4))  # day runs to 04:00 tomorrow (28 h)
 
 
-def test_change_once_a_week():
-    cfg = change_reset(None, "04:00", at(0, 22))
-    with pytest.raises(ValueError, match="once a week"):
-        change_reset(cfg, "05:00", at(6, 22))
-    assert json.loads(change_reset(cfg, "05:00", at(7, 22)))["time"] == "05:00"
+def test_repeated_changes_only_make_the_day_longer():
+    cfg = change_reset(None, "04:00", at(0, 22))     # Monday 22:00: day now runs to Tue 04:00
+    cfg = change_reset(cfg, "01:00", at(0, 23))       # can't pull it back: runs to Wed 01:00
+    assert LimitClock(cfg).day(at(1, 12)) == (at(0, 0), at(2, 1))
+
+
+def test_change_never_starts_the_week_early():
+    cfg = json.dumps({"time": "23:00"})                  # weeks start Sunday 23:00
+    cfg = change_reset(cfg, "12:00", at(5, 22))          # Saturday 22:00
+    c = LimitClock(cfg)
+    assert c.period("week", at(6, 13)) == ("w2026-09-14", at(6, 23))   # Sunday 13:00: still the old week
+    assert c.period("week", at(6, 23, 30))[0] == "w2026-09-21"
 
 
 def test_stacked_time_limits():
