@@ -252,3 +252,77 @@ class ProgressLine(ctk.CTkFrame):
     def set(self, fraction: float, color):
         self.bar.configure(progress_color=color)
         self.bar.set(max(0.0, min(1.0, fraction)))
+
+
+# ---------------------------------------------------------------- blocking page pieces
+
+CHIP_STYLES = {   # kind -> (text colour, background)
+    "group": (theme.ACCENT, ("#FBEAE3", "#2A1E19")),
+    "warn": (theme.WARNING, ("#FBF1DE", "#241E15")),
+    "danger": (theme.DANGER, ("#FBE5E3", "#2A1A19")),
+    "ok": (theme.SUCCESS, ("#E3F3E9", "#16241C")),
+    "neutral": (theme.MUTED, ("#EFF1F3", "#1F252D")),
+}
+
+
+def rule_chip(parent, text: str, kind: str = "neutral", wraplength: int = 200) -> ctk.CTkLabel:
+    """A rule shown as a small tinted label."""
+    fg, bg = CHIP_STYLES[kind]
+    return ctk.CTkLabel(parent, text=f" {text} ", text_color=fg, fg_color=bg, corner_radius=3, font=theme.body(11),
+                        wraplength=wraplength, justify="left", anchor="w", height=22)
+
+
+class BlockerCard(ctk.CTkFrame):
+    """A blocker as a collapsible card: tick box + name and a one-line summary; its settings open underneath.
+    `summary()` gives the text shown on the right (called when anything changes)."""
+
+    def __init__(self, master, name: str, make_editor, summary, off_text: str = "off", on_change=None):
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=6)
+        self.summary_fn, self.off_text, self.on_change = summary, off_text, on_change
+        self.bar = ctk.CTkFrame(self, width=3, height=1, corner_radius=0, fg_color="transparent")
+        self.bar.pack(side="left", fill="y", pady=1)
+        inner = ctk.CTkFrame(self, fg_color="transparent")
+        inner.pack(side="left", fill="both", expand=True)
+        head = ctk.CTkFrame(inner, fg_color="transparent")
+        head.pack(fill="x", padx=(10, 8), pady=6)
+        self.check = ctk.CTkCheckBox(head, text=name, font=theme.semi(13), command=self._ticked)
+        self.check.pack(side="left")
+        self.chevron = ctk.CTkButton(head, text="▾", width=24, height=24, fg_color="transparent",
+                                     text_color=theme.MUTED, hover_color=theme.SURFACE2, command=self.toggle)
+        self.chevron.pack(side="right")
+        self.summary = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
+        self.summary.pack(side="right", padx=6)
+        self.body = ctk.CTkFrame(inner, fg_color="transparent")
+        self.editor = make_editor(self.body)
+        self.editor.pack(anchor="w")
+        self.open = False
+
+    def _ticked(self):
+        self.open = bool(self.check.get())
+        self.update_state()
+        if self.on_change:
+            self.on_change()
+
+    def toggle(self):
+        if self.check.get():
+            self.open = not self.open
+            self.update_state()
+
+    def set(self, on: bool):
+        self.check.select() if on else self.check.deselect()
+        self.open = on
+        self.update_state()
+
+    def update_state(self):
+        on = bool(self.check.get())
+        self.bar.configure(fg_color=theme.ACCENT if on else "transparent")
+        self.check.configure(text_color=theme.TEXT if on else theme.MUTED)
+        if on and self.open:
+            self.body.pack(fill="x", padx=(40, 12), pady=(0, 10))
+        else:
+            self.body.pack_forget()
+        self.chevron.configure(text="▴" if on and self.open else "▾")
+        self.refresh_summary()
+
+    def refresh_summary(self):
+        self.summary.configure(text=self.summary_fn() if self.check.get() else self.off_text)

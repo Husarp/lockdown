@@ -7,7 +7,8 @@ shared total for all members.
 import customtkinter as ctk
 
 from gui import icons, theme
-from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor, SwitchEditor
+from gui.components import BlockerCard, eyebrow
+from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor, SwitchEditor, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton, clear_entry
 from rules import describe_rule, effective_rules, item_block
@@ -80,59 +81,66 @@ class CustomizeMember(ctk.CTkToplevel):
 
 
 class GroupEditor(ctk.CTkFrame):
+    """Name, blockers (collapsible cards) and members (chips) of one group."""
+
     def __init__(self, master, tab):
-        super().__init__(master)
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
         self.tab, self.draft = tab, tab.draft
         self.group_id: int | None = None
         self.members: list[dict] = []
-        self.title = ctk.CTkLabel(self, font=ctk.CTkFont(size=16, weight="bold"))
-        self.title.pack(anchor="w", padx=16, pady=(12, 8))
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(12, 8))
+        ctk.CTkFrame(head, width=3, height=24, corner_radius=0, fg_color=theme.ACCENT).pack(side="left", padx=(0, 10))
+        self.title = ctk.CTkLabel(head, font=theme.body(18, "bold"))
+        self.title.pack(side="left")
+        ctk.CTkButton(head, text="Done", width=70, command=self._save).pack(side="right")
+        ctk.CTkButton(head, text="Cancel", width=70, **theme.OUTLINE, command=self.tab.close_editor).pack(
+            side="right", padx=6)
+        self.remove_btn = ConfirmButton(head, self._remove, text="Remove group", confirm_text="Confirm remove",
+                                        width=120)
         name_row = ctk.CTkFrame(self, fg_color="transparent")
-        name_row.pack(anchor="w", padx=16)
-        ctk.CTkLabel(name_row, text="Name").pack(side="left", padx=(0, 8))
-        self.name = ctk.CTkEntry(name_row, width=260, placeholder_text="e.g. Night schedule, Games")
-        self.name.pack(side="left")
+        name_row.pack(fill="x", padx=16)
+        ctk.CTkLabel(name_row, text="Name", width=60, anchor="w").pack(side="left")
+        self.name = ctk.CTkEntry(name_row, placeholder_text="e.g. Night schedule, Games")
+        self.name.pack(side="left", fill="x", expand=True)
 
-        ctk.CTkLabel(self, text="Rules (combine any)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=16, pady=(14, 4))
+        eyebrow(self, "Blockers - tick any number").pack(anchor="w", padx=16, pady=(14, 4))
+        self.cards: dict[str, BlockerCard] = {}
         self.rule_parts = {}
         for t in EDITORS:
-            box = ctk.CTkCheckBox(self, text=RULE_NAMES[t], command=lambda t=t: self._toggle(t))
-            box.pack(anchor="w", padx=16, pady=(6, 2))
-            editor = _make_editor(self, t)
-            self.rule_parts[t] = (box, editor)
+            card = BlockerCard(self, RULE_NAMES[t], lambda m, t=t: _make_editor(m, t),
+                               lambda t=t: summary(t, self.cards[t].editor), off_text="not used")
+            card.pack(fill="x", padx=16, pady=3)
+            self.cards[t] = card
+            self.rule_parts[t] = (card.check, card.editor)
 
-        ctk.CTkLabel(self, text="Members", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=16, pady=(14, 4))
-        self.picker = TargetPicker(self, tab.page.app.db)
-        self.picker.pack(anchor="w", padx=16)
-        ctk.CTkButton(self.picker.buttons, text="+ Add member", width=110, command=self._add_member).pack(side="left", padx=4)
+        eyebrow(self, "Members").pack(anchor="w", padx=16, pady=(14, 4))
         self.members_box = ctk.CTkFrame(self, fg_color="transparent")
-        self.members_box.pack(fill="x", padx=16, pady=6)
+        self.members_box.pack(fill="x", padx=16)
+        self.add_btn = ctk.CTkButton(self, text="+ Add member", width=120, **theme.OUTLINE, command=self._show_picker)
+        self.add_btn.pack(anchor="w", padx=16, pady=(6, 0))
+        self.picker = TargetPicker(self, tab.page.app.db)
+        ctk.CTkButton(self.picker.buttons, text="Add", width=70, command=self._add_member).pack(side="left", padx=4)
         self.error = ctk.CTkLabel(self, text="", text_color=ERROR)
-        self.error.pack(anchor="w", padx=16)
-        buttons = ctk.CTkFrame(self, fg_color="transparent")
-        buttons.pack(anchor="w", padx=16, pady=(4, 14))
-        ctk.CTkButton(buttons, text="Save group", width=110, command=self._save).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(buttons, text="Cancel", width=80, **theme.OUTLINE,
-                      command=self.tab.close_editor).pack(side="left")
+        self.error.pack(anchor="w", padx=16, pady=(4, 10))
 
-    def _toggle(self, t: str):
-        box, editor = self.rule_parts[t]
-        if box.get():
-            editor.pack(anchor="w", padx=40, pady=(0, 6), after=box)
-        else:
-            editor.pack_forget()
+    def _show_picker(self):
+        self.picker.pack(anchor="w", padx=16, pady=(6, 0), before=self.error)
 
     def load(self, group: dict | None):
         self.group_id = group["id"] if group else None
-        self.title.configure(text=f"Edit group {group['name']}" if group else "New group")
+        self.title.configure(text="Edit group" if group else "New group")
+        if group:
+            self.remove_btn.pack(side="right")
+        else:
+            self.remove_btn.pack_forget()
         clear_entry(self.name)
         if group:
             self.name.insert(0, group["name"])
         rules = {r["rule_type"]: r for r in (group or {}).get("rules", [])}
-        for t, (box, editor) in self.rule_parts.items():
-            editor.load(rules.get(t))
-            box.select() if t in rules else box.deselect()
-            self._toggle(t)
+        for t, card in self.cards.items():
+            card.editor.load(rules.get(t))
+            card.set(t in rules)
         self.members = []
         for item_id, overrides in (group or {}).get("members", {}).items():
             item = self.draft.items.get(item_id)
@@ -140,11 +148,12 @@ class GroupEditor(ctk.CTkFrame):
                 self.members.append({"item_id": item_id, "name": item["display_name"], "item": item,
                                      "overrides": dict(overrides or {})})
         self.picker.reset()
+        self.picker.pack_forget()
         self.error.configure(text="")
         self._render_members()
 
     def _current_rules(self) -> list[dict]:
-        return [editor.value() for t, (box, editor) in self.rule_parts.items() if box.get()]
+        return [card.editor.value() for card in self.cards.values() if card.check.get()]
 
     def _add_member(self):
         self.picker.entry.hide()
@@ -164,6 +173,7 @@ class GroupEditor(ctk.CTkFrame):
         self.members.append({"item_id": existing["id"] if existing else None, "name": item["display_name"],
                              "item": item, "target": target, "overrides": {}})
         self.picker.reset()
+        self.picker.pack_forget()
         self.error.configure(text="")
         self._render_members()
 
@@ -173,18 +183,23 @@ class GroupEditor(ctk.CTkFrame):
         if not self.members:
             ctk.CTkLabel(self.members_box, text="No members yet.", text_color=MUTED).pack(anchor="w")
             return
-        for m in self.members:
-            row = ctk.CTkFrame(self.members_box, fg_color="transparent")
-            row.pack(fill="x", pady=1)
-            ctk.CTkLabel(row, text=f"  {m['name']}", image=icons.for_item(m["item"], 18), compound="left",
-                         width=220, anchor="w").pack(side="left")
-            custom = ", ".join(RULE_NAMES[t] for t in m["overrides"])
-            ctk.CTkLabel(row, text=f"customized: {custom}" if custom else "uses the group's rules",
-                         text_color=ORANGE if custom else MUTED, width=260, anchor="w").pack(side="left", padx=8)
-            ctk.CTkButton(row, text="Customize", width=90, **theme.OUTLINE,
-                          command=lambda m=m: self._customize(m)).pack(side="left", padx=4)
-            ctk.CTkButton(row, text="Remove", width=70, **theme.OUTLINE,
-                          command=lambda m=m: self._remove_member(m)).pack(side="left", padx=4)
+        grid = ctk.CTkFrame(self.members_box, fg_color="transparent")
+        grid.pack(anchor="w")
+        for i, m in enumerate(self.members):
+            chip = ctk.CTkFrame(grid, fg_color=theme.SURFACE2, border_width=1, border_color=theme.BORDER,
+                                corner_radius=4)
+            chip.grid(row=i // 3, column=i % 3, padx=(0, 8), pady=4, sticky="w")
+            name = ctk.CTkButton(chip, text=f" {m['name']}", image=icons.for_item(m["item"], 16), compound="left",
+                                 width=10, height=28, fg_color="transparent", hover_color=theme.BORDER,
+                                 text_color=theme.TEXT, font=theme.semi(12), command=lambda m=m: self._customize(m))
+            name.pack(side="left", padx=(4, 0))
+            custom = bool(m["overrides"])
+            ctk.CTkLabel(chip, text="customised" if custom else "group rules", font=theme.body(10),
+                         text_color=theme.ACCENT if custom else MUTED).pack(side="left", padx=(2, 4))
+            ctk.CTkButton(chip, text="×", width=22, height=22, fg_color="transparent", hover_color=theme.BORDER,
+                          text_color=MUTED, command=lambda m=m: self._remove_member(m)).pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(self.members_box, text="Click a member to give it its own version of the group's rules.",
+                     text_color=MUTED, font=theme.body(11)).pack(anchor="w", pady=(2, 0))
 
     def _customize(self, member):
         try:
@@ -201,6 +216,13 @@ class GroupEditor(ctk.CTkFrame):
     def _remove_member(self, member):
         self.members.remove(member)
         self._render_members()
+
+    def _remove(self):
+        if self.group_id is not None:
+            name = self.name.get().strip()
+            self.tab.close_editor()
+            self.draft.remove_group(self.group_id)
+            self.tab.page.confirm(f"Group {name} removed")
 
     def _save(self):
         name = self.name.get().strip()
@@ -229,65 +251,87 @@ class GroupEditor(ctk.CTkFrame):
         self.tab.page.confirm(f"Group {name} {'added' if added else 'saved'}")
 
 
-class GroupsTab(ctk.CTkScrollableFrame):
+class GroupsTab(ctk.CTkFrame):
+    """Groups on the left, the selected group's editor on the right."""
+
     def __init__(self, master, page):
         super().__init__(master, fg_color="transparent")
         self.page, self.draft = page, page.draft
+        self.selected: int | None = None
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=10, pady=(4, 8))
-        self.title = ctk.CTkLabel(top, font=ctk.CTkFont(size=16, weight="bold"))
-        self.title.pack(side="left")
-        self.new_btn = ctk.CTkButton(top, text="+ New group", width=110, command=lambda: self.open_editor(None))
-        self.new_btn.pack(side="left", padx=16)
-        ctk.CTkLabel(self, text="A group shares its rules with all members, e.g. \"Night schedule\" blocks all its "
-                                "apps and sites at night; \"Games\" gives all games 2 h per day together.",
-                     text_color=MUTED, wraplength=820, justify="left").pack(anchor="w", padx=10, pady=(0, 8))
-        self.editor = GroupEditor(self, self)
-        self.list_box = ctk.CTkFrame(self)
-        self.list_box.pack(fill="x")
+        top.pack(fill="x", pady=(0, 10), padx=(0, 18))   # line up with the cards (scrollbar)
+        ctk.CTkLabel(top, text="A group shares its rules with all members, e.g. \"Night schedule\" blocks its apps and "
+                               "sites at night; \"Games\" gives all games 2 h a day together.",
+                     text_color=MUTED, font=theme.body(11), wraplength=620, justify="left").pack(side="left")
+        ctk.CTkButton(top, text="+ New group", width=120, command=lambda: self.open_editor(None)).pack(side="right")
+        cols = ctk.CTkFrame(self, fg_color="transparent")
+        cols.pack(fill="both", expand=True)
+        cols.grid_columnconfigure(0, weight=1, uniform="g")
+        cols.grid_columnconfigure(1, weight=2, uniform="g")
+        cols.grid_rowconfigure(0, weight=1)
+        self.list_box = ctk.CTkScrollableFrame(cols, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
+        self.list_box.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.right = ctk.CTkScrollableFrame(cols, fg_color="transparent")
+        self.right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        self.placeholder = ctk.CTkLabel(self.right, text="Pick a group on the left, or create a new one.",
+                                        text_color=MUTED)
+        self.placeholder.pack(anchor="w", pady=20, padx=10)
+        self.editor = GroupEditor(self.right, self)
+        self.last = (None, None)
 
     def open_editor(self, group_id: int | None):
+        self.selected = group_id
         self.editor.load(self.draft.groups.get(group_id) if group_id is not None else None)
-        self.editor.pack(fill="x", pady=(0, 12), before=self.list_box)
-        self._parent_canvas.yview_moveto(0)
+        self.placeholder.pack_forget()
+        self.editor.pack(fill="x")
+        self.right._parent_canvas.yview_moveto(0)
+        self.refresh(*self.last)
 
     def edit(self, group_id: int):
         self.open_editor(group_id)
 
     def close_editor(self):
+        self.selected = None
         self.editor.pack_forget()
+        self.placeholder.pack(anchor="w", pady=20, padx=10)
 
     def refresh(self, now, usage):
-        groups = self.draft.sorted_groups()
-        self.title.configure(text=f"Groups ({len(groups)})")
+        if now is None:
+            return
+        self.last = (now, usage)
         for w in self.list_box.winfo_children():
             w.destroy()
+        groups = self.draft.sorted_groups()
         if not groups:
-            ctk.CTkLabel(self.list_box, text="No groups yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
+            ctk.CTkLabel(self.list_box, text="No groups yet.", text_color=MUTED).pack(anchor="w", padx=12, pady=12)
             return
         saved_groups = list(self.draft.saved_groups.values())
         for g in groups:
-            row = ctk.CTkFrame(self.list_box, fg_color="transparent")
-            row.pack(fill="x", pady=4)
-            left = ctk.CTkFrame(row, fg_color="transparent", width=300)
-            left.pack(side="left", padx=8, anchor="n")
-            ctk.CTkLabel(left, text=g["name"], font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w")
-            names = [self.draft.items[i]["display_name"] for i in g["members"] if i in self.draft.items]
-            ctk.CTkLabel(left, text=f"{len(names)} members: " + ", ".join(sorted(names)) if names else "no members",
-                         text_color=MUTED, wraplength=280, justify="left", font=ctk.CTkFont(size=11)).pack(anchor="w")
-            rules = "\n".join(describe_rule({**r, "usage_owner": f"group:{g['id']}"}, now, usage) for r in g["rules"])
-            ctk.CTkLabel(row, text=rules, justify="left", width=280, anchor="w", wraplength=270).pack(side="left", padx=8)
+            on = g["id"] == self.selected
+            entry = ctk.CTkFrame(self.list_box, fg_color=theme.SURFACE2 if on else "transparent", corner_radius=4)
+            entry.pack(fill="x", padx=4, pady=3)
+            ctk.CTkFrame(entry, width=3, height=1, corner_radius=0,
+                         fg_color=theme.ACCENT if on else "transparent").pack(side="left", fill="y")
+            texts = ctk.CTkFrame(entry, fg_color="transparent")
+            texts.pack(side="left", fill="x", expand=True, padx=10, pady=8)
+            names = sorted(self.draft.items[i]["display_name"] for i in g["members"] if i in self.draft.items)
+            rules = " · ".join(describe_rule({**r, "usage_owner": f"group:{g['id']}"}, now, usage)
+                               .replace(":\n", " ").replace("\n", " · ") for r in g["rules"])
             if self.draft.is_group_unsaved(g["id"]):
-                status = {"text": "○ Not applied\n(unsaved)", "text_color": ORANGE}
+                status, color = "Not applied (unsaved)", ORANGE
             else:
                 blocked = sum(1 for i in g["members"] if i in self.draft.saved_items and item_block(
                     effective_rules(self.draft.saved_items[i], saved_groups), now, usage))
-                status = {"text": f"● {blocked} of {len(g['members'])} blocked now",
-                          "text_color": RED if blocked else GREEN}
-            ctk.CTkLabel(row, **status, width=150, anchor="w", justify="left").pack(side="left", padx=8)
-            ctk.CTkButton(row, text="Edit", width=60, command=lambda gid=g["id"]: self.open_editor(gid)).pack(side="left", padx=4)
-            ConfirmButton(row, lambda g=g: self._remove(g), width=70).pack(side="left", padx=4)
-
-    def _remove(self, group):
-        self.close_editor()
-        self.draft.remove_group(group["id"])
+                status = f"{blocked} of {len(g['members'])} blocked now" if blocked else "Allowed now"
+                color = RED if blocked else GREEN
+            lines = [(g["name"], theme.semi(13), theme.TEXT),
+                     (f"{len(names)} members · " + ", ".join(names) if names else "no members", theme.body(11), MUTED),
+                     (rules, theme.body(11), theme.TEXT), (status, theme.body(11), color)]
+            widgets = [entry, texts]
+            for text, font, fg in lines:
+                label = ctk.CTkLabel(texts, text=text, font=font, text_color=fg, anchor="w", justify="left",
+                                     wraplength=230)
+                label.pack(anchor="w")
+                widgets.append(label)
+            for w in widgets:
+                w.bind("<Button-1>", lambda e, gid=g["id"]: self.open_editor(gid))

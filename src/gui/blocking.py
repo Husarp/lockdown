@@ -1,10 +1,10 @@
 """Blocking page - three tabs:
 
-- Overview: every blocked site/app with all its rules (own + groups), sortable; Edit opens it in "Add",
-  Remove deletes it (two clicks).
+- Overview: every blocked site/app with all its rules (own + groups) as chips, sortable; Edit opens it in "Add",
+  Remove deletes it (two clicks). Emergency unlock.
 - Groups: shared rule sets (see groups.py).
-- Add: pick a site or app, then tick any number of blockers at once (hours, time limit, switch limit,
-  permanent, temporary). Also used to edit an existing item.
+- Add: pick a site or app, then tick any number of blockers at once (collapsible cards: hours, time limit,
+  opening limit, permanent, temporary). Also used to edit an existing item.
 All edits go into the draft (see draft.py).
 """
 import tkinter as tk
@@ -15,8 +15,9 @@ import customtkinter as ctk
 import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
+from gui.components import BlockerCard, eyebrow, rule_chip
 from gui.groups import GroupsTab
-from gui.rule_editors import EDITORS, RULE_NAMES
+from gui.rule_editors import EDITORS, RULE_NAMES, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
@@ -30,10 +31,11 @@ ALERTS = {"Default": None, "On": "on", "Off": "off"}
 REFRESH_MS = 30_000   # full rebuild (sorting, service cleanup)
 LIVE_MS = 2_000       # in-place update of counters / countdowns / status
 NOTICE_MS = 5_000     # how long "✓ ... added" stays
+SUMMARY_MS = 1_000    # blocker card summaries follow what's typed
 MUTED = theme.MUTED
 ERROR = theme.DANGER
 GREEN, ORANGE, RED, BLUE = theme.ALLOWED, theme.PENDING, theme.BLOCKED, theme.INFO
-COLS = [220, 290, 140]   # name + targets, rules, status (then action buttons)
+COLS = [230, 250]   # wrap widths: item text, rule chips
 
 
 # ---------------------------------------------------------------- shared helpers
@@ -49,50 +51,37 @@ def saved_block(draft, item: dict, now, usage):
 def status_of(page, item: dict, now, usage) -> dict:
     draft = page.draft
     if draft.item_not_applied(item["id"]):
-        return {"text": "○ Not applied\n(unsaved)", "text_color": ORANGE}
+        return {"text": "● Not applied\n(unsaved)", "text_color": ORANGE}
     unlocked = getattr(usage, "unlocks", {}).get(f"item:{item['id']}")
     if unlocked and now < unlocked:
-        return {"text": f"◐ Emergency unlock\n{duration_text((unlocked - now).total_seconds())} left",
+        return {"text": f"● Emergency unlock\n{duration_text((unlocked - now).total_seconds())} left",
                 "text_color": BLUE}
     if not saved_block(draft, item, now, usage):
-        return {"text": "○ Allowed now", "text_color": GREEN}
+        return {"text": "● Allowed now", "text_color": GREEN}
     if not page.app.service_running:
-        return {"text": "○ Pending - service\nnot running", "text_color": ORANGE}
+        return {"text": "● Pending - service\nnot running", "text_color": ORANGE}
     return {"text": "● Blocked now", "text_color": RED}
-
-
-def make_row(parent) -> ctk.CTkFrame:
-    row = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=6)
-    row.pack(fill="x", pady=1)
-    for col, width in enumerate(COLS):
-        row.grid_columnconfigure(col, minsize=width)
-    return row
 
 
 def targets_text(item: dict) -> str:
     if item["item_type"] == "app":
         flags = block_flags(item.get("block_type"))
-        words = (("close", "closed"), ("background", "background processes"), ("minimize", "minimized"),
+        words = (("close", "closes"), ("background", "background processes"), ("minimize", "minimises"),
                  ("internet", "internet blocked"))
         how = " + ".join(w for f, w in words if f in flags)
         return f"app · {item['target']} · {how}"
-    return ", ".join(item["target"].split())
+    return " · ".join(item["target"].split())
 
 
-def name_cell(row, item):
-    """Icon + name, with the hostnames / exe in small text underneath."""
-    cell = ctk.CTkFrame(row, fg_color="transparent")
-    cell.grid(row=0, column=0, padx=8, pady=6, sticky="w")
-    ctk.CTkLabel(cell, text=f"  {item['display_name']}", image=icons.for_item(item, 18), compound="left",
-                 font=ctk.CTkFont(weight="bold"), anchor="w").pack(anchor="w")
-    ctk.CTkLabel(cell, text=targets_text(item), text_color=MUTED, font=ctk.CTkFont(size=11),
-                 wraplength=COLS[0] - 16, justify="left", anchor="w").pack(anchor="w")
+def rule_text(rule, now, usage) -> str:
+    text = describe_rule(rule, now, usage).replace(":\n", ": ").replace("\n", " · ")
+    return f"→ {rule['group']['name']}  {text}" if rule["group"] else text
 
 
-def header_row(parent, titles):
-    row = make_row(parent)
-    for col, title in enumerate(titles):
-        ctk.CTkLabel(row, text=title, text_color=MUTED).grid(row=0, column=col, padx=8, pady=(6, 0), sticky="w")
+def chip_kind(rule) -> str:
+    if rule["group"]:
+        return "group"
+    return {"permanent": "danger", "temporary": "warn", "time_limit": "warn"}.get(rule["rule_type"], "neutral")
 
 
 # ---------------------------------------------------------------- Overview
@@ -102,19 +91,23 @@ class OverviewTab(ctk.CTkScrollableFrame):
         super().__init__(master, fg_color="transparent")
         self.page, self.draft = page, page.draft
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=10, pady=(4, 8))
-        self.title = ctk.CTkLabel(top, font=ctk.CTkFont(size=16, weight="bold"))
+        top.pack(fill="x", pady=(0, 10))
+        self.title = ctk.CTkLabel(top, font=theme.card_title())
         self.title.pack(side="left")
-        ctk.CTkButton(top, text="+ Add", width=80, command=lambda: page.show_tab("Add")).pack(side="left", padx=16)
         self.unlock_btn = ctk.CTkButton(top, text="Emergency unlock", width=140,
                                         **{**theme.OUTLINE, "border_color": ORANGE}, command=self._toggle_unlock)
+        ctk.CTkButton(top, text="+ Add", width=90, command=lambda: page.show_tab("Add")).pack(side="right")
         self.sort = ctk.CTkOptionMenu(top, values=SORTS, width=170, command=self._sort_changed)
         self.sort.set(page.app.db.get_setting(SORT_KEY, SORTS[0]))
-        self.sort.pack(side="right")
-        ctk.CTkLabel(top, text="Sort by", text_color=MUTED).pack(side="right", padx=8)
+        self.sort.pack(side="right", padx=10)
+        ctk.CTkLabel(top, text="Sort by", text_color=MUTED).pack(side="right")
         self.unlock_panel = ctk.CTkFrame(self, border_width=1, border_color=ORANGE)
-        self.list_box = ctk.CTkFrame(self)
-        self.list_box.pack(fill="x")
+        self.list_card = ctk.CTkFrame(self, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
+        self.list_card.pack(fill="x")
+        self.list_box = ctk.CTkFrame(self.list_card, fg_color="transparent")
+        self.list_box.pack(fill="x", padx=15, pady=(8, 4))
+        ctk.CTkLabel(self.list_card, text="Rules from a group are marked with → and can only be changed in Groups.",
+                     text_color=MUTED, font=theme.body(11)).pack(anchor="w", padx=15, pady=(0, 10))
 
     # ---------- emergency unlock ----------
 
@@ -123,7 +116,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             self.unlock_panel.pack_forget()
         else:
             self._build_unlock_panel()
-            self.unlock_panel.pack(fill="x", pady=(0, 10), before=self.list_box)
+            self.unlock_panel.pack(fill="x", pady=(0, 10), before=self.list_card)
 
     def _build_unlock_panel(self):
         """Everything blocked right now, with checkboxes; unlocking any number of them is one use."""
@@ -134,8 +127,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         left, allowed, reset = emergency.uses_left(db, now)
         minutes = int(emergency.get(db, "emergency.minutes"))
         per = emergency.PERIODS[emergency.get(db, "emergency.per")]
-        ctk.CTkLabel(panel, text="Emergency unlock", font=ctk.CTkFont(size=14, weight="bold")).pack(
-            anchor="w", padx=14, pady=(10, 0))
+        ctk.CTkLabel(panel, text="Emergency unlock", font=theme.card_title()).pack(anchor="w", padx=14, pady=(10, 0))
         ctk.CTkLabel(panel, text=f"{left} of {allowed} left {per} (resets {DAY_NAMES[reset.weekday()]} {reset:%H:%M}). "
                                  f"Pick what to unblock for {minutes} min - several at once still count as one use.",
                      text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
@@ -174,6 +166,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.page.confirm(f"{names} unlocked until {until:%H:%M}", immediate=True)
         self.page.refresh()
 
+    # ---------- list ----------
+
     def _sort_changed(self, value: str):
         self.page.app.db.set_setting(SORT_KEY, value)
         self.page.refresh()
@@ -200,7 +194,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
     def refresh(self, now, usage):
         if emergency.get(self.page.app.db, "emergency.enabled") == "1":
-            self.unlock_btn.pack(side="left")
+            self.unlock_btn.pack(side="left", padx=16)
         else:
             self.unlock_btn.pack_forget()
             self.unlock_panel.pack_forget()
@@ -212,45 +206,54 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.live_status: list[tuple] = []   # (label, item)
         if not items:
             ctk.CTkLabel(self.list_box, text="Nothing blocked yet - use + Add.", text_color=MUTED).pack(
-                anchor="w", padx=16, pady=12)
+                anchor="w", pady=12)
             return
-        header_row(self.list_box, ["Name", "Rules", "Status", "Alerts"])
+        table = ctk.CTkFrame(self.list_box, fg_color="transparent")
+        table.pack(fill="x")
+        table.grid_columnconfigure(1, weight=1)
+        for col, title in enumerate(["Item", "Rules", "Status", "Alerts"]):
+            eyebrow(table, title).grid(row=0, column=col, padx=(0, 12), pady=(4, 6), sticky="w")
         groups = list(self.draft.groups.values())
-        for item in items:
-            row = make_row(self.list_box)
-            name_cell(row, item)
-            rules_box = ctk.CTkFrame(row, fg_color="transparent")
-            rules_box.grid(row=0, column=1, padx=8, sticky="w")
-            for r, rule in enumerate(effective_rules(item, groups)):
-                label = ctk.CTkLabel(rules_box, text=self._rule_text(rule, now, usage), wraplength=COLS[1] - 16,
-                                     justify="left", anchor="w")
-                label.grid(row=r, column=0, sticky="w", pady=1)
-                self.live_rules.append((label, rule))
-            status = ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left")
-            status.grid(row=0, column=2, padx=8, sticky="w")
+        for n, item in enumerate(items):
+            r = 2 * n + 1
+            ctk.CTkFrame(table, height=1, fg_color=theme.BORDER).grid(row=r, column=0, columnspan=6, sticky="ew")
+            r += 1
+            cell = ctk.CTkFrame(table, fg_color="transparent")
+            cell.grid(row=r, column=0, pady=10, padx=(0, 12), sticky="w")
+            ctk.CTkLabel(cell, text="", image=icons.for_item(item, 22), width=28).pack(side="left", anchor="n")
+            texts = ctk.CTkFrame(cell, fg_color="transparent")
+            texts.pack(side="left", padx=(6, 0))
+            ctk.CTkLabel(texts, text=item["display_name"], font=theme.semi(13), height=18, anchor="w").pack(anchor="w")
+            ctk.CTkLabel(texts, text=targets_text(item), text_color=MUTED, font=theme.body(10), height=14,
+                         wraplength=COLS[0] - 44, justify="left", anchor="w").pack(anchor="w")
+            rules_box = ctk.CTkFrame(table, fg_color="transparent")
+            rules_box.grid(row=r, column=1, pady=8, padx=(0, 12), sticky="w")
+            for rule in effective_rules(item, groups):
+                chip = rule_chip(rules_box, rule_text(rule, now, usage), chip_kind(rule), COLS[1] - 20)
+                chip.pack(anchor="w", pady=2)
+                self.live_rules.append((chip, rule))
+            status = ctk.CTkLabel(table, **status_of(self.page, item, now, usage), justify="left", font=theme.body(12))
+            status.grid(row=r, column=2, padx=(0, 12), sticky="w")
             self.live_status.append((status, item))
-            alerts = ctk.CTkOptionMenu(row, values=list(ALERTS), width=90,
+            alerts = ctk.CTkOptionMenu(table, values=list(ALERTS), width=86, height=28,
                                        command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
             alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
-            alerts.grid(row=0, column=3, padx=4)
+            alerts.grid(row=r, column=3, padx=(0, 10))
             choices = [("Edit its blockers", lambda i=item["id"]: self.page.edit_item(i))]
             choices += [(f"Edit group {g['name']}", lambda g=g["id"]: self.page.edit_group(g))
                         for g in self.draft.groups_of(item["id"])]
-            edit_btn = ctk.CTkButton(row, text="Edit ▾" if len(choices) > 1 else "Edit", width=70)
+            edit_btn = ctk.CTkButton(table, text="Edit ▾" if len(choices) > 1 else "Edit", width=66, height=28,
+                                     **theme.SECONDARY)
             edit_btn.configure(command=lambda b=edit_btn, c=choices: self._edit(b, c))
-            edit_btn.grid(row=0, column=4, padx=4)
-            ConfirmButton(row, lambda i=item["id"]: self.draft.remove_item(i), width=70).grid(row=0, column=5, padx=4)
-
-    @staticmethod
-    def _rule_text(rule, now, usage) -> str:
-        text = describe_rule(rule, now, usage)
-        return f"[{rule['group']['name']}] {text}" if rule["group"] else text
+            edit_btn.grid(row=r, column=4, padx=4)
+            ConfirmButton(table, lambda i=item["id"]: self.draft.remove_item(i), width=76, height=28,
+                          **theme.SECONDARY).grid(row=r, column=5, padx=(4, 0))
 
     def update_live(self, now, usage):
         """Refresh counters, countdowns and statuses without rebuilding the list."""
         for label, rule in getattr(self, "live_rules", []):
             if label.winfo_exists():
-                label.configure(text=self._rule_text(rule, now, usage))
+                label.configure(text=f" {rule_text(rule, now, usage)} ")
         for label, item in getattr(self, "live_status", []):
             if label.winfo_exists():
                 label.configure(**status_of(self.page, item, now, usage))
@@ -275,47 +278,74 @@ class AddTab(ctk.CTkScrollableFrame):
         super().__init__(master, fg_color="transparent")
         self.page, self.draft = page, page.draft
         self.edit_id: int | None = None
-        box = ctk.CTkFrame(self)
+        box = ctk.CTkFrame(self, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
         box.pack(fill="x")
-        self.title = ctk.CTkLabel(box, font=ctk.CTkFont(size=16, weight="bold"))
-        self.title.pack(anchor="w", padx=16, pady=(12, 8))
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(12, 8))
+        ctk.CTkFrame(head, width=3, height=24, corner_radius=0, fg_color=theme.ACCENT).pack(side="left", padx=(0, 10))
+        self.title = ctk.CTkLabel(head, font=theme.body(18, "bold"))
+        self.title.pack(side="left")
         self.picker = TargetPicker(box, page.app.db)
-        self.picker.pack(anchor="w", padx=16)
+        self.picker.pack(anchor="w", padx=16, pady=(0, 4))
         self.picker.entry.bind("<Return>", lambda e: self._submit(), add="+")
-        self.info = ctk.CTkLabel(box, text="", text_color=MUTED)
-        self.info.pack(anchor="w", padx=16)
+        self.info = ctk.CTkLabel(box, text="", text_color=MUTED, height=18)
+        self.info.pack(anchor="w", padx=16, pady=(0, 8))
 
-        ctk.CTkLabel(box, text="Blockers (tick any number)", font=ctk.CTkFont(weight="bold")).pack(
-            anchor="w", padx=16, pady=(12, 2))
+        line = ctk.CTkFrame(self, fg_color="transparent")
+        line.pack(fill="x", pady=(14, 6))
+        eyebrow(line, "Blockers - tick any number, they combine").pack(side="left")
+        self.count = ctk.CTkLabel(line, text="", text_color=MUTED, font=theme.body(11))
+        self.count.pack(side="right")
+        self.cards: dict[str, BlockerCard] = {}
         self.parts = {}
         for t in EDITORS:
-            check = ctk.CTkCheckBox(box, text=RULE_NAMES[t], command=lambda t=t: self._toggle(t))
-            check.pack(anchor="w", padx=16, pady=(6, 2))
-            self.parts[t] = (check, EDITORS[t](box))
+            card = BlockerCard(self, RULE_NAMES[t], EDITORS[t], lambda t=t: summary(t, self.cards[t].editor),
+                               on_change=self._changed)
+            card.pack(fill="x", pady=3)
+            self.cards[t] = card
+            self.parts[t] = (card.check, card.editor)
 
-        self.error = ctk.CTkLabel(box, text="", text_color=ERROR)
-        self.error.pack(anchor="w", padx=16, pady=(6, 0))
-        buttons = ctk.CTkFrame(box, fg_color="transparent")
-        buttons.pack(anchor="w", padx=16, pady=(4, 14))
-        self.submit_btn = ctk.CTkButton(buttons, width=110, command=self._submit)
-        self.submit_btn.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(buttons, text="Cancel", width=80, **theme.OUTLINE,
-                      command=self.cancel).pack(side="left")
+        self.error = ctk.CTkLabel(self, text="", text_color=ERROR)
+        self.error.pack(anchor="w", pady=(6, 0))
+        bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.pack(fill="x", pady=(2, 14))
+        self.submit_btn = ctk.CTkButton(bottom, width=110, height=34, command=self._submit)
+        self.submit_btn.pack(side="right")
+        ctk.CTkButton(bottom, text="Cancel", width=90, height=34, **theme.OUTLINE,
+                      command=self.cancel).pack(side="right", padx=8)
+        self.sentence = ctk.CTkLabel(bottom, text="", text_color=MUTED, font=theme.body(11), wraplength=560,
+                                     justify="left", anchor="w")
+        self.sentence.pack(side="left", fill="x", expand=True)
         self.reset()
+        self.after(SUMMARY_MS, self._follow_summaries)
 
     def _toggle(self, t: str):
-        check, editor = self.parts[t]
-        if check.get() and t != "permanent":
-            editor.pack(anchor="w", padx=44, pady=(0, 6), after=check)
-        else:
-            editor.pack_forget()
+        """Open/close the card after its tick box changed (also used by tests)."""
+        card = self.cards[t]
+        card.open = bool(card.check.get())
+        card.update_state()
+        self._changed()
+
+    def _changed(self):
+        on = [t for t, c in self.cards.items() if c.check.get()]
+        self.count.configure(text=f"{len(on)} of {len(self.cards)} on · blocked when any of them applies")
+        name = self.picker.name.get().strip() or "It"
+        self.sentence.configure(text=f"{name} will be blocked: " + "; ".join(
+            f"{RULE_NAMES[t].lower()} ({summary(t, self.cards[t].editor)})" for t in on) + "." if on else "")
+
+    def _follow_summaries(self):
+        if self.winfo_ismapped():
+            for card in self.cards.values():
+                card.refresh_summary()
+            self._changed()
+        self.after(SUMMARY_MS, self._follow_summaries)
 
     def _load_rules(self, rules: list[dict]):
         by_type = {r["rule_type"]: r for r in rules}
-        for t, (check, editor) in self.parts.items():
-            editor.load(by_type.get(t))
-            check.select() if t in by_type else check.deselect()
-            self._toggle(t)
+        for t, card in self.cards.items():
+            card.editor.load(by_type.get(t))
+            card.set(t in by_type)
+        self._changed()
 
     def reset(self):
         self.edit_id = None
@@ -345,7 +375,7 @@ class AddTab(ctk.CTkScrollableFrame):
         self._parent_canvas.yview_moveto(0)
 
     def _rules(self) -> list[dict]:
-        return [editor.value() for t, (check, editor) in self.parts.items() if check.get()]
+        return [card.editor.value() for card in self.cards.values() if card.check.get()]
 
     def _submit(self):
         self.picker.entry.hide()
@@ -394,19 +424,18 @@ class BlockingPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.draft = app, app.draft
-        ctk.CTkLabel(self, text="Blocking", font=theme.page_title()).pack(
-            anchor="w", padx=30, pady=(16, 8))
+        ctk.CTkLabel(self, text="Blocking", font=theme.page_title()).pack(anchor="w", padx=30, pady=(12, 6))
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.pack(fill="x", padx=30, pady=(0, 12))
+        bar.pack(fill="x", padx=30, pady=(0, 10))
         self.tab_bar = ctk.CTkSegmentedButton(bar, values=TABS, command=self.show_tab, width=240, height=30,
                                               dynamic_resizing=False)
         self.tab_bar.pack(side="left")
         # short confirmation after adding / saving ("✓ YouTube blocker added"), hidden after a few seconds
-        self.notice = ctk.CTkLabel(bar, text="", text_color=GREEN, font=ctk.CTkFont(weight="bold"))
+        self.notice = ctk.CTkLabel(bar, text="", text_color=GREEN, font=theme.semi(13))
         self.notice.pack(side="left", padx=16)
         self._notice_job = None
         holder = ctk.CTkFrame(self, fg_color="transparent")
-        holder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        holder.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         holder.grid_columnconfigure(0, weight=1)
         holder.grid_rowconfigure(0, weight=1)
         self.tabs = {"Overview": OverviewTab(holder, self), "Groups": GroupsTab(holder, self),

@@ -1214,7 +1214,8 @@ blocked = red / allowed = green (user's rule wins over the design); categories d
 items, neutral otherwise, click to change; time saved = attempts x usual visit length; daily goal setting (5 h);
 Appearance setting (dark default); fonts bundled; Start service button asks for admin.
 - [x] Batch 1: new look everywhere (tokens dark + light, Inter / Barlow Condensed, Lucide sidebar icons) + Dashboard + Screen Time tabs
-- [ ] Batch 2: Blocking page restyle (rule chips, collapsible blocker cards, groups split view)
+- [x] Batch 2: Blocking page restyle (rule chips, collapsible blocker cards, groups split view)
+- [ ] Later, with the next designs: Settings / emergency panel / Notifications / other pages in the new style (not designed yet)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
 - [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
 - [x] Switch counting data (`switch_events` table)
