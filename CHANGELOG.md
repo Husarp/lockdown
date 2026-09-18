@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 — 2026-09-18 22:35
+- Full day names everywhere: rules ("Monday–Friday 09:00-17:00", "Monday, Wednesday"), hours editor checkboxes, alert messages ("until Tuesday 07:00")
+- Hours editor: each time window is a box with the days on one line and from/to + "Remove window" below
+- Blocking > All: Edit button moved next to Remove; with several rules it's "Edit ▾" and asks which rule to edit
+
 ## 0.3.0 — 2026-09-18 22:10
 - Hours rules: "Allow only during" (default) / "Block during" switch; several time windows per rule, each with its own days (custom hours per day). Old rules keep working as "Block during".
 - Daily time limits: tray agent reads the active tab URL via UI Automation (Chrome/Edge/Brave/Firefox), counts time on limited sites (not while idle 15+ min); service blocks until midnight when used up; "limit reached" alert reason (`monitor/browser_url.py`, `monitor/usage.py`, `site_usage` table)

@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, time, timedelta
 
-DAY_NAMES = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 # When several rules on one item are active, the reason shown is the first in this order.
 REASON_ORDER = ["permanent", "temporary", "limit", "schedule"]
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
@@ -112,13 +112,16 @@ def item_block(rules: list[dict], now: datetime, used_sec: int = 0) -> tuple[str
 
 
 def days_text(days: list[int]) -> str:
+    """[0,1,2,3,4] -> 'Monday–Friday', [0,2,5,6] -> 'Monday, Wednesday, Saturday–Sunday'."""
     if days == list(range(7)):
         return "Every day"
-    if days == list(range(5)):
-        return "Mo-Fr"
-    if days == [5, 6]:
-        return "Sa-Su"
-    return ",".join(DAY_NAMES[d] for d in days)
+    runs: list[list[int]] = []
+    for d in sorted(days):
+        if runs and d == runs[-1][-1] + 1:
+            runs[-1].append(d)
+        else:
+            runs.append([d])
+    return ", ".join(DAY_NAMES[r[0]] if len(r) == 1 else f"{DAY_NAMES[r[0]]}–{DAY_NAMES[r[-1]]}" for r in runs)
 
 
 def duration_text(seconds: float) -> str:

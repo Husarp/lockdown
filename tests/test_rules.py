@@ -91,7 +91,14 @@ def test_allow_mode_reports_schedule_reason():
 
 
 def test_describe():
-    assert describe_rule({"rule_type": "scheduled", "schedule": BLOCK_NIGHT}, at(0, 0)) == "Blocked:\nMo-Fr 21:00-07:00"
+    assert describe_rule({"rule_type": "scheduled", "schedule": BLOCK_NIGHT}, at(0, 0)) == "Blocked:\nMonday–Friday 21:00-07:00"
     assert describe_rule({"rule_type": "scheduled", "schedule": ALLOW_WORK}, at(0, 0)) == \
-        "Allowed only:\nMo-Fr 09:00-17:00\nSa-Su 10:00-12:00"
+        "Allowed only:\nMonday–Friday 09:00-17:00\nSaturday–Sunday 10:00-12:00"
     assert describe_rule({"rule_type": "permanent"}, at(0, 0)) == "Permanent"
+
+
+def test_days_text():
+    from rules import days_text
+    assert days_text(list(range(7))) == "Every day"
+    assert days_text([0, 2, 5, 6]) == "Monday, Wednesday, Saturday–Sunday"
+    assert days_text([0, 1, 2, 4]) == "Monday–Wednesday, Friday"

@@ -4,6 +4,7 @@ Each rule tab (By Hours / By Limit / Permanent / Temporary) has its own add/edit
 that have that kind of rule. "All" is an overview of every site with all its rules; Edit jumps to the
 rule's tab, Remove deletes the whole site (after a confirmation). All edits go into the draft (see draft.py).
 """
+import tkinter as tk
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -50,25 +51,29 @@ def guess_name(host: str) -> str:
 
 class WindowRow(ctk.CTkFrame):
     def __init__(self, master, days, start, end, on_remove):
-        super().__init__(master, fg_color="transparent")
+        super().__init__(master, border_width=1, corner_radius=6)
         # no Tk variables here: rows get destroyed, and orphaned variables warn when collected off the Tk thread
+        day_line = ctk.CTkFrame(self, fg_color="transparent")
+        day_line.pack(anchor="w", padx=8, pady=(6, 2))
         self.day_boxes = []
         for i, day in enumerate(DAY_NAMES):
-            box = ctk.CTkCheckBox(self, text=day, width=52)
+            box = ctk.CTkCheckBox(day_line, text=day, width=20)
             if i in days:
                 box.select()
-            box.pack(side="left")
+            box.pack(side="left", padx=(0, 10))
             self.day_boxes.append(box)
-        ctk.CTkLabel(self, text="from").pack(side="left", padx=(8, 6))
-        self.start = ctk.CTkEntry(self, width=64)
+        time_line = ctk.CTkFrame(self, fg_color="transparent")
+        time_line.pack(anchor="w", padx=8, pady=(2, 6))
+        ctk.CTkLabel(time_line, text="from").pack(side="left", padx=(0, 6))
+        self.start = ctk.CTkEntry(time_line, width=64)
         self.start.insert(0, start)
         self.start.pack(side="left")
-        ctk.CTkLabel(self, text="to").pack(side="left", padx=6)
-        self.end = ctk.CTkEntry(self, width=64)
+        ctk.CTkLabel(time_line, text="to").pack(side="left", padx=6)
+        self.end = ctk.CTkEntry(time_line, width=64)
         self.end.insert(0, end)
         self.end.pack(side="left")
-        ctk.CTkButton(self, text="✕", width=28, fg_color="transparent", border_width=1,
-                      command=lambda: on_remove(self)).pack(side="left", padx=8)
+        ctk.CTkButton(time_line, text="✕ Remove window", width=120, fg_color="transparent", border_width=1,
+                      command=lambda: on_remove(self)).pack(side="left", padx=12)
 
     def value(self):
         return [i for i, b in enumerate(self.day_boxes) if b.get()], self.start.get(), self.end.get()
@@ -392,19 +397,29 @@ class AllTab(ctk.CTkScrollableFrame):
             rules_box.grid(row=0, column=1, padx=8, sticky="w")
             for r, rule in enumerate(item["rules"]):
                 ctk.CTkLabel(rules_box, text=describe_rule(rule, now, usage.get(item["id"], 0)),
-                             wraplength=COLS[1] - 60, justify="left", anchor="w").grid(row=r, column=0, sticky="w")
-                if rule["rule_type"] in RULE_TAB:
-                    ctk.CTkButton(rules_box, text="Edit", width=44, height=22, fg_color="transparent", border_width=1,
-                                  command=lambda i=item["id"], t=rule["rule_type"]: self.page.edit_rule(i, t)
-                                  ).grid(row=r, column=1, padx=6, pady=1)
+                             wraplength=COLS[1] - 16, justify="left", anchor="w").grid(row=r, column=0, sticky="w", pady=1)
             ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left").grid(
                 row=0, column=2, padx=8, sticky="w")
             alerts = ctk.CTkOptionMenu(row, values=list(ALERTS), width=90,
                                        command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
             alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
             alerts.grid(row=0, column=3, padx=4)
+            editable = [r["rule_type"] for r in item["rules"] if r["rule_type"] in RULE_TAB]
+            edit_btn = ctk.CTkButton(row, text="Edit ▾" if len(editable) > 1 else "Edit", width=70)
+            edit_btn.configure(command=lambda b=edit_btn, i=item["id"], t=editable: self._edit(b, i, t))
+            edit_btn.grid(row=0, column=4, padx=4)
             ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
-                          command=lambda it=item: self._remove(it)).grid(row=0, column=4, padx=4)
+                          command=lambda it=item: self._remove(it)).grid(row=0, column=5, padx=4)
+
+    def _edit(self, button, item_id: int, rule_types: list[str]):
+        """One rule: jump straight to its tab. Several: ask which one with a small menu under the button."""
+        if len(rule_types) == 1:
+            self.page.edit_rule(item_id, rule_types[0])
+            return
+        menu = tk.Menu(self, tearoff=False)
+        for t in rule_types:
+            menu.add_command(label=f"Edit {RULE_NAME[t]}", command=lambda t=t: self.page.edit_rule(item_id, t))
+        menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
 
     def _remove(self, item):
         if confirm("Remove site", f"Remove {item['display_name']} and all its rules?"):

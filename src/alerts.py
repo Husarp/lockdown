@@ -1,7 +1,7 @@
 """Blocked-visit alert settings and message formatting (used by the tray agent)."""
 from datetime import datetime
 
-from rules import TIME_FMT
+from rules import DAY_NAMES, TIME_FMT
 
 REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
@@ -31,7 +31,9 @@ def until_text(until: str | None, now: datetime) -> str:
     if not until:
         return "further notice"
     u = datetime.strptime(until, TIME_FMT)
-    return u.strftime("%H:%M") if u.date() == now.date() else u.strftime("%a %H:%M")
+    if u.date() == now.date():
+        return u.strftime("%H:%M")
+    return f"{DAY_NAMES[u.weekday()]} {u:%H:%M}"   # not strftime("%A"): that follows the system language
 
 
 def format_message(template: str, event: dict, now: datetime) -> str:

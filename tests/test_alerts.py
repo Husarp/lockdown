@@ -13,7 +13,7 @@ def test_format_message():
     assert format_message("{site} is blocked until {until}.", ev("schedule", "2026-09-14 23:30:00"), NOW) \
         == "Reddit is blocked until 23:30."
     assert format_message("{site}: {reason} until {until}", ev("schedule", "2026-09-15 07:00:00"), NOW) \
-        == "Reddit: blocked at this time until Tue 07:00"
+        == "Reddit: blocked at this time until Tuesday 07:00"
     assert format_message("{site} {until}", ev("permanent", None), NOW) == "Reddit further notice"
     assert format_message("bad {placeholder}", ev("permanent", None), NOW) == "bad {placeholder}"
 
