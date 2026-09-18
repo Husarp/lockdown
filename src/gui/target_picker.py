@@ -5,6 +5,7 @@ from blocker.apps import PROTECTED, block_flags, make_block_type
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
 from gui.site_picker import PopularSitesPopup, SiteEntry
+from gui.widgets import clear_entry
 from importer.popular import POPULAR_SITES
 
 ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then force-closed; started while blocked: "
@@ -101,8 +102,8 @@ class TargetPicker(ctk.CTkFrame):
     def reset(self):
         self.app = None
         self.entry.configure(state="normal")
-        self.entry.delete(0, "end")
-        self.name.delete(0, "end")
+        clear_entry(self.entry)
+        clear_entry(self.name)
         self._set_block_type("kill")
         self.pickers.pack(side="left", before=self.buttons)
         self._update_block_row()

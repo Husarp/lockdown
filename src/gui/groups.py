@@ -9,7 +9,7 @@ import customtkinter as ctk
 from gui import icons
 from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor, SwitchEditor
 from gui.target_picker import TargetPicker
-from gui.widgets import ConfirmButton
+from gui.widgets import ConfirmButton, clear_entry
 from rules import describe_rule, effective_rules, item_block
 
 MUTED = "gray60"
@@ -125,7 +125,7 @@ class GroupEditor(ctk.CTkFrame):
     def load(self, group: dict | None):
         self.group_id = group["id"] if group else None
         self.title.configure(text=f"Edit group {group['name']}" if group else "New group")
-        self.name.delete(0, "end")
+        clear_entry(self.name)
         if group:
             self.name.insert(0, group["name"])
         rules = {r["rule_type"]: r for r in (group or {}).get("rules", [])}
@@ -223,8 +223,10 @@ class GroupEditor(ctk.CTkFrame):
                     t["name"], t["targets"], t["source"], t["kind"], t["block_type"], t["app_path"])["id"]
             types = {r["rule_type"] for r in rules}
             members[item_id] = {k: v for k, v in m["overrides"].items() if k in types}
+        added = self.group_id is None
         self.draft.set_group(self.group_id, name, rules, members)
         self.tab.close_editor()
+        self.tab.page.confirm(f"Group {name} {'added' if added else 'saved'}")
 
 
 class GroupsTab(ctk.CTkScrollableFrame):

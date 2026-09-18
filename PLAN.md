@@ -1190,6 +1190,8 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] Opening limit counts "launches / new visits" by default (apps: program starts; sites: coming back after N min away, default 5), or "every switch" - chosen per blocker
 - [x] Faster: service checks rules every 2 s (was 5), Overview counters/status update every 2 s
 - Dropped (2026-09-18): "prevent blocked apps from starting at all" (IFEO registry) — the instant kill on launch is enough
+- [x] Fix: grey hint text in the site/app and Display name fields (and group name) missing until the field was clicked
+- [x] Short confirmation next to the tabs after adding/saving ("✓ YouTube blocker added", "✓ Group Night added"), gone after 5 s
 
 ### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)

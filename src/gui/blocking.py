@@ -28,6 +28,7 @@ SORT_KEY = "ui.blocking.sort"
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
 REFRESH_MS = 30_000   # full rebuild (sorting, service cleanup)
 LIVE_MS = 2_000       # in-place update of counters / countdowns / status
+NOTICE_MS = 5_000     # how long "✓ ... added" stays
 MUTED = "gray60"
 ERROR = "#f85149"
 GREEN, ORANGE, RED = "#3fb950", "#d29922", "#f85149"
@@ -299,6 +300,7 @@ class AddTab(ctk.CTkScrollableFrame):
                                        target["block_type"], target["app_path"])
             self.draft.set_rules(item["id"], rules, block_type=target["block_type"])
             self.reset()
+            self.page.confirm(f"{target['name']} blocker added")
             return
         item = self.draft.items[self.edit_id]
         if item["item_type"] == "app" and self.picker.selected_block_type() is None:
@@ -311,6 +313,7 @@ class AddTab(ctk.CTkScrollableFrame):
         self.draft.set_rules(self.edit_id, rules, name, self.picker.selected_block_type())
         self.reset()
         self.page.show_tab("Overview")
+        self.page.confirm(f"{name} saved")
 
 
 # ---------------------------------------------------------------- page
@@ -321,8 +324,14 @@ class BlockingPage(ctk.CTkFrame):
         self.app, self.draft = app, app.draft
         ctk.CTkLabel(self, text="Blocking", font=ctk.CTkFont(size=24, weight="bold")).pack(
             anchor="w", padx=30, pady=(16, 8))
-        self.tab_bar = ctk.CTkSegmentedButton(self, values=TABS, command=self.show_tab)
-        self.tab_bar.pack(anchor="w", padx=30, pady=(0, 12))
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.pack(fill="x", padx=30, pady=(0, 12))
+        self.tab_bar = ctk.CTkSegmentedButton(bar, values=TABS, command=self.show_tab)
+        self.tab_bar.pack(side="left")
+        # short confirmation after adding / saving ("✓ YouTube blocker added"), hidden after a few seconds
+        self.notice = ctk.CTkLabel(bar, text="", text_color=GREEN, font=ctk.CTkFont(weight="bold"))
+        self.notice.pack(side="left", padx=16)
+        self._notice_job = None
         holder = ctk.CTkFrame(self, fg_color="transparent")
         holder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         holder.grid_columnconfigure(0, weight=1)
@@ -343,6 +352,14 @@ class BlockingPage(ctk.CTkFrame):
             frame.grid_forget()
         self.tabs[tab].grid(row=0, column=0, sticky="nsew")
         self.refresh()
+
+    def confirm(self, text: str):
+        if not self.draft.autosave:
+            text += " - press Save changes to apply"
+        self.notice.configure(text=f"✓ {text}")
+        if self._notice_job:
+            self.after_cancel(self._notice_job)
+        self._notice_job = self.after(NOTICE_MS, lambda: self.notice.configure(text=""))
 
     def edit_item(self, item_id: int):
         self.show_tab("Add")

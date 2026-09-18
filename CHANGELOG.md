@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1 — 2026-09-18 22:37
+- Fix: the grey hint text ("site (reddit.com) or app.exe", "Display name", group name) didn't show until the field was clicked (customtkinter treats a new field as focused until its first focus-out)
+- Blocking: a short green confirmation next to the tabs after adding or saving ("✓ YouTube blocker added", "✓ YouTube saved", "✓ Group Night added"); with auto-save off it adds "press Save changes to apply"; disappears after 5 s
+
 ## 0.8.0 — 2026-09-18 22:30
 - "When blocked" for apps is now three checkboxes: Close app / Minimize / Block internet (Close and Minimize exclude each other; at least one needed); stored as flags, older values still work
 - Status colours: blocked now = red, allowed now = green (also in Groups)

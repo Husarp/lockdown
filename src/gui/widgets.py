@@ -31,3 +31,12 @@ class ConfirmButton(ctk.CTkButton):
             self._job = None
         if self.winfo_exists():
             self.configure(**self._normal)
+
+
+def clear_entry(entry: ctk.CTkEntry):
+    """Empty an entry and keep its placeholder visible. CTkEntry.delete() alone hides the placeholder until
+    the entry is clicked (it treats every new entry as focused until its first focus-out)."""
+    entry.delete(0, "end")
+    focus = entry.focus_get()
+    if not (focus and str(focus).startswith(str(entry))):
+        entry.configure(placeholder_text=entry.cget("placeholder_text"))   # re-shows it when empty
