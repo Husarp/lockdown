@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 ## 0.8.0 — 2026-09-18 22:30
 - "When blocked" for apps is now three checkboxes: Close app / Minimize / Block internet (Close and Minimize exclude each other; at least one needed); stored as flags, older values still work
