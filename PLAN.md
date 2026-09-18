@@ -1204,6 +1204,11 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] Time limits and opening limits per day / week / month, stackable (e.g. 2 h a day + max 8 h a week)
 
 ### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)
+Design received 2026-09-18: `design/Lockdown Dashboard & Screen Time.dc.html` (foundations, Dashboard dark/light,
+Screen Time Overview/Apps/Websites/Switches, empty state, Blocking Overview/Groups/Add). Waiting for answers
+(status colours, categories, time saved, daily goal, definitions, light theme, fonts, start-service button, order).
+- [ ] Batch 1: new look everywhere (tokens dark + light, Inter / Barlow Condensed, Lucide sidebar icons) + Dashboard + Screen Time tabs
+- [ ] Batch 2: Blocking page restyle (rule chips, collapsible blocker cards, groups split view)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
 - [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
 - [x] Switch counting data (`switch_events` table)
