@@ -1,6 +1,7 @@
 """Lockdown enforcement service.
 
-Every few seconds: evaluate block rules (permanent / scheduled / temporary), make the hosts file match
+Every few seconds: evaluate block rules (permanent / hours / temporary / daily limit) using its own trusted
+clock (changing the Windows clock has no effect), make the hosts file match
 (repairing manual edits), keep browser DoH/QUIC locked off, and close open connections to newly blocked
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
 Needs admin/SYSTEM rights.
@@ -22,8 +23,10 @@ from blocker import browser_policy, connections, hosts
 from blocker.listener import BlockListener
 from db import Database
 from paths import DATA_DIR, LOG_PATH
+from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, TrustedClock
 
 INTERVAL_SEC = 5
+CLOCK_JUMP_SEC = 60
 HEARTBEAT_KEY = "service_heartbeat"
 # Keep closing connections to a newly blocked site for this long (browsers cache DNS ~1 min).
 CLOSE_CONNECTIONS_FOR = timedelta(minutes=3)
@@ -48,14 +51,30 @@ def setup_logging():
 class Enforcer:
     def __init__(self, db: Database):
         self.db = db
+        last = db.get_setting(LAST_TRUSTED_KEY)
+        self.clock = TrustedClock(float(last) if last else None)
+        self.last_offset: float | None = None
         self.blocks: dict[str, dict] = {}       # current active blocks, read by the listener
         self.closing: dict[str, datetime] = {}  # ip -> keep closing connections until
         self.visit_db = None                    # separate connection for listener threads
         self.visit_lock = threading.Lock()
         self.last_visit: dict[str, float] = {}
 
+    def update_clock(self) -> datetime:
+        """Trusted now; publishes the offset to the system clock and logs clock changes."""
+        if self.clock.maybe_sync():
+            log.info("Trusted time synced with internet time")
+        offset = self.clock.offset()
+        if self.last_offset is not None and abs(offset - self.last_offset) > CLOCK_JUMP_SEC:
+            log.warning("System clock changed by %+.0f s - ignored, Lockdown keeps its own time",
+                        self.last_offset - offset)
+        self.last_offset = offset
+        self.db.set_setting(OFFSET_KEY, f"{offset:.3f}")
+        self.db.set_setting(LAST_TRUSTED_KEY, f"{self.clock.now_ts():.0f}")
+        return self.clock.now()
+
     def enforce_once(self):
-        now = datetime.now()
+        now = self.update_clock()
         if self.db.delete_expired_temporary(now):
             log.info("Removed expired temporary blocks")
         blocks = self.db.active_blocks(now)
@@ -95,7 +114,8 @@ class Enforcer:
             if self.visit_db is None:
                 self.visit_db = Database()
             item = block["item"]
-            self.visit_db.add_block_event(hostname, item["id"], item["display_name"], block["reason"], block["until"])
+            self.visit_db.add_block_event(hostname, item["id"], item["display_name"], block["reason"], block["until"],
+                                          now=self.clock.now())
 
 
 def main():

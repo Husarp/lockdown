@@ -1,16 +1,18 @@
 """Main window (sidebar navigation + content area) and tray agent duties (blocked-visit notifications)."""
 import queue
 import time
-from datetime import datetime
 
 import customtkinter as ctk
 
 import alerts
 from db import Database
 from gui.blocking import BlockingPage
+from gui.draft import Draft
 from gui.notifications import NotificationsPage, Popup
 from gui.tray import Tray
+from monitor.usage import UsageTracker
 from service import HEARTBEAT_KEY
+from trusted_time import now_from_db
 
 # (sidebar label, page class, or the phase in which the page gets built)
 PAGES = [
@@ -38,6 +40,8 @@ class LockdownApp(ctk.CTk):
             self.withdraw()
 
         self.db = Database()
+        self.draft = Draft(self.db)
+        self.draft.listeners.append(self._on_draft_change)
         self.service_running = False
         self.pages: dict[str, ctk.CTkFrame] = {}
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
@@ -48,8 +52,13 @@ class LockdownApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self._build_sidebar()
-        self.content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.content.grid(row=0, column=1, sticky="nsew")
+        right = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1)
+        self._build_save_bar(right)
+        self.content = ctk.CTkFrame(right, corner_radius=0, fg_color="transparent")
+        self.content.grid(row=1, column=0, sticky="nsew")
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(0, weight=1)
 
@@ -60,9 +69,49 @@ class LockdownApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.withdraw)  # close = minimize to tray
 
         self.show_page("Blocking")
+        self._update_save_bar()
         self._poll_events()
         self._poll_status()
         self._poll_block_events()
+        self.usage_tracker = UsageTracker()   # counts time on sites with a daily limit
+        self.usage_tracker.start()
+
+    def _build_save_bar(self, parent):
+        bar = ctk.CTkFrame(parent, fg_color="transparent")
+        bar.grid(row=0, column=0, sticky="e", padx=24, pady=(12, 0))
+        self.autosave_var = ctk.BooleanVar(value=self.draft.autosave)
+        ctk.CTkSwitch(bar, text="Auto-save", variable=self.autosave_var, command=self._toggle_autosave).pack(
+            side="left", padx=(0, 16))
+        self.saved_label = ctk.CTkLabel(bar, text="Changes are saved automatically", text_color="gray60")
+        self.discard_btn = ctk.CTkButton(bar, text="Discard", width=80, fg_color="transparent", border_width=1,
+                                         command=self.draft.discard)
+        self.save_btn = ctk.CTkButton(bar, text="Save changes", width=120, command=self.draft.save)
+        self.save_widgets = [self.discard_btn, self.save_btn]
+
+    def _toggle_autosave(self):
+        self.draft.autosave = self.autosave_var.get()
+        self._update_save_bar()
+
+    def _update_save_bar(self):
+        for w in (self.saved_label, *self.save_widgets):
+            w.pack_forget()
+        if self.draft.autosave:
+            self.saved_label.pack(side="left")
+            return
+        dirty = self.draft.dirty
+        if dirty:
+            self.discard_btn.pack(side="left", padx=4)
+        self.save_btn.pack(side="left", padx=4)
+        self.save_btn.configure(state="normal" if dirty else "disabled",
+                                text="Save changes" if dirty else "Saved",
+                                fg_color=("#3a7ebf", "#1f6aa5") if dirty else ("gray70", "gray30"))
+
+    def _on_draft_change(self, kind: str):
+        self._update_save_bar()
+        if "Blocking" in self.pages:
+            self.pages["Blocking"].refresh()
+        if kind == "discarded" and "Notifications" in self.pages:
+            self.pages["Notifications"].load()
 
     def _build_sidebar(self):
         bar = ctk.CTkFrame(self, width=190, corner_radius=0)
@@ -142,7 +191,7 @@ class LockdownApp(ctk.CTk):
         if not alerts.should_notify(event, item_notify, enabled, self.last_alert.get(event["item_id"]), now, cooldown):
             return
         self.last_alert[event["item_id"]] = now
-        message = alerts.format_message(alerts.get(self.db, f"notify.msg.{event['reason']}"), event, datetime.now())
+        message = alerts.format_message(alerts.get(self.db, f"notify.msg.{event['reason']}"), event, now_from_db(self.db))
         fmt = alerts.get(self.db, "notify.format")
         if fmt in ("toast", "both"):
             self.tray.notify(message)

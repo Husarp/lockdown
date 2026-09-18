@@ -1,6 +1,6 @@
 """SQLite database layer (shared by GUI and service)."""
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from paths import DB_PATH
@@ -42,8 +42,23 @@ CREATE TABLE IF NOT EXISTS block_events (
     hostname TEXT,
     item_id INTEGER,
     display_name TEXT,
-    reason TEXT,                  -- permanent, temporary, schedule
+    reason TEXT,                  -- permanent, temporary, schedule, limit
     until DATETIME                -- local time, NULL = indefinitely
+);
+
+-- Seconds spent on a site per day (written by the tray agent, read by the service for time limits)
+CREATE TABLE IF NOT EXISTS site_usage (
+    date TEXT NOT NULL,           -- YYYY-MM-DD (trusted local date)
+    item_id INTEGER NOT NULL,
+    seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, item_id)
+);
+
+-- Sites the user has blocked before (for suggestions; clearable)
+CREATE TABLE IF NOT EXISTS site_history (
+    hostname TEXT PRIMARY KEY,
+    display_name TEXT,
+    last_used DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -71,29 +86,42 @@ class Database:
     # ---------- blocked items ----------
 
     def add_site(self, display_name: str, hostnames: list[str], source: str = "manual",
-                 rules: list[dict] | None = None) -> int:
+                 rules: list[dict] | None = None, notify: str | None = None) -> int:
         """Add a site item with its rules (default: one permanent rule). Returns the item id.
-        A rule dict has rule_type plus optional schedule / temp_until."""
+        A rule dict has rule_type plus optional schedule / temp_until / daily_limit_min."""
         rules = rules or [{"rule_type": "permanent"}]
         with self.conn:
             cur = self.conn.execute(
-                "INSERT INTO blocked_items (display_name, target, item_type, source) VALUES (?, ?, 'site', ?)",
-                (display_name, " ".join(hostnames), source),
+                "INSERT INTO blocked_items (display_name, target, item_type, source, notify) "
+                "VALUES (?, ?, 'site', ?, ?)",
+                (display_name, " ".join(hostnames), source, notify),
             )
-            for r in rules:
-                self.conn.execute(
-                    "INSERT INTO block_rules (item_id, rule_type, schedule, temp_until) VALUES (?, ?, ?, ?)",
-                    (cur.lastrowid, r["rule_type"], r.get("schedule"), r.get("temp_until")),
-                )
+            self._insert_rules(cur.lastrowid, rules)
         return cur.lastrowid
+
+    def _insert_rules(self, item_id: int, rules: list[dict]):
+        for r in rules:
+            self.conn.execute(
+                "INSERT INTO block_rules (item_id, rule_type, schedule, temp_until, daily_limit_min) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (item_id, r["rule_type"], r.get("schedule"), r.get("temp_until"), r.get("daily_limit_min")),
+            )
+
+    def update_item(self, item_id: int, display_name: str, hostnames: list[str], notify: str | None,
+                    rules: list[dict]):
+        """Replace an item's fields and rules."""
+        with self.conn:
+            self.conn.execute("UPDATE blocked_items SET display_name = ?, target = ?, notify = ? WHERE id = ?",
+                              (display_name, " ".join(hostnames), notify, item_id))
+            self.conn.execute("DELETE FROM block_rules WHERE item_id = ?", (item_id,))
+            self._insert_rules(item_id, rules)
+
+    def item_ids(self) -> set[int]:
+        return {r[0] for r in self.conn.execute("SELECT id FROM blocked_items")}
 
     def remove_item(self, item_id: int):
         with self.conn:
             self.conn.execute("DELETE FROM blocked_items WHERE id = ?", (item_id,))
-
-    def set_item_notify(self, item_id: int, notify: str | None):
-        with self.conn:
-            self.conn.execute("UPDATE blocked_items SET notify = ? WHERE id = ?", (notify, item_id))
 
     def list_items(self) -> list[dict]:
         """All items, each with a 'rules' list of rule dicts."""
@@ -109,11 +137,12 @@ class Database:
     def active_blocks(self, now: datetime | None = None) -> dict[str, dict]:
         """hostname -> {item, reason, until} for every site that is blocked at `now`."""
         now = now or datetime.now()
+        usage = self.usage_on(now.date())
         out = {}
         for item in self.list_items():
             if item["item_type"] != "site":
                 continue
-            block = item_block(item["rules"], now)
+            block = item_block(item["rules"], now, usage.get(item["id"], 0))
             if block:
                 for h in item["target"].split():
                     out.setdefault(h, {"item": item, "reason": block[0], "until": block[1]})
@@ -132,6 +161,33 @@ class Database:
             cur = self.conn.execute(
                 "DELETE FROM blocked_items WHERE id NOT IN (SELECT item_id FROM block_rules)")
         return cur.rowcount
+
+    # ---------- usage + history ----------
+
+    def add_usage(self, item_id: int, day: date, seconds: int):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO site_usage (date, item_id, seconds) VALUES (?, ?, ?) "
+                "ON CONFLICT(date, item_id) DO UPDATE SET seconds = seconds + excluded.seconds",
+                (day.isoformat(), item_id, seconds))
+
+    def usage_on(self, day: date) -> dict[int, int]:
+        return {r["item_id"]: r["seconds"] for r in self.conn.execute(
+            "SELECT item_id, seconds FROM site_usage WHERE date = ?", (day.isoformat(),))}
+
+    def add_history(self, hostname: str, display_name: str):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO site_history (hostname, display_name, last_used) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(hostname) DO UPDATE SET display_name = excluded.display_name, last_used = CURRENT_TIMESTAMP",
+                (hostname, display_name))
+
+    def history(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM site_history ORDER BY last_used DESC")]
+
+    def clear_history(self):
+        with self.conn:
+            self.conn.execute("DELETE FROM site_history")
 
     # ---------- block events ----------
 

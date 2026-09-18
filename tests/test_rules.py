@@ -1,16 +1,21 @@
+import json
 from datetime import datetime
 
 import pytest
 
-from rules import describe_rule, make_schedule, rule_block, schedule_until
+from rules import ALLOW, BLOCK, describe_rule, make_schedule, rule_block, schedule_until
+
+WEEKDAYS = [0, 1, 2, 3, 4]
+
 
 # 2026-09-14 is a Monday
 def at(day, hh, mm=0):
     return datetime(2026, 9, 14 + day, hh, mm)
 
 
-WORKDAYS_DAYTIME = make_schedule([0, 1, 2, 3, 4], "09:00", "17:00")
-WORKDAYS_NIGHT = make_schedule([0, 1, 2, 3, 4], "21:00", "07:00")
+BLOCK_DAYTIME = make_schedule(BLOCK, [(WEEKDAYS, "09:00", "17:00")])
+BLOCK_NIGHT = make_schedule(BLOCK, [(WEEKDAYS, "21:00", "07:00")])
+ALLOW_WORK = make_schedule(ALLOW, [(WEEKDAYS, "09:00", "17:00"), ([5, 6], "10:00", "12:00")])
 
 
 @pytest.mark.parametrize("now,expected", [
@@ -20,8 +25,8 @@ WORKDAYS_NIGHT = make_schedule([0, 1, 2, 3, 4], "21:00", "07:00")
     (at(0, 17, 0), None),
     (at(5, 12), None),            # Saturday
 ])
-def test_daytime_window(now, expected):
-    assert schedule_until(WORKDAYS_DAYTIME, now) == expected
+def test_block_daytime(now, expected):
+    assert schedule_until(BLOCK_DAYTIME, now) == expected
 
 
 @pytest.mark.parametrize("now,expected", [
@@ -33,17 +38,37 @@ def test_daytime_window(now, expected):
     (at(5, 3), at(5, 7)),          # Sat early morning: Friday's window
     (at(5, 22), None),             # Sat night not selected
 ])
-def test_overnight_window(now, expected):
-    assert schedule_until(WORKDAYS_NIGHT, now) == expected
+def test_block_overnight(now, expected):
+    assert schedule_until(BLOCK_NIGHT, now) == expected
+
+
+@pytest.mark.parametrize("now,expected", [
+    (at(0, 10), None),             # inside allowed weekday window
+    (at(0, 20), at(1, 9)),         # Mon 20:00 blocked until Tue 09:00  (the reported YouTube case)
+    (at(4, 18), at(5, 10)),        # Fri evening -> Sat 10:00 (custom weekend hours)
+    (at(5, 11), None),             # Sat inside weekend window
+    (at(5, 13), at(6, 10)),        # Sat afternoon -> Sun 10:00
+    (at(6, 13), at(7, 9)),         # Sun afternoon -> next Mon 09:00
+])
+def test_allow_mode_with_per_day_windows(now, expected):
+    assert schedule_until(ALLOW_WORK, now) == expected
+
+
+def test_old_format_is_block_mode():
+    old = json.dumps({"days": WEEKDAYS, "start": "09:00", "end": "17:00"})
+    assert schedule_until(old, at(0, 10)) == at(0, 17)
+    assert schedule_until(old, at(0, 20)) is None
 
 
 def test_make_schedule_validates():
     with pytest.raises(ValueError):
-        make_schedule([], "09:00", "17:00")
+        make_schedule(ALLOW, [])
     with pytest.raises(ValueError):
-        make_schedule([0], "9am", "17:00")
+        make_schedule(ALLOW, [([], "09:00", "17:00")])
     with pytest.raises(ValueError):
-        make_schedule([0], "25:00", "17:00")
+        make_schedule(ALLOW, [([0], "9am", "17:00")])
+    with pytest.raises(ValueError):
+        make_schedule(BLOCK, [([0], "25:00", "17:00")])
 
 
 def test_temporary():
@@ -53,6 +78,20 @@ def test_temporary():
     assert describe_rule(rule, at(0, 12)) == "Temporary: 1h 30m left"
 
 
+def test_time_limit():
+    rule = {"rule_type": "time_limit", "daily_limit_min": 30}
+    assert rule_block(rule, at(0, 12), used_sec=29 * 60) is None
+    assert rule_block(rule, at(0, 12), used_sec=30 * 60) == ("limit", at(1, 0))
+    assert describe_rule(rule, at(0, 12), used_sec=12 * 60) == "Limit: 12m / 30m today"
+
+
+def test_allow_mode_reports_schedule_reason():
+    rule = {"rule_type": "scheduled", "schedule": ALLOW_WORK}
+    assert rule_block(rule, at(0, 20)) == ("schedule", at(1, 9))
+
+
 def test_describe():
-    assert describe_rule({"rule_type": "scheduled", "schedule": WORKDAYS_NIGHT}, at(0, 0)) == "Hours: Mo-Fr 21:00-07:00"
+    assert describe_rule({"rule_type": "scheduled", "schedule": BLOCK_NIGHT}, at(0, 0)) == "Blocked:\nMo-Fr 21:00-07:00"
+    assert describe_rule({"rule_type": "scheduled", "schedule": ALLOW_WORK}, at(0, 0)) == \
+        "Allowed only:\nMo-Fr 09:00-17:00\nSa-Su 10:00-12:00"
     assert describe_rule({"rule_type": "permanent"}, at(0, 0)) == "Permanent"

@@ -6,16 +6,18 @@ from rules import TIME_FMT
 REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
     "schedule": ("Outside its allowed hours", "blocked at this time"),
+    "limit": ("Over its daily limit", "over its daily limit"),
     "temporary": ("Temporarily blocked", "temporarily blocked"),
 }
 DEFAULT_MESSAGES = {
     "permanent": "{site} is permanently blocked.",
     "schedule": "{site} is blocked until {until}.",
+    "limit": "{site}: daily limit reached - blocked until {until}.",
     "temporary": "{site} is blocked for now - until {until}.",
 }
 FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "Both"}
 COOLDOWN_OPTIONS = [1, 5, 15, 30, 60]
-DEFAULTS = {"notify.cooldown_min": "5", "notify.format": "both"}
+DEFAULTS = {"notify.cooldown_min": "5", "notify.format": "toast"}
 for _r in REASONS:
     DEFAULTS[f"notify.enabled.{_r}"] = "1"
     DEFAULTS[f"notify.msg.{_r}"] = DEFAULT_MESSAGES[_r]

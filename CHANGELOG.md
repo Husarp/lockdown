@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-09-18 22:10
+- Hours rules: "Allow only during" (default) / "Block during" switch; several time windows per rule, each with its own days (custom hours per day). Old rules keep working as "Block during".
+- Daily time limits: tray agent reads the active tab URL via UI Automation (Chrome/Edge/Brave/Firefox), counts time on limited sites (not while idle 15+ min); service blocks until midnight when used up; "limit reached" alert reason (`monitor/browser_url.py`, `monitor/usage.py`, `site_usage` table)
+- Clock-change protection: service uses its own trusted clock (NTP + tick counter); the GUI uses the published offset; clock changes logged (`trusted_time.py`)
+- Blocking page rebuilt: add/edit form + list per tab (By Hours / By Limit / Permanent / Temporary); All = overview with per-rule Edit (jumps to the tab, highlights the site) and Remove with confirmation
+- Save system: global Save changes / Discard at the top, highlighted only on real changes; Auto-save switch (default off); unsaved sites show "Not applied (unsaved)"; temporary blocks start when saved (`gui/draft.py`)
+- "+ Popular sites" popup with site icons replaces the checkbox grid; favicons cached locally with letter-icon fallback (`gui/icons.py`, `gui/site_picker.py`)
+- Suggestions while typing a site (popular + previously blocked), "Clear my suggestions" (`site_history` table)
+- Notification format default: Windows notification only
+- Fixed: Blocking sub-tabs didn't switch visibly (scrollable frames can't be raised)
+- `uiautomation` added to requirements; 66 tests passing
+
 ## 0.2.0 — 2026-09-18 20:40
 - Phase 2 (except daily time limits):
   - Block by hours: pick days + from/to time, overnight windows supported (`src/rules.py`)

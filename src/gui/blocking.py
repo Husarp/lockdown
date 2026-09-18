@@ -1,25 +1,39 @@
-"""Blocking page: add sites (with stacked rules), popular quick-list, blocked items list."""
-from datetime import datetime, timedelta
+"""Blocking page.
+
+Each rule tab (By Hours / By Limit / Permanent / Temporary) has its own add/edit form and lists the sites
+that have that kind of rule. "All" is an overview of every site with all its rules; Edit jumps to the
+rule's tab, Remove deletes the whole site (after a confirmation). All edits go into the draft (see draft.py).
+"""
+from tkinter import messagebox
 
 import customtkinter as ctk
 
 from blocker.hosts import normalize_host
+from gui import icons
+from gui.site_picker import PopularSitesPopup, SiteEntry
 from importer.popular import POPULAR_SITES
-from rules import DAY_NAMES, TIME_FMT, describe_rule, item_block, make_schedule
+from rules import ALLOW, BLOCK, DAY_NAMES, describe_rule, item_block, load_schedule, make_schedule
+from trusted_time import now_from_db
 
-SUB_TABS = ["All", "By Hours", "By Limit", "By Switches", "Permanent", "Temporary"]
-TAB_RULE = {"By Hours": "scheduled", "Permanent": "permanent", "Temporary": "temporary"}
-NOT_YET = {"By Limit": "Daily time limits are coming soon.", "By Switches": "Switch limits are coming in a later phase."}
+TABS = ["All", "By Hours", "By Limit", "By Switches", "Permanent", "Temporary"]
+TAB_RULE = {"By Hours": "scheduled", "By Limit": "time_limit", "Permanent": "permanent", "Temporary": "temporary"}
+RULE_TAB = {v: k for k, v in TAB_RULE.items()}
+RULE_NAME = {"scheduled": "hours rule", "time_limit": "daily limit", "permanent": "permanent block",
+             "temporary": "temporary block"}
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
+MODES = {"Allow only during": ALLOW, "Block during": BLOCK}
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
-QUICK_COLUMNS = 4
 REFRESH_MS = 30_000
+HIGHLIGHT_MS = 2500
 MUTED = "gray60"
 ERROR = "#f85149"
+GREEN, ORANGE = "#3fb950", "#d29922"
+HIGHLIGHT = ("#dbe9ff", "#1f3a5f")
+COLS = [220, 270, 140]   # name + hostnames, rules, status (then action buttons)
 
 
-def _popular_entry(host: str) -> tuple[str, list[str]] | None:
+def popular_hosts(host: str) -> tuple[str, list[str]] | None:
     for sites in POPULAR_SITES.values():
         for name, hostnames in sites.items():
             if host in hostnames:
@@ -27,241 +41,422 @@ def _popular_entry(host: str) -> tuple[str, list[str]] | None:
     return None
 
 
-def _guess_name(host: str) -> str:
-    entry = _popular_entry(host)
+def guess_name(host: str) -> str:
+    entry = popular_hosts(host)
     return entry[0] if entry else host.split(".")[-2].capitalize()
+
+
+# ---------------------------------------------------------------- rule option editors
+
+class WindowRow(ctk.CTkFrame):
+    def __init__(self, master, days, start, end, on_remove):
+        super().__init__(master, fg_color="transparent")
+        # no Tk variables here: rows get destroyed, and orphaned variables warn when collected off the Tk thread
+        self.day_boxes = []
+        for i, day in enumerate(DAY_NAMES):
+            box = ctk.CTkCheckBox(self, text=day, width=52)
+            if i in days:
+                box.select()
+            box.pack(side="left")
+            self.day_boxes.append(box)
+        ctk.CTkLabel(self, text="from").pack(side="left", padx=(8, 6))
+        self.start = ctk.CTkEntry(self, width=64)
+        self.start.insert(0, start)
+        self.start.pack(side="left")
+        ctk.CTkLabel(self, text="to").pack(side="left", padx=6)
+        self.end = ctk.CTkEntry(self, width=64)
+        self.end.insert(0, end)
+        self.end.pack(side="left")
+        ctk.CTkButton(self, text="✕", width=28, fg_color="transparent", border_width=1,
+                      command=lambda: on_remove(self)).pack(side="left", padx=8)
+
+    def value(self):
+        return [i for i, b in enumerate(self.day_boxes) if b.get()], self.start.get(), self.end.get()
+
+
+class HoursEditor(ctk.CTkFrame):
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(anchor="w")
+        self.mode = ctk.CTkSegmentedButton(top, values=list(MODES))
+        self.mode.pack(side="left")
+        ctk.CTkLabel(top, text="these hours (end before start = overnight)", text_color=MUTED).pack(side="left", padx=10)
+        self.rows_box = ctk.CTkFrame(self, fg_color="transparent")
+        self.rows_box.pack(anchor="w", pady=4)
+        ctk.CTkButton(self, text="+ Add time window", width=140, fg_color="transparent", border_width=1,
+                      command=lambda: self._add_row([0, 1, 2, 3, 4], "09:00", "17:00")).pack(anchor="w")
+        self.rows: list[WindowRow] = []
+        self.load(None)
+
+    def _add_row(self, days, start, end):
+        row = WindowRow(self.rows_box, days, start, end, self._remove_row)
+        row.pack(anchor="w", pady=2)
+        self.rows.append(row)
+
+    def _remove_row(self, row):
+        row.destroy()
+        self.rows.remove(row)
+
+    def load(self, schedule_json: str | None):
+        for row in self.rows:
+            row.destroy()
+        self.rows = []
+        if schedule_json:
+            s = load_schedule(schedule_json)
+            self.mode.set(next(k for k, v in MODES.items() if v == s["mode"]))
+            for w in s["windows"]:
+                self._add_row(w["days"], w["start"], w["end"])
+        else:
+            self.mode.set("Allow only during")
+            self._add_row([0, 1, 2, 3, 4], "09:00", "17:00")
+
+    def value(self) -> str:
+        return make_schedule(MODES[self.mode.get()], [r.value() for r in self.rows])
+
+
+class LimitEditor(ctk.CTkFrame):
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        ctk.CTkLabel(self, text="Daily limit").pack(side="left")
+        self.minutes = ctk.CTkEntry(self, width=64)
+        self.minutes.pack(side="left", padx=8)
+        ctk.CTkLabel(self, text="minutes - counted while the site is the active tab in Chrome/Edge/Brave/Firefox "
+                                "(not while you're away 15+ min); resets at midnight",
+                     text_color=MUTED, wraplength=560, justify="left").pack(side="left")
+        self.load(None)
+
+    def load(self, minutes: int | None):
+        self.minutes.delete(0, "end")
+        self.minutes.insert(0, str(minutes or 30))
+
+    def value(self) -> int:
+        try:
+            minutes = int(self.minutes.get())
+        except ValueError:
+            minutes = 0
+        if not 1 <= minutes <= 1440:
+            raise ValueError("Daily limit must be 1-1440 minutes.")
+        return minutes
+
+
+class TemporaryEditor(ctk.CTkFrame):
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        ctk.CTkLabel(self, text="Block for").pack(side="left")
+        self.duration = ctk.CTkOptionMenu(self, values=list(DURATIONS), width=110)
+        self.duration.pack(side="left", padx=8)
+        ctk.CTkLabel(self, text="starting when saved", text_color=MUTED).pack(side="left")
+        self.load(None)
+
+    def load(self, minutes: int | None):
+        self.duration.set(next((k for k, v in DURATIONS.items() if v == minutes), "1 hour"))
+
+    def value(self) -> int:
+        return DURATIONS[self.duration.get()]
+
+
+# ---------------------------------------------------------------- shared list helpers
+
+def status_of(page, item: dict, now, usage: dict) -> dict:
+    if page.draft.is_unsaved(item["id"]):
+        return {"text": "○ Not applied\n(unsaved)", "text_color": ORANGE}
+    if not item_block(item["rules"], now, usage.get(item["id"], 0)):
+        return {"text": "○ Allowed now", "text_color": MUTED}
+    if not page.app.service_running:
+        return {"text": "○ Pending - service\nnot running", "text_color": ORANGE}
+    return {"text": "● Blocked now", "text_color": GREEN}
+
+
+def make_row(parent) -> ctk.CTkFrame:
+    row = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=6)
+    row.pack(fill="x", pady=1)
+    for col, width in enumerate(COLS):
+        row.grid_columnconfigure(col, minsize=width)
+    return row
+
+
+def name_cell(row, item):
+    """Icon + name, with the hostnames in small text underneath."""
+    host = item["target"].split()[0]
+    cell = ctk.CTkFrame(row, fg_color="transparent")
+    cell.grid(row=0, column=0, padx=8, pady=6, sticky="w")
+    ctk.CTkLabel(cell, text=f"  {item['display_name']}", image=icons.get(host, 18), compound="left",
+                 font=ctk.CTkFont(weight="bold"), anchor="w").pack(anchor="w")
+    ctk.CTkLabel(cell, text=", ".join(item["target"].split()), text_color=MUTED, font=ctk.CTkFont(size=11),
+                 wraplength=COLS[0] - 16, justify="left", anchor="w").pack(anchor="w")
+
+
+def header_row(parent, titles):
+    row = make_row(parent)
+    for col, title in enumerate(titles):
+        ctk.CTkLabel(row, text=title, text_color=MUTED).grid(row=0, column=col, padx=8, pady=(6, 0), sticky="w")
+
+
+def confirm(title: str, message: str) -> bool:
+    return messagebox.askyesno(title, message, icon="warning")
+
+
+# ---------------------------------------------------------------- tabs
+
+class RuleTab(ctk.CTkScrollableFrame):
+    """Add/edit form + list for one rule type."""
+
+    def __init__(self, master, page, rule_type: str):
+        super().__init__(master, fg_color="transparent")
+        self.page, self.draft, self.rule_type = page, page.draft, rule_type
+        self.edit_id: int | None = None
+        self.rows: dict[int, ctk.CTkFrame] = {}
+        self._build_form()
+        self.list_title = ctk.CTkLabel(self, font=ctk.CTkFont(size=16, weight="bold"))
+        self.list_title.pack(anchor="w", padx=10, pady=(4, 6))
+        self.list_box = ctk.CTkFrame(self)
+        self.list_box.pack(fill="x")
+
+    def _build_form(self):
+        box = ctk.CTkFrame(self)
+        box.pack(fill="x", pady=(0, 12))
+        self.form_title = ctk.CTkLabel(box, font=ctk.CTkFont(size=16, weight="bold"))
+        self.form_title.pack(anchor="w", padx=16, pady=(12, 8))
+        inputs = ctk.CTkFrame(box, fg_color="transparent")
+        inputs.pack(anchor="w", padx=16)
+        self.site_entry = SiteEntry(inputs, self.page.app.db, self._fill, width=260,
+                                    placeholder_text="reddit.com or a full URL")
+        self.site_entry.pack(side="left", padx=(0, 8))
+        self.site_entry.bind("<Return>", lambda e: self._submit(), add="+")
+        self.name_entry = ctk.CTkEntry(inputs, width=180, placeholder_text="Display name")
+        self.name_entry.pack(side="left", padx=8)
+        self.popular_btn = ctk.CTkButton(inputs, text="+ Popular sites", width=120, fg_color="transparent",
+                                         border_width=1, command=lambda: PopularSitesPopup(self, self._fill))
+        self.popular_btn.pack(side="left", padx=8)
+        self.submit_btn = ctk.CTkButton(inputs, width=90, command=self._submit)
+        self.submit_btn.pack(side="left", padx=8)
+        self.cancel_btn = ctk.CTkButton(inputs, text="Cancel", width=80, fg_color="transparent", border_width=1,
+                                        command=self.reset_form)
+
+        editor_cls = {"scheduled": HoursEditor, "time_limit": LimitEditor, "temporary": TemporaryEditor}.get(self.rule_type)
+        self.editor = editor_cls(box) if editor_cls else None
+        if self.editor:
+            self.editor.pack(anchor="w", padx=16, pady=(10, 0))
+        self.error = ctk.CTkLabel(box, text="", text_color=ERROR)
+        self.error.pack(anchor="w", padx=16, pady=(4, 8))
+        self.reset_form()
+
+    def _fill(self, name: str, host: str):
+        """A suggestion or popular site was picked."""
+        if self.edit_id is not None:
+            return
+        self.site_entry.delete(0, "end")
+        self.site_entry.insert(0, host)
+        self.name_entry.delete(0, "end")
+        self.name_entry.insert(0, name)
+
+    def reset_form(self):
+        self.edit_id = None
+        self.form_title.configure(text="Add Site")
+        self.submit_btn.configure(text="+ Add")
+        self.cancel_btn.pack_forget()
+        self.popular_btn.pack(side="left", padx=8, before=self.submit_btn)
+        self.site_entry.configure(state="normal")
+        self.site_entry.delete(0, "end")
+        self.name_entry.delete(0, "end")
+        self.error.configure(text="")
+        if self.editor:
+            self.editor.load(None)
+
+    def edit(self, item_id: int):
+        item = self.draft.items[item_id]
+        rule = next(r for r in item["rules"] if r["rule_type"] == self.rule_type)
+        self.edit_id = item_id
+        self.form_title.configure(text=f"Edit {item['display_name']}")
+        self.submit_btn.configure(text="Update")
+        self.popular_btn.pack_forget()
+        self.cancel_btn.pack(side="left", padx=8)
+        self.site_entry.configure(state="normal")
+        self.site_entry.delete(0, "end")
+        self.site_entry.insert(0, item["target"].split()[0])
+        self.site_entry.configure(state="disabled")
+        self.name_entry.delete(0, "end")
+        self.name_entry.insert(0, item["display_name"])
+        self.error.configure(text="")
+        if self.rule_type == "scheduled":
+            self.editor.load(rule["schedule"])
+        elif self.rule_type == "time_limit":
+            self.editor.load(rule["daily_limit_min"])
+        elif self.rule_type == "temporary":
+            self.editor.load(rule.get("duration_min"))
+        self._parent_canvas.yview_moveto(0)
+        self.highlight(item_id)
+
+    def _rule(self) -> dict:
+        if self.rule_type == "scheduled":
+            return {"rule_type": "scheduled", "schedule": self.editor.value()}
+        if self.rule_type == "time_limit":
+            return {"rule_type": "time_limit", "daily_limit_min": self.editor.value()}
+        if self.rule_type == "temporary":
+            return {"rule_type": "temporary", "duration_min": self.editor.value()}
+        return {"rule_type": "permanent"}
+
+    def _submit(self):
+        self.site_entry.hide()
+        try:
+            rule = self._rule()
+            if self.edit_id is None:
+                host = normalize_host(self.site_entry.get())
+        except ValueError as e:
+            self.error.configure(text=str(e))
+            return
+        name = self.name_entry.get().strip()
+        if self.edit_id is not None and self.edit_id not in self.draft.items:  # expired meanwhile
+            self.reset_form()
+            return
+        if self.edit_id is not None:
+            # identical values leave the draft clean (Save stays grey)
+            self.draft.set_rule(self.edit_id, rule, name or self.draft.items[self.edit_id]["display_name"])
+            self.reset_form()
+            return
+        existing = next((i for i in self.draft.items.values() if host in i["target"].split()), None)
+        if existing and any(r["rule_type"] == self.rule_type for r in existing["rules"]):
+            self.error.configure(text=f"{existing['display_name']} already has a {RULE_NAME[self.rule_type]} - use Edit.")
+            return
+        if existing is None:
+            entry = popular_hosts(host)   # known site: block all of its hostnames
+            existing = self.draft.add_item(name or guess_name(host), entry[1] if entry else [host],
+                                           "popular" if entry else "manual")
+        self.draft.set_rule(existing["id"], rule)
+        self.reset_form()
+
+    def highlight(self, item_id: int):
+        row = self.rows.get(item_id)
+        if row and row.winfo_exists():
+            row.configure(fg_color=HIGHLIGHT)
+            self.after(HIGHLIGHT_MS, lambda: row.winfo_exists() and row.configure(fg_color="transparent"))
+
+    def refresh(self, now, usage):
+        items = [i for i in self.draft.sorted_items() if any(r["rule_type"] == self.rule_type for r in i["rules"])]
+        self.list_title.configure(text=f"{RULE_TAB[self.rule_type]} ({len(items)})")
+        for w in self.list_box.winfo_children():
+            w.destroy()
+        self.rows = {}
+        if not items:
+            ctk.CTkLabel(self.list_box, text="Nothing here yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
+            return
+        header_row(self.list_box, ["Name", "Rule", "Status"])
+        for item in items:
+            rule = next(r for r in item["rules"] if r["rule_type"] == self.rule_type)
+            row = make_row(self.list_box)
+            self.rows[item["id"]] = row
+            name_cell(row, item)
+            ctk.CTkLabel(row, text=describe_rule(rule, now, usage.get(item["id"], 0)), wraplength=COLS[1] - 16,
+                         justify="left", anchor="w").grid(row=0, column=1, padx=8, sticky="w")
+            ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left").grid(
+                row=0, column=2, padx=8, sticky="w")
+            ctk.CTkButton(row, text="Edit", width=60, command=lambda i=item["id"]: self.edit(i)).grid(
+                row=0, column=3, padx=4)
+            ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
+                          command=lambda it=item: self._remove(it)).grid(row=0, column=4, padx=4)
+
+    def _remove(self, item):
+        if confirm("Remove", f"Remove the {RULE_NAME[self.rule_type]} from {item['display_name']}?"):
+            if self.edit_id == item["id"]:
+                self.reset_form()
+            self.draft.remove_rule(item["id"], self.rule_type)
+
+
+class AllTab(ctk.CTkScrollableFrame):
+    """Overview of every site with all its rules. Edit jumps to the rule's tab."""
+
+    def __init__(self, master, page):
+        super().__init__(master, fg_color="transparent")
+        self.page, self.draft = page, page.draft
+        self.title = ctk.CTkLabel(self, font=ctk.CTkFont(size=16, weight="bold"))
+        self.title.pack(anchor="w", padx=10, pady=(4, 2))
+        ctk.CTkLabel(self, text="To add sites, open the tab for the kind of block you want (By Hours, By Limit, ...).",
+                     text_color=MUTED).pack(anchor="w", padx=10, pady=(0, 8))
+        self.list_box = ctk.CTkFrame(self)
+        self.list_box.pack(fill="x")
+
+    def refresh(self, now, usage):
+        items = self.draft.sorted_items()
+        self.title.configure(text=f"All Blocked Sites ({len(items)})")
+        for w in self.list_box.winfo_children():
+            w.destroy()
+        if not items:
+            ctk.CTkLabel(self.list_box, text="Nothing blocked yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
+            return
+        header_row(self.list_box, ["Name", "Rules", "Status", "Alerts"])
+        for item in items:
+            row = make_row(self.list_box)
+            name_cell(row, item)
+            rules_box = ctk.CTkFrame(row, fg_color="transparent")
+            rules_box.grid(row=0, column=1, padx=8, sticky="w")
+            for r, rule in enumerate(item["rules"]):
+                ctk.CTkLabel(rules_box, text=describe_rule(rule, now, usage.get(item["id"], 0)),
+                             wraplength=COLS[1] - 60, justify="left", anchor="w").grid(row=r, column=0, sticky="w")
+                if rule["rule_type"] in RULE_TAB:
+                    ctk.CTkButton(rules_box, text="Edit", width=44, height=22, fg_color="transparent", border_width=1,
+                                  command=lambda i=item["id"], t=rule["rule_type"]: self.page.edit_rule(i, t)
+                                  ).grid(row=r, column=1, padx=6, pady=1)
+            ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left").grid(
+                row=0, column=2, padx=8, sticky="w")
+            alerts = ctk.CTkOptionMenu(row, values=list(ALERTS), width=90,
+                                       command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
+            alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
+            alerts.grid(row=0, column=3, padx=4)
+            ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
+                          command=lambda it=item: self._remove(it)).grid(row=0, column=4, padx=4)
+
+    def _remove(self, item):
+        if confirm("Remove site", f"Remove {item['display_name']} and all its rules?"):
+            self.draft.remove_item(item["id"])
 
 
 class BlockingPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
-        self.app = app
-        self.db = app.db
-        self.name_edited = False
-        self.quick_vars: dict[str, ctk.BooleanVar] = {}
-
+        self.app, self.draft = app, app.draft
         ctk.CTkLabel(self, text="Blocking", font=ctk.CTkFont(size=24, weight="bold")).pack(
-            anchor="w", padx=30, pady=(24, 8))
-        self.tabs = ctk.CTkSegmentedButton(self, values=SUB_TABS, command=self._show_tab)
-        self.tabs.pack(anchor="w", padx=30, pady=(0, 12))
-
-        self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-
-        self.add_box = self._build_add_box()
-        self.quick_box = self._build_quick_box()
-        self.list_title = ctk.CTkLabel(self.body, font=ctk.CTkFont(size=16, weight="bold"))
-        self.list_box = ctk.CTkFrame(self.body)
-        self.placeholder = ctk.CTkLabel(self.body, text_color=MUTED)
-
-        self.tabs.set("All")
-        self._show_tab("All")
+            anchor="w", padx=30, pady=(16, 8))
+        self.tab_bar = ctk.CTkSegmentedButton(self, values=TABS, command=self.show_tab)
+        self.tab_bar.pack(anchor="w", padx=30, pady=(0, 12))
+        holder = ctk.CTkFrame(self, fg_color="transparent")
+        holder.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        holder.grid_columnconfigure(0, weight=1)
+        holder.grid_rowconfigure(0, weight=1)
+        self.tabs = {"All": AllTab(holder, self)}
+        for tab, rule_type in TAB_RULE.items():
+            self.tabs[tab] = RuleTab(holder, self, rule_type)
+        switches = ctk.CTkFrame(holder, fg_color="transparent")
+        ctk.CTkLabel(switches, text="Switch limits are coming in a later phase.", text_color=MUTED).pack(
+            anchor="w", padx=10, pady=10)
+        self.tabs["By Switches"] = switches
+        icons.prefetch([hosts[0] for sites in POPULAR_SITES.values() for hosts in sites.values()]
+                       + [i["target"].split()[0] for i in self.draft.items.values()])
+        self.tab_bar.set("All")
+        self.show_tab("All")
         self.after(REFRESH_MS, self._auto_refresh)
 
-    # ---------- layout ----------
-
-    def _section(self, title: str) -> ctk.CTkFrame:
-        box = ctk.CTkFrame(self.body)
-        ctk.CTkLabel(box, text=title, font=ctk.CTkFont(size=16, weight="bold")).grid(
-            row=0, column=0, columnspan=QUICK_COLUMNS + 1, padx=16, pady=(12, 8), sticky="w")
-        return box
-
-    def _build_add_box(self) -> ctk.CTkFrame:
-        box = self._section("Add Site")
-        inputs = ctk.CTkFrame(box, fg_color="transparent")
-        inputs.grid(row=1, column=0, columnspan=3, padx=16, pady=4, sticky="w")
-        self.site_entry = ctk.CTkEntry(inputs, width=260, placeholder_text="reddit.com or a full URL")
-        self.site_entry.pack(side="left", padx=(0, 8))
-        self.site_entry.bind("<KeyRelease>", self._on_site_typed)
-        self.site_entry.bind("<Return>", lambda e: self._add_site())
-        self.name_entry = ctk.CTkEntry(inputs, width=180, placeholder_text="Display name")
-        self.name_entry.pack(side="left", padx=8)
-        self.name_entry.bind("<KeyRelease>", lambda e: setattr(self, "name_edited", bool(self.name_entry.get())))
-        self.name_entry.bind("<Return>", lambda e: self._add_site())
-        ctk.CTkButton(inputs, text="+ Add", width=80, command=self._add_site).pack(side="left", padx=8)
-
-        types = ctk.CTkFrame(box, fg_color="transparent")
-        types.grid(row=2, column=0, columnspan=3, padx=16, pady=(6, 2), sticky="w")
-        ctk.CTkLabel(types, text="Block type:").pack(side="left", padx=(0, 10))
-        self.use_permanent = ctk.BooleanVar(value=True)
-        self.use_hours = ctk.BooleanVar(value=False)
-        self.use_temp = ctk.BooleanVar(value=False)
-        for text, var in (("Permanent", self.use_permanent), ("By hours", self.use_hours), ("Temporary", self.use_temp)):
-            ctk.CTkCheckBox(types, text=text, variable=var, command=self._update_rule_rows).pack(side="left", padx=(0, 14))
-        ctk.CTkLabel(types, text="(can check several)", text_color=MUTED).pack(side="left")
-
-        # "By hours" options
-        self.hours_row = ctk.CTkFrame(box, fg_color="transparent")
-        ctk.CTkLabel(self.hours_row, text="Blocked on").pack(side="left", padx=(0, 8))
-        self.day_vars = []
-        for i, day in enumerate(DAY_NAMES):
-            var = ctk.BooleanVar(value=i < 5)
-            ctk.CTkCheckBox(self.hours_row, text=day, variable=var, width=52).pack(side="left")
-            self.day_vars.append(var)
-        ctk.CTkLabel(self.hours_row, text="from").pack(side="left", padx=(10, 6))
-        self.start_entry = ctk.CTkEntry(self.hours_row, width=64)
-        self.start_entry.insert(0, "09:00")
-        self.start_entry.pack(side="left")
-        ctk.CTkLabel(self.hours_row, text="to").pack(side="left", padx=6)
-        self.end_entry = ctk.CTkEntry(self.hours_row, width=64)
-        self.end_entry.insert(0, "17:00")
-        self.end_entry.pack(side="left")
-        ctk.CTkLabel(self.hours_row, text="(end before start = overnight)", text_color=MUTED).pack(side="left", padx=8)
-
-        # "Temporary" options
-        self.temp_row = ctk.CTkFrame(box, fg_color="transparent")
-        ctk.CTkLabel(self.temp_row, text="Block for").pack(side="left", padx=(0, 8))
-        self.duration = ctk.CTkOptionMenu(self.temp_row, values=list(DURATIONS), width=110)
-        self.duration.set("1 hour")
-        self.duration.pack(side="left")
-        ctk.CTkLabel(self.temp_row, text="starting now", text_color=MUTED).pack(side="left", padx=8)
-
-        self.add_error = ctk.CTkLabel(box, text="", text_color=ERROR)
-        self.add_error.grid(row=5, column=0, columnspan=3, padx=16, pady=(0, 8), sticky="w")
-        return box
-
-    def _update_rule_rows(self):
-        if self.use_hours.get():
-            self.hours_row.grid(row=3, column=0, columnspan=3, padx=16, pady=4, sticky="w")
-        else:
-            self.hours_row.grid_remove()
-        if self.use_temp.get():
-            self.temp_row.grid(row=4, column=0, columnspan=3, padx=16, pady=4, sticky="w")
-        else:
-            self.temp_row.grid_remove()
-
-    def _build_quick_box(self) -> ctk.CTkFrame:
-        box = self._section("Quick Add - Popular Sites (permanent)")
-        row = 1
-        for category, sites in POPULAR_SITES.items():
-            ctk.CTkLabel(box, text=category, text_color=MUTED).grid(row=row, column=0, padx=16, pady=4, sticky="nw")
-            for i, name in enumerate(sites):
-                var = ctk.BooleanVar()
-                self.quick_vars[name] = var
-                ctk.CTkCheckBox(box, text=name, variable=var, command=lambda n=name, c=category: self._toggle_quick(c, n)
-                                ).grid(row=row + i // QUICK_COLUMNS, column=1 + i % QUICK_COLUMNS, padx=8, pady=4, sticky="w")
-            row += (len(sites) - 1) // QUICK_COLUMNS + 1
-        ctk.CTkLabel(box, text="").grid(row=row, column=0, pady=2)
-        return box
-
-    def _show_tab(self, tab: str):
-        for w in (self.add_box, self.quick_box, self.list_title, self.list_box, self.placeholder):
-            w.pack_forget()
-        if tab in NOT_YET:
-            self.placeholder.configure(text=NOT_YET[tab])
-            self.placeholder.pack(anchor="w", padx=10, pady=10)
-            return
-        if tab == "All":
-            self.add_box.pack(fill="x", pady=(0, 12))
-            self.quick_box.pack(fill="x", pady=(0, 12))
-        self.list_title.pack(anchor="w", padx=10, pady=(4, 6))
-        self.list_box.pack(fill="x")
+    def show_tab(self, tab: str):
+        self.tab_bar.set(tab)
+        # show only the chosen tab (tkraise doesn't work for scrollable frames: it raises the inner frame only)
+        for frame in self.tabs.values():
+            frame.grid_forget()
+        self.tabs[tab].grid(row=0, column=0, sticky="nsew")
         self.refresh()
 
-    # ---------- data ----------
-
-    def _auto_refresh(self):
-        self.refresh()  # countdowns + "blocked now" status
-        self.after(REFRESH_MS, self._auto_refresh)
+    def edit_rule(self, item_id: int, rule_type: str):
+        """From the All tab: open the rule's tab with the site loaded in the form."""
+        tab = RULE_TAB[rule_type]
+        self.show_tab(tab)
+        self.tabs[tab].edit(item_id)
 
     def refresh(self):
-        now = datetime.now()
-        items = self.db.list_items()
-        rule_filter = TAB_RULE.get(self.tabs.get())
-        if rule_filter:
-            items = [i for i in items if any(r["rule_type"] == rule_filter for r in i["rules"])]
-        self.list_title.configure(text=f"Blocked Items ({len(items)})")
+        tab = self.tabs[self.tab_bar.get()]
+        if hasattr(tab, "refresh"):
+            now = now_from_db(self.app.db)
+            tab.refresh(now, self.app.db.usage_on(now.date()))
 
-        quick_names = {i["display_name"] for i in items if i["source"] == "quick-list"}
-        for name, var in self.quick_vars.items():
-            var.set(name in quick_names)
-
-        for w in self.list_box.winfo_children():
-            w.destroy()
-        if not items:
-            ctk.CTkLabel(self.list_box, text="Nothing here yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
-            return
-        self.list_box.grid_columnconfigure(2, weight=1)
-        for col, head in enumerate(["Name", "Type", "Hostnames", "Rules", "Status", "Alerts", ""]):
-            ctk.CTkLabel(self.list_box, text=head, text_color=MUTED).grid(row=0, column=col, padx=10, pady=(8, 2), sticky="w")
-        for r, item in enumerate(items, start=1):
-            ctk.CTkLabel(self.list_box, text=item["display_name"], font=ctk.CTkFont(weight="bold")).grid(
-                row=r, column=0, padx=10, pady=4, sticky="w")
-            ctk.CTkLabel(self.list_box, text=f"[{item['item_type']}]", text_color=MUTED).grid(row=r, column=1, padx=10, sticky="w")
-            ctk.CTkLabel(self.list_box, text=", ".join(item["target"].split()), text_color=MUTED, wraplength=230,
-                         justify="left", anchor="w").grid(row=r, column=2, padx=10, sticky="w")
-            ctk.CTkLabel(self.list_box, text="\n".join(describe_rule(rule, now) for rule in item["rules"]),
-                         justify="left").grid(row=r, column=3, padx=10, sticky="w")
-            ctk.CTkLabel(self.list_box, **self._status(item, now)).grid(row=r, column=4, padx=10, sticky="w")
-            alerts = ctk.CTkOptionMenu(self.list_box, values=list(ALERTS), width=90,
-                                       command=lambda v, i=item["id"]: self.db.set_item_notify(i, ALERTS[v]))
-            alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
-            alerts.grid(row=r, column=5, padx=10)
-            ctk.CTkButton(self.list_box, text="Remove", width=70, fg_color="transparent", border_width=1,
-                          command=lambda i=item["id"]: self._remove(i)).grid(row=r, column=6, padx=10, pady=4)
-
-    def _status(self, item: dict, now: datetime) -> dict:
-        if not item_block(item["rules"], now):
-            return {"text": "○ Allowed now", "text_color": MUTED}
-        if not self.app.service_running:
-            return {"text": "○ Pending - service\nnot running", "text_color": "#d29922"}
-        return {"text": "● Blocked now", "text_color": "#3fb950"}
-
-    def _on_site_typed(self, _event):
-        if self.name_edited:
-            return
-        self.name_entry.delete(0, "end")
-        try:
-            self.name_entry.insert(0, _guess_name(normalize_host(self.site_entry.get())))
-        except ValueError:
-            pass
-
-    def _selected_rules(self) -> list[dict]:
-        """Rules from the form. Raises ValueError with a user-facing message."""
-        rules = []
-        if self.use_permanent.get():
-            rules.append({"rule_type": "permanent"})
-        if self.use_hours.get():
-            days = [i for i, v in enumerate(self.day_vars) if v.get()]
-            try:
-                schedule = make_schedule(days, self.start_entry.get(), self.end_entry.get())
-            except ValueError as e:
-                raise ValueError(str(e) if not days else "Hours must look like 09:00 or 21:30.") from e
-            rules.append({"rule_type": "scheduled", "schedule": schedule})
-        if self.use_temp.get():
-            until = datetime.now() + timedelta(minutes=DURATIONS[self.duration.get()])
-            rules.append({"rule_type": "temporary", "temp_until": until.strftime(TIME_FMT)})
-        if not rules:
-            raise ValueError("Pick at least one block type.")
-        return rules
-
-    def _add_site(self):
-        try:
-            host = normalize_host(self.site_entry.get())
-            rules = self._selected_rules()
-        except ValueError as e:
-            self.add_error.configure(text=str(e))
-            return
-        if any(host in i["target"].split() for i in self.db.list_items()):
-            self.add_error.configure(text=f"{host} is already in the list.")
-            return
-        entry = _popular_entry(host)  # known site: block all of its hostnames
-        self.db.add_site(self.name_entry.get().strip() or _guess_name(host), entry[1] if entry else [host], rules=rules)
-        self.site_entry.delete(0, "end")
-        self.name_entry.delete(0, "end")
-        self.name_edited = False
-        self.add_error.configure(text="")
-        self.refresh()
-
-    def _toggle_quick(self, category: str, name: str):
-        if self.quick_vars[name].get():
-            self.db.add_site(name, POPULAR_SITES[category][name], source="quick-list")
-        else:
-            for item in self.db.list_items():
-                if item["source"] == "quick-list" and item["display_name"] == name:
-                    self.db.remove_item(item["id"])
-        self.refresh()
-
-    def _remove(self, item_id: int):
-        self.db.remove_item(item_id)
-        self.refresh()
+    def _auto_refresh(self):
+        self.draft.refresh_if_clean()   # service may have removed expired blocks
+        self.refresh()                  # countdowns, usage, "blocked now"
+        self.after(REFRESH_MS, self._auto_refresh)

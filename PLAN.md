@@ -1138,8 +1138,20 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] Blocked visit notifications (localhost listener + reason: permanent / outside hours / temporary; customizable per reason, cooldown, format, per-item override) — "limit reached" reason comes with daily limits
 - [x] Tray agent auto-starts at login (hidden in tray) + single instance (second launch just shows the window)
 - [x] Schedule-based blocking (time ranges, days of week, overnight windows)
-- [ ] Daily time limits per site — **on hold: open question how to measure time on a site** (see conversation)
+- [x] Daily time limits per site — time measured by reading the active browser tab's URL via Windows UI Automation (Chrome/Edge/Brave/Firefox), counted by the tray agent, enforced by the service, resets at midnight; "limit reached" alert reason
 - [x] Temporary blocks (block for 15 min … 24 h; expired ones removed automatically)
+
+### Phase 2b — Blocking UX rework + clock protection (requested 2026-09-18)
+- [x] Hours rules: switch per rule "Allow only during" (default) / "Block during"; multiple time windows per rule, each with its own days + from/to (custom hours per day)
+- [x] Blocking tabs: each tab (By Hours / By Limit / Permanent / Temporary) has its own add + edit form and list; a site added in "By Hours" gets an hours rule, etc.
+- [x] "All" tab = overview of every site with all its rules/times; per rule an Edit button that jumps to that tab with the site loaded + highlighted; Remove (whole site) with "Are you sure?" confirmation
+- [x] Save system: one Save button at the top for all pages, highlighted only when something really differs from the saved state (Edit → Cancel doesn't count); Discard; unsaved items show "Not applied" and aren't enforced
+- [x] Auto-save option (switch next to Save; when on, every change is saved immediately) — default off
+- [x] "+ Popular sites" button next to Add: popup with popular sites by category (with site icons); clicking one fills URL + name; the old checkbox grid is removed
+- [x] Site icons: favicons downloaded + cached locally; letter icon fallback when offline/unavailable (never a broken image)
+- [x] Suggestions while typing a site: popular sites + sites you blocked before; "Clear my suggestions" button
+- [x] Clock-change protection: service keeps its own trusted time (network time + tick counter), so changing the Windows clock doesn't unlock anything; clock changes are logged
+- [x] Notification format default = Windows notification only (choice stays on the Notifications page)
 
 ### Phase 3 — App Blocking
 - [ ] Process monitoring (detect running blocked apps)
@@ -1181,6 +1193,7 @@ General app settings (lock and notification settings have moved to their own tab
 - [ ] Service permission lockdown
 - [ ] Service relaunches the tray agent if it's closed/killed (and logs the attempt)
 - [ ] Tray "Exit" requires the anti-bypass challenge (closing the window still just hides to tray)
+- [ ] Clock protection hardening: time-zone changes, clock rolled back while offline across a reboot
 - [ ] Convert enforcement scheduled task into a real Windows Service (pywin32, easier once packaged with PyInstaller)
 - [ ] Lock down `C:\ProgramData\Lockdown\` ACLs (currently Users: modify)
 - [ ] Watchdog service
@@ -1220,7 +1233,8 @@ Lockdown/
 │   ├── service.py             # Enforcement service
 │   ├── watchdog.py            # Watchdog service
 │   ├── db.py                  # SQLite database layer
-│   ├── rules.py               # Block rule evaluation (permanent / scheduled / temporary)
+│   ├── rules.py               # Block rule evaluation (permanent / hours / temporary / daily limit)
+│   ├── trusted_time.py        # Clock-change protection (internet time + tick counter)
 │   ├── alerts.py              # Blocked-visit alert settings + message formatting
 │   ├── blocker/
 │   │   ├── hosts.py           # Hosts file manipulation
@@ -1232,6 +1246,8 @@ Lockdown/
 │   ├── monitor/
 │   │   ├── network.py         # Network connection logging
 │   │   ├── dns.py             # DNS query monitoring
+│   │   ├── browser_url.py     # Active tab URL via UI Automation
+│   │   ├── usage.py           # Time on limited sites (tray agent)
 │   │   ├── screentime.py      # Foreground window + activity tracking
 │   │   └── applist.py         # Installed app enumeration (registry)
 │   ├── gui/
@@ -1249,6 +1265,9 @@ Lockdown/
 │   │   ├── charts.py          # Chart/graph widgets
 │   │   ├── page_settings.py   # Per-page display settings panel
 │   │   ├── single_instance.py # One GUI/tray process only
+│   │   ├── draft.py           # Unsaved changes + Save/Discard/Auto-save
+│   │   ├── site_picker.py     # Site suggestions + popular sites popup
+│   │   ├── icons.py           # Favicon cache + letter fallback
 │   │   └── tray.py            # System tray icon
 │   ├── lock/
 │   │   ├── challenges.py      # Type-phrase, math problems, grid challenge
@@ -1323,6 +1342,21 @@ CREATE TABLE block_events (
     display_name TEXT,
     reason TEXT,                  -- permanent, schedule, temporary
     until DATETIME
+);
+
+-- Seconds spent per site per day (tray agent writes, service enforces daily limits)
+CREATE TABLE site_usage (
+    date TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, item_id)
+);
+
+-- Sites blocked before (add-site suggestions; clearable)
+CREATE TABLE site_history (
+    hostname TEXT PRIMARY KEY,
+    display_name TEXT,
+    last_used DATETIME
 );
 
 -- Network log

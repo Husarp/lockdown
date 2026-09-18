@@ -12,9 +12,13 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 ## Status
 
 - **Phase 1 (MVP) done:** permanent website blocking via the hosts file, enforcement service, GUI with blocklist + popular-sites quick-list, system tray.
-- **Phase 2 (mostly done):** blocking by hours (days + time window, overnight supported), temporary blocks, stacked rules,
-  locked browser DoH/QUIC policies, closing open connections on block, blocked-visit notifications, tray agent at login, single instance.
-  Daily time limits are still to come.
+- **Phase 2 done:** blocking by hours (allow-only or block-during, several time windows with their own days),
+  daily time limits, temporary blocks, stacked rules, locked browser DoH/QUIC policies, closing open connections on block,
+  blocked-visit notifications, tray agent at login, single instance, clock-change protection.
+- **Blocking UI:** one tab per kind of block (By Hours / By Limit / Permanent / Temporary) with its own add/edit form;
+  "All" is the overview (Edit jumps to the right tab, Remove asks first). Site suggestions while typing,
+  "+ Popular sites" picker with site icons. Changes are staged until you press **Save changes** (top right),
+  or saved instantly with **Auto-save** on; unsaved sites show "Not applied".
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
@@ -29,6 +33,13 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   - keeps browser policies set that turn off DNS-over-HTTPS and QUIC in Chrome, Edge, Brave and Firefox
     (browsers then show "managed by your organization") — otherwise browsers could skip the hosts file;
   - closes already-open connections to a site right after it gets blocked.
+- Daily limits: the tray agent reads the active browser tab's address (Windows UI Automation — Chrome, Edge, Brave,
+  Firefox, no extension needed) and counts time on limited sites; the service blocks the site once the limit is used up,
+  until midnight.
+- The service keeps its own trusted time (internet time + the Windows tick counter), so changing the Windows clock
+  doesn't unlock anything; clock changes are logged.
+- Site icons are downloaded once from Google's favicon service and cached in `%LOCALAPPDATA%\Lockdown\icons`
+  (a letter icon is shown when offline).
 - The service also listens on `127.0.0.1:80/443`: when a browser tries to open a blocked site, it records which
   site and why; the tray agent turns that into a notification (configurable on the Notifications page).
 - Service log: `C:\ProgramData\Lockdown\lockdown.log`.
