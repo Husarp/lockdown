@@ -1,7 +1,9 @@
-"""Counts time spent on blocked items (sites and apps) - runs in the tray agent, which sees the desktop.
+"""Desktop tracking in the tray agent (which sees the desktop), every 2 seconds:
 
-Time goes to every usage bucket the item's rules need: its own day total, a shared group limit,
-and the allowance of the current blocked stretch of an hours rule.
+- screen time: which app (and which site, in a browser) is in front, and whether you're active
+- switches: every change to another app / site
+- blocked items in use: time goes to every usage bucket their rules need (own day total,
+  shared group limit, allowance of the current blocked stretch of an hours rule)
 """
 import logging
 import threading
@@ -12,7 +14,9 @@ from rules import effective_rules, usage_targets
 from trusted_time import now_from_db
 
 TICK_SEC = 2
-IDLE_LIMIT_SEC = 15 * 60   # sites: no keyboard/mouse input for this long = away, don't count
+IDLE_LIMIT_SEC = 15 * 60   # sites: no keyboard/mouse input for this long = away, don't count for limits
+ACTIVE_IDLE_SEC = 5 * 60   # screen time: input within this = active (plan: 5 min idle threshold)
+_UNSET = object()
 
 log = logging.getLogger("lockdown.usage")
 
@@ -41,13 +45,20 @@ def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict]
 
 
 def sense_desktop():
-    """(foreground exe, its browser URL or None, idle?) - None exe when nothing is in front (e.g. locked)."""
+    """(foreground exe, its browser URL or None, seconds since last input) - None exe when nothing is in front."""
     from monitor import browser_url, win
     hwnd, exe = win.foreground()
     if not hwnd:
-        return None, None, True
+        return None, None, win.idle_seconds()
     url = browser_url.browser_url(hwnd) if exe in browser_url.BROWSERS else None
-    return exe, url, win.idle_seconds() > IDLE_LIMIT_SEC
+    return exe, url, win.idle_seconds()
+
+
+def site_of(url: str | None) -> str:
+    try:
+        return normalize_host(url) if url else ""
+    except ValueError:
+        return ""
 
 
 class UsageTracker(threading.Thread):
@@ -55,6 +66,7 @@ class UsageTracker(threading.Thread):
         super().__init__(daemon=True)
         self.stop_event = threading.Event()
         self.in_use: set[int] = set()   # item ids in use right now (read by the warning watcher)
+        self.last_focus = _UNSET        # (exe, site) in front at the previous tick
 
     def run(self):
         import uiautomation as auto  # COM must be initialized in this thread
@@ -67,11 +79,21 @@ class UsageTracker(threading.Thread):
                     log.exception("Usage tracking failed")
 
     def tick(self, db: Database, sense):
-        exe, url, idle = sense()
-        used = items_in_use(exe, url, idle, db.list_items())
+        exe, url, idle_sec = sense()
+        now = now_from_db(db)
+        self.record_activity(db, exe, site_of(url), idle_sec, now)
+        used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, db.list_items())
         if used:
-            now = now_from_db(db)
             groups = db.list_groups()
             for item in used:
                 db.add_usage(usage_targets(effective_rules(item, groups), item["id"], now), TICK_SEC, now.date())
         self.in_use = {i["id"] for i in used}
+
+    def record_activity(self, db: Database, exe: str | None, site: str, idle_sec: float, now):
+        focus = (exe, site) if exe else None     # None: nothing in front (e.g. locked)
+        if exe:
+            db.add_activity(now.strftime("%Y-%m-%d %H:%M"), exe, site, TICK_SEC,
+                            TICK_SEC if idle_sec < ACTIVE_IDLE_SEC else 0)
+            if self.last_focus is not _UNSET and focus != self.last_focus:
+                db.add_switch(now, exe, site)
+        self.last_focus = focus

@@ -1172,13 +1172,22 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] "Block started" notification (on/off)
 - [x] Group warnings/notifications combined into one ("Night schedule starts in 5 min: Discord, Steam, YouTube")
 
+**Added 2026-09-19:**
+- [x] Remove buttons: click twice (turns into a red "Confirm" for 3 s) instead of a confirmation dialog
+- [x] Apps started while blocked are killed immediately (checked 4x per second); the polite 10 s close is only for apps already open when their block begins
+- [ ] Proposal (awaiting approval): stop blocked apps from starting at all (Windows "Image File Execution Options" registry entry, set/removed by the service)
+- [ ] Proposal (awaiting approval): Blocking page with fewer tabs — "Sites & Apps" (list + sort + one editor where block types combine) and "Groups"
+- [ ] Hours editor: only show "Remove window" when a rule has 2+ time windows (awaiting approval, part of the rework)
+- [ ] Design brief for Claude Design (screens, components, data, states) — after the Blocking rework is decided
+
 **Ideas added 2026-09-18 (not scheduled yet):**
 - [ ] Weekly block calendar: a week view (like a Teams calendar, but) with colored bars per app/site showing when each is blocked; see at a glance when everything is blocked — visual only
 - [ ] Dashboard: list of everything with a minute limit (or opening limit) with progress bars, time left / percentage used
 
 ### Phase 4 — Screen Time & Stats
-- [ ] Foreground window tracking (per-app time)
-- [ ] Mouse/keyboard activity detection (active vs idle)
+- [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
+- [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
+- [x] Switch counting data (`switch_events` table)
 - [ ] Overall screen time calculation
 - [ ] Per-app usage graphs (bar chart, pie chart)
 - [ ] Daily/weekly/monthly trend line graphs

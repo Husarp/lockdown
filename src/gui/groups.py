@@ -4,13 +4,12 @@ Members inherit the group's rules; editing the group changes all of them. A memb
 (e.g. an "emergency" app gets a 5-minute allowance in the night block). A group daily limit is one
 shared total for all members.
 """
-from tkinter import messagebox
-
 import customtkinter as ctk
 
 from gui import icons
 from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor
 from gui.target_picker import TargetPicker
+from gui.widgets import ConfirmButton
 from rules import describe_rule, effective_rules, item_block
 
 MUTED = "gray60"
@@ -284,11 +283,8 @@ class GroupsTab(ctk.CTkScrollableFrame):
                           "text_color": GREEN if blocked else MUTED}
             ctk.CTkLabel(row, **status, width=150, anchor="w", justify="left").pack(side="left", padx=8)
             ctk.CTkButton(row, text="Edit", width=60, command=lambda gid=g["id"]: self.open_editor(gid)).pack(side="left", padx=4)
-            ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
-                          command=lambda g=g: self._remove(g)).pack(side="left", padx=4)
+            ConfirmButton(row, lambda g=g: self._remove(g), width=70).pack(side="left", padx=4)
 
     def _remove(self, group):
-        if messagebox.askyesno("Remove group", f"Remove the group {group['name']}? Its members stay blocked only "
-                                                "by their own rules and other groups.", icon="warning"):
-            self.close_editor()
-            self.draft.remove_group(group["id"])
+        self.close_editor()
+        self.draft.remove_group(group["id"])

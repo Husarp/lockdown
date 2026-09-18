@@ -6,7 +6,6 @@ Edit jumps to the rule's tab (or the group), Remove deletes the item (after a co
 shared rule sets. All edits go into the draft (see draft.py).
 """
 import tkinter as tk
-from tkinter import messagebox
 
 import customtkinter as ctk
 
@@ -14,6 +13,7 @@ from gui import app_browser, icons
 from gui.groups import GroupsTab
 from gui.rule_editors import EDITORS
 from gui.target_picker import TargetPicker
+from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
 from rules import describe_rule, effective_rules, item_block
 from trusted_time import now_from_db
@@ -77,10 +77,6 @@ def header_row(parent, titles):
     row = make_row(parent)
     for col, title in enumerate(titles):
         ctk.CTkLabel(row, text=title, text_color=MUTED).grid(row=0, column=col, padx=8, pady=(6, 0), sticky="w")
-
-
-def confirm(title: str, message: str) -> bool:
-    return messagebox.askyesno(title, message, icon="warning")
 
 
 # ---------------------------------------------------------------- tabs
@@ -195,14 +191,12 @@ class RuleTab(ctk.CTkScrollableFrame):
                 row=0, column=2, padx=8, sticky="w")
             ctk.CTkButton(row, text="Edit", width=60, command=lambda i=item["id"]: self.edit(i)).grid(
                 row=0, column=3, padx=4)
-            ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
-                          command=lambda it=item: self._remove(it)).grid(row=0, column=4, padx=4)
+            ConfirmButton(row, lambda it=item: self._remove(it), width=70).grid(row=0, column=4, padx=4)
 
     def _remove(self, item):
-        if confirm("Remove", f"Remove the {RULE_NAME[self.rule_type]} from {item['display_name']}?"):
-            if self.edit_id == item["id"]:
-                self.reset_form()
-            self.draft.remove_rule(item["id"], self.rule_type)
+        if self.edit_id == item["id"]:
+            self.reset_form()
+        self.draft.remove_rule(item["id"], self.rule_type)
 
 
 class AllTab(ctk.CTkScrollableFrame):
@@ -252,8 +246,7 @@ class AllTab(ctk.CTkScrollableFrame):
             edit_btn = ctk.CTkButton(row, text="Edit ▾" if len(choices) > 1 else "Edit", width=70)
             edit_btn.configure(command=lambda b=edit_btn, c=choices: self._edit(b, c))
             edit_btn.grid(row=0, column=4, padx=4)
-            ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
-                          command=lambda it=item: self._remove(it)).grid(row=0, column=5, padx=4)
+            ConfirmButton(row, lambda i=item["id"]: self.draft.remove_item(i), width=70).grid(row=0, column=5, padx=4)
 
     def _edit(self, button, choices):
         """One choice: do it. Several: ask which one with a small menu under the button."""
@@ -264,12 +257,6 @@ class AllTab(ctk.CTkScrollableFrame):
         for label, action in choices:
             menu.add_command(label=label, command=action)
         menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
-
-    def _remove(self, item):
-        groups = ", ".join(g["name"] for g in self.draft.groups_of(item["id"]))
-        extra = f" It will also leave: {groups}." if groups else ""
-        if confirm("Remove", f"Remove {item['display_name']} and all its rules?{extra}"):
-            self.draft.remove_item(item["id"])
 
 
 class BlockingPage(ctk.CTkFrame):

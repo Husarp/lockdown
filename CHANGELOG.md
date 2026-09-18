@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-09-19 00:50
+- Remove buttons need two clicks (first click turns the button into a red "Confirm" for 3 s) instead of a confirmation dialog (`gui/widgets.py`)
+- Apps started while blocked are killed immediately; process check 4x per second (was 1x); polite 10 s close only for apps already open when their block begins
+- Phase 4 data collection (no UI yet): per-minute screen time per app and browser site with active/idle split (`activity` table), switch counting (`switch_events` table)
+- 88 tests passing
+
 ## 0.4.0 — 2026-09-19 00:10
 - Phase 3 — app blocking:
   - Apps are blocked items like sites (all tabs/rules); matched by exe name; Windows/Lockdown processes are protected

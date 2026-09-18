@@ -82,6 +82,24 @@ CREATE TABLE IF NOT EXISTS usage (
     PRIMARY KEY (owner, bucket)
 );
 
+-- Screen time: seconds per minute per foreground app (and site, when it's a browser)
+CREATE TABLE IF NOT EXISTS activity (
+    minute TEXT NOT NULL,         -- "YYYY-MM-DD HH:MM" (trusted local time)
+    exe TEXT NOT NULL,            -- foreground app
+    site TEXT NOT NULL DEFAULT '',-- hostname of the active tab, if the app is a browser
+    seconds INTEGER NOT NULL DEFAULT 0,
+    active_seconds INTEGER NOT NULL DEFAULT 0,   -- of which with keyboard/mouse input in the last 5 min
+    PRIMARY KEY (minute, exe, site)
+);
+
+-- Every switch to another app / site (for "you switched to Discord 47 times today")
+CREATE TABLE IF NOT EXISTS switch_events (
+    id INTEGER PRIMARY KEY,
+    timestamp DATETIME,           -- trusted local time
+    exe TEXT,
+    site TEXT
+);
+
 -- Sites the user has blocked before (for suggestions; clearable)
 CREATE TABLE IF NOT EXISTS site_history (
     hostname TEXT PRIMARY KEY,
@@ -283,6 +301,21 @@ class Database:
     def clear_history(self):
         with self.conn:
             self.conn.execute("DELETE FROM site_history")
+
+    # ---------- screen time ----------
+
+    def add_activity(self, minute: str, exe: str, site: str, seconds: int, active_seconds: int):
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO activity (minute, exe, site, seconds, active_seconds) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(minute, exe, site) DO UPDATE SET seconds = seconds + excluded.seconds, "
+                "active_seconds = active_seconds + excluded.active_seconds",
+                (minute, exe, site, seconds, active_seconds))
+
+    def add_switch(self, timestamp: datetime, exe: str, site: str):
+        with self.conn:
+            self.conn.execute("INSERT INTO switch_events (timestamp, exe, site) VALUES (?, ?, ?)",
+                              (timestamp.strftime(TIME_FMT), exe, site))
 
     # ---------- block events ----------
 

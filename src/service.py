@@ -4,8 +4,9 @@ Every few seconds: evaluate block rules (permanent / hours / temporary / daily l
 clock (changing the Windows clock has no effect), make the hosts file match
 (repairing manual edits), keep browser DoH/QUIC locked off, and close open connections to newly blocked
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
-Blocked apps: the tray agent is asked to close them politely, they are force-killed after 10 s; apps with
-block type firewall/both get a Windows Firewall rule.
+Blocked apps (checked 4x per second): started while blocked -> killed at once; already open when the block
+began -> the tray agent asks them to close, force-killed after 10 s. Block type firewall/both adds a Windows
+Firewall rule.
 Needs admin/SYSTEM rights.
 
 Usage:
@@ -34,8 +35,9 @@ HEARTBEAT_KEY = "service_heartbeat"
 # Keep closing connections to a newly blocked site for this long (browsers cache DNS ~1 min).
 CLOSE_CONNECTIONS_FOR = timedelta(minutes=3)
 VISIT_DEDUPE_SEC = 10
-APP_CHECK_SEC = 1
-APP_GRACE_SEC = 10          # the tray agent asks the app to close; force-kill after this
+APP_CHECK_SEC = 0.25
+APP_GRACE_SEC = 10          # app already open when its block began: asked to close, force-killed after this
+LAUNCH_SLACK_SEC = 1        # started more than this after the block began = launched while blocked
 FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
 
 log = logging.getLogger("lockdown.service")
@@ -67,6 +69,7 @@ class Enforcer:
         self.last_visit: dict[str, float] = {}
         self.app_blocks: dict[str, dict] = {}   # exe -> block, for blocked apps (read by the app thread)
         self.app_first_seen: dict[int, float] = {}
+        self.block_since: dict[str, float] = {}    # exe -> when its block began
         self.firewalled: dict[str, str] = json.loads(db.get_setting(FIREWALL_KEY, "{}"))
 
     def update_clock(self) -> datetime:
@@ -140,17 +143,24 @@ class Enforcer:
     # ---------- apps ----------
 
     def enforce_apps(self):
-        """Blocked app running: tell the tray agent (it closes the app politely), force-kill after the grace time."""
+        """Blocked app launched while blocked: killed at once. Already open when the block began: the tray
+        agent asks it to close (so you can save), force-killed after the grace time."""
+        now = time.time()
         targets = {exe: b for exe, b in self.app_blocks.items() if (b["item"]["block_type"] or "kill") in ("kill", "both")}
+        self.block_since = {exe: self.block_since.get(exe, now) for exe in targets}
         seen = {}
         for pid, exe in apps.list_processes():
             block = targets.get(exe)
             if not block:
                 continue
-            first = seen[pid] = self.app_first_seen.get(pid, time.time())
             if pid not in self.app_first_seen:
                 self.record_event(exe, block)
-            elif time.time() - first >= APP_GRACE_SEC and apps.terminate(pid):
+                started = apps.start_time(pid)
+                if started and started > self.block_since[exe] + LAUNCH_SLACK_SEC and apps.terminate(pid):
+                    log.info("Blocked app %s was started - closed immediately (pid %d)", exe, pid)
+                    continue
+            first = seen[pid] = self.app_first_seen.get(pid, now)
+            if now - first >= APP_GRACE_SEC and apps.terminate(pid):
                 log.info("Force-closed blocked app %s (pid %d)", exe, pid)
         self.app_first_seen = seen
 

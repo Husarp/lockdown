@@ -28,6 +28,7 @@ _k32.OpenProcess.restype = wintypes.HANDLE
 _k32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
 _k32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
 _k32.CloseHandle.argtypes = [wintypes.HANDLE]
+_k32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
 _k32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
 _k32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
                                             ctypes.POINTER(wintypes.DWORD)]
@@ -58,6 +59,22 @@ def process_path(pid: int) -> str | None:
         buf = ctypes.create_unicode_buffer(1024)
         size = wintypes.DWORD(len(buf))
         return buf.value if _k32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)) else None
+    finally:
+        _k32.CloseHandle(handle)
+
+
+def start_time(pid: int) -> float | None:
+    """When the process was started (unix seconds), or None."""
+    handle = _k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+        if not _k32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel),
+                                    ctypes.byref(user)):
+            return None
+        ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime   # 100 ns since 1601-01-01
+        return ticks / 10_000_000 - 11_644_473_600
     finally:
         _k32.CloseHandle(handle)
 
