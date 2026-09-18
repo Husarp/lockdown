@@ -20,8 +20,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   "N minutes allowed during blocked hours", warnings before blocks + reminders while in use + "block started".
 - **Blocking UI:** three tabs — **Overview** (everything, sortable, Edit/Remove), **Groups**, **Add** (pick a site or app,
   tick any number of blockers: hours, daily time limit, daily switch limit, permanent, temporary). Site suggestions while typing,
-  "+ Popular sites" picker with site icons. Changes are staged until you press **Save changes** (top right),
-  or saved instantly with **Auto-save** on; unsaved sites show "Not applied".
+  "+ Popular sites" picker with site icons. **Auto-save** is on by default; turn it off to stage changes until you
+  press **Save changes** (unsaved items then show "Not applied").
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
@@ -36,9 +36,10 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   - keeps browser policies set that turn off DNS-over-HTTPS and QUIC in Chrome, Edge, Brave and Firefox
     (browsers then show "managed by your organization") — otherwise browsers could skip the hosts file;
   - closes already-open connections to a site right after it gets blocked.
-- Apps are matched by exe name. The service checks running processes every second: a blocked app is asked to close
-  by the tray agent (like clicking X) and force-closed after 10 s; "Block internet" adds a Windows Firewall rule.
-  Windows' own processes can't be blocked.
+- Apps are matched by exe name. The service checks running processes 4x per second: an app started while blocked
+  is killed at once; one that was already open when its block began is asked to close (like clicking X) and
+  force-closed after 10 s. "Minimize" keeps the app running but the tray agent minimizes it whenever it comes to the
+  front; "Block internet" adds a Windows Firewall rule. Windows' own processes can't be blocked.
 - Groups (Blocking > Groups) hold shared rules; members inherit them, a member can be customized, and a group
   daily limit is one total for all members. Warnings/reminders are set on the Notifications page.
 - Daily limits: the tray agent reads the active browser tab's address (Windows UI Automation — Chrome, Edge, Brave,
