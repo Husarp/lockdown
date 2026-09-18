@@ -1,11 +1,11 @@
-# Changelog
+﻿# Changelog
 
 ## 0.8.0 — 2026-09-18 22:30
 - "When blocked" for apps is now three checkboxes: Close app / Minimize / Block internet (Close and Minimize exclude each other; at least one needed); stored as flags, older values still work
 - Status colours: blocked now = red, allowed now = green (also in Groups)
 - Daily switch limit renamed "Daily opening limit" with a choice of what counts: **Launches / new visits** (default: apps = each start of the program, sites = coming back after N minutes away, default 5) or **Every switch** (previous behaviour); an app launched past its opening limit is closed at once
 - Faster: the service re-checks rules every 2 s (was 5 s); Overview counters, countdowns and statuses update every 2 s in place
-- 99 tests passing
+- 97 tests passing
 
 ## 0.7.0 — 2026-09-18 22:15
 - Blocking page reworked into 3 tabs: **Overview** (everything, sort by blocked now / next block / date added / name; Edit + Remove), **Groups**, **Add** (pick a site or app, tick any number of blockers at once); Edit from Overview opens the Add form; adding something that's already in the list loads it for editing
