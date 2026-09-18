@@ -43,6 +43,11 @@ Remove it with `scripts\uninstall_service.ps1` (clear the blocklist first so the
 
 ## Usage
 
+Double-click **Lockdown** on the Desktop (or `Lockdown.lnk` in the project folder) — no console window.
+Create/recreate the shortcuts with `scripts\create_shortcut.ps1` (no admin needed).
+
+Or from a terminal in the project folder:
+
 ```powershell
 .\.venv\Scripts\pythonw.exe src\main.py
 ```

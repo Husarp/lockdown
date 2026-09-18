@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.3 — 2026-09-18 19:58
+- Added `scripts/create_shortcut.ps1`: creates double-click `Lockdown.lnk` shortcuts (Desktop + project folder) that start the GUI without a console window; `*.lnk` git-ignored
+
 ## 0.1.2 — 2026-09-18 19:45
 - PLAN.md: added DoH lock, QUIC disable and closing open connections on block (section 1.1 + Phase 2 checklist)
 
