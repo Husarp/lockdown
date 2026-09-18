@@ -53,7 +53,6 @@ def test_categories_default_and_saved(tmp_path):
     assert stats.category_of("app", "code.exe", db.categories(), items) == "neutral"
     db.set_category("app", "code.exe", "productive")
     assert stats.category_of("app", "code.exe", db.categories(), items) == "productive"
-    assert stats.next_category("distracting") == "productive"
 
 
 def test_time_saved_uses_usual_visit_length():
@@ -69,3 +68,14 @@ def test_ranges_and_text():
     assert stats.range_dates("Yesterday", DAY) == (DAY - timedelta(days=1), DAY)
     assert stats.range_dates("7 days", DAY) == (DAY - timedelta(days=6), DAY + timedelta(days=1))
     assert stats.hm(4 * 3600 + 12 * 60) == "4 h 12 m" and stats.ms(106) == "1 m 46 s"
+
+
+def test_average_switches_up_to_the_same_time(tmp_path):
+    from datetime import time
+    db = Database(tmp_path / "t.db")
+    y = DAY - timedelta(days=1)
+    db.add_activity(f"{y} 09:00", "code.exe", "", 60, 60)
+    for hh in (8, 9, 20, 21):
+        db.add_switch(datetime.combine(y, time(hh)), "code.exe", "")
+    assert stats.average_daily_switches(db, DAY) == 4
+    assert stats.average_daily_switches(db, DAY, until=time(10)) == 2

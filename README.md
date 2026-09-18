@@ -27,7 +27,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   (Blocking > Overview: unblock chosen items for 20 min; 3 uses per week by default, configurable in Settings).
 
 - **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
-  categories (productive / neutral / distracting - click to change). Dark and light theme (Settings > Appearance).
+  categories (productive / neutral / distracting + your own, with your colours - click a category to change it).
+  Hover a chart for details. Dark and light theme (Settings > Appearance).
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 

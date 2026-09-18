@@ -4,6 +4,8 @@ from gui import app_browser, icons
 
 def app_name_path(exe: str, items: list[dict]) -> tuple[str, str | None]:
     """(name, exe path) - from the blocklist, the Start Menu app list (once loaded), or the exe name."""
+    if exe == "pythonw.exe":   # Lockdown's own window
+        return "Lockdown", None
     for item in items:
         if item["item_type"] == "app" and item["target"].lower() == exe:
             return item["display_name"], item.get("app_path")

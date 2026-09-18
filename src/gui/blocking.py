@@ -15,7 +15,7 @@ import customtkinter as ctk
 import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
-from gui.components import BlockerCard, eyebrow, rule_chip
+from gui.components import BlockerCard, Segmented, eyebrow, rule_chip
 from gui.groups import GroupsTab
 from gui.rule_editors import EDITORS, RULE_NAMES, summary
 from gui.target_picker import TargetPicker
@@ -297,13 +297,11 @@ class AddTab(ctk.CTkScrollableFrame):
         self.count = ctk.CTkLabel(line, text="", text_color=MUTED, font=theme.body(11))
         self.count.pack(side="right")
         self.cards: dict[str, BlockerCard] = {}
-        self.parts = {}
         for t in EDITORS:
             card = BlockerCard(self, RULE_NAMES[t], EDITORS[t], lambda t=t: summary(t, self.cards[t].editor),
                                on_change=self._changed)
             card.pack(fill="x", pady=3)
             self.cards[t] = card
-            self.parts[t] = (card.check, card.editor)
 
         self.error = ctk.CTkLabel(self, text="", text_color=ERROR)
         self.error.pack(anchor="w", pady=(6, 0))
@@ -343,8 +341,7 @@ class AddTab(ctk.CTkScrollableFrame):
     def _load_rules(self, rules: list[dict]):
         by_type = {r["rule_type"]: r for r in rules}
         for t, card in self.cards.items():
-            card.editor.load(by_type.get(t))
-            card.set(t in by_type)
+            card.load(by_type.get(t))
         self._changed()
 
     def reset(self):
@@ -427,7 +424,7 @@ class BlockingPage(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Blocking", font=theme.page_title()).pack(anchor="w", padx=30, pady=(12, 6))
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 10))
-        self.tab_bar = ctk.CTkSegmentedButton(bar, values=TABS, command=self.show_tab, width=240, height=30,
+        self.tab_bar = Segmented(bar, values=TABS, command=self.show_tab, width=240, height=30,
                                               dynamic_resizing=False)
         self.tab_bar.pack(side="left")
         # short confirmation after adding / saving ("✓ YouTube blocker added"), hidden after a few seconds
@@ -438,8 +435,8 @@ class BlockingPage(ctk.CTkFrame):
         holder.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         holder.grid_columnconfigure(0, weight=1)
         holder.grid_rowconfigure(0, weight=1)
-        self.tabs = {"Overview": OverviewTab(holder, self), "Groups": GroupsTab(holder, self),
-                     "Add": AddTab(holder, self)}
+        self.holder = holder
+        self.tabs: dict[str, ctk.CTkFrame] = {}   # built the first time each tab is shown
         icons.prefetch([hosts[0] for sites in POPULAR_SITES.values() for hosts in sites.values()]
                        + [i["target"].split()[0] for i in self.draft.items.values() if i["item_type"] == "site"])
         app_browser.preload()
@@ -447,7 +444,11 @@ class BlockingPage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
         self.after(LIVE_MS, self._live_update)
 
+    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab}
+
     def show_tab(self, tab: str):
+        if tab not in self.tabs:
+            self.tabs[tab] = self.TAB_CLASSES[tab](self.holder, self)
         self.tab_bar.set(tab)
         # show only the chosen tab (tkraise doesn't work for scrollable frames: it raises the inner frame only)
         for frame in self.tabs.values():

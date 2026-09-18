@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0 — 2026-09-19 00:21
+- Tab bars (Screen Time, Blocking, Settings, rule editors): the chosen tab is a rounded button with padding, not a sharp block
+- Charts are drawn smooth (anti-aliased): round donut, rounded bars/cells/timeline; the heatmap's less/more legend is no longer cut off; charts follow the Windows display scaling
+- Hover a chart for details: heatmap cell ("Fri 10:00-11:00 16 min active"), a day bar (date + time), an hour bar (switches), a timeline piece (time + category), the donut (time per category)
+- Switches per hour always shows at least 07-22 (a single busy hour no longer turns into one huge block)
+- Days with an emergency unlock get a small blue dot on the day charts (tooltip: "Emergency unlock used 1x")
+- Categories: clicking a category opens a small menu - pick one, "New category..." (name + colour) or "Edit categories..." (change colours, delete your own); the hint text is gone. Timelines, the donut and legends use your colours
+- Faster: Screen Time tabs are built once and only updated; Dashboard/legend lists reuse their rows; the Dashboard isn't rebuilt when you come back within 10 s; Blocking tabs and blocker settings are built only when first opened
+- "Switches today" compares with your usual count by this time of day (not with whole days)
+- Lockdown's own window shows as "Lockdown" instead of "Pythonw"
+- 117 tests passing
+
 ## 0.11.0 — 2026-09-18 23:56
 - **Blocking page in the new design** (Phase 4, batch 2):
   - Overview: one table card; rules as coloured chips (group rules marked with →), status with a dot, Edit / Remove as quiet buttons, Sort + "+ Add" on the right

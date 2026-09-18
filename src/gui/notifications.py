@@ -2,6 +2,7 @@
 import customtkinter as ctk
 
 from gui import theme
+from gui.components import Segmented
 
 import alerts
 
@@ -64,7 +65,7 @@ class NotificationsPage(ctk.CTkFrame):
         fmt_row = ctk.CTkFrame(box, fg_color="transparent")
         fmt_row.grid(row=row + 2, column=0, columnspan=2, padx=16, pady=4, sticky="w")
         ctk.CTkLabel(fmt_row, text="Show as").pack(side="left")
-        self.fmt = ctk.CTkSegmentedButton(fmt_row, values=list(alerts.FORMATS.values()), command=lambda v: self.draft.set_setting(
+        self.fmt = Segmented(fmt_row, values=list(alerts.FORMATS.values()), command=lambda v: self.draft.set_setting(
             "notify.format", next(k for k, lbl in alerts.FORMATS.items() if lbl == v)))
         self.fmt.pack(side="left", padx=8)
         ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > All.", text_color=MUTED).grid(

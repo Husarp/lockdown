@@ -1,13 +1,15 @@
 """Screen Time: Overview · Apps · Websites · Switches, for Today / Yesterday / 7 days / 30 days.
-Categories (productive / neutral / distracting) are changed by clicking an app's or site's category label."""
+Each tab is built once and then only updated (rebuilding Tk widgets is what makes switching slow).
+Clicking an app's or site's category opens a small menu (pick / new category / edit colours)."""
 from collections import Counter
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 import customtkinter as ctk
 
 import stats
-from gui import app_browser, appinfo, theme
-from gui.components import Card, Chip, DayBars, Donut, Heatmap, HourBars, StatCard, TimelineBar
+from gui import app_browser, appinfo, categories, theme
+from gui.charts import DayBars, Donut, Heatmap, HourBars, TimelineBar
+from gui.components import Card, Chip, Rows, Segmented, StatCard
 from gui.dashboard import goal_seconds
 from rules import DAY_NAMES
 from trusted_time import now_from_db
@@ -18,9 +20,10 @@ MAX_ROWS = 40
 STYLE = {"checking": ("Short visits - often just checking", theme.WARNING),
          "focused": ("Long, focused stretches", theme.SUCCESS),
          "mixed": ("Mixed use", theme.MUTED)}
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def _grid_cards(parent, labels: list[str]) -> dict[str, StatCard]:
+def _stat_row(parent, labels: list[str]) -> dict[str, StatCard]:
     row = ctk.CTkFrame(parent, fg_color="transparent")
     row.pack(fill="x", pady=(0, 12))
     out = {}
@@ -43,7 +46,315 @@ def _columns(parent, weights=(3, 2)) -> list[ctk.CTkFrame]:
     return cols
 
 
+def day_tip(d: date, seconds: float) -> str:
+    return f"{DAY_NAMES[d.weekday()]} {d.day} {MONTHS[d.month - 1]}  {stats.hm(seconds)}"
+
+
+def unlocks_per_day(db, start: date) -> Counter:
+    return Counter(u["started"].date() for u in db.unlocks_since(datetime.combine(start, datetime.min.time())))
+
+
+def _legend_row(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.square = ctk.CTkFrame(f, width=10, height=10, corner_radius=2)
+    f.square.pack(side="left", padx=(0, 8))
+    f.name = ctk.CTkLabel(f, text="", height=18)
+    f.name.pack(side="left")
+    f.time = ctk.CTkLabel(f, text="", font=theme.semi(13), height=18)
+    f.time.pack(side="right")
+    return f
+
+
+class Context:
+    """Everything a tab needs for one refresh."""
+
+    def __init__(self, page):
+        db = page.db
+        self.db, self.page = db, page
+        self.now = now_from_db(db)
+        self.today = self.now.date()
+        self.range = page.range_bar.get()
+        self.items = db.list_items()
+        self.saved = db.categories()
+        self.cats = categories.load(db)
+        self.colors = categories.colors_of(self.cats)
+        self.names = categories.names_of(self.cats)
+        self.start, self.end = stats.range_dates(self.range, self.today)
+        self.rows = stats.activity(db, self.start, self.end)
+        self.events = stats.switches(db, self.start, self.end)
+
+    def category(self, kind: str, name: str) -> str:
+        cat = stats.category_of(kind, name, self.saved, self.items)
+        return cat if cat in self.colors else "neutral"
+
+    def category_of_row(self, exe: str, site: str) -> str:
+        return self.category(*(("site", site) if site else ("app", exe)))
+
+
+# ---------------------------------------------------------------- Overview
+
+class OverviewView(ctk.CTkScrollableFrame):
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        self.cards = _stat_row(self, ["Active", "Idle", "Longest focus", "Sessions"])
+        left, right = _columns(self)
+        self.timeline_card = Card(left, "Day timeline")
+        self.timeline_card.pack(fill="x", pady=(0, 12))
+        self.timeline = TimelineBar(self.timeline_card.body)
+        self.timeline.pack(fill="x")
+        card = Card(left, "Active hours - last 7 days")
+        card.pack(fill="x")
+        self.heat = Heatmap(card.body)
+        self.heat.pack(fill="x")
+        self.bars_card = Card(right, "Last 7 days")
+        self.bars_card.pack(fill="x", pady=(0, 12))
+        self.bars = DayBars(self.bars_card.body, height=190)
+        self.bars.pack(fill="x")
+        card = Card(right, "Categories")
+        card.pack(fill="x")
+        inner = ctk.CTkFrame(card.body, fg_color="transparent")
+        inner.pack(fill="x")
+        self.donut = Donut(inner, 110)
+        self.donut.pack(side="left")
+        legend = ctk.CTkFrame(inner, fg_color="transparent")
+        legend.pack(side="left", fill="x", expand=True, padx=(14, 0))
+        self.legend = Rows(legend, _legend_row, item_pack={"fill": "x", "pady": 2})
+
+    def update_view(self, c: Context):
+        active, total = stats.totals(c.rows)
+        self.cards["Active"].set(stats.hm(active), f"of {stats.hm(total)} at the PC")
+        self.cards["Idle"].set(stats.hm(total - active), "screen on, no input")
+        focus = stats.longest_focus(c.rows)
+        if focus:
+            sec, exe, start = focus
+            self.cards["Longest focus"].set(stats.hm(sec), f"{appinfo.name_of('app', exe, c.items)}, {start:%H:%M}")
+        else:
+            self.cards["Longest focus"].set("-")
+        sessions = stats.sessions(c.rows)
+        avg = sum((e - s).total_seconds() for s, e in sessions) / len(sessions) if sessions else 0
+        self.cards["Sessions"].set(str(len(sessions)), f"avg {stats.hm(avg)} each" if sessions else "")
+
+        single_day = c.range in ("Today", "Yesterday")
+        n = 30 if c.range == "30 days" else 7
+        first = c.today - timedelta(days=n - 1)
+        span_rows = stats.activity(c.db, first, c.today + timedelta(days=1))   # bars, heatmap, today's timeline
+        day = c.start if single_day else c.today
+        day_rows = c.rows if single_day else [r for r in span_rows if r["minute"][:10] == day.isoformat()]
+        self.timeline_card.title.configure(text="Day timeline" if single_day else "Day timeline - today")
+        start_hour = min(6, int(day_rows[0]["minute"][11:13])) if day_rows else 6
+        self.timeline.set(stats.timeline(day_rows, day, c.category_of_row), start_hour,
+                          {**c.colors, "idle": theme.TRACK}, {**c.names, "idle": "Idle"})
+
+        week = [c.today - timedelta(days=6 - i) for i in range(7)]
+        week_rows = [r for r in span_rows if r["minute"][:10] >= week[0].isoformat()]
+        self.heat.set([(DAY_NAMES[d.weekday()][:3], d, m) for d, m in zip(week, stats.hourly_minutes(week_rows, week))])
+
+        days = [first + timedelta(days=i) for i in range(n)]
+        per_day = stats.per_day(span_rows)
+        values = [per_day.get(d.isoformat(), 0) for d in days]
+        with_data = [v for v in values if v]
+        self.bars_card.title.configure(text=f"Last {n} days")
+        self.bars_card.note.configure(text=f"avg {stats.hm(sum(with_data) / len(with_data))}" if with_data else "")
+        unlocks = unlocks_per_day(c.db, first)
+        label = (lambda d: DAY_NAMES[d.weekday()][:3]) if n == 7 else (lambda d: str(d.day))
+        self.bars.set([(label(d), v, d == c.today, day_tip(d, v), unlocks.get(d, 0)) for d, v in zip(days, values)],
+                      goal_seconds(c.db))
+
+        split = Counter()
+        for r in c.rows:
+            if r["active"]:
+                split[c.category_of_row(r["exe"], r["site"])] += r["active"]
+        shown = [cat for cat in c.cats if split[cat["key"]] or cat["builtin"]]
+        self.donut.set([(split[cat["key"]], cat["color"], f"{cat['name']}  {stats.hm(split[cat['key']])}")
+                        for cat in shown], stats.hm(active).replace(" h ", "h").replace(" m", "") if active else "0")
+        for row, cat in zip(self.legend.take(len(shown)), shown):
+            row.square.configure(fg_color=cat["color"])
+            row.name.configure(text=cat["name"])
+            row.time.configure(text=stats.hm(split[cat["key"]]))
+
+
+# ---------------------------------------------------------------- Apps / Websites
+
+class TableRow:
+    def __init__(self, parent, widths):
+        self.sep = ctk.CTkFrame(parent, height=1, fg_color=theme.BORDER)
+        self.frame = ctk.CTkFrame(parent, fg_color="transparent", height=44)
+        for i, width in enumerate(widths):
+            self.frame.grid_columnconfigure(i, minsize=width, weight=1 if i == 1 else 0)
+        who = ctk.CTkFrame(self.frame, fg_color="transparent")
+        who.grid(row=0, column=0, sticky="w", pady=6)
+        self.icon = ctk.CTkLabel(who, text="", width=28)
+        self.icon.pack(side="left")
+        texts = ctk.CTkFrame(who, fg_color="transparent")
+        texts.pack(side="left", padx=(6, 0))
+        self.name = ctk.CTkLabel(texts, text="", height=16, anchor="w")
+        self.name.pack(anchor="w")
+        self.sub = ctk.CTkLabel(texts, text="", text_color=theme.MUTED, font=theme.body(10), height=12, anchor="w")
+        self.sub.pack(anchor="w")
+        self.share = ctk.CTkProgressBar(self.frame, height=6, corner_radius=3)
+        self.share.grid(row=0, column=1, sticky="ew", padx=8)
+        self.time = ctk.CTkLabel(self.frame, text="", font=theme.semi(13))
+        self.time.grid(row=0, column=2, sticky="e", padx=8)
+        self.count = ctk.CTkLabel(self.frame, text="", text_color=theme.MUTED)
+        self.count.grid(row=0, column=3, sticky="e", padx=8)
+        self.chip = Chip(self.frame, "", theme.MUTED, width=100)
+        self.chip.grid(row=0, column=4, sticky="e", padx=(8, 0))
+
+    def show(self, on: bool):
+        if on:
+            self.sep.pack(fill="x")
+            self.frame.pack(fill="x")
+        else:
+            self.sep.pack_forget()
+            self.frame.pack_forget()
+
+
+class TableView(ctk.CTkScrollableFrame):
+    WIDTHS = [230, 0, 90, 80, 120]
+
+    def __init__(self, master, kind: str, headers: list[str]):
+        super().__init__(master, fg_color="transparent")
+        self.kind = kind
+        card = Card(self)
+        card.pack(fill="both", expand=True)
+        head = ctk.CTkFrame(card.body, fg_color="transparent")
+        head.pack(fill="x", pady=(6, 4))
+        for i, (text, width) in enumerate(zip(headers, self.WIDTHS)):
+            head.grid_columnconfigure(i, minsize=width, weight=1 if i == 1 else 0)
+            ctk.CTkLabel(head, text=text.upper(), font=theme.eyebrow(), text_color=theme.MUTED, height=14).grid(
+                row=0, column=i, sticky="w" if i < 2 else "e", padx=(36 if i == 0 else 8, 8))
+        self.box = ctk.CTkFrame(card.body, fg_color="transparent")
+        self.box.pack(fill="x")
+        self.empty = ctk.CTkLabel(card.body, text="Nothing recorded for this period yet.", text_color=theme.MUTED)
+        self.rows: list[TableRow] = []
+
+    def update_view(self, c: Context):
+        if self.kind == "app":
+            times, counts = stats.per_app(c.rows), Counter(e["exe"] for e in c.events)
+        else:
+            times, counts = stats.per_site(c.rows), Counter(e["site"] for e in c.events if e["site"])
+        ranked = [(n, s) for n, s in times.most_common(MAX_ROWS) if s >= 60]
+        if ranked:
+            self.empty.pack_forget()
+        else:
+            self.empty.pack(anchor="w", pady=12)
+        top = ranked[0][1] if ranked else 1
+        while len(self.rows) < len(ranked):
+            self.rows.append(TableRow(self.box, self.WIDTHS))
+        for row, (name, sec) in zip(self.rows, ranked):
+            cat = c.category(self.kind, name)
+            color = c.colors[cat]
+            row.icon.configure(image=appinfo.icon_of(self.kind, name, c.items, 22))
+            row.name.configure(text=appinfo.name_of(self.kind, name, c.items))
+            row.sub.configure(text=name if self.kind == "app" else "")
+            row.share.configure(progress_color=color)
+            row.share.set(sec / top)
+            row.time.configure(text=stats.hm(sec))
+            row.count.configure(text=str(counts.get(name, 0)))
+            row.chip.configure(text=f"{c.names[cat]}  ▾", border_color=color, text_color=color,
+                               command=lambda chip=row.chip, n=name, k=cat: categories.open_menu(
+                                   chip, c.db, self.kind, n, k, c.page.refresh))
+            row.show(True)
+        for row in self.rows[len(ranked):]:
+            row.show(False)
+
+
+# ---------------------------------------------------------------- Switches
+
+class TargetEntry:
+    def __init__(self, parent):
+        self.frame = ctk.CTkFrame(parent, fg_color=theme.SURFACE2, corner_radius=4)
+        self.stripe = ctk.CTkFrame(self.frame, width=3, height=1, corner_radius=0)
+        self.stripe.pack(side="left", fill="y")
+        self.icon = ctk.CTkLabel(self.frame, text="", width=28)
+        self.icon.pack(side="left", padx=(8, 4), pady=8)
+        texts = ctk.CTkFrame(self.frame, fg_color="transparent")
+        texts.pack(side="left", fill="x", expand=True)
+        self.name = ctk.CTkLabel(texts, text="", font=theme.semi(13), height=16, anchor="w")
+        self.name.pack(anchor="w")
+        self.style = ctk.CTkLabel(texts, text="", font=theme.body(11), height=14, anchor="w")
+        self.style.pack(anchor="w")
+        nums = ctk.CTkFrame(self.frame, fg_color="transparent")
+        nums.pack(side="right", padx=10)
+        self.count = ctk.CTkLabel(nums, text="", font=theme.numeral(18), height=18, anchor="e")
+        self.count.pack(anchor="e")
+        self.avg = ctk.CTkLabel(nums, text="", text_color=theme.MUTED, font=theme.body(10), height=12, anchor="e")
+        self.avg.pack(anchor="e")
+
+
+class SwitchesView(ctk.CTkScrollableFrame):
+    LABELS = ["Switches", "Average time per visit", "Short visits (< 30 s)"]
+
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        self.cards = _stat_row(self, self.LABELS)
+        left, right = _columns(self, (1, 1))
+        card = Card(left, "Switches per hour")
+        card.pack(fill="both", expand=True)
+        self.peak = ctk.CTkLabel(card.body, text="", text_color=theme.MUTED, font=theme.body(11), height=14)
+        self.peak.pack(anchor="w")
+        self.chart = HourBars(card.body, height=330)
+        self.chart.pack(fill="both", expand=True, pady=(6, 0))
+        card = Card(right, "Most switched to")
+        card.pack(fill="both", expand=True)
+        ctk.CTkLabel(card.body, text="Many switches with very short visits usually means checking out of habit.",
+                     text_color=theme.MUTED, font=theme.body(11), wraplength=380, justify="left").pack(anchor="w")
+        self.none = ctk.CTkLabel(card.body, text="No switches yet.", text_color=theme.MUTED)
+        self.entries = [TargetEntry(card.body) for _ in range(5)]
+
+    def update_view(self, c: Context):
+        summary = stats.switch_summary(c.events, c.now)
+        title = "Switches today" if c.range == "Today" else "Switches yesterday" if c.range == "Yesterday" \
+            else f"Switches ({c.range})"
+        self.cards["Switches"].label.configure(text=title.upper())
+        n = summary["count"]
+        if c.range == "Today":
+            avg = stats.average_daily_switches(c.db, c.today, until=c.now.time())
+            if avg is None or abs(n - avg) < 1:
+                self.cards["Switches"].set(str(n), "about usual for this time of day" if avg is not None else "")
+            else:
+                self.cards["Switches"].set(str(n), f"{abs(round(n - avg))} {'more' if n > avg else 'fewer'} than "
+                                                   "usual by this time", theme.WARNING if n > avg else theme.SUCCESS)
+        else:
+            self.cards["Switches"].set(str(n))
+        self.cards["Average time per visit"].set(stats.ms(summary["avg_visit"]) if n else "-")
+        top = [appinfo.name_of(kind, name, c.items) for kind, name in summary["short_top"]]
+        self.cards["Short visits (< 30 s)"].set(str(summary["short"]), f"mostly {' and '.join(top)}" if top else "")
+
+        per_hour = summary["per_hour"]
+        if per_hour:
+            peak = max(per_hour, key=per_hour.get)
+            self.peak.configure(text=f"Peak between {peak:02d}:00 and {peak + 1:02d}:00 - {per_hour[peak]} switches.")
+        else:
+            self.peak.configure(text="")
+        self.chart.set(dict(per_hour))
+
+        targets = summary["targets"][:5]
+        if targets:
+            self.none.pack_forget()
+        else:
+            self.none.pack(anchor="w", pady=8)
+        for entry, ((kind, name), count, avg) in zip(self.entries, targets):
+            text, color = STYLE[stats.visit_style(count, avg)]
+            entry.stripe.configure(fg_color=color)
+            entry.icon.configure(image=appinfo.icon_of(kind, name, c.items, 20))
+            entry.name.configure(text=appinfo.name_of(kind, name, c.items))
+            entry.style.configure(text=text, text_color=color)
+            entry.count.configure(text=str(count))
+            entry.avg.configure(text=f"avg {stats.ms(avg)}")
+            entry.frame.pack(fill="x", pady=(8, 0))
+        for entry in self.entries[len(targets):]:
+            entry.frame.pack_forget()
+
+
+# ---------------------------------------------------------------- page
+
 class ScreenTimePage(ctk.CTkFrame):
+    VIEWS = {"Overview": lambda m: OverviewView(m),
+             "Apps": lambda m: TableView(m, "app", ["App", "Share of day", "Time", "Switches", "Category"]),
+             "Websites": lambda m: TableView(m, "site", ["Website", "Share of browsing", "Time", "Visits", "Category"]),
+             "Switches": lambda m: SwitchesView(m)}
+
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.db = app, app.db
@@ -51,20 +362,31 @@ class ScreenTimePage(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Screen Time", font=theme.page_title()).pack(anchor="w", padx=30, pady=(12, 6))
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 10))
-        self.tab_bar = ctk.CTkSegmentedButton(bar, values=TABS, command=self.show_tab, width=330, height=30,
-                                              dynamic_resizing=False)
+        self.tab_bar = Segmented(bar, values=TABS, command=self.show_tab)
         self.tab_bar.pack(side="left")
-        self.range_bar = ctk.CTkSegmentedButton(bar, values=list(stats.RANGES), command=lambda v: self.refresh(),
-                                                width=300, height=30, dynamic_resizing=False)
+        self.range_bar = Segmented(bar, values=list(stats.RANGES), command=lambda v: self.refresh())
         self.range_bar.pack(side="right")
         self.tab_bar.set("Overview")
         self.range_bar.set("Today")
-        self.content = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.content.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+        self.holder = ctk.CTkFrame(self, fg_color="transparent")
+        self.holder.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+        self.holder.grid_columnconfigure(0, weight=1)
+        self.holder.grid_rowconfigure(0, weight=1)
+        self.views: dict[str, ctk.CTkScrollableFrame] = {}
+        self._show_view("Overview")
         self.after(REFRESH_MS, self._auto_refresh)
+
+    def _show_view(self, tab: str):
+        if tab not in self.views:
+            self.views[tab] = self.VIEWS[tab](self.holder)
+        for name, view in self.views.items():
+            if name != tab:
+                view.grid_forget()
+        self.views[tab].grid(row=0, column=0, sticky="nsew")
 
     def show_tab(self, tab: str):
         self.tab_bar.set(tab)
+        self._show_view(tab)
         self.refresh()
 
     def on_show(self):
@@ -76,204 +398,4 @@ class ScreenTimePage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
 
     def refresh(self):
-        for w in self.content.winfo_children():
-            w.destroy()
-        db = self.db
-        self.now = now_from_db(db)
-        self.items = db.list_items()
-        self.saved_categories = db.categories()
-        self.start, self.end = stats.range_dates(self.range_bar.get(), self.now.date())
-        self.rows = stats.activity(db, self.start, self.end)
-        self.events = stats.switches(db, self.start, self.end)
-        getattr(self, "_" + self.tab_bar.get().lower())()
-
-    def _category(self, kind: str, name: str) -> str:
-        return stats.category_of(kind, name, self.saved_categories, self.items)
-
-    def _cycle(self, kind: str, name: str):
-        self.db.set_category(kind, name, stats.next_category(self._category(kind, name)))
-        self.refresh()
-
-    # ---------- Overview ----------
-
-    def _overview(self):
-        active, total = stats.totals(self.rows)
-        cards = _grid_cards(self.content, ["Active", "Idle", "Longest focus", "Sessions"])
-        cards["Active"].set(stats.hm(active), f"of {stats.hm(total)} at the PC")
-        cards["Idle"].set(stats.hm(total - active), "screen on, no input")
-        focus = stats.longest_focus(self.rows)
-        if focus:
-            sec, exe, start = focus
-            cards["Longest focus"].set(stats.hm(sec), f"{appinfo.name_of('app', exe, self.items)}, {start:%H:%M}")
-        else:
-            cards["Longest focus"].set("-")
-        sessions = stats.sessions(self.rows)
-        avg = sum((e - s).total_seconds() for s, e in sessions) / len(sessions) if sessions else 0
-        cards["Sessions"].set(str(len(sessions)), f"avg {stats.hm(avg)} each" if sessions else "")
-
-        left, right = _columns(self.content)
-        day = self.start if self.range_bar.get() in ("Today", "Yesterday") else self.now.date()
-        title = "Day timeline" if day == self.start else "Day timeline - today"
-        card = Card(left, title)
-        card.pack(fill="x", pady=(0, 12))
-        day_rows = self.rows if day == self.start else stats.activity(self.db, day, day + timedelta(days=1))
-        category = lambda exe, site: self._category(*(("site", site) if site else ("app", exe)))
-        start_hour = min(6, int(day_rows[0]["minute"][11:13])) if day_rows else 6
-        timeline = TimelineBar(card.body)
-        timeline.pack(fill="x")
-        timeline.set(stats.timeline(day_rows, day, category), start_hour)
-
-        week = [self.now.date() - timedelta(days=6 - i) for i in range(7)]
-        heat_rows = stats.activity(self.db, week[0], week[-1] + timedelta(days=1))
-        card = Card(left, "Active hours - last 7 days")
-        card.pack(fill="x")
-        heat = Heatmap(card.body)
-        heat.pack(fill="x")
-        heat.set([(DAY_NAMES[d.weekday()][:3], levels) for d, levels in zip(week, stats.heatmap(heat_rows, week))])
-
-        n = 30 if self.range_bar.get() == "30 days" else 7
-        days = [self.now.date() - timedelta(days=n - 1 - i) for i in range(n)]
-        per_day = stats.per_day(stats.activity(self.db, days[0], days[-1] + timedelta(days=1)))
-        values = [per_day.get(d.isoformat(), 0) for d in days]
-        with_data = [v for v in values if v]
-        card = Card(right, f"Last {n} days", note=f"avg {stats.hm(sum(with_data) / len(with_data))}" if with_data else "")
-        card.pack(fill="x", pady=(0, 12))
-        bars = DayBars(card.body, height=190)
-        bars.pack(fill="x")
-        label = (lambda d: DAY_NAMES[d.weekday()][:3]) if n == 7 else (lambda d: str(d.day))
-        bars.set([(label(d), v, d == self.now.date()) for d, v in zip(days, values)], goal_seconds(self.db))
-
-        split = Counter()
-        for r in self.rows:
-            if r["active"]:
-                split[category(r["exe"], r["site"])] += r["active"]
-        card = Card(right, "Categories")
-        card.pack(fill="x")
-        inner = ctk.CTkFrame(card.body, fg_color="transparent")
-        inner.pack(fill="x")
-        donut = Donut(inner, 110)
-        donut.pack(side="left")
-        parts = [(split[c], theme.CATEGORY_COLORS[c]) for c in ("productive", "neutral", "distracting")]
-        donut.set(parts, stats.hm(active).replace(" h ", "h").replace(" m", "") if active else "0")
-        legend = ctk.CTkFrame(inner, fg_color="transparent")
-        legend.pack(side="left", fill="x", expand=True, padx=(14, 0))
-        for c in ("productive", "neutral", "distracting"):
-            line = ctk.CTkFrame(legend, fg_color="transparent")
-            line.pack(fill="x", pady=2)
-            ctk.CTkFrame(line, width=10, height=10, corner_radius=2, fg_color=theme.CATEGORY_COLORS[c]).pack(
-                side="left", padx=(0, 8))
-            ctk.CTkLabel(line, text=c.capitalize(), height=18).pack(side="left")
-            ctk.CTkLabel(line, text=stats.hm(split[c]), font=theme.semi(13), height=18).pack(side="right")
-
-    # ---------- Apps / Websites ----------
-
-    def _apps(self):
-        switches = Counter(e["exe"] for e in self.events)
-        self._table("app", stats.per_app(self.rows), switches, ["App", "Share of day", "Time", "Switches", "Category"])
-
-    def _websites(self):
-        visits = Counter(e["site"] for e in self.events if e["site"])
-        self._table("site", stats.per_site(self.rows), visits,
-                    ["Website", "Share of browsing", "Time", "Visits", "Category"])
-
-    def _table(self, kind: str, times: Counter, counts: Counter, headers: list[str]):
-        card = Card(self.content)
-        card.pack(fill="both", expand=True)
-        widths = [230, 0, 90, 80, 110]
-        head = ctk.CTkFrame(card.body, fg_color="transparent")
-        head.pack(fill="x", pady=(6, 4))
-        for i, (text, width) in enumerate(zip(headers, widths)):
-            head.grid_columnconfigure(i, minsize=width, weight=1 if i == 1 else 0)
-            ctk.CTkLabel(head, text=text.upper(), font=theme.eyebrow(), text_color=theme.MUTED, height=14).grid(
-                row=0, column=i, sticky="w" if i < 2 else "e", padx=(36 if i == 0 else 8, 8))
-        ranked = [(n, s) for n, s in times.most_common(MAX_ROWS) if s >= 60]
-        if not ranked:
-            ctk.CTkLabel(card.body, text="Nothing recorded for this period yet.", text_color=theme.MUTED).pack(
-                anchor="w", pady=12)
-            return
-        top = ranked[0][1]
-        for name, sec in ranked:
-            cat = self._category(kind, name)
-            color = theme.CATEGORY_COLORS[cat]
-            ctk.CTkFrame(card.body, height=1, fg_color=theme.BORDER).pack(fill="x")
-            row = ctk.CTkFrame(card.body, fg_color="transparent", height=44)
-            row.pack(fill="x")
-            for i, width in enumerate(widths):
-                row.grid_columnconfigure(i, minsize=width, weight=1 if i == 1 else 0)
-            who = ctk.CTkFrame(row, fg_color="transparent")
-            who.grid(row=0, column=0, sticky="w", pady=6)
-            ctk.CTkLabel(who, text="", image=appinfo.icon_of(kind, name, self.items, 22), width=28).pack(side="left")
-            texts = ctk.CTkFrame(who, fg_color="transparent")
-            texts.pack(side="left", padx=(6, 0))
-            ctk.CTkLabel(texts, text=appinfo.name_of(kind, name, self.items), height=16, anchor="w").pack(anchor="w")
-            if kind == "app":
-                ctk.CTkLabel(texts, text=name, text_color=theme.MUTED, font=theme.body(10), height=12,
-                             anchor="w").pack(anchor="w")
-            share = ctk.CTkProgressBar(row, height=6, corner_radius=3, progress_color=color)
-            share.grid(row=0, column=1, sticky="ew", padx=8)
-            share.set(sec / top)
-            ctk.CTkLabel(row, text=stats.hm(sec), font=theme.semi(13)).grid(row=0, column=2, sticky="e", padx=8)
-            ctk.CTkLabel(row, text=str(counts.get(name, 0)), text_color=theme.MUTED).grid(row=0, column=3, sticky="e",
-                                                                                          padx=8)
-            Chip(row, cat.capitalize(), color, command=lambda k=kind, n=name: self._cycle(k, n), width=84).grid(
-                row=0, column=4, sticky="e", padx=(8, 0))
-        ctk.CTkLabel(card.body, text="Click a category to change it (productive → neutral → distracting).",
-                     text_color=theme.MUTED, font=theme.body(11)).pack(anchor="w", pady=(8, 0))
-
-    # ---------- Switches ----------
-
-    def _switches(self):
-        summary = stats.switch_summary(self.events, self.now)
-        name = self.range_bar.get()
-        label = "Switches today" if name == "Today" else "Switches yesterday" if name == "Yesterday" \
-            else f"Switches ({name})"
-        cards = _grid_cards(self.content, [label, "Average time per visit", "Short visits (< 30 s)"])
-        if name == "Today":
-            avg = stats.average_daily_switches(self.db, self.now.date())
-            n = summary["count"]
-            if avg is None or abs(n - avg) < 1:
-                cards[label].set(str(n), "about your average" if avg else "")
-            else:
-                cards[label].set(str(n), f"{abs(round(n - avg))} {'more' if n > avg else 'fewer'} than your average",
-                                 theme.WARNING if n > avg else theme.SUCCESS)
-        else:
-            cards[label].set(str(summary["count"]))
-        cards["Average time per visit"].set(stats.ms(summary["avg_visit"]) if summary["count"] else "-")
-        top = [appinfo.name_of(kind, n, self.items) for kind, n in summary["short_top"]]
-        cards["Short visits (< 30 s)"].set(str(summary["short"]), f"mostly {' and '.join(top)}" if top else "")
-
-        left, right = _columns(self.content, (1, 1))
-        card = Card(left, "Switches per hour")
-        card.pack(fill="both", expand=True)
-        per_hour = summary["per_hour"]
-        if per_hour:
-            peak = max(per_hour, key=per_hour.get)
-            ctk.CTkLabel(card.body, text=f"Peak between {peak:02d}:00 and {peak + 1:02d}:00 - {per_hour[peak]} switches.",
-                         text_color=theme.MUTED, font=theme.body(11), height=14).pack(anchor="w")
-        chart = HourBars(card.body, height=330)
-        chart.pack(fill="both", expand=True, pady=(6, 0))
-        chart.set(dict(per_hour))
-
-        card = Card(right, "Most switched to")
-        card.pack(fill="both", expand=True)
-        ctk.CTkLabel(card.body, text="Many switches with very short visits usually means checking out of habit.",
-                     text_color=theme.MUTED, font=theme.body(11), wraplength=380, justify="left").pack(anchor="w")
-        if not summary["targets"]:
-            ctk.CTkLabel(card.body, text="No switches yet.", text_color=theme.MUTED).pack(anchor="w", pady=8)
-        for (kind, target), count, avg in summary["targets"][:5]:
-            text, color = STYLE[stats.visit_style(count, avg)]
-            entry = ctk.CTkFrame(card.body, fg_color=theme.SURFACE2, corner_radius=4)
-            entry.pack(fill="x", pady=(8, 0))
-            ctk.CTkFrame(entry, width=3, height=1, fg_color=color, corner_radius=0).pack(side="left", fill="y")
-            ctk.CTkLabel(entry, text="", image=appinfo.icon_of(kind, target, self.items, 20), width=28).pack(
-                side="left", padx=(8, 4), pady=8)
-            texts = ctk.CTkFrame(entry, fg_color="transparent")
-            texts.pack(side="left", fill="x", expand=True)
-            ctk.CTkLabel(texts, text=appinfo.name_of(kind, target, self.items), font=theme.semi(13), height=16,
-                         anchor="w").pack(anchor="w")
-            ctk.CTkLabel(texts, text=text, text_color=color, font=theme.body(11), height=14, anchor="w").pack(anchor="w")
-            nums = ctk.CTkFrame(entry, fg_color="transparent")
-            nums.pack(side="right", padx=10)
-            ctk.CTkLabel(nums, text=str(count), font=theme.numeral(18), height=18, anchor="e").pack(anchor="e")
-            ctk.CTkLabel(nums, text=f"avg {stats.ms(avg)}", text_color=theme.MUTED, font=theme.body(10), height=12,
-                         anchor="e").pack(anchor="e")
+        self.views[self.tab_bar.get()].update_view(Context(self))

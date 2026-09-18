@@ -106,13 +106,11 @@ class GroupEditor(ctk.CTkFrame):
 
         eyebrow(self, "Blockers - tick any number").pack(anchor="w", padx=16, pady=(14, 4))
         self.cards: dict[str, BlockerCard] = {}
-        self.rule_parts = {}
         for t in EDITORS:
             card = BlockerCard(self, RULE_NAMES[t], lambda m, t=t: _make_editor(m, t),
                                lambda t=t: summary(t, self.cards[t].editor), off_text="not used")
             card.pack(fill="x", padx=16, pady=3)
             self.cards[t] = card
-            self.rule_parts[t] = (card.check, card.editor)
 
         eyebrow(self, "Members").pack(anchor="w", padx=16, pady=(14, 4))
         self.members_box = ctk.CTkFrame(self, fg_color="transparent")
@@ -139,8 +137,7 @@ class GroupEditor(ctk.CTkFrame):
             self.name.insert(0, group["name"])
         rules = {r["rule_type"]: r for r in (group or {}).get("rules", [])}
         for t, card in self.cards.items():
-            card.editor.load(rules.get(t))
-            card.set(t in rules)
+            card.load(rules.get(t))
         self.members = []
         for item_id, overrides in (group or {}).get("members", {}).items():
             item = self.draft.items.get(item_id)

@@ -7,14 +7,13 @@ Definitions:
 - visit: from switching to an app/site until switching away; short visit = under 30 s
 """
 from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from rules import TIME_FMT
 
 SESSION_GAP_MIN = 5
 SHORT_VISIT_SEC = 30
 DEFAULT_VISIT_SEC = 5 * 60      # "time saved" per blocked visit when there's no history for it
-CATEGORIES = ("productive", "neutral", "distracting")
 RANGES = {"Today": (0, 1), "Yesterday": (1, 1), "7 days": (0, 7), "30 days": (0, 30)}   # (days back, length)
 
 
@@ -59,10 +58,6 @@ def category_of(kind: str, name: str, saved: dict, items: list[dict]) -> str:
                 name == h or name.endswith("." + h) for h in item["target"].split()):
             return "distracting"
     return "neutral"
-
-
-def next_category(category: str) -> str:
-    return CATEGORIES[(CATEGORIES.index(category) + 1) % len(CATEGORIES)]
 
 
 # ---------- totals ----------
@@ -147,19 +142,18 @@ def timeline(rows: list[dict], day: date, category) -> list[tuple[int, int, str]
     return [tuple(s) for s in segs]
 
 
-def heatmap(rows: list[dict], days: list[date]) -> list[list[int]]:
-    """Level 0-4 of active minutes per (day, hour)."""
+def hourly_minutes(rows: list[dict], days: list[date]) -> list[list[float]]:
+    """Active minutes per (day, hour)."""
     active = defaultdict(int)
     for r in rows:
         active[(r["minute"][:10], int(r["minute"][11:13]))] += r["active"]
-    levels = []
-    for d in days:
-        row = []
-        for h in range(24):
-            minutes = active[(d.isoformat(), h)] / 60
-            row.append(0 if minutes < 1 else 1 if minutes < 15 else 2 if minutes < 30 else 3 if minutes < 45 else 4)
-        levels.append(row)
-    return levels
+    return [[active[(d.isoformat(), h)] / 60 for h in range(24)] for d in days]
+
+
+def heatmap(rows: list[dict], days: list[date]) -> list[list[int]]:
+    """Level 0-4 of active minutes per (day, hour)."""
+    return [[0 if m < 1 else 1 if m < 15 else 2 if m < 30 else 3 if m < 45 else 4 for m in row]
+            for row in hourly_minutes(rows, days)]
 
 
 # ---------- switches / visits ----------
@@ -201,15 +195,17 @@ def visit_style(count: int, avg_sec: float) -> str:
     return "mixed"
 
 
-def average_daily_switches(db, today: date, days: int = 7) -> float | None:
-    """Average switches per day over the previous days that have any activity."""
+def average_daily_switches(db, today: date, days: int = 7, until: time | None = None) -> float | None:
+    """Average switches per day over the previous days that have any activity - counting each day only up to
+    `until` (the time now), so a morning isn't compared with whole days."""
+    end = until.strftime("%H:%M:%S") if until else "24:00:00"
     counts = []
     for i in range(1, days + 1):
         d = today - timedelta(days=i)
         if db.conn.execute("SELECT 1 FROM activity WHERE minute >= ? AND minute < ? LIMIT 1",
                            (f"{d} 00:00", f"{d + timedelta(days=1)} 00:00")).fetchone():
             counts.append(db.conn.execute("SELECT COUNT(*) FROM switch_events WHERE timestamp >= ? AND timestamp < ?",
-                                          (f"{d} 00:00:00", f"{d + timedelta(days=1)} 00:00:00")).fetchone()[0])
+                                          (f"{d} 00:00:00", f"{d} {end}")).fetchone()[0])
     return sum(counts) / len(counts) if counts else None
 
 

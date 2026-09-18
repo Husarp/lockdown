@@ -6,6 +6,7 @@ from datetime import datetime
 import customtkinter as ctk
 
 from gui import theme
+from gui.components import Segmented
 from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS, SWITCH, TIME_FMT,
                    TIME_LIMIT_FIELDS, VISIT, days_text, duration_text, load_schedule, make_schedule)
 
@@ -101,7 +102,7 @@ class WindowRow(ctk.CTkFrame):
 class HoursEditor(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
-        self.mode = ctk.CTkSegmentedButton(self, values=list(MODES))
+        self.mode = Segmented(self, values=list(MODES))
         self.mode.pack(anchor="w")
         ctk.CTkLabel(self, text="these hours - end before start = overnight; turn all days off to drop a window",
                      text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w", pady=(2, 0))
@@ -207,7 +208,7 @@ class SwitchEditor(ctk.CTkFrame):
         line = ctk.CTkFrame(self, fg_color="transparent")
         line.pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(line, text="What counts").pack(side="left", padx=(0, 8))
-        self.mode = ctk.CTkSegmentedButton(line, values=list(SWITCH_MODES), command=lambda v: self._mode_changed())
+        self.mode = Segmented(line, values=list(SWITCH_MODES), command=lambda v: self._mode_changed())
         self.mode.pack(side="left")
         self.visit_line = ctk.CTkFrame(self, fg_color="transparent")
         ctk.CTkLabel(self.visit_line, text="Apps: each start of the program. Sites: coming back after").pack(side="left")

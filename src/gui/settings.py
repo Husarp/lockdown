@@ -7,6 +7,7 @@ import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton
+from gui.components import Segmented
 from trusted_time import now_from_db
 
 MUTED = theme.MUTED
@@ -46,7 +47,7 @@ class SettingsPage(ctk.CTkFrame):
         line = ctk.CTkFrame(box, fg_color="transparent")
         line.pack(anchor="w", padx=16, pady=(4, 8))
         ctk.CTkLabel(line, text="Theme").pack(side="left", padx=(0, 10))
-        self.appearance = ctk.CTkSegmentedButton(line, values=list(APPEARANCES), command=self.app.set_appearance)
+        self.appearance = Segmented(line, values=list(APPEARANCES), command=self.app.set_appearance)
         self.appearance.pack(side="left")
         mode = self.db.get_setting("ui.appearance", "dark")
         self.appearance.set(next(k for k, v in APPEARANCES.items() if v == mode))
@@ -118,7 +119,7 @@ class SettingsPage(ctk.CTkFrame):
                                          command=lambda v: self._save_emergency())
         self.em_uses.pack(side="left", padx=8)
         ctk.CTkLabel(line, text="times").pack(side="left")
-        self.em_per = ctk.CTkSegmentedButton(line, values=list(PER_LABELS), command=lambda v: self._save_emergency())
+        self.em_per = Segmented(line, values=list(PER_LABELS), command=lambda v: self._save_emergency())
         self.em_per.pack(side="left", padx=8)
         self.em_info = ctk.CTkLabel(box, text="", text_color=MUTED)
         self.em_info.pack(anchor="w", padx=16, pady=(4, 12))

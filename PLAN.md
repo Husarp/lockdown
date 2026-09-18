@@ -1228,7 +1228,10 @@ Appearance setting (dark default); fonts bundled; Start service button asks for 
 - [x] Dashboard with stat cards and graphs
 - [x] Dashboard: "limits today" list — every time/switch limit with a progress bar, time left and % used (requested 2026-09-18)
 - [ ] Weekly block calendar: week view with coloured bars per site/app showing when each is blocked (requested 2026-09-18)
-- [ ] Graphs (weekly / history): mark when emergency unlocks were used (requested 2026-09-18; data: emergency_unlocks table)
+- [x] Graphs (weekly / history): mark when emergency unlocks were used (requested 2026-09-18; blue dot on day bars)
+- [x] Polish (requested 2026-09-19): rounded tab highlight, smooth donut/charts, heatmap legend not cut, hover
+  tooltips on charts, no giant single bars, faster tab switching
+- [x] Categories: pick from a small menu, add own categories with custom colours (requested 2026-09-19)
 
 ### Phase 5 — Network Logging
 - [ ] Connection enumeration with `psutil`

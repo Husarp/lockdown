@@ -1,19 +1,22 @@
 """Dashboard: "how am I doing today?" - stat cards, limits in progress, today's timeline, the last 7 days,
 what's coming up, blocked visits and a quick glance. Refreshed when shown and every 30 s while shown."""
 import ctypes
+import time
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import customtkinter as ctk
 
 import stats
-from gui import app_browser, appinfo, icons, theme
-from gui.components import Card, DayBars, ProgressLine, StatCard, TimelineBar, eyebrow
+from gui import app_browser, appinfo, categories, icons, theme
+from gui.charts import DayBars, TimelineBar
+from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow
 from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, effective_rules, item_block,
                    limits, next_block, opening_bucket, time_bucket)
 from trusted_time import now_from_db
 
 REFRESH_MS = 30_000
+FRESH_SEC = 10      # showing the page again within this time doesn't rebuild it
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
           "November", "December"]
 GOAL_KEY = "stats.goal_hours"      # daily screen-time goal, "0" = off
@@ -30,6 +33,66 @@ def start_service():
 def goal_seconds(db) -> float | None:
     hours = float(db.get_setting(GOAL_KEY, DEFAULT_GOAL_HOURS) or 0)
     return hours * 3600 or None
+
+
+def _legend_entry(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.square = ctk.CTkFrame(f, width=9, height=9, corner_radius=2)
+    f.square.pack(side="left", padx=(8, 4))
+    f.label = ctk.CTkLabel(f, text="", text_color=theme.MUTED, font=theme.body(11))
+    f.label.pack(side="left")
+    return f
+
+
+def _limit_row(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    line = ctk.CTkFrame(f, fg_color="transparent")
+    line.pack(fill="x", pady=(2, 0))
+    f.name = ctk.CTkLabel(line, text="", compound="left", height=20)
+    f.name.pack(side="left")
+    f.left = ctk.CTkLabel(line, text="", font=theme.semi(12), height=20)
+    f.left.pack(side="right")
+    f.text = ctk.CTkLabel(line, text="", text_color=theme.MUTED, font=theme.body(12), height=20)
+    f.text.pack(side="right", padx=12)
+    f.bar = ProgressLine(f)
+    f.bar.pack(fill="x", pady=(2, 6))
+    return f
+
+
+def _coming_row(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.when = ctk.CTkLabel(f, text="", text_color=theme.ACCENT, font=theme.semi(13), width=84, anchor="nw")
+    f.when.pack(side="left", anchor="n")
+    texts = ctk.CTkFrame(f, fg_color="transparent")
+    texts.pack(side="left", fill="x", expand=True)
+    f.title = ctk.CTkLabel(texts, text="", anchor="w", height=18)
+    f.title.pack(anchor="w")
+    f.sub = ctk.CTkLabel(texts, text="", text_color=theme.MUTED, font=theme.body(11), anchor="w", height=14,
+                         wraplength=260, justify="left")
+    f.sub.pack(anchor="w")
+    return f
+
+
+def _visit_row(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.name = ctk.CTkLabel(f, text="", compound="left", height=20)
+    f.name.pack(side="left")
+    f.count = ctk.CTkLabel(f, text="", text_color=theme.MUTED, font=theme.body(11), height=20)
+    f.count.pack(side="right")
+    return f
+
+
+def _glance_entry(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.label = eyebrow(f, "")
+    f.label.pack(anchor="w", pady=(4, 0))
+    line = ctk.CTkFrame(f, fg_color="transparent")
+    line.pack(anchor="w")
+    f.main = ctk.CTkLabel(line, text="", font=theme.semi(13), height=18)
+    f.main.pack(side="left")
+    f.extra = ctk.CTkLabel(line, text="", text_color=theme.MUTED, font=theme.body(11), height=18)
+    f.extra.pack(side="left")
+    return f
 
 
 def when_text(when, now) -> str:
@@ -50,6 +113,7 @@ class DashboardPage(ctk.CTkFrame):
         self.body.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         self._build()
         self.after(REFRESH_MS, self._auto_refresh)
+        self.last_refresh = 0.0
 
     # ---------- layout ----------
 
@@ -87,14 +151,13 @@ class DashboardPage(ctk.CTkFrame):
 
         self.limits = Card(left, "Limits today")
         self.limits.pack(fill="x", pady=(0, 12))
+        self.limit_rows = Rows(self.limits.body, _limit_row, "No time or opening limits set.")
         self.today = Card(left, "Today")
         self.today.pack(fill="x", pady=(0, 12))
-        legend = self.today.note.master
+        legend = ctk.CTkFrame(self.today.note.master, fg_color="transparent")
+        legend.pack(side="right")
         self.today.note.destroy()
-        for name, color in (("Idle", theme.TRACK), ("Neutral", theme.NEUTRAL), ("Productive", theme.SUCCESS),
-                            ("Distracting", theme.ACCENT)):
-            ctk.CTkLabel(legend, text=name, text_color=theme.MUTED, font=theme.body(11)).pack(side="right", padx=(0, 8))
-            ctk.CTkFrame(legend, width=9, height=9, corner_radius=2, fg_color=color).pack(side="right", padx=(0, 4))
+        self.legend = Rows(legend, _legend_entry, item_pack={"side": "left"})
         self.timeline = TimelineBar(self.today.body)
         self.timeline.pack(fill="x")
         self.week = Card(left, "Last 7 days")
@@ -104,11 +167,15 @@ class DashboardPage(ctk.CTkFrame):
 
         self.coming = Card(right, "Coming up")
         self.coming.pack(fill="x", pady=(0, 12))
+        self.coming_rows = Rows(self.coming.body, _coming_row, "Nothing in the next 24 hours.",
+                                {"fill": "x", "pady": 3})
         self.visits = Card(right, "Blocked visits today")
         self.visits.pack(fill="x", pady=(0, 12))
         self.visits.note.configure(font=theme.numeral(22), text_color=theme.ACCENT)
+        self.visit_rows = Rows(self.visits.body, _visit_row, "No blocked visits today.", {"fill": "x", "pady": 1})
         self.glance = Card(right, "At a glance")
         self.glance.pack(fill="x")
+        self.glance_rows = Rows(self.glance.body, _glance_entry, "Not enough data yet.", {"anchor": "w"})
 
         self.empty = Card(b)
         inner = ctk.CTkFrame(self.empty.body, fg_color="transparent")
@@ -131,15 +198,11 @@ class DashboardPage(ctk.CTkFrame):
         self.app.show_page("Screen Time")
         self.app.pages["Screen Time"].show_tab("Apps")
 
-    @staticmethod
-    def _clear(card: Card):
-        for w in card.body.winfo_children():
-            w.destroy()
-
     # ---------- data ----------
 
     def on_show(self):
-        self.refresh()
+        if time.monotonic() - self.last_refresh > FRESH_SEC:
+            self.refresh()
 
     def _auto_refresh(self):
         if getattr(self.app, "current_page", None) == "Dashboard":
@@ -147,6 +210,7 @@ class DashboardPage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
 
     def refresh(self):
+        self.last_refresh = time.monotonic()
         db = self.db
         now = now_from_db(db)
         today = now.date()
@@ -164,7 +228,12 @@ class DashboardPage(ctk.CTkFrame):
         items, groups = db.list_items(), db.list_groups()
         usage = db.usage_lookup(now)
         saved = db.categories()
-        category = lambda exe, site: stats.category_of(*(("site", site) if site else ("app", exe)), saved, items)
+        cats = categories.load(db)
+        colors = categories.colors_of(cats)
+
+        def category(exe, site):
+            cat = stats.category_of(*(("site", site) if site else ("app", exe)), saved, items)
+            return cat if cat in colors else "neutral"
         rows = stats.activity(db, today, today + timedelta(days=1))
         events = stats.switches(db, today, today + timedelta(days=1))
         if rows:
@@ -173,7 +242,14 @@ class DashboardPage(ctk.CTkFrame):
         self._stat_cards(now, rows, events, items, groups, usage)
         self._limits(now, items, groups, usage)
         start_hour = min(6, int(rows[0]["minute"][11:13])) if rows else 6
-        self.timeline.set(stats.timeline(rows, today, category), start_hour)
+        segments = stats.timeline(rows, today, category)
+        self.timeline.set(segments, start_hour, {**colors, "idle": theme.TRACK},
+                          {**categories.names_of(cats), "idle": "Idle"})
+        used = {kind for _, _, kind in segments}
+        shown = [c for c in cats if c["key"] in used or c["builtin"]] + [{"name": "Idle", "color": theme.TRACK}]
+        for entry, c in zip(self.legend.take(len(shown)), shown):
+            entry.square.configure(fg_color=c["color"])
+            entry.label.configure(text=c["name"])
         self._week(now)
         self._coming(now, items, groups, usage)
         self._visits(today, items)
@@ -202,12 +278,12 @@ class DashboardPage(ctk.CTkFrame):
                 else "Nothing else coming up today"
             self.stat["Blocked now"].set(f"{len(blocked)} of {len(items)}", note)
 
-        avg = stats.average_daily_switches(db, today)
+        avg = stats.average_daily_switches(db, today, until=now.time())
         n = len(events)
         if avg is None or abs(n - avg) < 1:
-            delta, color = ("no history yet" if avg is None else "about your average"), theme.MUTED
+            delta, color = ("no history yet" if avg is None else "about usual for this time of day"), theme.MUTED
         else:
-            delta = f"{abs(round(n - avg))} {'more' if n > avg else 'fewer'} than your average"
+            delta = f"{abs(round(n - avg))} {'more' if n > avg else 'fewer'} than usual by this time"
             color = theme.WARNING if n > avg else theme.SUCCESS
         self.stat["Switches today"].set(str(n), delta, color)
 
@@ -218,7 +294,6 @@ class DashboardPage(ctk.CTkFrame):
                                     f"{len(blocked_today)} blocked visit{'s' * (len(blocked_today) != 1)} turned away")
 
     def _limits(self, now, items, groups, usage):
-        self._clear(self.limits)
         clock = usage.clock
         seen, entries = set(), []
         for item in items:
@@ -240,11 +315,9 @@ class DashboardPage(ctk.CTkFrame):
                     icon = icons.get(r["group"]["name"], 16) if group else icons.for_item(item, 16)
                     entries.append((name, icon, is_time, *best))
         self.limits.note.configure(text=f"{len(entries)} active")
-        if not entries:
-            ctk.CTkLabel(self.limits.body, text="No time or opening limits set.", text_color=theme.MUTED).pack(
-                anchor="w")
-            return
-        for name, icon, is_time, frac, period, used, limit in sorted(entries, key=lambda e: -e[3]):
+        entries.sort(key=lambda e: -e[3])
+        for row, (name, icon, is_time, frac, period, used, limit) in zip(self.limit_rows.take(len(entries)),
+                                                                           entries):
             color = theme.SUCCESS if frac < 0.6 else theme.WARNING if frac < 0.85 else theme.DANGER
             when = "" if period == "day" else f" {PERIOD_WORDS[period]}"
             if is_time:
@@ -254,22 +327,22 @@ class DashboardPage(ctk.CTkFrame):
                 text = f"{used} opens of {limit} {PERIOD_WORDS[period]}"
                 left_text = f"{limit - used} left" if used < limit else "limit reached"
                 name += " - opens"
-            row = ctk.CTkFrame(self.limits.body, fg_color="transparent")
-            row.pack(fill="x", pady=(2, 0))
-            ctk.CTkLabel(row, text=f"  {name}", image=icon, compound="left", height=20).pack(side="left")
-            ctk.CTkLabel(row, text=left_text, text_color=color, font=theme.semi(12), height=20).pack(side="right")
-            ctk.CTkLabel(row, text=text, text_color=theme.MUTED, font=theme.body(12), height=20).pack(
-                side="right", padx=12)
-            bar = ProgressLine(self.limits.body)
-            bar.pack(fill="x", pady=(2, 6))
-            bar.set(frac, color)
+            row.name.configure(text=f"  {name}", image=icon)
+            row.left.configure(text=left_text, text_color=color)
+            row.text.configure(text=text)
+            row.bar.set(frac, color)
 
     def _week(self, now):
         today = now.date()
         start = today - timedelta(days=6)
         per_day = stats.per_day(stats.activity(self.db, start, today + timedelta(days=1)))
-        days = [(DAY_NAMES[d.weekday()][:3], per_day.get(d.isoformat(), 0), d == today)
-                for d in (start + timedelta(days=i) for i in range(7))]
+        since = datetime.combine(start, datetime.min.time())
+        unlocks = Counter(u["started"].date() for u in self.db.unlocks_since(since))
+        days = []
+        for d in (start + timedelta(days=i) for i in range(7)):
+            sec = per_day.get(d.isoformat(), 0)
+            days.append((DAY_NAMES[d.weekday()][:3], sec, d == today,
+                         f"{DAY_NAMES[d.weekday()]} {d.day} {MONTHS[d.month - 1]}  {stats.hm(sec)}", unlocks.get(d, 0)))
         goal = goal_seconds(self.db)
         self.week.note.configure(text=f"- - daily goal {goal / 3600:g} h" if goal else "")
         self.bars.set(days, goal)
@@ -307,45 +380,29 @@ class DashboardPage(ctk.CTkFrame):
         return sorted(merged.values(), key=lambda e: (e["when"] is not None, e["when"] or now))
 
     def _coming(self, now, items, groups, usage):
-        self._clear(self.coming)
         upcoming = self._upcoming(now, items, groups, usage)[:4]
-        if not upcoming:
-            ctk.CTkLabel(self.coming.body, text="Nothing in the next 24 hours.", text_color=theme.MUTED).pack(
-                anchor="w")
-        for e in upcoming:
-            row = ctk.CTkFrame(self.coming.body, fg_color="transparent")
-            row.pack(fill="x", pady=3)
-            when = "Today" if e["when"] is None else when_text(e["when"], now)
-            ctk.CTkLabel(row, text=when, text_color=theme.ACCENT, font=theme.semi(13), width=84, anchor="nw").pack(
-                side="left", anchor="n")
-            texts = ctk.CTkFrame(row, fg_color="transparent")
-            texts.pack(side="left", fill="x", expand=True)
-            ctk.CTkLabel(texts, text=e["title"], anchor="w", height=18).pack(anchor="w")
+        for row, e in zip(self.coming_rows.take(len(upcoming)), upcoming):
+            row.when.configure(text="Today" if e["when"] is None else when_text(e["when"], now))
+            row.title.configure(text=e["title"])
             sub = f"about {round(e['left'] / 60)} minutes of use left" if e["kind"] == "limit" else \
                 " · ".join(e["names"]) if len(e["names"]) > 1 else ""
+            row.sub.configure(text=sub)
             if sub:
-                ctk.CTkLabel(texts, text=sub, text_color=theme.MUTED, font=theme.body(11), anchor="w", height=14,
-                             wraplength=260, justify="left").pack(anchor="w")
+                row.sub.pack(anchor="w")
+            else:
+                row.sub.pack_forget()
 
     def _visits(self, today, items):
-        self._clear(self.visits)
         events = stats.blocked_events(self.db, today)
         self.visits.note.configure(text=str(len(events)) if events else "")
-        if not events:
-            ctk.CTkLabel(self.visits.body, text="No blocked visits today.", text_color=theme.MUTED).pack(anchor="w")
-            return
         by_id = {i["id"]: i for i in items}
-        for (item_id, name), count in Counter((e["item_id"], e["name"]) for e in events).most_common(4):
-            row = ctk.CTkFrame(self.visits.body, fg_color="transparent")
-            row.pack(fill="x", pady=1)
+        top = Counter((e["item_id"], e["name"]) for e in events).most_common(4)
+        for row, ((item_id, name), count) in zip(self.visit_rows.take(len(top)), top):
             item = by_id.get(item_id)
-            icon = icons.for_item(item, 16) if item else icons.get(name, 16)
-            ctk.CTkLabel(row, text=f"  {name}", image=icon, compound="left", height=20).pack(side="left")
-            ctk.CTkLabel(row, text=f"{count} attempt{'s' * (count != 1)}", text_color=theme.MUTED,
-                         font=theme.body(11), height=20).pack(side="right")
+            row.name.configure(text=f"  {name}", image=icons.for_item(item, 16) if item else icons.get(name, 16))
+            row.count.configure(text=f"{count} attempt{'s' * (count != 1)}")
 
     def _glance(self, now, rows, events, items):
-        self._clear(self.glance)
         entries = []
         apps = stats.per_app(rows)
         if apps:
@@ -362,12 +419,7 @@ class DashboardPage(ctk.CTkFrame):
             quiet = min(span, key=lambda h: summary["per_hour"].get(h, 0))
             n = summary["per_hour"].get(quiet, 0)
             entries.append(("Quietest hour", f"{quiet:02d}:00 - {quiet + 1:02d}:00", f"{n} switch{'es' * (n != 1)}"))
-        if not entries:
-            ctk.CTkLabel(self.glance.body, text="Not enough data yet.", text_color=theme.MUTED).pack(anchor="w")
-        for label, main, extra in entries:
-            eyebrow(self.glance.body, label).pack(anchor="w", pady=(4, 0))
-            line = ctk.CTkFrame(self.glance.body, fg_color="transparent")
-            line.pack(anchor="w")
-            ctk.CTkLabel(line, text=main, font=theme.semi(13), height=18).pack(side="left")
-            ctk.CTkLabel(line, text=f"  {extra}", text_color=theme.MUTED, font=theme.body(11), height=18).pack(
-                side="left")
+        for row, (label, main, extra) in zip(self.glance_rows.take(len(entries)), entries):
+            row.label.configure(text=label.upper())
+            row.main.configure(text=main)
+            row.extra.configure(text=f"  {extra}")
