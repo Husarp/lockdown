@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.2 — 2026-09-18 23:32
+- Apps: new "Also close its background processes" option under Close app (off by default). Once the app itself is closed, the service also closes what it started and whatever runs from its install folder (never Windows' own processes; not used for apps inside Windows or loose folders like Desktop/Downloads)
+- 111 tests passing
+
 ## 0.9.1 — 2026-09-18 23:14
 - Limit reset time can be changed any number of times (no once-a-week lock); the running week and month are now also held, so a change can't start a new week/month early (before: up to 12 h early)
 

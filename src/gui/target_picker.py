@@ -10,6 +10,8 @@ from importer.popular import POPULAR_SITES
 
 ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then force-closed; started while blocked: "
                                   "closed at once"),
+           "background": ("Also close its background processes", "once the app is closed: what it started and what "
+                                                                   "runs from its install folder"),
            "minimize": ("Minimize", "keeps it running (e.g. a browser with many tabs) but minimizes it whenever it's opened"),
            "internet": ("Block internet", "it can't connect to the internet")}
 MUTED = "gray60"
@@ -57,10 +59,11 @@ class TargetPicker(ctk.CTkFrame):
         self.flag_boxes = {}
         for flag, (label, note) in ACTIONS.items():
             line = ctk.CTkFrame(self.block_row, fg_color="transparent")
-            line.pack(anchor="w", pady=1)
+            line.pack(anchor="w", pady=1, padx=(28 if flag == "background" else 0, 0))   # goes with Close app
             box = ctk.CTkCheckBox(line, text=label, width=150, command=lambda f=flag: self._flag_ticked(f))
             box.pack(side="left")
-            ctk.CTkLabel(line, text=note, text_color=MUTED, anchor="w", justify="left", wraplength=640).pack(side="left")
+            ctk.CTkLabel(line, text=note, text_color=MUTED, anchor="w", justify="left", wraplength=640).pack(
+                side="left", padx=(8, 0))
             self.flag_boxes[flag] = box
         self.reset()
 
@@ -124,16 +127,25 @@ class TargetPicker(ctk.CTkFrame):
         flags = block_flags(block_type)
         for flag, box in self.flag_boxes.items():
             box.select() if flag in flags else box.deselect()
+        self._update_background()
 
     def _flag_ticked(self, flag: str):
         other = {"close": "minimize", "minimize": "close"}.get(flag)
         if other and self.flag_boxes[flag].get():
             self.flag_boxes[other].deselect()   # closing makes minimizing pointless
+        self._update_background()
+
+    def _update_background(self):
+        """"Also close its background processes" only goes with Close app."""
+        box = self.flag_boxes["background"]
+        if not self.flag_boxes["close"].get():
+            box.deselect()
+        box.configure(state="normal" if self.flag_boxes["close"].get() else "disabled")
 
     def selected_block_type(self) -> str | None:
         """None if nothing is ticked."""
         flags = [f for f, box in self.flag_boxes.items() if box.get()]
-        return make_block_type(flags) if flags else None
+        return make_block_type(flags) if set(flags) - {"background"} else None
 
     def get(self) -> dict:
         """{kind, targets, name, source, block_type, app_path}. Raises ValueError with a user-facing message."""

@@ -72,7 +72,8 @@ def make_row(parent) -> ctk.CTkFrame:
 def targets_text(item: dict) -> str:
     if item["item_type"] == "app":
         flags = block_flags(item.get("block_type"))
-        how = " + ".join(w for f, w in (("close", "closed"), ("minimize", "minimized"), ("internet", "internet blocked"))
+        how = " + ".join(w for f, w in (("close", "closed"), ("background", "background processes"), ("minimize", "minimized"),
+                                            ("internet", "internet blocked"))
                          if f in flags)
         return f"app · {item['target']} · {how}"
     return ", ".join(item["target"].split())

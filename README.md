@@ -42,7 +42,9 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
 - Apps are matched by exe name. The service checks running processes 4x per second: an app started while blocked
   is killed at once; one that was already open when its block began is asked to close (like clicking X) and
   force-closed after 10 s. "Minimize" keeps the app running but the tray agent minimizes it whenever it comes to the
-  front; "Block internet" adds a Windows Firewall rule. Windows' own processes can't be blocked.
+  front; "Block internet" adds a Windows Firewall rule. "Also close its background processes" (with Close app)
+  closes, once the app is gone, what it started and whatever runs from its install folder. Windows' own processes
+  can't be blocked.
 - Groups (Blocking > Groups) hold shared rules; members inherit them, a member can be customized, and a group
   daily limit is one total for all members. Warnings/reminders are set on the Notifications page.
 - Daily limits: the tray agent reads the active browser tab's address (Windows UI Automation — Chrome, Edge, Brave,

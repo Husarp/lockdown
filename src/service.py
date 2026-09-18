@@ -17,6 +17,7 @@ Usage:
 import ctypes
 import json
 import logging
+import os
 import sys
 import threading
 import time
@@ -70,6 +71,8 @@ class Enforcer:
         self.app_blocks: dict[str, dict] = {}   # exe -> block, for blocked apps (read by the app thread)
         self.app_first_seen: dict[int, float] = {}
         self.block_since: dict[str, float] = {}    # exe -> when its block began
+        self.helpers: dict[str, set[int]] = {}     # exe -> pids it started ("also close background processes")
+        self.path_cache: dict[int, tuple[str, str]] = {}   # pid -> (exe, lowercase path)
         self.firewalled: dict[str, str] = json.loads(db.get_setting(FIREWALL_KEY, "{}"))
 
     def update_clock(self) -> datetime:
@@ -148,8 +151,10 @@ class Enforcer:
         now = time.time()
         targets = {exe: b for exe, b in self.app_blocks.items() if apps.kills(b["item"]["block_type"])}
         self.block_since = {exe: self.block_since.get(exe, now) for exe in targets}
+        procs = apps.list_processes_full()
+        self.enforce_background(targets, procs)
         seen = {}
-        for pid, exe in apps.list_processes():
+        for pid, _ppid, exe in procs:
             block = targets.get(exe)
             if not block:
                 continue
@@ -167,6 +172,35 @@ class Enforcer:
             if now - first >= APP_GRACE_SEC and apps.terminate(pid):
                 log.info("Force-closed blocked app %s (pid %d)", exe, pid)
         self.app_first_seen = seen
+
+    def enforce_background(self, targets: dict[str, dict], procs: list[tuple[int, int, str]]):
+        """"Also close its background processes": once the app itself is closed, close what it started and
+        whatever runs from its install folder (helpers that keep going without it)."""
+        wanted = {exe: b for exe, b in targets.items() if apps.kills_background(b["item"]["block_type"])}
+        self.helpers = {exe: pids for exe, pids in self.helpers.items() if exe in wanted}
+        if not wanted:
+            return
+        alive = {pid for pid, _ppid, _exe in procs}
+        self.path_cache = {pid: v for pid, v in self.path_cache.items() if pid in alive}
+        for exe, block in wanted.items():
+            main = {pid for pid, _ppid, name in procs if name == exe}
+            if main:   # the app goes first (asked to close, then force-closed); remember what it started
+                self.helpers.setdefault(exe, set()).update(apps.descendants(main, procs))
+                continue
+            folder = apps.helper_folder(block["item"]["app_path"])
+            for pid, _ppid, name in procs:
+                if name in apps.PROTECTED or pid == os.getpid():
+                    continue
+                if pid not in self.helpers.get(exe, ()) and not (folder and self._in_folder(pid, name, folder)):
+                    continue
+                if apps.terminate(pid):
+                    log.info("Closed background process %s of blocked app %s (pid %d)", name, exe, pid)
+
+    def _in_folder(self, pid: int, name: str, folder: str) -> bool:
+        cached = self.path_cache.get(pid)
+        if not cached or cached[0] != name:
+            cached = self.path_cache[pid] = (name, (apps.process_path(pid) or "").lower())
+        return cached[1].startswith(folder + "\\")
 
     def update_firewall(self):
         """Firewall rules for blocked apps with block type 'firewall'/'both'; remove the rest."""

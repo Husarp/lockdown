@@ -1203,6 +1203,10 @@ General app settings (lock and notification settings have moved to their own tab
   - dropped: "time used during an unlock counts toward limits" option (not needed)
 - [x] Time limits and opening limits per day / week / month, stackable (e.g. 2 h a day + max 8 h a week)
 
+### Requested 2026-09-18
+- [x] Blocking apps: option to also close the app's background processes - off by default, only with Close app
+  (the app closes first, then its child processes and whatever runs from its install folder)
+
 ### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)
 Design received 2026-09-18: `design/Lockdown Dashboard & Screen Time.dc.html` (foundations, Dashboard dark/light,
 Screen Time Overview/Apps/Websites/Switches, empty state, Blocking Overview/Groups/Add). Waiting for answers
