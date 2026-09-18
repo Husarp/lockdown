@@ -4,6 +4,7 @@ Every 2 seconds: evaluate block rules (permanent / hours / temporary / daily lim
 clock (changing the Windows clock has no effect), make the hosts file match
 (repairing manual edits), keep browser DoH/QUIC locked off, and close open connections to newly blocked
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
+Network log (every 2 s, own thread): new connections per app and site, kept for an hour.
 Blocked apps (checked 4x per second): started while blocked -> killed at once; already open when the block
 began -> the tray agent asks them to close, force-killed after 10 s. Block type firewall/both adds a Windows
 Firewall rule ("Block internet"). "Minimize" is handled by the tray agent (it can see the desktop).
@@ -24,7 +25,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from blocker import apps, browser_policy, connections, firewall, hosts
+from blocker import apps, browser_policy, connections, firewall, hosts, netlog
 from blocker.listener import BlockListener
 from db import Database
 from paths import DATA_DIR, LOG_PATH
@@ -40,6 +41,8 @@ APP_CHECK_SEC = 0.25
 APP_GRACE_SEC = 10          # app already open when its block began: asked to close, force-killed after this
 LAUNCH_SLACK_SEC = 1        # started more than this after the block began = launched while blocked
 FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
+NETLOG_SEC = 2
+NETLOG_KEEP = timedelta(hours=1)  # the network log only shows the last hour
 
 log = logging.getLogger("lockdown.service")
 
@@ -231,6 +234,58 @@ class Enforcer:
         return None
 
 
+class NetworkLogger:
+    """Every 2 s: which TCP connections are new, which app opened them and which site they go to (Windows DNS
+    cache) -> network_log. Rows older than an hour are deleted."""
+
+    def __init__(self, db: Database, now):
+        self.db, self.now = db, now
+        self.seen: set[tuple[int, str, int, int]] = set()   # (pid, remote ip, remote port, local port)
+        self.names: dict[str, str] = {}              # ip -> domain, remembered after the DNS cache forgets it
+        self.procs: dict[int, tuple[str, bool]] = {}  # pid -> (exe, is a Windows program)
+        self.windows_dir = os.environ.get("SystemRoot", r"C:\Windows").lower() + "\\"
+
+    def _proc(self, pid: int, exe_by_pid: dict[int, str]) -> tuple[str, bool]:
+        exe = exe_by_pid.get(pid, "system" if pid in (0, 4) else "unknown")
+        cached = self.procs.get(pid)
+        if not cached or cached[0] != exe:
+            path = (apps.process_path(pid) or "").lower()
+            cached = self.procs[pid] = (exe, exe in ("system", "unknown") or path.startswith(self.windows_dir))
+        return cached
+
+    def tick(self):
+        now = self.now()
+        current = set(netlog.tcp_connections())
+        new, self.seen = current - self.seen, current
+        exe_by_pid = dict(apps.list_processes())
+        self.procs = {pid: v for pid, v in self.procs.items() if pid in exe_by_pid}
+        if any(ip not in self.names and not netlog.is_local(ip) for _, ip, _, _ in new):
+            self.names.update(netlog.dns_names())
+            if len(self.names) > 20000:
+                self.names = dict(list(self.names.items())[-10000:])
+        rows: dict[tuple, dict] = {}
+        minute = now.strftime("%Y-%m-%d %H:%M")
+        for pid, ip, port, _local_port in new:
+            exe, windows = self._proc(pid, exe_by_pid)
+            row = rows.setdefault((exe, ip, port), {
+                "minute": minute, "exe": exe, "ip": ip, "port": port, "domain": self.names.get(ip, ""), "count": 0,
+                "windows": int(windows), "local": int(netlog.is_local(ip))})
+            row["count"] += 1
+        if rows:
+            self.db.add_network(list(rows.values()))
+        self.db.prune_network((now - NETLOG_KEEP).strftime("%Y-%m-%d %H:%M"))
+
+
+def netlog_loop(enforcer: Enforcer):
+    logger = NetworkLogger(Database(), enforcer.clock.now)
+    while True:
+        try:
+            logger.tick()
+        except Exception:
+            log.exception("Network logging failed")
+        time.sleep(NETLOG_SEC)
+
+
 def app_loop(enforcer: Enforcer):
     while True:
         try:
@@ -264,6 +319,7 @@ def main():
     log.info("Service started")
     BlockListener(enforcer.on_visit, log).start()
     threading.Thread(target=app_loop, args=(enforcer,), daemon=True).start()
+    threading.Thread(target=netlog_loop, args=(enforcer,), daemon=True).start()
     while True:
         try:
             enforcer.enforce_once()

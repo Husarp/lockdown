@@ -1234,11 +1234,16 @@ Appearance setting (dark default); fonts bundled; Start service button asks for 
 - [x] Categories: pick from a small menu, add own categories with custom colours (requested 2026-09-19)
 
 ### Phase 5 — Network Logging
-- [ ] Connection enumeration with `psutil`
-- [ ] DNS query logging
-- [ ] Log storage in SQLite
-- [ ] Network log viewer in GUI (filter, search, export)
-- [ ] Right-click to block domain/app from log view
+Approved 2026-09-19: the service (SYSTEM, sees every app) lists TCP connections with their app every 2 s via
+Windows' own tables (no psutil - the service stays standard-library only), names IPs from the Windows DNS cache,
+stores one row per app + address + port per minute (with a count). Keeps only the last hour (user: "it is to see
+sites that you have visited"). Windows' own + local traffic hidden by default; built in the current style.
+- [x] Connection enumeration (GetExtendedTcpTable IPv4 + IPv6, owning process)
+- [x] DNS names (Windows DNS cache: IP -> domain the app looked up; Chromium built-in DNS client turned off by policy)
+- [x] Log storage in SQLite (network_log, 1 hour)
+- [x] Network log viewer in GUI (table / graph, filter, search, live, export CSV)
+- [x] Click a row: block site / app (opens Add filled in), copy site / app name, show only this app
+- Dropped: UDP (no remote address in Windows' table; browsers use TCP since QUIC is off), "Lookup domain info" (WHOIS)
 
 ### Phase 6 — Modes & Reminders
 - [ ] Built-in modes (Work, Study, Focus/Pomodoro, DND, Relax)

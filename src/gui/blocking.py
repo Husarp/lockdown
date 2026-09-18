@@ -468,6 +468,22 @@ class BlockingPage(ctk.CTkFrame):
         self.show_tab("Add")
         self.tabs["Add"].edit(item_id)
 
+    def add_prefilled(self, site: tuple[str, str] | None = None, app: dict | None = None):
+        """Open Add with a site (name, host) or an app {name, exe, path} filled in (e.g. from the network log);
+        something already on the list opens for editing instead."""
+        self.show_tab("Add")
+        add = self.tabs["Add"]
+        existing = self.draft.find_item(site[1] if site else app["exe"])
+        if existing:
+            add.edit(existing["id"])
+            return
+        add.reset()
+        if site:
+            add.picker._fill_site(*site)
+        else:
+            add.picker._fill_app(app)
+        add._changed()
+
     def edit_group(self, group_id: int):
         self.show_tab("Groups")
         self.tabs["Groups"].edit(group_id)

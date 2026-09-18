@@ -26,8 +26,9 @@ class Chart(tk.Canvas):
         self._job = None
         self._photo = None
         self.bind("<Configure>", lambda e: self._schedule())
+        self.tooltip = Tooltip(self)
         self.bind("<Motion>", self._hover)
-        self.bind("<Leave>", lambda e: self.delete("tip"))
+        self.bind("<Leave>", lambda e: self.tooltip.hide())
 
     def px(self, n: float) -> float:
         return n * self.s
@@ -75,22 +76,40 @@ class Chart(tk.Canvas):
     # ---------- tooltip ----------
 
     def _hover(self, event):
-        self.delete("tip")
         tip = next((t for x0, y0, x1, y1, t in self.hits if x0 <= event.x <= x1 and y0 <= event.y <= y1), None)
-        if not tip:
-            return
-        item = self.create_text(0, 0, text=tip, anchor="nw", font=TIP_FONT, fill=theme.pick(theme.TEXT), tags="tip")
-        x0, y0, x1, y1 = self.bbox(item)
-        tw, th = x1 - x0, y1 - y0
-        pad = self.px(6)
-        x = min(max(2, event.x + self.px(12)), self.winfo_width() - tw - 2 * pad - 2)
-        y = event.y - th - 2 * pad - self.px(6)
-        if y < 2:
-            y = event.y + self.px(16)
-        self.coords(item, x + pad, y + pad)
-        box = self.create_rectangle(x, y, x + tw + 2 * pad, y + th + 2 * pad, fill=theme.pick(theme.SURFACE2),
-                                    outline=theme.pick(theme.BORDER), tags="tip")
-        self.tag_lower(box, item)
+        if tip:
+            self.tooltip.show(tip, event.x_root, event.y_root)
+        else:
+            self.tooltip.hide()
+
+
+class Tooltip:
+    """A small borderless window next to the mouse - outside the chart, so it's never cut off."""
+
+    def __init__(self, widget):
+        self.widget, self.win, self.text = widget, None, ""
+
+    def show(self, text: str, x_root: int, y_root: int):
+        if self.win is None:
+            self.win = tk.Toplevel(self.widget)
+            self.win.overrideredirect(True)
+            self.win.attributes("-topmost", True)
+            self.label = tk.Label(self.win, justify="left", font=TIP_FONT, padx=8, pady=5, bd=0,
+                                  highlightthickness=1)
+            self.label.pack()
+        self.text = text
+        self.label.configure(text=text, bg=theme.pick(theme.SURFACE2), fg=theme.pick(theme.TEXT),
+                             highlightbackground=theme.pick(theme.BORDER))
+        self.win.update_idletasks()
+        w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
+        x = min(x_root + 14, self.widget.winfo_screenwidth() - w - 4)
+        y = y_root - h - 10 if y_root - h - 10 > 0 else y_root + 18
+        self.win.geometry(f"+{x}+{y}")
+        self.win.deiconify()
+
+    def hide(self):
+        if self.win is not None:
+            self.win.withdraw()
 
 
 class TimelineBar(Chart):
@@ -300,3 +319,32 @@ class HourBars(Chart):
                 self.text(x + bar / 2, bottom + self.px(4), f"{hr:02d}")
             self.hit(slot * i, 0, slot * (i + 1), h, f"{hr:02d}:00-{(hr + 1) % 24:02d}:00  "
                                                      f"{n} switch{'es' * (n != 1)}")
+
+
+class MinuteBars(Chart):
+    """Connections per minute over the last hour (oldest left); labels every 10 minutes."""
+
+    def __init__(self, master, height: int = 220):
+        super().__init__(master, height=height)
+        self.values: list[tuple[str, int]] = []   # (HH:MM, count) per minute
+
+    def set(self, values):
+        self.values = values
+        self._schedule()
+
+    def draw(self, w, h):
+        if not any(n for _, n in self.values):
+            self.text(w / 2, h / 2, "Nothing in the last hour", "center", font=(theme.BODY, 10))
+            return
+        peak = max(n for _, n in self.values)
+        top, bottom = self.px(4), h - self.fh - self.px(6)
+        slot = w / len(self.values)
+        bar = max(1.0, slot * 0.7)
+        for i, (label, n) in enumerate(self.values):
+            x = slot * i + (slot - bar) / 2
+            if n:
+                self.rect(x, bottom - (bottom - top) * n / peak, x + bar, bottom,
+                          theme.ACCENT if i == len(self.values) - 1 else theme.BAR, self.px(2))
+            if label.endswith("0"):
+                self.text(x + bar / 2, bottom + self.px(4), label)
+            self.hit(slot * i, 0, slot * (i + 1), h, f"{label}  {n} connection{'s' * (n != 1)}")

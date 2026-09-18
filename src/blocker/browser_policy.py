@@ -2,6 +2,8 @@
 
 - DNS-over-HTTPS off: DoH resolves names through the browser's own server, bypassing the hosts file.
 - QUIC/HTTP3 off: QUIC runs over UDP, which connections.close_to() can't close; browsers fall back to TCP.
+- Chromium's built-in DNS client off: names are then looked up by Windows, so they land in the Windows DNS cache,
+  where the network log finds which site each connection belongs to.
 
 Browsers show "managed by your organization" while these are set. Needs admin (HKLM).
 """
@@ -10,7 +12,8 @@ import winreg
 
 REG_SZ, REG_DWORD, REG_MULTI_SZ = winreg.REG_SZ, winreg.REG_DWORD, winreg.REG_MULTI_SZ
 
-_CHROMIUM = {"DnsOverHttpsMode": (REG_SZ, "off"), "QuicAllowed": (REG_DWORD, 0)}
+_CHROMIUM = {"DnsOverHttpsMode": (REG_SZ, "off"), "QuicAllowed": (REG_DWORD, 0),
+             "BuiltInDnsClientEnabled": (REG_DWORD, 0)}
 _FIREFOX_PREFS = json.dumps({"network.http.http3.enable": {"Value": False, "Status": "locked", "Type": "boolean"}})
 
 # registry key (under HKLM) -> {value name: (type, data)}

@@ -122,6 +122,19 @@ CREATE TABLE IF NOT EXISTS emergency_unlocks (
     names TEXT NOT NULL           -- JSON list of display names (kept for history / graphs)
 );
 
+-- Network log: new connections per minute, app and address (kept for 1 hour; written by the service)
+CREATE TABLE IF NOT EXISTS network_log (
+    minute TEXT NOT NULL,         -- "YYYY-MM-DD HH:MM" (trusted local time)
+    exe TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    domain TEXT NOT NULL DEFAULT '',   -- from the Windows DNS cache ('' = unknown)
+    count INTEGER NOT NULL DEFAULT 0,  -- connections opened in that minute
+    windows INTEGER NOT NULL DEFAULT 0,  -- a Windows program (svchost etc.)
+    local INTEGER NOT NULL DEFAULT 0,    -- this PC / local network
+    PRIMARY KEY (minute, exe, ip, port)
+);
+
 -- Screen-time category chosen for an app (exe) or site (hostname)
 CREATE TABLE IF NOT EXISTS categories (
     kind TEXT NOT NULL,           -- "app" or "site"
@@ -388,6 +401,29 @@ class Database:
             self.conn.execute("INSERT INTO categories (kind, name, category) VALUES (?, ?, ?) "
                               "ON CONFLICT(kind, name) DO UPDATE SET category = excluded.category",
                               (kind, name, category))
+
+    # ---------- network log ----------
+
+    def add_network(self, rows: list[dict]):
+        """rows: {minute, exe, ip, port, domain, count, windows, local}; counts add up, a known domain is kept."""
+        with self.conn:
+            self.conn.executemany(
+                "INSERT INTO network_log (minute, exe, ip, port, domain, count, windows, local) "
+                "VALUES (:minute, :exe, :ip, :port, :domain, :count, :windows, :local) "
+                "ON CONFLICT(minute, exe, ip, port) DO UPDATE SET count = count + excluded.count, "
+                "domain = CASE WHEN excluded.domain != '' THEN excluded.domain ELSE domain END", rows)
+
+    def network_since(self, minute: str) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM network_log WHERE minute >= ? ORDER BY minute DESC, count DESC", (minute,))]
+
+    def prune_network(self, before_minute: str):
+        with self.conn:
+            self.conn.execute("DELETE FROM network_log WHERE minute < ?", (before_minute,))
+
+    def block_events_since(self, since: datetime) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM block_events WHERE timestamp >= ? ORDER BY id DESC", (since.strftime(TIME_FMT),))]
 
     # ---------- block events ----------
 

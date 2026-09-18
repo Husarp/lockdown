@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 — 2026-09-19 01:55
+- **Network Log** (Phase 5): which app connected to which site in the last hour
+  - the service reads Windows' TCP tables (every 2 s, own thread) with the owning app, names each address from the Windows DNS cache (the name the app looked up), and keeps one hour
+  - Chrome/Edge/Brave policy: built-in DNS client off, so their lookups go through Windows and get names
+  - page: table (time, app, site, port, allowed / blocked visit) or graph (connections per minute + top apps / sites), search, app filter, All / Allowed / Blocked, Windows' own and local-network traffic hidden by default (switches), Live updates, Export CSV
+  - click a row: Block site (opens Add filled in with the main domain, e.g. googlevideo.com), Block app, Copy site, Copy app name, Show only this app
+- Chart tooltips are a small window of their own now, so they're never cut off
+- 122 tests passing
+
 ## 0.12.0 — 2026-09-19 00:21
 - Tab bars (Screen Time, Blocking, Settings, rule editors): the chosen tab is a rounded button with padding, not a sharp block
 - Charts are drawn smooth (anti-aliased): round donut, rounded bars/cells/timeline; the heatmap's less/more legend is no longer cut off; charts follow the Windows display scaling

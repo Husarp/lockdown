@@ -16,6 +16,7 @@ from gui import theme
 from gui.blocking import BlockingPage
 from gui.dashboard import DashboardPage
 from gui.draft import Draft
+from gui.network import NetworkPage
 from gui.notifications import NotificationsPage, Popup
 from gui.screen_time import ScreenTimePage
 from gui.settings import SettingsPage
@@ -32,7 +33,7 @@ PAGES = [
     ("Blocking", BlockingPage, "ban"),
     ("Anti-Bypass", 7, "shield-check"),
     ("Screen Time", ScreenTimePage, "bar-chart-3"),
-    ("Network Log", 5, "activity"),
+    ("Network Log", NetworkPage, "activity"),
     ("Modes", 6, "sliders-horizontal"),
     ("Notifications", NotificationsPage, "bell"),
     ("Settings", SettingsPage, "settings"),
