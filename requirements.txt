@@ -1,0 +1,4 @@
+customtkinter
+pystray
+pillow
+pytest
