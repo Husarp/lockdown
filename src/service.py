@@ -1,4 +1,4 @@
-"""Lockdown enforcement service.
+﻿"""Lockdown enforcement service.
 
 Every few seconds: evaluate block rules (permanent / hours / temporary / daily limit) using its own trusted
 clock (changing the Windows clock has no effect), make the hosts file match
@@ -11,7 +11,7 @@ Needs admin/SYSTEM rights.
 Usage:
     python src/service.py run              # enforcement loop (what the scheduled task runs)
     python src/service.py once             # single pass, for testing
-    python src/service.py remove-policies  # undo the browser policies (used on uninstall)
+    python src/service.py remove-policies  # undo browser policies + firewall rules (used on uninstall)
 """
 import ctypes
 import json
@@ -203,7 +203,11 @@ def main():
         return 1
     if cmd == "remove-policies":
         browser_policy.remove()
-        log.info("Browser policies removed")
+        db = Database()
+        for exe in json.loads(db.get_setting(FIREWALL_KEY, "{}")):
+            firewall.remove(exe)
+        db.set_setting(FIREWALL_KEY, "{}")
+        log.info("Browser policies and firewall rules removed")
         return 0
     enforcer = Enforcer(Database())
     if cmd == "once":
