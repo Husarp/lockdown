@@ -1185,6 +1185,10 @@ General app settings (lock and notification settings have moved to their own tab
 - [x] Hours editor: no "Remove window" button — a time window with no days ticked is ignored
 - [x] Switch limits: "max N openings per day" for a site/app (group: shared total); the next opening after the limit is blocked
 - [x] Design brief: add the new Blocking page
+- [x] "When blocked" for apps: three checkboxes Close app / Minimize / Block internet (Close and Minimize exclude each other)
+- [x] Status colours: blocked now = red, allowed now = green
+- [x] Opening limit counts "launches / new visits" by default (apps: program starts; sites: coming back after N min away, default 5), or "every switch" - chosen per blocker
+- [x] Faster: service checks rules every 2 s (was 5), Overview counters/status update every 2 s
 - Dropped (2026-09-18): "prevent blocked apps from starting at all" (IFEO registry) — the instant kill on launch is enough
 
 ### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)

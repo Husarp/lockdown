@@ -4,7 +4,8 @@ from datetime import datetime
 
 import customtkinter as ctk
 
-from rules import ALLOW, BLOCK, DAY_NAMES, TIME_FMT, duration_text, load_schedule, make_schedule
+from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, SWITCH, TIME_FMT, VISIT, duration_text,
+                   load_schedule, make_schedule)
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
@@ -12,6 +13,7 @@ CUSTOM = "Custom..."
 UNITS = {"days": 1440, "hours": 60, "minutes": 1}   # biggest first (used to display a custom duration)
 MAX_TEMPORARY_MIN = 30 * 1440
 MODES = {"Allow only during": ALLOW, "Block during": BLOCK}
+SWITCH_MODES = {"Launches / new visits": VISIT, "Every switch": SWITCH}
 MUTED = "gray60"
 
 
@@ -127,19 +129,46 @@ class LimitEditor(ctk.CTkFrame):
 
 
 class SwitchEditor(ctk.CTkFrame):
+    """Opening limit: how many times per day it may be opened, and what counts as opening it."""
+
     def __init__(self, master, shared: bool = False):
         super().__init__(master, fg_color="transparent")
-        ctk.CTkLabel(self, text="Open at most").pack(side="left")
-        self.times = ctk.CTkEntry(self, width=56)
+        line = ctk.CTkFrame(self, fg_color="transparent")
+        line.pack(anchor="w")
+        ctk.CTkLabel(line, text="Open at most").pack(side="left")
+        self.times = ctk.CTkEntry(line, width=56)
         self.times.pack(side="left", padx=8)
-        note = "times per day" + (" for all members together" if shared else "") + \
-            " - every switch to it counts (alt-tab, clicking its tab); the next opening after that is blocked"
-        ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=560, justify="left").pack(side="left")
+        ctk.CTkLabel(line, text="times per day" + (" (all members together)" if shared else "") +
+                     " - the next opening is blocked", text_color=MUTED).pack(side="left")
+        line = ctk.CTkFrame(self, fg_color="transparent")
+        line.pack(anchor="w", pady=(6, 0))
+        ctk.CTkLabel(line, text="What counts").pack(side="left", padx=(0, 8))
+        self.mode = ctk.CTkSegmentedButton(line, values=list(SWITCH_MODES), command=lambda v: self._mode_changed())
+        self.mode.pack(side="left")
+        self.visit_line = ctk.CTkFrame(self, fg_color="transparent")
+        ctk.CTkLabel(self.visit_line, text="Apps: each start of the program. Sites: coming back after").pack(side="left")
+        self.gap = ctk.CTkEntry(self.visit_line, width=48)
+        self.gap.pack(side="left", padx=6)
+        ctk.CTkLabel(self.visit_line, text="minutes away (clicking away and back sooner doesn't count)",
+                     text_color=MUTED).pack(side="left")
+        self.switch_note = ctk.CTkLabel(self, text="every time it comes to the front counts (alt-tab, clicking its "
+                                                   "window or browser tab)", text_color=MUTED)
         self.load(None)
 
+    def _mode_changed(self):
+        visit = SWITCH_MODES[self.mode.get()] == VISIT
+        (self.visit_line if visit else self.switch_note).pack(anchor="w", pady=(6, 0))
+        (self.switch_note if visit else self.visit_line).pack_forget()
+
     def load(self, rule: dict | None):
+        rule = rule or {}
         self.times.delete(0, "end")
-        self.times.insert(0, str((rule or {}).get("daily_switch_limit") or 10))
+        self.times.insert(0, str(rule.get("daily_switch_limit") or 10))
+        self.gap.delete(0, "end")
+        self.gap.insert(0, str(rule.get("visit_gap_min") or DEFAULT_VISIT_GAP_MIN))
+        mode = rule.get("switch_mode") or VISIT
+        self.mode.set(next(k for k, v in SWITCH_MODES.items() if v == mode))
+        self._mode_changed()
 
     def value(self) -> dict:
         try:
@@ -148,7 +177,11 @@ class SwitchEditor(ctk.CTkFrame):
             times = -1
         if not 0 <= times <= 1000:
             raise ValueError("Openings per day must be 0-1000.")
-        return {"rule_type": "switch_limit", "daily_switch_limit": times}
+        mode = SWITCH_MODES[self.mode.get()]
+        rule = {"rule_type": "switch_limit", "daily_switch_limit": times, "switch_mode": mode}
+        if mode == VISIT:
+            rule["visit_gap_min"] = _minutes(self.gap.get(), 1, 1440, "Minutes away")
+        return rule
 
 
 class TemporaryEditor(ctk.CTkFrame):
@@ -227,5 +260,5 @@ class PermanentEditor(ctk.CTkFrame):
 
 EDITORS = {"scheduled": HoursEditor, "time_limit": LimitEditor, "switch_limit": SwitchEditor,
            "permanent": PermanentEditor, "temporary": TemporaryEditor}
-RULE_NAMES = {"scheduled": "By hours", "time_limit": "Daily time limit", "switch_limit": "Daily switch limit",
+RULE_NAMES = {"scheduled": "By hours", "time_limit": "Daily time limit", "switch_limit": "Daily opening limit",
               "permanent": "Permanent", "temporary": "Temporary"}

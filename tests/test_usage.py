@@ -52,12 +52,28 @@ def test_screen_time_and_switches(tmp_path):
     assert switches == [("brave.exe", "youtube.com"), ("brave.exe", "reddit.com"), ("code.exe", "")]
 
 
-def test_switch_limit_counts_openings(tmp_path):
+def test_every_switch_mode(tmp_path):
     db = Database(tmp_path / "t.db")
-    dc = db.add_item("Discord", ["discord.exe"], "app", rules=[{"rule_type": "switch_limit", "daily_switch_limit": 1}])
+    db.add_item("Discord", ["discord.exe"], "app",
+                rules=[{"rule_type": "switch_limit", "daily_switch_limit": 1, "switch_mode": "switch"}])
     tracker = UsageTracker()
-    for exe in ["code.exe", "discord.exe", "discord.exe", "code.exe"]:   # opened once
-        tracker.tick(db, lambda e=exe: (e, None, 0))
-    assert [b["item"]["display_name"] for b in db.blocks(datetime.now())] == []
-    tracker.tick(db, lambda: ("discord.exe", None, 0))                    # second opening -> blocked
+    none = lambda: set()
+    for exe in ["code.exe", "discord.exe", "discord.exe", "code.exe"]:   # switched to it once
+        tracker.tick(db, lambda e=exe: (e, None, 0), none)
+    assert db.blocks(datetime.now()) == []
+    tracker.tick(db, lambda: ("discord.exe", None, 0), none)              # second switch -> blocked
+    assert [b["reason"] for b in db.blocks(datetime.now())] == ["switches"]
+
+
+def test_launch_mode_ignores_clicking_back(tmp_path):
+    db = Database(tmp_path / "t.db")
+    db.add_item("Discord", ["discord.exe"], "app", rules=[{"rule_type": "switch_limit", "daily_switch_limit": 1}])
+    tracker = UsageTracker()
+    steps = [("code.exe", set()), ("discord.exe", {"discord.exe"}),         # launched once
+             ("code.exe", {"discord.exe"}), ("discord.exe", {"discord.exe"}), ("code.exe", {"discord.exe"})]
+    for exe, running in steps:                                            # clicking back and forth: no count
+        tracker.tick(db, lambda e=exe: (e, None, 0), lambda r=running: r)
+    assert db.blocks(datetime.now()) == []
+    tracker.tick(db, lambda: ("code.exe", None, 0), lambda: set())         # closed
+    tracker.tick(db, lambda: ("discord.exe", None, 0), lambda: {"discord.exe"})   # launched again -> over the limit
     assert [b["reason"] for b in db.blocks(datetime.now())] == ["switches"]

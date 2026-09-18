@@ -8,9 +8,10 @@
 import logging
 import threading
 
+from blocker.apps import list_processes
 from blocker.hosts import normalize_host
 from db import Database
-from rules import effective_rules, switch_targets, usage_targets
+from rules import effective_rules, switch_targets, usage_targets, visit_targets
 from trusted_time import now_from_db
 
 TICK_SEC = 2
@@ -67,6 +68,8 @@ class UsageTracker(threading.Thread):
         self.stop_event = threading.Event()
         self.in_use: set[int] = set()   # item ids in use right now (read by the warning watcher)
         self.last_focus = _UNSET        # (exe, site) in front at the previous tick
+        self.running: set[str] | None = None   # exes running at the previous tick (to spot app launches)
+        self.last_used: dict[int, float] = {}  # item id -> when it was last in use (for "new visit")
 
     def run(self):
         import uiautomation as auto  # COM must be initialized in this thread
@@ -78,19 +81,35 @@ class UsageTracker(threading.Thread):
                 except Exception:
                     log.exception("Usage tracking failed")
 
-    def tick(self, db: Database, sense):
+    def tick(self, db: Database, sense, running_exes=None):
         exe, url, idle_sec = sense()
         now = now_from_db(db)
+        running = running_exes() if running_exes else {name for _pid, name in list_processes()}
+        launched = running - self.running if self.running is not None else set()
+        self.running = running
         switched = self.record_activity(db, exe, site_of(url), idle_sec, now)
-        used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, db.list_items())
-        if used:
-            groups = db.list_groups()
-            for item in used:
-                rules = effective_rules(item, groups)
-                db.add_usage(usage_targets(rules, item["id"], now), TICK_SEC, now.date())
-                if switched:   # you just switched to it: one more opening
-                    db.add_usage(switch_targets(rules, item["id"], now), 1, now.date())
-        self.in_use = {i["id"] for i in used}
+        items = db.list_items()
+        used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, items)
+        used_ids = {i["id"] for i in used}
+        groups = db.list_groups()
+        now_ts = now.timestamp()
+        for item in items:
+            is_app = item["item_type"] == "app"
+            app_launched = is_app and item["target"].lower() in launched
+            if not (app_launched or (not is_app and item["id"] in used_ids)):
+                continue
+            rules = effective_rules(item, groups)
+            last = self.last_used.get(item["id"])
+            away = None if last is None else now_ts - last
+            # opening limits in "launches / new visits" mode
+            db.add_usage(visit_targets(rules, item, now, app_launched, away), 1, now.date())
+        for item in used:
+            rules = effective_rules(item, groups)
+            db.add_usage(usage_targets(rules, item["id"], now), TICK_SEC, now.date())
+            if switched:   # you just switched to it (opening limits in "every switch" mode)
+                db.add_usage(switch_targets(rules, item["id"], now), 1, now.date())
+            self.last_used[item["id"]] = now_ts
+        self.in_use = used_ids
 
     def record_activity(self, db: Database, exe: str | None, site: str, idle_sec: float, now) -> bool:
         """Screen time + switch log. Returns True if you just switched to another app/site."""

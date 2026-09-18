@@ -1,16 +1,16 @@
 """'What to block' input shared by the rule tabs and the group editor: a site or an app."""
 import customtkinter as ctk
 
-from blocker.apps import PROTECTED, compose_block_type, split_block_type
+from blocker.apps import PROTECTED, block_flags, make_block_type
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
 from gui.site_picker import PopularSitesPopup, SiteEntry
 from importer.popular import POPULAR_SITES
 
-ACTIONS = {"Close app": "close", "Minimize": "minimize", "Only block internet": "internet"}
-ACTION_NOTES = {"close": "asks the app to close (it can save), force-closes after 10 s; started while blocked = closed at once",
-                "minimize": "keeps it running (e.g. a browser with many tabs) but minimizes it whenever it's opened",
-                "internet": "the app keeps working, but can't connect to the internet"}
+ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then force-closed; started while blocked: "
+                                  "closed at once"),
+           "minimize": ("Minimize", "keeps it running (e.g. a browser with many tabs) but minimizes it whenever it's opened"),
+           "internet": ("Block internet", "it can't connect to the internet")}
 MUTED = "gray60"
 
 
@@ -51,15 +51,16 @@ class TargetPicker(ctk.CTkFrame):
         self.buttons = ctk.CTkFrame(row, fg_color="transparent", width=1, height=1)
         self.buttons.pack(side="left")
         self.block_row = ctk.CTkFrame(self, fg_color="transparent")
-        line = ctk.CTkFrame(self.block_row, fg_color="transparent")
-        line.pack(anchor="w")
-        ctk.CTkLabel(line, text="When blocked:").pack(side="left", padx=(0, 8))
-        self.block_type = ctk.CTkSegmentedButton(line, values=list(ACTIONS), command=self._action_chosen)
-        self.block_type.pack(side="left")
-        self.internet = ctk.CTkCheckBox(line, text="Also block its internet")
-        self.internet.pack(side="left", padx=12)
-        self.action_note = ctk.CTkLabel(self.block_row, text="", text_color=MUTED)
-        self.action_note.pack(anchor="w", pady=(2, 0))
+        ctk.CTkLabel(self.block_row, text="When blocked (tick one or more; Close and Minimize exclude each other):").pack(
+            anchor="w")
+        self.flag_boxes = {}
+        for flag, (label, note) in ACTIONS.items():
+            line = ctk.CTkFrame(self.block_row, fg_color="transparent")
+            line.pack(anchor="w", pady=1)
+            box = ctk.CTkCheckBox(line, text=label, width=150, command=lambda f=flag: self._flag_ticked(f))
+            box.pack(side="left")
+            ctk.CTkLabel(line, text=note, text_color=MUTED, anchor="w", justify="left", wraplength=640).pack(side="left")
+            self.flag_boxes[flag] = box
         self.reset()
 
     # ---------- filling ----------
@@ -119,21 +120,19 @@ class TargetPicker(ctk.CTkFrame):
         self._update_block_row()
 
     def _set_block_type(self, block_type: str | None):
-        action, internet = split_block_type(block_type)
-        self.block_type.set(next(k for k, v in ACTIONS.items() if v == action))
-        self.internet.select() if internet else self.internet.deselect()
-        self._action_chosen(self.block_type.get())
+        flags = block_flags(block_type)
+        for flag, box in self.flag_boxes.items():
+            box.select() if flag in flags else box.deselect()
 
-    def _action_chosen(self, label: str):
-        action = ACTIONS[label]
-        self.action_note.configure(text=ACTION_NOTES[action])
-        if action == "internet":
-            self.internet.pack_forget()   # that's the whole point of this choice
-        else:
-            self.internet.pack(side="left", padx=12)
+    def _flag_ticked(self, flag: str):
+        other = {"close": "minimize", "minimize": "close"}.get(flag)
+        if other and self.flag_boxes[flag].get():
+            self.flag_boxes[other].deselect()   # closing makes minimizing pointless
 
-    def selected_block_type(self) -> str:
-        return compose_block_type(ACTIONS[self.block_type.get()], bool(self.internet.get()))
+    def selected_block_type(self) -> str | None:
+        """None if nothing is ticked."""
+        flags = [f for f, box in self.flag_boxes.items() if box.get()]
+        return make_block_type(flags) if flags else None
 
     def get(self) -> dict:
         """{kind, targets, name, source, block_type, app_path}. Raises ValueError with a user-facing message."""
@@ -143,6 +142,8 @@ class TargetPicker(ctk.CTkFrame):
             exe = (self.app["exe"] if self.app else text).lower()
             if exe in PROTECTED:
                 raise ValueError(f"{exe} is part of Windows (or Lockdown) and can't be blocked.")
+            if self.selected_block_type() is None:
+                raise ValueError("Tick at least one of Close app / Minimize / Block internet.")
             return {"kind": "app", "targets": [exe], "name": name or (self.app or {}).get("name") or exe[:-4].title(),
                     "source": "app-browser" if self.app else "manual", "block_type": self.selected_block_type(),
                     "app_path": (self.app or {}).get("path")}

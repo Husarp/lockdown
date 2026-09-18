@@ -12,6 +12,7 @@ from datetime import datetime
 
 import customtkinter as ctk
 
+from blocker.apps import block_flags
 from gui import app_browser, icons
 from gui.groups import GroupsTab
 from gui.rule_editors import EDITORS, RULE_NAMES
@@ -25,10 +26,11 @@ TABS = ["Overview", "Groups", "Add"]
 SORTS = ["Blocked now first", "Next block", "Date added", "Name"]
 SORT_KEY = "ui.blocking.sort"
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
-REFRESH_MS = 30_000
+REFRESH_MS = 30_000   # full rebuild (sorting, service cleanup)
+LIVE_MS = 2_000       # in-place update of counters / countdowns / status
 MUTED = "gray60"
 ERROR = "#f85149"
-GREEN, ORANGE = "#3fb950", "#d29922"
+GREEN, ORANGE, RED = "#3fb950", "#d29922", "#f85149"
 COLS = [220, 290, 140]   # name + targets, rules, status (then action buttons)
 
 
@@ -47,10 +49,10 @@ def status_of(page, item: dict, now, usage) -> dict:
     if draft.item_not_applied(item["id"]):
         return {"text": "○ Not applied\n(unsaved)", "text_color": ORANGE}
     if not saved_block(draft, item, now, usage):
-        return {"text": "○ Allowed now", "text_color": MUTED}
+        return {"text": "○ Allowed now", "text_color": GREEN}
     if not page.app.service_running:
         return {"text": "○ Pending - service\nnot running", "text_color": ORANGE}
-    return {"text": "● Blocked now", "text_color": GREEN}
+    return {"text": "● Blocked now", "text_color": RED}
 
 
 def make_row(parent) -> ctk.CTkFrame:
@@ -63,8 +65,9 @@ def make_row(parent) -> ctk.CTkFrame:
 
 def targets_text(item: dict) -> str:
     if item["item_type"] == "app":
-        how = {"firewall": "internet blocked", "both": "closed + internet blocked", "minimize": "minimized",
-               "minimize_fw": "minimized + internet blocked"}.get(item.get("block_type"), "closed")
+        flags = block_flags(item.get("block_type"))
+        how = " + ".join(w for f, w in (("close", "closed"), ("minimize", "minimized"), ("internet", "internet blocked"))
+                         if f in flags)
         return f"app · {item['target']} · {how}"
     return ", ".join(item["target"].split())
 
@@ -132,6 +135,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.title.configure(text=f"Everything blocked ({len(items)})")
         for w in self.list_box.winfo_children():
             w.destroy()
+        self.live_rules: list[tuple] = []    # (label, rule) - texts updated in place every 2 s
+        self.live_status: list[tuple] = []   # (label, item)
         if not items:
             ctk.CTkLabel(self.list_box, text="Nothing blocked yet - use + Add.", text_color=MUTED).pack(
                 anchor="w", padx=16, pady=12)
@@ -144,13 +149,13 @@ class OverviewTab(ctk.CTkScrollableFrame):
             rules_box = ctk.CTkFrame(row, fg_color="transparent")
             rules_box.grid(row=0, column=1, padx=8, sticky="w")
             for r, rule in enumerate(effective_rules(item, groups)):
-                text = describe_rule(rule, now, usage)
-                if rule["group"]:
-                    text = f"[{rule['group']['name']}] {text}"
-                ctk.CTkLabel(rules_box, text=text, wraplength=COLS[1] - 16, justify="left", anchor="w").grid(
-                    row=r, column=0, sticky="w", pady=1)
-            ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left").grid(
-                row=0, column=2, padx=8, sticky="w")
+                label = ctk.CTkLabel(rules_box, text=self._rule_text(rule, now, usage), wraplength=COLS[1] - 16,
+                                     justify="left", anchor="w")
+                label.grid(row=r, column=0, sticky="w", pady=1)
+                self.live_rules.append((label, rule))
+            status = ctk.CTkLabel(row, **status_of(self.page, item, now, usage), justify="left")
+            status.grid(row=0, column=2, padx=8, sticky="w")
+            self.live_status.append((status, item))
             alerts = ctk.CTkOptionMenu(row, values=list(ALERTS), width=90,
                                        command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
             alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
@@ -162,6 +167,20 @@ class OverviewTab(ctk.CTkScrollableFrame):
             edit_btn.configure(command=lambda b=edit_btn, c=choices: self._edit(b, c))
             edit_btn.grid(row=0, column=4, padx=4)
             ConfirmButton(row, lambda i=item["id"]: self.draft.remove_item(i), width=70).grid(row=0, column=5, padx=4)
+
+    @staticmethod
+    def _rule_text(rule, now, usage) -> str:
+        text = describe_rule(rule, now, usage)
+        return f"[{rule['group']['name']}] {text}" if rule["group"] else text
+
+    def update_live(self, now, usage):
+        """Refresh counters, countdowns and statuses without rebuilding the list."""
+        for label, rule in getattr(self, "live_rules", []):
+            if label.winfo_exists():
+                label.configure(text=self._rule_text(rule, now, usage))
+        for label, item in getattr(self, "live_status", []):
+            if label.winfo_exists():
+                label.configure(**status_of(self.page, item, now, usage))
 
     def _edit(self, button, choices):
         """One choice: do it. Several: ask which one with a small menu under the button."""
@@ -282,6 +301,9 @@ class AddTab(ctk.CTkScrollableFrame):
             self.reset()
             return
         item = self.draft.items[self.edit_id]
+        if item["item_type"] == "app" and self.picker.selected_block_type() is None:
+            self.error.configure(text="Tick at least one of Close app / Minimize / Block internet.")
+            return
         if not rules and not self.draft.groups_of(self.edit_id):
             self.error.configure(text="Tick at least one blocker (or remove it in Overview).")
             return
@@ -312,6 +334,7 @@ class BlockingPage(ctk.CTkFrame):
         app_browser.preload()
         self.show_tab("Overview")
         self.after(REFRESH_MS, self._auto_refresh)
+        self.after(LIVE_MS, self._live_update)
 
     def show_tab(self, tab: str):
         self.tab_bar.set(tab)
@@ -334,6 +357,15 @@ class BlockingPage(ctk.CTkFrame):
         if hasattr(tab, "refresh"):
             now = now_from_db(self.app.db)
             tab.refresh(now, self.app.db.usage_lookup(now))
+
+    def _live_update(self):
+        try:
+            tab = self.tabs[self.tab_bar.get()]
+            if hasattr(tab, "update_live") and self.winfo_ismapped():
+                now = now_from_db(self.app.db)
+                tab.update_live(now, self.app.db.usage_lookup(now))
+        finally:
+            self.after(LIVE_MS, self._live_update)
 
     def _auto_refresh(self):
         self.draft.refresh_if_clean()   # service may have removed expired blocks

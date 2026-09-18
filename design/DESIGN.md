@@ -37,7 +37,7 @@ The app is built with **Python + customtkinter** (a modern-looking Tk toolkit). 
   "Save changes" is highlighted only when something actually changed.
 - **Content area:** page title + page content.
 
-Status colours used today: green = blocked now / service running, orange = pending / not applied, grey = allowed now,
+Status colours used today: red = blocked now, green = allowed now / service running, orange = pending / not applied,
 red = errors / "Confirm" state of a Remove button (Remove needs two clicks: the button turns red "Confirm" for 3 s).
 
 ## 4. Please design first: Dashboard + Screen Time
@@ -90,9 +90,10 @@ Three tabs (see screenshots 01–05):
 - **Groups:** list of groups (name, members, rules, "2 of 3 blocked now") + a group editor (name, rules that can be
   combined, members, per-member "Customize").
 - **Add:** choose a site (with suggestions, "+ Popular sites" with icons) or an app ("Browse apps" with icons);
-  for apps "When blocked: Close app / Minimize / Only block internet" + "Also block its internet". Then tick any
+  for apps "When blocked": checkboxes Close app / Minimize / Block internet (Close and Minimize exclude each other). Then tick any
   number of **blockers**, each with its own small settings: By hours (allow-only / block-during, time windows per
-  day, minutes still allowed during blocked hours), Daily time limit, Daily switch limit, Permanent, Temporary
+  day, minutes still allowed during blocked hours), Daily time limit, Daily opening limit (launches / new visits, or every
+  switch), Permanent, Temporary
   (preset or custom duration). The same form edits an existing item.
 
 The editor can get long when several blockers are ticked — a cleaner layout (e.g. collapsible sections or

@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS block_rules (
     schedule TEXT,                -- JSON {"mode": "allow"|"block", "windows": [{"days", "start", "end"}]}
     temp_until DATETIME,          -- local time, "YYYY-MM-DD HH:MM:SS"
     allowance_min INTEGER,        -- scheduled: minutes allowed during blocked hours
+    switch_mode TEXT,             -- switch_limit: "visit" (launches / new visits, default) or "switch" (every switch)
+    visit_gap_min INTEGER,        -- switch_limit, visit mode: minutes away before a site visit counts as new
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -48,7 +50,9 @@ CREATE TABLE IF NOT EXISTS group_rules (
     schedule TEXT,
     temp_until DATETIME,
     allowance_min INTEGER,
-    daily_switch_limit INTEGER    -- a group switch limit is one shared total
+    daily_switch_limit INTEGER,   -- a group opening limit is one shared total
+    switch_mode TEXT,
+    visit_gap_min INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS group_members (
@@ -111,8 +115,11 @@ CREATE TABLE IF NOT EXISTS site_history (
 
 # Columns added after a table was first released: (table, column, definition)
 MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path", "TEXT"),
-              ("block_rules", "allowance_min", "INTEGER"), ("group_rules", "daily_switch_limit", "INTEGER")]
-RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "daily_switch_limit")
+              ("block_rules", "allowance_min", "INTEGER"), ("group_rules", "daily_switch_limit", "INTEGER"),
+              ("block_rules", "switch_mode", "TEXT"), ("block_rules", "visit_gap_min", "INTEGER"),
+              ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER")]
+RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "daily_switch_limit",
+                "switch_mode", "visit_gap_min")
 USAGE_DAYS_LOADED = 2
 
 

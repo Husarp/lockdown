@@ -15,24 +15,33 @@ PROTECTED = {"system", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "
              "rundll32.exe", "dllhost.exe", "msiexec.exe", "consent.exe", "logonui.exe"}
 
 
-# What happens to a blocked app (blocked_items.block_type). None = "kill" (the default).
-ACTIONS = ("close", "minimize", "internet")   # internet = keep it open, only cut its internet
-_COMPOSE = {("close", False): "kill", ("close", True): "both", ("minimize", False): "minimize",
-            ("minimize", True): "minimize_fw", ("internet", True): "firewall", ("internet", False): "firewall"}
-KILL_TYPES = {"kill", "both"}
-MINIMIZE_TYPES = {"minimize", "minimize_fw"}
-FIREWALL_TYPES = {"firewall", "both", "minimize_fw"}
+# What happens to a blocked app (blocked_items.block_type): a comma-separated set of flags,
+# e.g. "close,internet". close and minimize exclude each other. None = "close" (the default).
+FLAGS = ("close", "minimize", "internet")
+_LEGACY = {"kill": {"close"}, "both": {"close", "internet"}, "minimize": {"minimize"},
+           "minimize_fw": {"minimize", "internet"}, "firewall": {"internet"}}   # 0.4-0.7 values
 
 
-def compose_block_type(action: str, internet: bool) -> str:
-    return _COMPOSE[(action, internet)]
+def block_flags(block_type: str | None) -> set[str]:
+    if not block_type:
+        return {"close"}
+    return set(_LEGACY.get(block_type) or block_type.split(","))
 
 
-def split_block_type(block_type: str | None) -> tuple[str, bool]:
-    """block_type -> (action, also block internet?)."""
-    block_type = block_type or "kill"
-    action = "close" if block_type in KILL_TYPES else "minimize" if block_type in MINIMIZE_TYPES else "internet"
-    return action, block_type in FIREWALL_TYPES
+def make_block_type(flags) -> str:
+    return ",".join(f for f in FLAGS if f in flags)
+
+
+def kills(block_type: str | None) -> bool:
+    return "close" in block_flags(block_type)
+
+
+def minimizes(block_type: str | None) -> bool:
+    return "minimize" in block_flags(block_type)
+
+
+def firewalls(block_type: str | None) -> bool:
+    return "internet" in block_flags(block_type)
 
 
 class PROCESSENTRY32W(ctypes.Structure):

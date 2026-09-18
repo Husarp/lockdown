@@ -7,6 +7,8 @@ DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 REASON_ORDER = ["permanent", "temporary", "limit", "switches", "schedule"]
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
 ALLOW, BLOCK = "allow", "block"   # hours rule mode: allow only during the windows / block during them
+VISIT, SWITCH = "visit", "switch"  # opening limit counts: launches / new visits (default), or every switch to it
+DEFAULT_VISIT_GAP_MIN = 5
 
 
 def parse_hhmm(text: str) -> time:
@@ -101,6 +103,17 @@ def switch_bucket(now: datetime) -> str:
     return f"sw:{now.date().isoformat()}"
 
 
+def switch_mode(rule: dict) -> str:
+    return rule.get("switch_mode") or VISIT
+
+
+def opening_bucket(rule: dict, now: datetime) -> str:
+    """Where an opening limit's count lives: every switch ("sw:<date>") or launches / new visits (per rule)."""
+    if switch_mode(rule) == SWITCH:
+        return switch_bucket(now)
+    return f"op:{rule.get('rule_key', '')}:{now.date().isoformat()}"
+
+
 def allowance_bucket(rule: dict, until: datetime) -> str:
     return f"win:{rule.get('rule_key', '')}:{until:%Y-%m-%dT%H:%M}"
 
@@ -156,7 +169,7 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
         return ("limit", next_midnight(now)) if used >= rule["daily_limit_min"] * 60 else None
     if kind == "switch_limit" and rule.get("daily_switch_limit") is not None:
         # the openings up to the limit are allowed; the next one is blocked
-        opened = usage(_owner(rule), switch_bucket(now))
+        opened = usage(_owner(rule), opening_bucket(rule, now))
         return ("switches", next_midnight(now)) if opened > rule["daily_switch_limit"] else None
     return None
 
@@ -186,7 +199,27 @@ def usage_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[s
 def switch_targets(rules: list[dict], item_id: int, now: datetime) -> set[tuple[str, str]]:
     """(owner, bucket) pairs to add 1 to when you switch to the item."""
     targets = {(f"item:{item_id}", switch_bucket(now))}
-    targets |= {(_owner(r), switch_bucket(now)) for r in rules if r["rule_type"] == "switch_limit"}
+    targets |= {(_owner(r), switch_bucket(now)) for r in rules
+                if r["rule_type"] == "switch_limit" and switch_mode(r) == SWITCH}
+    return targets
+
+
+def visit_targets(rules: list[dict], item: dict, now: datetime, launched: bool,
+                  away_sec: float | None) -> set[tuple[str, str]]:
+    """(owner, bucket) pairs to add 1 to for "launches / new visits" opening limits.
+    Apps: counts when the program was just started. Sites: counts when it's in use again after being away
+    for at least the rule's gap (away_sec None = not used before)."""
+    targets = set()
+    for r in rules:
+        if r["rule_type"] != "switch_limit" or switch_mode(r) != VISIT:
+            continue
+        if item["item_type"] == "app":
+            opened = launched
+        else:
+            gap = (r.get("visit_gap_min") or DEFAULT_VISIT_GAP_MIN) * 60
+            opened = away_sec is None or away_sec >= gap
+        if opened:
+            targets.add((_owner(r), opening_bucket(r, now)))
     return targets
 
 
@@ -263,7 +296,8 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
         shared = " (shared)" if _owner(rule).startswith("group:") else ""
         return f"Limit{shared}: {duration_text(used)} / {duration_text(rule['daily_limit_min'] * 60)} today"
     if kind == "switch_limit":
-        opened = usage(_owner(rule), switch_bucket(now))
+        opened = usage(_owner(rule), opening_bucket(rule, now))
         shared = " (shared)" if _owner(rule).startswith("group:") else ""
-        return f"Switches{shared}: opened {opened} / {rule['daily_switch_limit']} times today"
+        what = "Switches" if switch_mode(rule) == SWITCH else "Openings"
+        return f"{what}{shared}: {opened} / {rule['daily_switch_limit']} today"
     return kind

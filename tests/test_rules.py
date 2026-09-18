@@ -157,10 +157,24 @@ def test_duration_text_days():
 
 
 def test_switch_limit():
-    rule = {"rule_type": "switch_limit", "daily_switch_limit": 3, "usage_owner": "item:1"}
+    rule = {"rule_type": "switch_limit", "daily_switch_limit": 3, "usage_owner": "item:1", "switch_mode": "switch"}
     assert rule_block(rule, at(0, 12), used(3)) is None                  # 3 openings allowed
     assert rule_block(rule, at(0, 12), used(4)) == ("switches", at(1, 0))
-    assert describe_rule(rule, at(0, 12), used(2)) == "Switches: opened 2 / 3 times today"
+    assert describe_rule(rule, at(0, 12), used(2)) == "Switches: 2 / 3 today"
     from rules import switch_targets
     group_rule = {**rule, "usage_owner": "group:7"}
     assert switch_targets([group_rule], 1, at(0, 12)) == {("item:1", "sw:2026-09-14"), ("group:7", "sw:2026-09-14")}
+
+
+def test_opening_limit_visit_mode():
+    from rules import visit_targets
+    rule = {"rule_type": "switch_limit", "daily_switch_limit": 2, "usage_owner": "item:1", "rule_key": "k",
+            "visit_gap_min": 5}
+    assert describe_rule(rule, at(0, 12), used(1)) == "Openings: 1 / 2 today"
+    site, app = {"item_type": "site"}, {"item_type": "app"}
+    bucket = {("item:1", "op:k:2026-09-14")}
+    assert visit_targets([rule], site, at(0, 12), False, None) == bucket       # first visit
+    assert visit_targets([rule], site, at(0, 12), False, 60) == set()          # back after 1 min: same visit
+    assert visit_targets([rule], site, at(0, 12), False, 301) == bucket        # back after 5+ min: new visit
+    assert visit_targets([rule], app, at(0, 12), True, None) == bucket         # app launched
+    assert visit_targets([rule], app, at(0, 12), False, None) == set()         # app just focused

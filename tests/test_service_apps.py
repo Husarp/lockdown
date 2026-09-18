@@ -76,10 +76,20 @@ def test_minimize_apps_are_left_to_the_tray_agent(monkeypatch):
     assert e.events == []
 
 
-def test_block_type_compose_split():
-    for action in apps.ACTIONS:
-        for internet in (False, True):
-            bt = apps.compose_block_type(action, internet)
-            got = apps.split_block_type(bt)
-            assert got == (action, True if action == "internet" else internet)
-    assert apps.split_block_type(None) == ("close", False)
+def test_block_flags():
+    assert apps.block_flags(None) == {"close"}
+    assert apps.block_flags("both") == {"close", "internet"}                 # older values still work
+    assert apps.block_flags("minimize,internet") == {"minimize", "internet"}
+    assert apps.make_block_type({"internet", "minimize"}) == "minimize,internet"
+    assert apps.kills("close,internet") and apps.firewalls("close,internet") and not apps.minimizes("close")
+
+
+def test_over_opening_limit_is_killed_at_once(monkeypatch):
+    killed = []
+    monkeypatch.setattr(apps, "list_processes", lambda: [(30, "discord.exe")])
+    monkeypatch.setattr(apps, "terminate", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr(apps, "start_time", lambda pid: 1.0)                # started before the block began
+    e = make_enforcer()
+    e.app_blocks["discord.exe"]["rule"] = {"rule_type": "switch_limit"}     # launches mode (default)
+    e.enforce_apps()
+    assert killed == [30]

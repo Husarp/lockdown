@@ -1,12 +1,12 @@
 ﻿"""Lockdown enforcement service.
 
-Every few seconds: evaluate block rules (permanent / hours / temporary / daily limit) using its own trusted
+Every 2 seconds: evaluate block rules (permanent / hours / temporary / daily limit) using its own trusted
 clock (changing the Windows clock has no effect), make the hosts file match
 (repairing manual edits), keep browser DoH/QUIC locked off, and close open connections to newly blocked
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
 Blocked apps (checked 4x per second): started while blocked -> killed at once; already open when the block
 began -> the tray agent asks them to close, force-killed after 10 s. Block type firewall/both adds a Windows
-Firewall rule. Block type "minimize" is handled by the tray agent (it can see the desktop).
+Firewall rule ("Block internet"). "Minimize" is handled by the tray agent (it can see the desktop).
 Needs admin/SYSTEM rights.
 
 Usage:
@@ -29,7 +29,7 @@ from db import Database
 from paths import DATA_DIR, LOG_PATH
 from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, TrustedClock
 
-INTERVAL_SEC = 5
+INTERVAL_SEC = 2
 CLOCK_JUMP_SEC = 60
 HEARTBEAT_KEY = "service_heartbeat"
 # Keep closing connections to a newly blocked site for this long (browsers cache DNS ~1 min).
@@ -146,7 +146,7 @@ class Enforcer:
         """Blocked app launched while blocked: killed at once. Already open when the block began: the tray
         agent asks it to close (so you can save), force-killed after the grace time."""
         now = time.time()
-        targets = {exe: b for exe, b in self.app_blocks.items() if (b["item"]["block_type"] or "kill") in apps.KILL_TYPES}
+        targets = {exe: b for exe, b in self.app_blocks.items() if apps.kills(b["item"]["block_type"])}
         self.block_since = {exe: self.block_since.get(exe, now) for exe in targets}
         seen = {}
         for pid, exe in apps.list_processes():
@@ -156,7 +156,11 @@ class Enforcer:
             if pid not in self.app_first_seen:
                 self.record_event(exe, block)
                 started = apps.start_time(pid)
-                if started and started > self.block_since[exe] + LAUNCH_SLACK_SEC and apps.terminate(pid):
+                rule = block.get("rule") or {}
+                # over an opening limit ("launches" mode): this very launch went over it
+                over_openings = rule.get("rule_type") == "switch_limit" and (rule.get("switch_mode") or "visit") == "visit"
+                launched_while_blocked = started and started > self.block_since[exe] + LAUNCH_SLACK_SEC
+                if (over_openings or launched_while_blocked) and apps.terminate(pid):
                     log.info("Blocked app %s was started - closed immediately (pid %d)", exe, pid)
                     continue
             first = seen[pid] = self.app_first_seen.get(pid, now)
@@ -168,7 +172,7 @@ class Enforcer:
         """Firewall rules for blocked apps with block type 'firewall'/'both'; remove the rest."""
         wanted = {}
         for exe, b in self.app_blocks.items():
-            if b["item"]["block_type"] in apps.FIREWALL_TYPES:
+            if apps.firewalls(b["item"]["block_type"]):
                 path = b["item"]["app_path"] or self._learn_path(exe, b["item"]["id"])
                 if path:
                     wanted[exe] = path

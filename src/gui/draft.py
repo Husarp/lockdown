@@ -15,7 +15,7 @@ from trusted_time import now_from_db
 
 AUTOSAVE_KEY = "ui.autosave"
 RULE_FIELDS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "duration_min", "allowance_min",
-               "daily_switch_limit")
+               "daily_switch_limit", "switch_mode", "visit_gap_min")
 
 
 def _rule_key(rule: dict) -> tuple:

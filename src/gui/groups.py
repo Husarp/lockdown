@@ -14,7 +14,7 @@ from rules import describe_rule, effective_rules, item_block
 
 MUTED = "gray60"
 ERROR = "#f85149"
-GREEN, ORANGE = "#3fb950", "#d29922"
+GREEN, ORANGE, RED = "#3fb950", "#d29922", "#f85149"
 CUSTOMIZABLE = ("scheduled", "time_limit", "switch_limit", "temporary")
 
 
@@ -281,7 +281,7 @@ class GroupsTab(ctk.CTkScrollableFrame):
                 blocked = sum(1 for i in g["members"] if i in self.draft.saved_items and item_block(
                     effective_rules(self.draft.saved_items[i], saved_groups), now, usage))
                 status = {"text": f"● {blocked} of {len(g['members'])} blocked now",
-                          "text_color": GREEN if blocked else MUTED}
+                          "text_color": RED if blocked else GREEN}
             ctk.CTkLabel(row, **status, width=150, anchor="w", justify="left").pack(side="left", padx=8)
             ctk.CTkButton(row, text="Edit", width=60, command=lambda gid=g["id"]: self.open_editor(gid)).pack(side="left", padx=4)
             ConfirmButton(row, lambda g=g: self._remove(g), width=70).pack(side="left", padx=4)

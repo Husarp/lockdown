@@ -10,7 +10,7 @@ import uiautomation  # noqa: F401
 import customtkinter as ctk
 
 import alerts
-from blocker.apps import MINIMIZE_TYPES
+from blocker.apps import minimizes
 from db import Database
 from gui.blocking import BlockingPage
 from gui.draft import Draft
@@ -225,7 +225,7 @@ class LockdownApp(ctk.CTk):
                                               now, self.usage_tracker.in_use, settings):
                 self._show(message)
             self.minimize_blocks = {b["item"]["target"].lower(): b for b in self.db.blocks(now)
-                                    if b["item"]["item_type"] == "app" and b["item"]["block_type"] in MINIMIZE_TYPES}
+                                    if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
         finally:
             self.after(WATCH_MS, self._poll_watcher)
 
