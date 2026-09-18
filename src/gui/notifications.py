@@ -1,9 +1,11 @@
 """Notifications page (blocked-visit alert settings + recent visits) and the in-app popup."""
 import customtkinter as ctk
 
+from gui import theme
+
 import alerts
 
-MUTED = "gray60"
+MUTED = theme.MUTED
 POPUP_MS = 6000
 
 
@@ -11,7 +13,7 @@ class NotificationsPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.db, self.draft = app.db, app.draft
-        ctk.CTkLabel(self, text="Notifications", font=ctk.CTkFont(size=24, weight="bold")).pack(
+        ctk.CTkLabel(self, text="Notifications", font=theme.page_title()).pack(
             anchor="w", padx=30, pady=(16, 12))
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=20, pady=(0, 20))

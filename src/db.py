@@ -122,6 +122,14 @@ CREATE TABLE IF NOT EXISTS emergency_unlocks (
     names TEXT NOT NULL           -- JSON list of display names (kept for history / graphs)
 );
 
+-- Screen-time category chosen for an app (exe) or site (hostname)
+CREATE TABLE IF NOT EXISTS categories (
+    kind TEXT NOT NULL,           -- "app" or "site"
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,       -- productive, neutral, distracting
+    PRIMARY KEY (kind, name)
+);
+
 -- Sites the user has blocked before (for suggestions; clearable)
 CREATE TABLE IF NOT EXISTS site_history (
     hostname TEXT PRIMARY KEY,
@@ -371,6 +379,15 @@ class Database:
         with self.conn:
             self.conn.execute("INSERT INTO switch_events (timestamp, exe, site) VALUES (?, ?, ?)",
                               (timestamp.strftime(TIME_FMT), exe, site))
+
+    def categories(self) -> dict[tuple[str, str], str]:
+        return {(r[0], r[1]): r[2] for r in self.conn.execute("SELECT kind, name, category FROM categories")}
+
+    def set_category(self, kind: str, name: str, category: str):
+        with self.conn:
+            self.conn.execute("INSERT INTO categories (kind, name, category) VALUES (?, ?, ?) "
+                              "ON CONFLICT(kind, name) DO UPDATE SET category = excluded.category",
+                              (kind, name, category))
 
     # ---------- block events ----------
 

@@ -1,14 +1,18 @@
 """Settings page: when limits reset, and the emergency unlock. Changes here apply at once (not via Save)."""
 import customtkinter as ctk
 
+from gui import theme
+
 import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
+from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton
 from trusted_time import now_from_db
 
-MUTED = "gray60"
-ERROR = "#f85149"
+MUTED = theme.MUTED
+ERROR = theme.DANGER
 PER_LABELS = {"per day": "day", "per week": "week"}
+GOAL_OPTIONS = ["Off"] + [f"{h} h" for h in range(1, 13)]
 
 
 def when_text(when) -> str:
@@ -19,10 +23,11 @@ class SettingsPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.db = app, app.db
-        ctk.CTkLabel(self, text="Settings", font=ctk.CTkFont(size=24, weight="bold")).pack(
+        ctk.CTkLabel(self, text="Settings", font=theme.page_title()).pack(
             anchor="w", padx=30, pady=(16, 8))
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")   # (tkraise needs a plain frame on top)
         self.body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self._build_appearance()
         self._build_reset()
         self._build_emergency()
         self.load()
@@ -32,6 +37,30 @@ class SettingsPage(ctk.CTkFrame):
         box.pack(fill="x", pady=(0, 14))
         ctk.CTkLabel(box, text=title, font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=16, pady=(12, 4))
         return box
+
+    # ---------- appearance / goal ----------
+
+    def _build_appearance(self):
+        from gui.app import APPEARANCES
+        box = self._section("Appearance")
+        line = ctk.CTkFrame(box, fg_color="transparent")
+        line.pack(anchor="w", padx=16, pady=(4, 8))
+        ctk.CTkLabel(line, text="Theme").pack(side="left", padx=(0, 10))
+        self.appearance = ctk.CTkSegmentedButton(line, values=list(APPEARANCES), command=self.app.set_appearance)
+        self.appearance.pack(side="left")
+        mode = self.db.get_setting("ui.appearance", "dark")
+        self.appearance.set(next(k for k, v in APPEARANCES.items() if v == mode))
+        line = ctk.CTkFrame(box, fg_color="transparent")
+        line.pack(anchor="w", padx=16, pady=(0, 12))
+        ctk.CTkLabel(line, text="Daily screen-time goal").pack(side="left", padx=(0, 10))
+        self.goal = ctk.CTkOptionMenu(line, width=90, values=GOAL_OPTIONS, command=self._goal_changed)
+        self.goal.pack(side="left")
+        hours = self.db.get_setting(GOAL_KEY, DEFAULT_GOAL_HOURS)
+        self.goal.set("Off" if hours == "0" else f"{hours} h")
+        ctk.CTkLabel(line, text="shown as a dashed line on the day charts", text_color=MUTED).pack(side="left", padx=10)
+
+    def _goal_changed(self, value: str):
+        self.db.set_setting(GOAL_KEY, "0" if value == "Off" else value.split()[0])
 
     # ---------- limit reset time ----------
 

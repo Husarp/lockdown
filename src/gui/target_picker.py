@@ -1,6 +1,8 @@
 """'What to block' input shared by the rule tabs and the group editor: a site or an app."""
 import customtkinter as ctk
 
+from gui import theme
+
 from blocker.apps import PROTECTED, block_flags, make_block_type
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
@@ -14,7 +16,7 @@ ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then for
                                                                    "runs from its install folder"),
            "minimize": ("Minimize", "keeps it running (e.g. a browser with many tabs) but minimizes it whenever it's opened"),
            "internet": ("Block internet", "it can't connect to the internet")}
-MUTED = "gray60"
+MUTED = theme.MUTED
 
 
 def popular_hosts(host: str) -> tuple[str, list[str]] | None:
@@ -46,9 +48,9 @@ class TargetPicker(ctk.CTkFrame):
         self.name.pack(side="left", padx=4)
         self.pickers = ctk.CTkFrame(row, fg_color="transparent")
         self.pickers.pack(side="left")
-        ctk.CTkButton(self.pickers, text="+ Popular sites", width=120, fg_color="transparent", border_width=1,
+        ctk.CTkButton(self.pickers, text="+ Popular sites", width=120, **theme.OUTLINE,
                       command=lambda: PopularSitesPopup(self, self._fill_site)).pack(side="left", padx=4)
-        ctk.CTkButton(self.pickers, text="Browse apps", width=110, fg_color="transparent", border_width=1,
+        ctk.CTkButton(self.pickers, text="Browse apps", width=110, **theme.OUTLINE,
                       command=lambda: AppBrowser(self, self._fill_app)).pack(side="left", padx=4)
         # optional slot for Add/Update buttons; tiny when empty (an empty frame would default to 200x200)
         self.buttons = ctk.CTkFrame(row, fg_color="transparent", width=1, height=1)

@@ -4,10 +4,10 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from gui import icons
+from gui import icons, theme
 from monitor import win
 
-MUTED = "gray60"
+MUTED = theme.MUTED
 _cache: list[dict] | None = None   # the app list takes a few seconds; keep it for the session
 _loading = threading.Lock()
 
@@ -76,8 +76,8 @@ class AppBrowser(ctk.CTkToplevel):
         for a in shown:
             label = f"  {a['name']}   ·   {a['exe']}" + ("   ● running" if a["running"] else "")
             ctk.CTkButton(self.body, text=label, image=icons.get_app(a["exe"], a["path"], 20), anchor="w",
-                          height=32, fg_color="transparent", hover_color=("gray75", "gray25"),
-                          text_color=("gray10", "gray90"), command=lambda a=a: self._pick(a)).pack(fill="x", pady=1)
+                          height=32, fg_color="transparent", hover_color=theme.SURFACE2,
+                          text_color=theme.TEXT, command=lambda a=a: self._pick(a)).pack(fill="x", pady=1)
 
     def _browse_file(self):
         path = filedialog.askopenfilename(parent=self, title="Choose an app", filetypes=[("Programs", "*.exe")])

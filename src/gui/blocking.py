@@ -14,7 +14,7 @@ import customtkinter as ctk
 
 import emergency
 from blocker.apps import block_flags
-from gui import app_browser, icons
+from gui import app_browser, icons, theme
 from gui.groups import GroupsTab
 from gui.rule_editors import EDITORS, RULE_NAMES
 from gui.target_picker import TargetPicker
@@ -30,9 +30,9 @@ ALERTS = {"Default": None, "On": "on", "Off": "off"}
 REFRESH_MS = 30_000   # full rebuild (sorting, service cleanup)
 LIVE_MS = 2_000       # in-place update of counters / countdowns / status
 NOTICE_MS = 5_000     # how long "✓ ... added" stays
-MUTED = "gray60"
-ERROR = "#f85149"
-GREEN, ORANGE, RED, BLUE = "#3fb950", "#d29922", "#f85149", "#58a6ff"
+MUTED = theme.MUTED
+ERROR = theme.DANGER
+GREEN, ORANGE, RED, BLUE = theme.ALLOWED, theme.PENDING, theme.BLOCKED, theme.INFO
 COLS = [220, 290, 140]   # name + targets, rules, status (then action buttons)
 
 
@@ -72,9 +72,9 @@ def make_row(parent) -> ctk.CTkFrame:
 def targets_text(item: dict) -> str:
     if item["item_type"] == "app":
         flags = block_flags(item.get("block_type"))
-        how = " + ".join(w for f, w in (("close", "closed"), ("background", "background processes"), ("minimize", "minimized"),
-                                            ("internet", "internet blocked"))
-                         if f in flags)
+        words = (("close", "closed"), ("background", "background processes"), ("minimize", "minimized"),
+                 ("internet", "internet blocked"))
+        how = " + ".join(w for f, w in words if f in flags)
         return f"app · {item['target']} · {how}"
     return ", ".join(item["target"].split())
 
@@ -106,8 +106,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.title = ctk.CTkLabel(top, font=ctk.CTkFont(size=16, weight="bold"))
         self.title.pack(side="left")
         ctk.CTkButton(top, text="+ Add", width=80, command=lambda: page.show_tab("Add")).pack(side="left", padx=16)
-        self.unlock_btn = ctk.CTkButton(top, text="Emergency unlock", width=140, fg_color="transparent",
-                                        border_width=1, border_color=ORANGE, command=self._toggle_unlock)
+        self.unlock_btn = ctk.CTkButton(top, text="Emergency unlock", width=140,
+                                        **{**theme.OUTLINE, "border_color": ORANGE}, command=self._toggle_unlock)
         self.sort = ctk.CTkOptionMenu(top, values=SORTS, width=170, command=self._sort_changed)
         self.sort.set(page.app.db.get_setting(SORT_KEY, SORTS[0]))
         self.sort.pack(side="right")
@@ -159,7 +159,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             ConfirmButton(buttons, lambda: self._unlock([i for b, i in boxes if b.get()], error),
                           text=f"Unlock for {minutes} min", confirm_text=f"Confirm - uses 1 of {left}",
                           width=170).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(buttons, text="Close", width=80, fg_color="transparent", border_width=1,
+        ctk.CTkButton(buttons, text="Close", width=80, **theme.OUTLINE,
                       command=self._toggle_unlock).pack(side="left")
 
     def _unlock(self, items: list[dict], error):
@@ -299,7 +299,7 @@ class AddTab(ctk.CTkScrollableFrame):
         buttons.pack(anchor="w", padx=16, pady=(4, 14))
         self.submit_btn = ctk.CTkButton(buttons, width=110, command=self._submit)
         self.submit_btn.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(buttons, text="Cancel", width=80, fg_color="transparent", border_width=1,
+        ctk.CTkButton(buttons, text="Cancel", width=80, **theme.OUTLINE,
                       command=self.cancel).pack(side="left")
         self.reset()
 
@@ -394,11 +394,12 @@ class BlockingPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.draft = app, app.draft
-        ctk.CTkLabel(self, text="Blocking", font=ctk.CTkFont(size=24, weight="bold")).pack(
+        ctk.CTkLabel(self, text="Blocking", font=theme.page_title()).pack(
             anchor="w", padx=30, pady=(16, 8))
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 12))
-        self.tab_bar = ctk.CTkSegmentedButton(bar, values=TABS, command=self.show_tab)
+        self.tab_bar = ctk.CTkSegmentedButton(bar, values=TABS, command=self.show_tab, width=240, height=30,
+                                              dynamic_resizing=False)
         self.tab_bar.pack(side="left")
         # short confirmation after adding / saving ("✓ YouTube blocker added"), hidden after a few seconds
         self.notice = ctk.CTkLabel(bar, text="", text_color=GREEN, font=ctk.CTkFont(weight="bold"))

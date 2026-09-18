@@ -6,15 +6,15 @@ shared total for all members.
 """
 import customtkinter as ctk
 
-from gui import icons
+from gui import icons, theme
 from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor, SwitchEditor
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton, clear_entry
 from rules import describe_rule, effective_rules, item_block
 
-MUTED = "gray60"
-ERROR = "#f85149"
-GREEN, ORANGE, RED = "#3fb950", "#d29922", "#f85149"
+MUTED = theme.MUTED
+ERROR = theme.DANGER
+GREEN, ORANGE, RED = theme.ALLOWED, theme.PENDING, theme.BLOCKED
 CUSTOMIZABLE = ("scheduled", "time_limit", "switch_limit", "temporary")
 
 
@@ -61,7 +61,7 @@ class CustomizeMember(ctk.CTkToplevel):
         self.error.pack(anchor="w")
         buttons = ctk.CTkFrame(self, fg_color="transparent")
         buttons.pack(anchor="e", padx=12, pady=(0, 12))
-        ctk.CTkButton(buttons, text="Cancel", width=80, fg_color="transparent", border_width=1,
+        ctk.CTkButton(buttons, text="Cancel", width=80, **theme.OUTLINE,
                       command=self._close).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="OK", width=80, command=self._ok).pack(side="left", padx=4)
 
@@ -112,7 +112,7 @@ class GroupEditor(ctk.CTkFrame):
         buttons = ctk.CTkFrame(self, fg_color="transparent")
         buttons.pack(anchor="w", padx=16, pady=(4, 14))
         ctk.CTkButton(buttons, text="Save group", width=110, command=self._save).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(buttons, text="Cancel", width=80, fg_color="transparent", border_width=1,
+        ctk.CTkButton(buttons, text="Cancel", width=80, **theme.OUTLINE,
                       command=self.tab.close_editor).pack(side="left")
 
     def _toggle(self, t: str):
@@ -181,9 +181,9 @@ class GroupEditor(ctk.CTkFrame):
             custom = ", ".join(RULE_NAMES[t] for t in m["overrides"])
             ctk.CTkLabel(row, text=f"customized: {custom}" if custom else "uses the group's rules",
                          text_color=ORANGE if custom else MUTED, width=260, anchor="w").pack(side="left", padx=8)
-            ctk.CTkButton(row, text="Customize", width=90, fg_color="transparent", border_width=1,
+            ctk.CTkButton(row, text="Customize", width=90, **theme.OUTLINE,
                           command=lambda m=m: self._customize(m)).pack(side="left", padx=4)
-            ctk.CTkButton(row, text="Remove", width=70, fg_color="transparent", border_width=1,
+            ctk.CTkButton(row, text="Remove", width=70, **theme.OUTLINE,
                           command=lambda m=m: self._remove_member(m)).pack(side="left", padx=4)
 
     def _customize(self, member):

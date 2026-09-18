@@ -1,0 +1,139 @@
+"""Design tokens from design/Lockdown Dashboard & Screen Time.dc.html: colours as (light, dark) pairs, fonts,
+and the customtkinter defaults built from them. Status colours: blocked now = red, allowed now = green."""
+import ctypes
+from pathlib import Path
+
+import customtkinter as ctk
+
+ASSETS = Path(__file__).resolve().parents[2] / "assets"
+
+BG = ("#F2F2F2", "#14181D")
+SIDEBAR = ("#EBEBEB", "#0F1319")
+SURFACE = ("#FFFFFF", "#1B2027")
+SURFACE2 = ("#EBEBEB", "#232A33")
+NAV_ACTIVE = ("#FFFFFF", "#232A33")   # selected sidebar item
+BORDER = ("#E2E2E2", "#2E3742")
+TRACK = ("#E6E6E6", "#262E38")
+TEXT = ("#1A1A1A", "#E8ECF1")
+MUTED = ("#6B6B6B", "#93A0AE")
+ACCENT = ("#DB5126", "#DB5126")
+ACCENT_PRESS = ("#B33D18", "#B33D18")
+SUCCESS = ("#1E8449", "#27AE60")
+WARNING = ("#B37514", "#E0A02A")
+DANGER = ("#B32E22", "#C0392B")
+INFO = ("#1F6FEB", "#58A6FF")        # emergency unlock
+NEUTRAL = ("#A8AFB7", "#5C6875")     # neutral category in charts
+BAR = ("#C9CED4", "#3C4753")         # chart bars
+BAR_OVER = ("#EBB49E", "#8C4A31")    # a day over the daily goal
+HEAT = (("#EFEFEF", "#F6D9CD", "#EEB79E", "#E4886A", "#DB5126"),
+        ("#20262E", "#4A2A1C", "#8A3F20", "#C04A22", "#DB5126"))
+WHITE = ("#FFFFFF", "#FFFFFF")
+
+# Status (blocked = red, allowed = green - the user's choice over the design's green "blocked")
+BLOCKED, ALLOWED, PENDING = DANGER, SUCCESS, WARNING
+CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": ACCENT}
+
+# Secondary buttons: outlined, text in the normal text colour (works in light and dark)
+OUTLINE = {"fg_color": "transparent", "border_width": 1, "border_color": BORDER, "text_color": TEXT,
+           "hover_color": SURFACE2}
+SECONDARY = {"fg_color": SURFACE2, "text_color": TEXT, "hover_color": BORDER}
+
+FONT_FILES = ["Inter-Regular.otf", "Inter-Medium.otf", "Inter-SemiBold.otf", "Inter-Bold.otf",
+              "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-Bold.ttf", "BarlowCondensed-ExtraBold.ttf"]
+BODY = "Inter"
+BODY_SEMI = "Inter Semi Bold"
+DISPLAY = "Barlow Condensed"                # bold weight = Barlow Condensed Bold
+DISPLAY_HEAVY = "Barlow Condensed ExtraBold"
+
+
+def pick(color) -> str:
+    """The colour for the current appearance mode (for plain Tk widgets like Canvas)."""
+    if isinstance(color, (tuple, list)):
+        return color[1] if ctk.get_appearance_mode() == "Dark" else color[0]
+    return color
+
+
+def load_fonts():
+    """Make the bundled fonts available to this process only (before any Tk font is created)."""
+    for name in FONT_FILES:
+        path = ASSETS / "fonts" / name
+        if path.exists():
+            ctypes.windll.gdi32.AddFontResourceExW(str(path), 0x10, 0)   # FR_PRIVATE
+
+
+# ---------- fonts (need a Tk root) ----------
+
+def page_title():
+    return ctk.CTkFont(DISPLAY, 30, "bold")
+
+
+def numeral(size: int = 32):
+    return ctk.CTkFont(DISPLAY, size, "bold")
+
+
+def card_title():
+    return ctk.CTkFont(BODY_SEMI, 14)
+
+
+def body(size: int = 13, weight: str = "normal"):
+    return ctk.CTkFont(BODY, size, weight)
+
+
+def semi(size: int = 13):
+    return ctk.CTkFont(BODY_SEMI, size)
+
+
+def eyebrow():
+    return ctk.CTkFont(BODY_SEMI, 10)
+
+
+def apply():
+    """customtkinter defaults from the tokens. Call before any widget is created."""
+    load_fonts()
+    ctk.set_default_color_theme("dark-blue")
+    t = ctk.ThemeManager.theme
+    t["CTk"]["fg_color"] = list(BG)
+    t["CTkToplevel"]["fg_color"] = list(BG)
+    t["CTkFrame"].update(fg_color=list(SURFACE), top_fg_color=list(SURFACE2), border_color=list(BORDER),
+                         corner_radius=6)
+    t["CTkButton"].update(fg_color=list(ACCENT), hover_color=list(ACCENT_PRESS), border_color=list(BORDER),
+                          text_color=list(WHITE), text_color_disabled=list(MUTED), corner_radius=4)
+    t["CTkLabel"]["text_color"] = list(TEXT)
+    t["CTkEntry"].update(fg_color=list(BG), border_color=list(BORDER), text_color=list(TEXT),
+                         placeholder_text_color=list(MUTED), corner_radius=4, border_width=1)
+    t["CTkCheckBox"].update(fg_color=list(ACCENT), border_color=list(NEUTRAL), hover_color=list(ACCENT_PRESS),
+                            checkmark_color=list(WHITE), text_color=list(TEXT), text_color_disabled=list(MUTED),
+                            corner_radius=3, border_width=2)
+    t["CTkSwitch"].update(fg_color=list(BAR), progress_color=list(ACCENT), button_color=list(WHITE),
+                          button_hover_color=list(WHITE), text_color=list(TEXT))
+    t["CTkRadioButton"].update(fg_color=list(ACCENT), border_color=list(NEUTRAL), hover_color=list(ACCENT_PRESS),
+                               text_color=list(TEXT))
+    t["CTkSegmentedButton"].update(fg_color=list(SURFACE2), selected_color=list(ACCENT),
+                                   selected_hover_color=list(ACCENT_PRESS), unselected_color=list(SURFACE2),
+                                   unselected_hover_color=list(BORDER), text_color=list(TEXT),
+                                   text_color_disabled=list(MUTED), corner_radius=4)
+    t["CTkOptionMenu"].update(fg_color=list(SURFACE2), button_color=list(SURFACE2), button_hover_color=list(BORDER),
+                              text_color=list(TEXT), corner_radius=4)
+    t["CTkComboBox"].update(fg_color=list(BG), border_color=list(BORDER), button_color=list(SURFACE2),
+                            button_hover_color=list(BORDER), text_color=list(TEXT))
+    t["CTkScrollbar"].update(button_color=list(BORDER), button_hover_color=list(NEUTRAL))
+    t["CTkProgressBar"].update(fg_color=list(TRACK), progress_color=list(ACCENT), border_color=list(BORDER))
+    t["CTkSlider"].update(fg_color=list(TRACK), progress_color=list(ACCENT), button_color=list(ACCENT),
+                          button_hover_color=list(ACCENT_PRESS))
+    t["CTkTextbox"].update(fg_color=list(BG), border_color=list(BORDER), text_color=list(TEXT))
+    t["CTkScrollableFrame"]["label_fg_color"] = list(SURFACE2)
+    t["DropdownMenu"].update(fg_color=list(SURFACE), hover_color=list(SURFACE2), text_color=list(TEXT))
+    t["CTkFont"].update(family=BODY, size=13, weight="normal")
+
+
+def icon(name: str, color, size: int = 18) -> ctk.CTkImage:
+    """A white Lucide icon from assets/icons, tinted (light / dark variants)."""
+    from PIL import Image
+    src = Image.open(ASSETS / "icons" / f"{name}.png").convert("RGBA")
+
+    def tint(c: str):
+        img = Image.new("RGBA", src.size, c)
+        img.putalpha(src.getchannel("A"))
+        return img
+    light, dark = color if isinstance(color, (tuple, list)) else (color, color)
+    return ctk.CTkImage(tint(light), tint(dark), size=(size, size))

@@ -26,6 +26,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   time** (Settings; a change never ends the current limit day, week or month early), and **Emergency unlock**
   (Blocking > Overview: unblock chosen items for 20 min; 3 uses per week by default, configurable in Settings).
 
+- **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
+  categories (productive / neutral / distracting - click to change). Dark and light theme (Settings > Appearance).
+
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
 ## How it works
@@ -99,6 +102,10 @@ Or from a terminal in the project folder:
 ```
 
 Set `LOCKDOWN_DATA_DIR` to use a different data folder (e.g. for testing).
+
+Design: `design/Lockdown Dashboard & Screen Time.dc.html` (Claude Design). Colours/fonts live in `src/gui/theme.py`;
+fonts (Inter, Barlow Condensed - SIL Open Font License, licences next to them) are in `assets/fonts`, the Lucide
+sidebar icons (rendered from the design) in `assets/icons`.
 
 ## Known limitations
 

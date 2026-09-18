@@ -4,6 +4,8 @@ from datetime import datetime
 
 import customtkinter as ctk
 
+from gui import theme
+
 import re
 
 from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS, SWITCH, TIME_FMT,
@@ -16,7 +18,7 @@ UNITS = {"days": 1440, "hours": 60, "minutes": 1}   # biggest first (used to dis
 MAX_TEMPORARY_MIN = 30 * 1440
 MODES = {"Allow only during": ALLOW, "Block during": BLOCK}
 SWITCH_MODES = {"Launches / new visits": VISIT, "Every switch": SWITCH}
-MUTED = "gray60"
+MUTED = theme.MUTED
 PERIOD_LABELS = {"day": "per day", "week": "per week", "month": "per month"}
 PERIOD_MAX_MIN = {"day": 1440, "week": 7 * 1440, "month": 31 * 1440}
 

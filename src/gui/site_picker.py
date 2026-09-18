@@ -1,11 +1,11 @@
 """Site input with suggestions (popular + previously blocked sites) and the "Popular sites" popup."""
 import customtkinter as ctk
 
-from gui import icons
+from gui import icons, theme
 from importer.popular import POPULAR_SITES
 
 MAX_SUGGESTIONS = 8
-MUTED = "gray60"
+MUTED = theme.MUTED
 
 
 def popular_entries() -> list[tuple[str, str]]:
@@ -24,11 +24,11 @@ class SuggestionList(ctk.CTkToplevel):
         frame.pack(fill="both", expand=True)
         for name, host, _mine in matches:
             ctk.CTkButton(frame, text=f"{name}   {host}", image=icons.get(host, 18), anchor="w", height=30,
-                          fg_color="transparent", hover_color=("gray75", "gray25"), text_color=("gray10", "gray90"),
+                          fg_color="transparent", hover_color=theme.SURFACE2, text_color=theme.TEXT,
                           command=lambda n=name, h=host: on_pick(n, h)).pack(fill="x", padx=4, pady=1)
         if on_clear_history:
             ctk.CTkButton(frame, text="Clear my suggestions", height=24, fg_color="transparent", text_color=MUTED,
-                          hover_color=("gray75", "gray25"), command=on_clear_history).pack(anchor="e", padx=6, pady=(2, 4))
+                          hover_color=theme.SURFACE2, command=on_clear_history).pack(anchor="e", padx=6, pady=(2, 4))
         x, y = entry.winfo_rootx(), entry.winfo_rooty() + entry.winfo_height() + 2
         self.geometry(f"+{x}+{y}")
         self.update_idletasks()
@@ -102,8 +102,8 @@ class PopularSitesPopup(ctk.CTkToplevel):
             grid.pack(fill="x", padx=4)
             for i, (name, hosts) in enumerate(sites.items()):
                 ctk.CTkButton(grid, text=name, image=icons.get(hosts[0], 20), anchor="w", width=180, height=34,
-                              fg_color=("gray85", "gray20"), hover_color=("gray75", "gray30"),
-                              text_color=("gray10", "gray90"),
+                              fg_color=theme.SURFACE2, hover_color=theme.BORDER,
+                              text_color=theme.TEXT,
                               command=lambda n=name, h=hosts[0]: self._pick(on_pick, n, h)
                               ).grid(row=i // 3, column=i % 3, padx=4, pady=4, sticky="w")
 

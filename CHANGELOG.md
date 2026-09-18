@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0 — 2026-09-18 23:48
+- **New look** from the design (Phase 4, batch 1): design colours as light + dark tokens, Inter + Barlow Condensed fonts (bundled in `assets/fonts`, OFL), Lucide icons in the sidebar, "LOCKDOWN" logo, accent orange; status colours stay blocked = red, allowed = green
+- **Dashboard** (new home page): screen time today vs yesterday, blocked now, switches vs your average, time saved (blocked attempts x your usual visit length, 5 min without history), limits in progress with bars, today's timeline by category, last 7 days with the daily goal line, coming up (blocks starting/ending, limits about to run out), blocked visits today, at a glance (top app, most switched to, quietest hour); "Blocking isn't being enforced" banner with a Start service button (asks for admin); first-day empty state
+- **Screen Time** page: Overview (active / idle / longest focus / sessions, day timeline, 7-day heatmap, 7- or 30-day bars, categories donut), Apps and Websites (time, share, switches/visits, category), Switches (per hour, average visit, short visits under 30 s, most switched to with "often just checking" / "focused" hints); Today / Yesterday / 7 days / 30 days
+- **Categories**: productive / neutral / distracting per app and site; blocked ones start as distracting, the rest neutral; click the label to change it
+- Settings: Appearance (Dark / Light / Match Windows) and a daily screen-time goal (default 5 h, can be off)
+- 116 tests passing
+
 ## 0.9.2 — 2026-09-18 23:32
 - Apps: new "Also close its background processes" option under Close app (off by default). Once the app itself is closed, the service also closes what it started and whatever runs from its install folder (never Windows' own processes; not used for apps inside Windows or loose folders like Desktop/Downloads)
 - 111 tests passing

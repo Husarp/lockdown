@@ -1209,21 +1209,23 @@ General app settings (lock and notification settings have moved to their own tab
 
 ### Phase 4 — Screen Time & Stats (UI after the Claude Design mockups)
 Design received 2026-09-18: `design/Lockdown Dashboard & Screen Time.dc.html` (foundations, Dashboard dark/light,
-Screen Time Overview/Apps/Websites/Switches, empty state, Blocking Overview/Groups/Add). Waiting for answers
-(status colours, categories, time saved, daily goal, definitions, light theme, fonts, start-service button, order).
-- [ ] Batch 1: new look everywhere (tokens dark + light, Inter / Barlow Condensed, Lucide sidebar icons) + Dashboard + Screen Time tabs
+Screen Time Overview/Apps/Websites/Switches, empty state, Blocking Overview/Groups/Add). Decisions (2026-09-18):
+blocked = red / allowed = green (user's rule wins over the design); categories default distracting for blocked
+items, neutral otherwise, click to change; time saved = attempts x usual visit length; daily goal setting (5 h);
+Appearance setting (dark default); fonts bundled; Start service button asks for admin.
+- [x] Batch 1: new look everywhere (tokens dark + light, Inter / Barlow Condensed, Lucide sidebar icons) + Dashboard + Screen Time tabs
 - [ ] Batch 2: Blocking page restyle (rule chips, collapsible blocker cards, groups split view)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
 - [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
 - [x] Switch counting data (`switch_events` table)
-- [ ] Overall screen time calculation
-- [ ] Screen Time page: Overview / Apps / Websites / Switches tabs (per design/DESIGN.md)
-- [ ] Per-app usage graphs (bar chart, pie chart)
-- [ ] Daily/weekly/monthly trend line graphs
-- [ ] Category breakdown (productive/neutral/distracting)
+- [x] Overall screen time calculation
+- [x] Screen Time page: Overview / Apps / Websites / Switches tabs (per design/DESIGN.md)
+- [x] Per-app usage graphs (bar chart, pie chart)
+- [ ] Daily/weekly/monthly trend line graphs (7/30-day bars done; trend lines not yet)
+- [x] Category breakdown (productive/neutral/distracting)
 - [ ] Screen time limits (warning, soft lock, hard lock)
-- [ ] Dashboard with stat cards and graphs
-- [ ] Dashboard: "limits today" list — every time/switch limit with a progress bar, time left and % used (requested 2026-09-18)
+- [x] Dashboard with stat cards and graphs
+- [x] Dashboard: "limits today" list — every time/switch limit with a progress bar, time left and % used (requested 2026-09-18)
 - [ ] Weekly block calendar: week view with coloured bars per site/app showing when each is blocked (requested 2026-09-18)
 - [ ] Graphs (weekly / history): mark when emergency unlocks were used (requested 2026-09-18; data: emergency_unlocks table)
 
