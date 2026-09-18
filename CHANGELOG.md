@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.4 — 2026-09-18 20:10
+- PLAN.md: added blocked-visit notifications (reason: permanent / limit reached / outside hours; customizable per reason, message, cooldown, format, per-item override) — section 1.1, Notifications screen 3.10, Phase 2 checklist
+
 ## 0.1.3 — 2026-09-18 19:58
 - Added `scripts/create_shortcut.ps1`: creates double-click `Lockdown.lnk` shortcuts (Desktop + project folder) that start the GUI without a console window; `*.lnk` git-ignored
 

@@ -22,6 +22,10 @@
   - Works system-wide — all browsers, all apps
   - Background service re-applies blocks every few seconds (prevents manual edits)
   - **DoH lock** — browsers with DNS-over-HTTPS skip the hosts file, so the service disables DoH via locked browser policies (Chrome/Edge `DnsOverHttpsMode=off`, Firefox `DNSOverHTTPS` policy with `Locked`) and re-applies them every loop
+  - **Blocked visit notifications** — notify when you try to open a blocked site, with the reason: permanently blocked / daily limit (or switch limit) reached / outside allowed hours
+    - Detection: a small local listener on `127.0.0.1:80/443` (where the hosts file sends blocked sites) reads the requested hostname (HTTP `Host` header / HTTPS SNI) — so it knows which site was attempted, without breaking HTTPS
+    - Fully customizable (Notifications tab): on/off per reason, custom message per reason (`{site}`, `{reason}`, `{until}`), anti-spam cooldown per site, format (Windows toast / in-app / both), per-item override
+    - Every attempt is logged (feeds "Blocks Triggered" stat card + notification log)
   - **Close open connections** — when a site gets blocked, the service resolves its real IPs and closes existing TCP connections to them (`SetTcpEntry`, IPv4); QUIC/HTTP3 (UDP) is disabled via Chrome/Edge `QuicAllowed=false` so browsers fall back to TCP
 - **Popular websites quick-list** — pre-built lists of common time-wasters, one-click to add:
   - Social Media: Facebook, Instagram, Twitter/X, TikTok, Reddit, Snapchat, LinkedIn
@@ -852,6 +856,18 @@ Dedicated tab for all notification/alert settings — what you receive, when, an
 │  │  Format: ○ Windows toast  ● In-app  ○ Both     │       │
 │  └────────────────────────────────────────────────┘       │
 │                                                          │
+│  ┌─ Blocked Visit Alerts (see 1.1) ──────────────┐       │
+│  │  Notify when I open a site that is:            │       │
+│  │    ☑ Permanently blocked                       │       │
+│  │    ☑ Over its daily limit / switch limit       │       │
+│  │    ☑ Outside its allowed hours                 │       │
+│  │  Message per reason: [Reddit is blocked      ] │       │
+│  │    placeholders: {site} {reason} {until}       │       │
+│  │  Don't repeat for same site within: [5 min ▼]  │       │
+│  │  Format: ○ Windows toast  ● In-app  ○ Both     │       │
+│  │  Per-item override: in item's expanded row     │       │
+│  └────────────────────────────────────────────────┘       │
+│                                                          │
 │  ┌─ Reports ─────────────────────────────────────┐       │
 │  │  Daily report:    [ON]   Time: [21:00]         │       │
 │  │  Weekly report:   [ON]   Day: [Monday 09:00]   │       │
@@ -1103,6 +1119,7 @@ General app settings (lock and notification settings have moved to their own tab
 - [ ] DoH lock: disable DNS-over-HTTPS in Chrome/Edge/Firefox via locked policies, re-applied by the service
 - [ ] Disable QUIC/HTTP3 in Chrome/Edge via policy (so connections can be closed)
 - [ ] Close open connections to a site when it gets blocked (resolve real IPs, `SetTcpEntry`)
+- [ ] Blocked visit notifications (localhost listener + reason: permanent / limit / outside hours; customizable per reason, cooldown, format, per-item override)
 - [ ] Schedule-based blocking (time ranges, days of week)
 - [ ] Daily time limits per site
 - [ ] Temporary blocks (block for X hours)
