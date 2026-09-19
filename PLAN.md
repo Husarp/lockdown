@@ -1344,7 +1344,7 @@ Phased so each part is verified on the hidden desktop before the next.
 - [x] Phase C — Blocking → Add: blockers are a rail + one open panel (form never grows past the window)
 - [x] Phase D — accent top-bar cards on Modes (Now + mode cards) and section accent bars in Settings (Protection / Notifications already use the card style)
 - [~] Phase E — Screen Time trend line + Blocking → Calendar tab done (week × 24h bars, category colours, emergency
-  markers, now line, week navigation, click a bar to edit). Still to do: Network Log graph blocked-minute markers
+  markers, now line, week navigation, click a bar to edit) and Network Log graph blocked-minute markers (red) done
 - [~] Phase F — Anti-Bypass locked/unlocked banner done (red locked + "Unlock to edit" / green unlocked + "Lock now").
   Still to do: dim view-only controls on other pages, and restyle the challenge / browse / suggestion / display / popup windows
 - Animation notes to honour (all show/hide or a repainted canvas): service-dot pulse (2.4s, stops when hidden),

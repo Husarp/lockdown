@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.30.1 - 2026-09-19 15:35
+- **Round 2 redesign - phase E finished**: the Network Log graph now draws the minutes that had a blocked attempt in **red** (with a small legend), so you can see at a glance when something was turned away.
+
 ## 0.30.0 — 2026-09-19 15:00
 - **Round 2 redesign - phase E: Blocking > Calendar (new tab)**. A week view (Mon-Sun x 24 h) showing when each site/app is blocked: one bar per item, coloured by category, lane-packed so overlaps stack; permanent = all day, by-time schedules shown at their real hours (spilling past midnight), with the previous/next week arrows, a "this week" button, an emergency-unlock marker and a "now" line. Click a bar to edit that item. (Time/opening limits and temporary blocks aren't clock-time-based, so they aren't shown here.)
 

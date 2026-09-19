@@ -434,32 +434,35 @@ class HourBars(Chart):
 
 
 class MinuteBars(Chart):
-    """Connections per minute over the last hour (oldest left); labels every 10 minutes."""
+    """Connections per minute over the last hour (oldest left); labels every 10 minutes. A minute that had a
+    blocked attempt is drawn in red. Values: (HH:MM, count) or (HH:MM, count, blocked)."""
 
     def __init__(self, master, height: int = 220):
         super().__init__(master, height=height)
-        self.values: list[tuple[str, int]] = []   # (HH:MM, count) per minute
+        self.values: list[tuple] = []
 
     def set(self, values):
         self.values = values
         self._schedule()
 
     def draw(self, w, h):
-        if not any(n for _, n in self.values):
+        vals = [(v[0], v[1], v[2] if len(v) > 2 else False) for v in self.values]
+        if not any(n for _, n, _ in vals):
             self.text(w / 2, h / 2, "Nothing in the last hour", "center", font=(theme.BODY, 10))
             return
-        peak = max(n for _, n in self.values)
+        peak = max(n for _, n, _ in vals)
         top, bottom = self.px(4), h - self.fh - self.px(6)
-        slot = w / len(self.values)
+        slot = w / len(vals)
         bar = max(1.0, slot * 0.7)
-        for i, (label, n) in enumerate(self.values):
+        for i, (label, n, blocked) in enumerate(vals):
             x = slot * i + (slot - bar) / 2
             if n:
-                self.rect(x, bottom - (bottom - top) * n / peak, x + bar, bottom,
-                          theme.ACCENT if i == len(self.values) - 1 else theme.BAR, self.px(2))
+                color = theme.DANGER if blocked else theme.ACCENT if i == len(vals) - 1 else theme.BAR
+                self.rect(x, bottom - (bottom - top) * n / peak, x + bar, bottom, color, self.px(2))
             if label.endswith("0"):
                 self.text(x + bar / 2, bottom + self.px(4), label)
-            self.hit(slot * i, 0, slot * (i + 1), h, f"{label}  {n} connection{'s' * (n != 1)}")
+            self.hit(slot * i, 0, slot * (i + 1), h, f"{label}  {n} connection{'s' * (n != 1)}"
+                     + ("  ·  blocked attempt" if blocked else ""))
 
 
 class WeekCalendar(Chart):

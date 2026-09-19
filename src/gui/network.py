@@ -182,6 +182,8 @@ class NetworkPage(ctk.CTkFrame):
         self.graph.pack(fill="both", expand=True)
         card = Card(self.graph, "Connections per minute", note="last hour")
         card.pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(card.note.master, text="■ minute with a blocked attempt", text_color=theme.DANGER,
+                     font=theme.body(11)).pack(side="right", padx=(0, 12))
         self.chart = MinuteBars(card.body)
         self.chart.pack(fill="x")
         cols = ctk.CTkFrame(self.graph, fg_color="transparent")
@@ -280,11 +282,14 @@ class NetworkPage(ctk.CTkFrame):
 
     def _fill_graph(self, per_app: Counter):
         now = now_from_db(self.db)
-        per_minute = Counter()
+        per_minute, blocked_minutes = Counter(), set()
         for r in self.shown:
-            per_minute[r["minute"][11:]] += r["count"]
+            hm = r["minute"][11:]
+            per_minute[hm] += r["count"]
+            if r["blocked"]:
+                blocked_minutes.add(hm)
         minutes = [(now - timedelta(minutes=59 - i)).strftime("%H:%M") for i in range(60)]
-        self.chart.set([(m, per_minute.get(m, 0)) for m in minutes])
+        self.chart.set([(m, per_minute.get(m, 0), m in blocked_minutes) for m in minutes])
         top_apps = per_app.most_common(8)
         for row, (exe, n) in zip(self.top_apps.take(len(top_apps)), top_apps):
             name, path = appinfo.app_name_path(exe, self.items)
