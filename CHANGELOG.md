@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.24.0 — 2026-09-19 05:20
+- **One search box for sites and apps** (Blocking > Add): typing suggests your sites, popular sites, installed apps
+  and Steam games together ("Discord   discord.exe · app"); picking an app shows the app options. "Browse apps" stays
+- **"?" hints**: explanations that were grey lines (By time, allowance, app block options, Protection, Anti-Bypass
+  hours, Settings sections, Screen Time switches, Modes categories, Blocking group rules) are now a small "?" that
+  shows the text on hover; important hints and half-titles stay as they were
+- **Smoother switching**: changing page or tab (Blocking, Screen Time, Modes) shows the new page at once - it's
+  drawn behind a cover for a moment instead of piece by piece in front of you
+- **Locked modes**: "Stop (locked until 18:00)" works now but asks for the Anti-Bypass phrase first - also when no
+  challenge is turned on (the lock would mean nothing otherwise); starting another mode over a locked one too
+- **Themes** (Settings > Appearance): Dark, **AMOLED** (pure black), Light, Match Windows; **accent colour**: 8
+  colours or any colour ("Custom..." colour picker) - the logo, buttons, switches, charts and heatmap follow it.
+  Light / dark switch at once; AMOLED and a new colour need a restart ("Restart now" button)
+- 164 tests passing
+
 ## 0.23.1 — 2026-09-19 04:58
 - **Site suggestions fixed**: the box flashed while typing (a new window was made on every key, first shown at its
   default 200 × 200 size) and stayed on screen over other apps until you picked something. Now it's one window that

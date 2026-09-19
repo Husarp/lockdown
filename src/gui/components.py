@@ -119,6 +119,42 @@ class Rows:
         return self.items[:n]
 
 
+def help_icon(parent, text: str) -> ctk.CTkLabel:
+    """A small "?" that shows `text` while the mouse is over it (instead of a grey hint line under things).
+    Returns it unpacked - pack / grid it next to what it explains."""
+    import textwrap
+    from gui.charts import Tooltip
+    icon = ctk.CTkLabel(parent, text="?", width=18, height=18, corner_radius=9, fg_color=theme.SURFACE2,
+                        text_color=theme.MUTED, font=theme.semi(11))
+    tip = Tooltip(icon)
+    wrapped = "\n".join(textwrap.fill(p, 60) for p in text.split("\n"))
+    icon.bind("<Enter>", lambda e: tip.show(wrapped, e.x_root, e.y_root))
+    icon.bind("<Leave>", lambda e: tip.hide())
+    return icon
+
+
+class Curtain:
+    """Covers an area for a moment while its content is swapped (another page / tab), so the new content appears at
+    once instead of being drawn piece by piece in front of you. cover(over) - `over` must be inside `master`."""
+    HOLD_MS = 60
+
+    def __init__(self, master):
+        self.frame = ctk.CTkFrame(master, fg_color=theme.BG, corner_radius=0)
+        self.job = None
+
+    def cover(self, over=None):
+        self.frame.place(in_=over or self.frame.master, x=0, y=0, relwidth=1, relheight=1)
+        self.frame.lift()
+        if self.job:
+            self.frame.after_cancel(self.job)
+        # open once the new content had time to lay out and draw (and Tk is idle again)
+        self.job = self.frame.after(self.HOLD_MS, lambda: self.frame.after_idle(self._open))
+
+    def _open(self):
+        self.job = None
+        self.frame.place_forget()
+
+
 class Collapsible(ctk.CTkFrame):
     """A section you open by clicking its title. build(body) runs the first time it's opened (so a closed section
     costs nothing); on_open() runs every time it's opened."""

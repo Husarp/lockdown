@@ -5,7 +5,7 @@ import customtkinter as ctk
 
 import antibypass
 from gui import theme
-from gui.components import Card, Segmented
+from gui.components import Card, Segmented, help_icon
 from gui.word_grid import WordGrid, block_paste
 from gui.rule_editors import WindowRow
 from rules import days_text, make_schedule, load_schedule
@@ -171,11 +171,13 @@ class AntiBypassPage(ctk.CTkFrame):
                                         "random (you click it; macros can't just type blindly)", command=self._apply)
         self.grid_box.pack(anchor="w", padx=(46, 0), pady=(0, 12))
         line.pack_configure(pady=(4, 6))
-        self.hours_sw = ctk.CTkSwitch(challenges.body, text="Only during these hours", font=theme.semi(13),
+        hours_line = ctk.CTkFrame(challenges.body, fg_color="transparent")
+        hours_line.pack(anchor="w")
+        self.hours_sw = ctk.CTkSwitch(hours_line, text="Only during these hours", font=theme.semi(13),
                                       command=self._apply)
-        self.hours_sw.pack(anchor="w")
-        ctk.CTkLabel(challenges.body, text="Outside them nothing can be loosened at all (end before start = overnight)",
-                     text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w", padx=(46, 0))
+        self.hours_sw.pack(side="left")
+        help_icon(hours_line, "Outside these times nothing can be loosened at all. An end before the start means "
+                              "overnight.").pack(side="left", padx=4)
         self.rows_box = ctk.CTkFrame(challenges.body, fg_color="transparent")
         self.rows_box.pack(anchor="w", padx=(46, 0), pady=4)
         line = ctk.CTkFrame(challenges.body, fg_color="transparent")
@@ -191,9 +193,9 @@ class AntiBypassPage(ctk.CTkFrame):
         protects.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(protects.body, text="\n".join(f"•  {p}" for p in PROTECTS), justify="left", anchor="w",
                      wraplength=820).pack(anchor="w")
-        ctk.CTkLabel(protects.body, text="Not included: the emergency unlock (it has its own limit), locked modes "
-                                         "(they can't be stopped anyway), and changing when limits reset (it never "
-                                         "shortens a limit day).", text_color=MUTED, wraplength=820,
+        ctk.CTkLabel(protects.body, text="Not included: the emergency unlock (it has its own limit) and changing when "
+                                         "limits reset (it never shortens a limit day). Stopping a locked mode always "
+                                         "needs the phrase, even with no challenge turned on here.", text_color=MUTED, wraplength=820,
                      justify="left").pack(anchor="w", pady=(6, 0))
 
         itself = Card(body, "Keeping Lockdown running")

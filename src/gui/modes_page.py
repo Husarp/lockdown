@@ -6,7 +6,7 @@ import customtkinter as ctk
 
 import modes
 from gui import categories, icons, theme
-from gui.components import Card, Rows, Segmented, eyebrow
+from gui.components import Curtain, Card, Rows, Segmented, eyebrow, help_icon
 from gui.reminders_ui import RemindersView
 from gui.rule_editors import MUTED, WindowRow
 from gui.target_picker import TargetPicker
@@ -68,12 +68,13 @@ class ModeEditor(ctk.CTkFrame):
         self.name = ctk.CTkEntry(line, placeholder_text="e.g. Gaming-free evening")
         self.name.pack(side="left", fill="x", expand=True)
 
-        eyebrow(self, "Block these categories").pack(anchor="w", padx=16, pady=(14, 4))
+        cats = ctk.CTkFrame(self, fg_color="transparent")
+        cats.pack(anchor="w", padx=16, pady=(14, 4))
+        eyebrow(cats, "Block these categories").pack(side="left")
+        help_icon(cats, "Categories are set on Screen Time > Apps / Websites; blocked sites and apps count as "
+                        "Distracting unless you chose otherwise.").pack(side="left", padx=6)
         self.cat_box = ctk.CTkFrame(self, fg_color="transparent")
         self.cat_box.pack(anchor="w", padx=16)
-        ctk.CTkLabel(self, text="Categories are set on Screen Time > Apps / Websites; blocked sites and apps count as "
-                                "Distracting unless you chose otherwise.", text_color=MUTED, font=theme.body(11),
-                     wraplength=640, justify="left").pack(anchor="w", padx=16)
 
         eyebrow(self, "Also block").pack(anchor="w", padx=16, pady=(14, 4))
         self.chips = Rows(self, _extra_chip, "Nothing else.", {"side": "left", "padx": (0, 6), "pady": 2})
@@ -329,8 +330,8 @@ class ModesPage(ctk.CTkFrame):
         self.duration.set("1 h")
         self.duration.pack(anchor="w")
         self.until = ctk.CTkEntry(sp, width=70, placeholder_text="17:00")
-        self.lock = ctk.CTkCheckBox(sp, text="Lock until it ends (can't be stopped early; the emergency unlock "
-                                             "still works)")
+        self.lock = ctk.CTkCheckBox(sp, text="Lock until it ends (stopping it early needs the Anti-Bypass challenge; "
+                                             "the emergency unlock still works)")
         self.lock.pack(anchor="w", pady=(8, 0))
         self.start_error = ctk.CTkLabel(sp, text="", text_color=theme.DANGER)
         self.start_error.pack(anchor="w")
@@ -359,7 +360,11 @@ class ModesPage(ctk.CTkFrame):
     def _switch(self):
         reminders_tab = self.tab.get() == "Reminders"
         (self.body if reminders_tab else self.reminders).pack_forget()
-        (self.reminders if reminders_tab else self.body).pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+        shown = self.reminders if reminders_tab else self.body
+        shown.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+        if not hasattr(self, "curtain"):
+            self.curtain = Curtain(self)
+        self.curtain.cover(shown)
         if reminders_tab:
             self.new_btn.pack_forget()
         else:
@@ -402,9 +407,8 @@ class ModesPage(ctk.CTkFrame):
         self.now_text.configure(text=state_text(state, now))
         if state and not state["scheduled"]:
             locked = state["locked"]
-            self.stop_btn.configure(state="disabled" if locked else "normal",
-                                    text=f"Locked until {state['until']:%H:%M}" if locked else "Stop",
-                                    width=160 if locked else 90)
+            self.stop_btn.configure(text=f"Stop (locked until {state['until']:%H:%M})" if locked else "Stop",
+                                    width=190 if locked else 90)   # locked: needs the Anti-Bypass challenge
             self.stop_btn.pack(side="right")
         else:
             self.stop_btn.pack_forget()

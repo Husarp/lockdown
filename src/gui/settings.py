@@ -8,7 +8,7 @@ import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton
-from gui.components import Segmented
+from gui.components import Segmented, help_icon
 from trusted_time import now_from_db
 
 MUTED = theme.MUTED
@@ -34,24 +34,42 @@ class SettingsPage(ctk.CTkFrame):
         self._build_emergency()
         self.load()
 
-    def _section(self, title: str) -> ctk.CTkFrame:
+    def _section(self, title: str, help_text: str = "") -> ctk.CTkFrame:
         box = ctk.CTkFrame(self.body)
         box.pack(fill="x", pady=(0, 14))
-        ctk.CTkLabel(box, text=title, font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=16, pady=(12, 4))
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.pack(anchor="w", padx=16, pady=(12, 4))
+        ctk.CTkLabel(head, text=title, font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+        if help_text:
+            help_icon(head, help_text).pack(side="left", padx=8)
         return box
 
     # ---------- appearance / goal ----------
 
     def _build_appearance(self):
-        from gui.app import APPEARANCES
         box = self._section("Appearance")
         line = ctk.CTkFrame(box, fg_color="transparent")
         line.pack(anchor="w", padx=16, pady=(4, 8))
-        ctk.CTkLabel(line, text="Theme").pack(side="left", padx=(0, 10))
-        self.appearance = Segmented(line, values=list(APPEARANCES), command=self.app.set_appearance)
+        ctk.CTkLabel(line, text="Theme", width=110, anchor="w").pack(side="left")
+        self.appearance = Segmented(line, values=list(theme.THEMES), command=self._theme_changed)
         self.appearance.pack(side="left")
-        mode = self.db.get_setting("ui.appearance", "dark")
-        self.appearance.set(next(k for k, v in APPEARANCES.items() if v == mode))
+        self.appearance.set(next(k for k, v in theme.THEMES.items() if v == theme.THEME))
+        line = ctk.CTkFrame(box, fg_color="transparent")
+        line.pack(anchor="w", padx=16, pady=(0, 8))
+        ctk.CTkLabel(line, text="Accent colour", width=110, anchor="w").pack(side="left")
+        self.swatches = {}
+        for name, color in theme.ACCENTS.items():
+            b = ctk.CTkButton(line, text="", width=26, height=26, corner_radius=13, fg_color=color, hover_color=color,
+                              border_width=2, command=lambda c=color: self._accent_changed(c))
+            b.pack(side="left", padx=3)
+            self.swatches[color] = b
+        ctk.CTkButton(line, text="Custom...", width=90, **theme.OUTLINE, command=self._custom_accent).pack(
+            side="left", padx=(10, 0))
+        self.restart_line = ctk.CTkFrame(box, fg_color="transparent")
+        ctk.CTkLabel(self.restart_line, text="Restart Lockdown to use the new colours everywhere.",
+                     text_color=theme.WARNING).pack(side="left")
+        ctk.CTkButton(self.restart_line, text="Restart now", width=110, command=self.app.restart).pack(
+            side="left", padx=10)
         line = ctk.CTkFrame(box, fg_color="transparent")
         line.pack(anchor="w", padx=16, pady=(0, 12))
         ctk.CTkLabel(line, text="Daily screen-time goal").pack(side="left", padx=(0, 10))
@@ -59,7 +77,36 @@ class SettingsPage(ctk.CTkFrame):
         self.goal.pack(side="left")
         hours = self.db.get_setting(GOAL_KEY, DEFAULT_GOAL_HOURS)
         self.goal.set("Off" if hours == "0" else f"{hours} h")
-        ctk.CTkLabel(line, text="shown as a dashed line on the day charts", text_color=MUTED).pack(side="left", padx=10)
+        help_icon(line, "Shown as a dashed line on the day charts.").pack(side="left", padx=8)
+        self.restart_anchor = line   # (the restart hint goes above the goal line)
+        self._show_accent()
+
+    def _theme_changed(self, label: str):
+        self.app.set_appearance(label)
+        self._show_accent()
+
+    def _accent_changed(self, color: str):
+        self.db.set_setting(theme.ACCENT_KEY, color.upper())
+        self._show_accent()
+
+    def _custom_accent(self):
+        from tkinter import colorchooser
+        color = colorchooser.askcolor(color=self.db.get_setting(theme.ACCENT_KEY, theme.ACCENT_HEX), parent=self,
+                                      title="Accent colour")[1]
+        if color:
+            self._accent_changed(color)
+
+    def _show_accent(self):
+        """Ring around the chosen swatch; "restart" hint while the saved theme / colour differs from what's showing."""
+        saved = self.db.get_setting(theme.ACCENT_KEY, theme.ACCENT_HEX).upper()
+        for color, b in self.swatches.items():
+            b.configure(border_color=theme.TEXT if color.upper() == saved else theme.SURFACE)
+        amoled_now = theme.THEME == "amoled"
+        amoled_saved = self.db.get_setting(theme.THEME_KEY, theme.THEME) == "amoled"
+        if saved != theme.ACCENT_HEX.upper() or amoled_now != amoled_saved:
+            self.restart_line.pack(anchor="w", padx=16, pady=(0, 8), before=self.restart_anchor)
+        else:
+            self.restart_line.pack_forget()
 
     def _goal_changed(self, value: str):
         self.db.set_setting(GOAL_KEY, "0" if value == "Off" else value.split()[0])
@@ -67,10 +114,9 @@ class SettingsPage(ctk.CTkFrame):
     # ---------- limit reset time ----------
 
     def _build_reset(self):
-        box = self._section("When limits reset")
-        ctk.CTkLabel(box, text="Time limits and opening limits start over at this time every day (weekly limits on "
-                               "Monday, monthly ones on the 1st, at the same time). Screen-time stats keep normal days.",
-                     text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=16)
+        box = self._section("When limits reset", "Time limits and opening limits start over at this time every day "
+                                                  "(weekly limits on Monday, monthly ones on the 1st, at the same "
+                                                  "time). Screen-time stats keep normal days.")
         line = ctk.CTkFrame(box, fg_color="transparent")
         line.pack(anchor="w", padx=16, pady=(8, 0))
         ctk.CTkLabel(line, text="Limits reset at").pack(side="left")
@@ -101,10 +147,9 @@ class SettingsPage(ctk.CTkFrame):
     # ---------- emergency unlock ----------
 
     def _build_emergency(self):
-        box = self._section("Emergency unlock")
-        ctk.CTkLabel(box, text="The \"Emergency unlock\" button (Blocking > Overview) unblocks the sites/apps you pick "
-                               "for a while. Unlocking several at once counts as one use.",
-                     text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=16)
+        box = self._section("Emergency unlock", "The \"Emergency unlock\" button (Blocking > Overview) unblocks the "
+                                                "sites / apps you pick for a while. Unlocking several at once counts as "
+                                                "one use.")
         self.em_enabled = ctk.CTkSwitch(box, text="Allow emergency unlocks", command=self._save_emergency)
         self.em_enabled.pack(anchor="w", padx=16, pady=(8, 4))
         line = ctk.CTkFrame(box, fg_color="transparent")

@@ -109,10 +109,11 @@ def start(db, mode_id: str, now: datetime, until: datetime | None, locked: bool 
                                            "locked": bool(locked and until)}))
 
 
-def stop(db, now: datetime):
-    """Stop the mode started by hand. Raises ValueError while it's locked."""
+def stop(db, now: datetime, force: bool = False):
+    """Stop the mode started by hand. Raises ValueError while it's locked (unless force: the Anti-Bypass challenge
+    was passed)."""
     state = active(db, now)
-    if state and state["locked"] and not state["scheduled"]:
+    if state and state["locked"] and not state["scheduled"] and not force:
         raise ValueError(f"{state['mode']['name']} is locked until {state['until']:%H:%M}.")
     db.set_setting(ACTIVE_KEY, "")
 

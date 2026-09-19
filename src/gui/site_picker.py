@@ -1,11 +1,12 @@
-"""Site input with suggestions (popular + previously blocked sites) while typing."""
+"""Site-or-app input with suggestions while typing: your earlier sites, popular sites, installed apps and Steam
+games in one list (apps come from the app browser's list, loaded in the background at start)."""
 import os
 import tkinter as tk
 
 import customtkinter as ctk
 
 import search
-from gui import icons, theme
+from gui import app_browser, icons, theme
 from gui.components import Rows
 from importer.popular import POPULAR_SITES
 from monitor import win
@@ -20,6 +21,13 @@ MUTED = theme.MUTED
 def popular_entries() -> list[tuple[str, str]]:
     """(display name, main hostname) for every popular site."""
     return [(name, hosts[0]) for sites in POPULAR_SITES.values() for name, hosts in sites.items()]
+
+
+def _search_text(match: dict) -> str:
+    if match["kind"] == "app":
+        app = match["app"]
+        return f"{app['name']} {app['exe']}" + (" steam" if app.get("steam") else "")
+    return f"{match['name']} {match['host']}"
 
 
 class SuggestionList:
@@ -43,17 +51,22 @@ class SuggestionList:
         return ctk.CTkButton(parent, text="", anchor="w", height=30, fg_color="transparent",
                              hover_color=theme.SURFACE2, text_color=theme.TEXT)
 
-    def show(self, matches: list[tuple[str, str, bool]]):
+    def show(self, matches: list[dict]):
         if not matches:
             self.hide()
             return
-        for row, (name, host, _mine) in zip(self.rows.take(len(matches)), matches):
-            text = f"{name}   {host}"
+        for row, m in zip(self.rows.take(len(matches)), matches):
+            if m["kind"] == "app":
+                app = m["app"]
+                text = f"{app['name']}   {app['exe']} · {'Steam game' if app.get('steam') else 'app'}"
+                image = icons.get_app(app["exe"], app["path"], 18)
+            else:
+                text, image = f"{m['name']}   {m['host']}", icons.get(m["host"], 18)
             if len(text) > MAX_CHARS:
                 text = text[:MAX_CHARS - 1] + "…"
-            row.configure(text=text, image=icons.get(host, 18), command=lambda n=name, h=host: self.on_pick(n, h))
+            row.configure(text=text, image=image, command=lambda m=m: self.on_pick(m))
         self.clear.pack_forget()
-        if any(m[2] for m in matches):
+        if any(m.get("mine") for m in matches):
             self.clear.pack(anchor="e", padx=6, pady=(2, 4))
         self.win.configure(bg=theme.pick(theme.BORDER))   # (the 1-px frame around it)
         self.win.update_idletasks()
@@ -87,17 +100,18 @@ class SuggestionList:
 
 
 class SiteEntry(ctk.CTkEntry):
-    """Entry that suggests sites while typing. on_pick(name, host) is called when a suggestion is chosen."""
+    """Entry that suggests sites and apps while typing. on_pick(name, host) is called when a site is chosen,
+    on_pick_app(app) when an app is."""
 
-    def __init__(self, master, db, on_pick, **kw):
+    def __init__(self, master, db, on_pick, on_pick_app=None, **kw):
         super().__init__(master, **kw)
         self.db = db
-        self.on_pick = on_pick
+        self.on_pick, self.on_pick_app = on_pick, on_pick_app
         self.dropdown: SuggestionList | None = None
         self.bind("<KeyRelease>", self._on_key, add="+")
         self.bind("<Escape>", lambda e: self.hide(), add="+")
 
-    def _matches(self, text: str) -> list[tuple[str, str, bool]]:
+    def _matches(self, text: str) -> list[dict]:
         text = text.strip().lower()
         if not text:
             return []
@@ -106,9 +120,11 @@ class SiteEntry(ctk.CTkEntry):
         for name, host, is_mine in mine + [(n, h, False) for n, h in popular_entries()]:
             if host not in seen:
                 seen.add(host)
-                entries.append((name, host, is_mine))
+                entries.append({"kind": "site", "name": name, "host": host, "mine": is_mine})
+        if self.on_pick_app:
+            entries += [{"kind": "app", "app": a} for a in app_browser._cache or []]
         # small typos are fine ("yotube" -> youtube.com); exact matches first
-        return search.rank(entries, text, lambda e: f"{e[0]} {e[1]}")[:MAX_SUGGESTIONS]
+        return search.rank(entries, text, _search_text)[:MAX_SUGGESTIONS]
 
     def _on_key(self, event):
         if event.keysym in ("Return", "Escape", "Tab"):
@@ -124,9 +140,12 @@ class SiteEntry(ctk.CTkEntry):
         if self.dropdown:
             self.dropdown.hide()
 
-    def _pick(self, name: str, host: str):
+    def _pick(self, match: dict):
         self.hide()
-        self.on_pick(name, host)
+        if match["kind"] == "app":
+            self.on_pick_app(match["app"])
+        else:
+            self.on_pick(match["name"], match["host"])
 
     def _clear_history(self):
         self.db.clear_history()

@@ -9,7 +9,7 @@ import customtkinter as ctk
 import stats
 from gui import app_browser, appinfo, categories, theme
 from gui.charts import DayBars, Donut, Heatmap, HourBars, TimelineBar
-from gui.components import Card, Chip, Rows, Segmented, StatCard
+from gui.components import Curtain, Card, Chip, Rows, Segmented, StatCard, help_icon
 from gui.dashboard import goal_seconds
 from rules import DAY_NAMES
 from trusted_time import now_from_db
@@ -297,8 +297,8 @@ class SwitchesView(ctk.CTkScrollableFrame):
         self.chart.pack(fill="both", expand=True, pady=(6, 0))
         card = Card(right, "Most switched to")
         card.pack(fill="both", expand=True)
-        ctk.CTkLabel(card.body, text="Many switches with very short visits usually means checking out of habit.",
-                     text_color=theme.MUTED, font=theme.body(11), wraplength=380, justify="left").pack(anchor="w")
+        help_icon(card.title.master, "Many switches with very short visits usually means checking out of habit.").pack(
+            side="left", padx=8)
         self.none = ctk.CTkLabel(card.body, text="No switches yet.", text_color=theme.MUTED)
         self.entries = [TargetEntry(card.body) for _ in range(5)]
 
@@ -383,6 +383,9 @@ class ScreenTimePage(ctk.CTkFrame):
             if name != tab:
                 view.grid_forget()
         self.views[tab].grid(row=0, column=0, sticky="nsew")
+        if not hasattr(self, "curtain"):
+            self.curtain = Curtain(self.holder)
+        self.curtain.cover()
 
     def show_tab(self, tab: str):
         self.tab_bar.set(tab)

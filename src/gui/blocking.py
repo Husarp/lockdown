@@ -16,7 +16,7 @@ import customtkinter as ctk
 import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
-from gui.components import BlockerCard, Segmented, eyebrow, rule_chip
+from gui.components import Curtain, BlockerCard, Segmented, eyebrow, rule_chip, help_icon
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, summary
@@ -108,8 +108,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.list_card.pack(fill="x")
         self.list_box = ctk.CTkFrame(self.list_card, fg_color="transparent")
         self.list_box.pack(fill="x", padx=15, pady=(8, 4))
-        ctk.CTkLabel(self.list_card, text="Rules from a group are marked with → and can only be changed in Groups.",
-                     text_color=MUTED, font=theme.body(11)).pack(anchor="w", padx=15, pady=(0, 10))
+        self.list_box.pack_configure(pady=(8, 10))
+        help_icon(top, "Rules from a group are marked with → and can only be changed in Groups.").pack(
+            side="left", padx=8, after=self.title)
 
     # ---------- emergency unlock ----------
 
@@ -462,6 +463,9 @@ class BlockingPage(ctk.CTkFrame):
         for frame in self.tabs.values():
             frame.grid_forget()
         self.tabs[tab].grid(row=0, column=0, sticky="nsew")
+        if not hasattr(self, "curtain"):
+            self.curtain = Curtain(self.holder)
+        self.curtain.cover()
         if hasattr(self.tabs[tab], "on_show"):
             self.tabs[tab].on_show()
         self.refresh()

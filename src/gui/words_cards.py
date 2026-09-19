@@ -6,7 +6,7 @@ import customtkinter as ctk
 import keywords
 import search
 from gui import theme
-from gui.components import Card, Segmented
+from gui.components import Card, Segmented, help_icon
 from gui.widgets import clear_entry
 
 MUTED = theme.MUTED
@@ -110,29 +110,31 @@ class WordsCards:
         self.app, self.db = app, app.db
         safe = Card(parent, "Safe search")
         safe.pack(fill="x", pady=(0, 12))
-        self.safe_sw = ctk.CTkSwitch(safe.body, text="Force SafeSearch", font=theme.semi(13), command=self._save_safe)
-        self.safe_sw.pack(anchor="w")
-        ctk.CTkLabel(safe.body, text="Google, Bing and DuckDuckGo always search with SafeSearch on (adult pictures and "
-                                     "videos filtered out), YouTube runs in Restricted Mode - in every browser, also "
-                                     "in private windows.", text_color=MUTED, wraplength=820, justify="left").pack(
-            anchor="w", pady=(2, 0))
+        line = ctk.CTkFrame(safe.body, fg_color="transparent")
+        line.pack(anchor="w")
+        self.safe_sw = ctk.CTkSwitch(line, text="Force SafeSearch", font=theme.semi(13), command=self._save_safe)
+        self.safe_sw.pack(side="left")
+        help_icon(line, "Google, Bing and DuckDuckGo always search with SafeSearch on (adult pictures and videos "
+                        "filtered out), YouTube runs in Restricted Mode - in every browser, also in private "
+                        "windows.").pack(side="left", padx=4)
 
         words = Card(parent, "Blocked words")
         words.pack(fill="x", pady=(0, 12))
-        self.words_sw = ctk.CTkSwitch(words.body, text="Check the browser tab for blocked words", font=theme.semi(13),
+        line = ctk.CTkFrame(words.body, fg_color="transparent")
+        line.pack(anchor="w", pady=(0, 8))
+        self.words_sw = ctk.CTkSwitch(line, text="Check the browser tab for blocked words", font=theme.semi(13),
                                       command=self._save_enabled)
-        self.words_sw.pack(anchor="w")
-        ctk.CTkLabel(words.body, text="The address and title of the tab in front are checked twice a second. Whole "
-                                      "words only (\"analysis\" is fine); a word ending in * also matches longer ones "
-                                      "(porn* -> pornhub).", text_color=MUTED, wraplength=820,
-                     justify="left").pack(anchor="w", pady=(2, 8))
+        self.words_sw.pack(side="left")
+        help_icon(line, "The address and title of the tab in front are checked twice a second. Whole words only "
+                        "(\"analysis\" is fine); a word ending in * also matches longer ones (porn* -> pornhub); "
+                        "small typos in searches don't matter here - the words must be spelled right.").pack(
+            side="left", padx=4)
         line = ctk.CTkFrame(words.body, fg_color="transparent")
         line.pack(anchor="w", pady=(0, 10))
         ctk.CTkLabel(line, text="When a page has one").pack(side="left", padx=(0, 10))
         self.action = Segmented(line, values=list(keywords.ACTIONS.values()), command=lambda v: self._save_action())
         self.action.pack(side="left")
-        ctk.CTkLabel(line, text="(a tab with nothing to go back to is closed)", text_color=MUTED).pack(
-            side="left", padx=10)
+        help_icon(line, "A tab with nothing to go back to is closed.").pack(side="left", padx=8)
 
         ctk.CTkLabel(words.body, text="Word lists", font=theme.semi(13)).pack(anchor="w")
         self.list_rows = {}

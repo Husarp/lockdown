@@ -29,7 +29,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 
 - **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
   categories (productive / neutral / distracting + your own, with your colours - click a category to change it).
-  Hover a chart for details. Dark and light theme (Settings > Appearance).
+  Hover a chart for details. Themes: Dark, AMOLED, Light, Match Windows + any accent colour (Settings > Appearance).
 - **Protection lists** (Blocking > Protection): always-on community lists of scam, phishing, malware and adult sites
   (gambling optional; ~4.3M sites from HaGeZi, Block List Project, Phishing Army, URLhaus), updated daily with a
   download progress, with exceptions and a "check a site" box. Blocked by the service's own DNS filter.

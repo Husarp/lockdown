@@ -9,7 +9,7 @@ import antibypass
 from blocker import protection
 from blocker.hosts import normalize_host
 from gui import icons, theme
-from gui.components import Card, Rows
+from gui.components import Card, Rows, help_icon
 from gui.words_cards import WordsCards
 from trusted_time import now_from_db
 
@@ -82,8 +82,8 @@ class ProtectionTab(ctk.CTkScrollableFrame):
 
         allowed = Card(self, "Allowed anyway")
         allowed.pack(fill="x", pady=(0, 12))
-        ctk.CTkLabel(allowed.body, text="Sites a list blocks by mistake (their subdomains too). They open again "
-                                        "within a minute.", text_color=MUTED, font=theme.body(11)).pack(anchor="w")
+        help_icon(allowed.title.master, "Sites a list blocks by mistake (their subdomains too). They open again "
+                                        "within a minute.").pack(side="left", padx=8)
         self.chips = Rows(allowed.body, _allowed_chip, "None.", {"side": "left", "padx": (0, 6), "pady": 4})
         line = ctk.CTkFrame(allowed.body, fg_color="transparent")
         line.pack(anchor="w", pady=(4, 0))

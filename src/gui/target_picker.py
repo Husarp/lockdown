@@ -1,7 +1,8 @@
 """'What to block' input shared by the rule tabs and the group editor: a site or an app."""
 import customtkinter as ctk
 
-from gui import theme
+from gui import theme
+from gui.components import help_icon
 
 from blocker.apps import PROTECTED, block_flags, make_block_type
 from blocker.hosts import normalize_host
@@ -41,7 +42,8 @@ class TargetPicker(ctk.CTkFrame):
         self.app: dict | None = None      # picked app {name, exe, path}
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(anchor="w")
-        self.entry = SiteEntry(row, db, self._fill_site, width=240, placeholder_text="site (reddit.com) or app.exe")
+        self.entry = SiteEntry(row, db, self._fill_site, self._fill_app, width=240,
+                               placeholder_text="site or app (reddit.com, Discord...)")
         self.entry.pack(side="left", padx=(0, 8))
         self.entry.bind("<KeyRelease>", lambda e: self._typed(), add="+")
         self.name = ctk.CTkEntry(row, width=160, placeholder_text="Display name")
@@ -60,10 +62,9 @@ class TargetPicker(ctk.CTkFrame):
         for flag, (label, note) in ACTIONS.items():
             line = ctk.CTkFrame(self.block_row, fg_color="transparent")
             line.pack(anchor="w", pady=1, padx=(28 if flag == "background" else 0, 0))   # goes with Close app
-            box = ctk.CTkCheckBox(line, text=label, width=150, command=lambda f=flag: self._flag_ticked(f))
+            box = ctk.CTkCheckBox(line, text=label, command=lambda f=flag: self._flag_ticked(f))
             box.pack(side="left")
-            ctk.CTkLabel(line, text=note, text_color=MUTED, anchor="w", justify="left", wraplength=640).pack(
-                side="left", padx=(8, 0))
+            help_icon(line, note[0].upper() + note[1:] + ".").pack(side="left", padx=(4, 0))
             self.flag_boxes[flag] = box
         self.reset()
 

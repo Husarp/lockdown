@@ -18,6 +18,7 @@ from db import Database
 from gui import shortcuts, theme
 from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
+from gui.components import Curtain
 from gui.dashboard import DashboardPage
 from gui.draft import Draft
 from gui.modes_page import ModesPage
@@ -45,8 +46,7 @@ PAGES = [
     ("Notifications", NotificationsPage, "bell"),
     ("Settings", SettingsPage, "settings"),
 ]
-APPEARANCE_KEY = "ui.appearance"
-APPEARANCES = {"Dark": "dark", "Light": "light", "Match Windows": "system"}
+APPEARANCE_KEY = "ui.appearance"   # customtkinter mode (dark / light / system); the theme itself: theme.THEME_KEY
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
 WATCH_MS = 5000
@@ -100,6 +100,7 @@ class LockdownApp(ctk.CTk):
         self.content.grid(row=1, column=0, sticky="nsew")
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(0, weight=1)
+        self.curtain = Curtain(self.content)   # hides a page while it's being drawn
 
         # Tray / second-launch callbacks arrive on other threads; hand them to Tk via a queue.
         self.events = events
@@ -208,8 +209,11 @@ class LockdownApp(ctk.CTk):
         self.status_label.grid(row=len(PAGES) + 2, column=0, padx=22, pady=16, sticky="w")
 
     def set_appearance(self, label: str):
-        """Dark / Light / Match Windows. Charts (plain Tk canvases) are redrawn in the new colours."""
-        mode = APPEARANCES[label]
+        """Dark / AMOLED / Light / Match Windows. Light / dark switch at once (charts - plain Tk canvases - are
+        redrawn); AMOLED's black needs a restart (colours are fixed when widgets are made)."""
+        choice = theme.THEMES[label]
+        mode = theme.MODES[choice]
+        self.db.set_setting(theme.THEME_KEY, choice)
         self.db.set_setting(APPEARANCE_KEY, mode)
         ctk.set_appearance_mode(mode)
         for page in self.pages.values():
@@ -239,6 +243,8 @@ class LockdownApp(ctk.CTk):
         if name not in self.pages:
             self._build_page(name)
         self.pages[name].tkraise()
+        if name != getattr(self, "current_page", None):
+            self.curtain.cover()
         self.current_page = name
         if hasattr(self.pages[name], "on_show"):
             self.pages[name].on_show()
@@ -297,9 +303,26 @@ class LockdownApp(ctk.CTk):
         self.tray.stop()
         self.destroy()
 
-    def guard(self, changes: list[str], proceed, cancel=lambda: None):
-        """Anti-Bypass: run `proceed` if loosening is allowed now, else show the challenge first."""
-        if antibypass.status(antibypass.settings(self.db), now_from_db(self.db)) == "free":
+    def restart(self):
+        """Start Lockdown again (new theme / accent colour): a helper process waits until this one is gone."""
+        import subprocess
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2]
+        pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
+        pythonw = pythonw if pythonw.exists() else Path(sys.executable).with_name("pythonw.exe")
+        main = root / "src" / "main.py"
+        subprocess.Popen([str(pythonw), "-c", f"import subprocess, time; time.sleep(2); "
+                                              f"subprocess.Popen([r'{pythonw}', r'{main}'])"],
+                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+        self.tray.stop()
+        self.destroy()
+
+    def guard(self, changes: list[str], proceed, cancel=lambda: None, force: bool = False):
+        """Anti-Bypass: run `proceed` if loosening is allowed now, else show the challenge first. force: ask even when
+        no challenge is turned on (a locked mode) - unless the challenge was passed a few minutes ago."""
+        cfg, now = antibypass.settings(self.db), now_from_db(self.db)
+        if antibypass.status(cfg, now) == "free" and not (force and not antibypass.unlocked_until(cfg, now)):
             proceed()
             return
         if self.challenge and self.challenge.winfo_exists():
@@ -401,8 +424,14 @@ class LockdownApp(ctk.CTk):
     def start_mode(self, mode: dict, until, locked: bool):
         now = now_from_db(self.db)
         current = modes.active(self.db, now)
-        if current and current["locked"] and not current["scheduled"]:
-            raise ValueError(f"{current['mode']['name']} is locked until {current['until']:%H:%M}.")
+        if current and current["locked"] and not current["scheduled"]:   # replacing a locked mode: challenge first
+            self.guard([f"End the locked {current['mode']['name']} mode (locked until {current['until']:%H:%M}) "
+                        f"and start {mode['name']}"], lambda: self._start_mode(mode, until, locked), force=True)
+            return
+        self._start_mode(mode, until, locked)
+
+    def _start_mode(self, mode: dict, until, locked: bool):
+        now = now_from_db(self.db)
         modes.start(self.db, mode["id"], now, until, locked)
         state = modes.active(self.db, now)
         end = state["until"] if state else until
@@ -413,7 +442,16 @@ class LockdownApp(ctk.CTk):
     def stop_mode(self):
         now = now_from_db(self.db)
         state = modes.active(self.db, now)
-        modes.stop(self.db, now)
+        if state and state["locked"] and not state["scheduled"]:   # locked: only with the challenge
+            self.guard([f"Stop the locked {state['mode']['name']} mode (locked until {state['until']:%H:%M})"],
+                       lambda: self._stop_mode(force=True), force=True)
+            return
+        self._stop_mode()
+
+    def _stop_mode(self, force: bool = False):
+        now = now_from_db(self.db)
+        state = modes.active(self.db, now)
+        modes.stop(self.db, now, force)
         if state and not state["scheduled"]:
             self._show(f"{state['mode']['name']} mode off", force=True)
         self._mode_changed()

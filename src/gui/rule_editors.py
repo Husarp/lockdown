@@ -6,7 +6,7 @@ from datetime import datetime
 import customtkinter as ctk
 
 from gui import theme
-from gui.components import Segmented
+from gui.components import Segmented, help_icon
 from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS, SWITCH, TIME_FMT,
                    TIME_LIMIT_FIELDS, VISIT, days_text, duration_text, load_schedule, make_schedule)
 
@@ -110,10 +110,13 @@ class WindowRow(ctk.CTkFrame):
 class HoursEditor(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
-        self.mode = Segmented(self, values=list(MODES))
-        self.mode.pack(anchor="w")
-        ctk.CTkLabel(self, text="these times - end before start = overnight; × removes a time window",
-                     text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w", pady=(2, 0))
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(anchor="w")
+        self.mode = Segmented(top, values=list(MODES))
+        self.mode.pack(side="left")
+        help_icon(top, "Allow only during: the site / app works only in these times.\nBlock during: it's blocked in "
+                       "these times.\nAn end before the start means overnight (22:00 to 07:00). × removes a time "
+                       "window.").pack(side="left", padx=8)
         self.rows_box = ctk.CTkFrame(self, fg_color="transparent")
         self.rows_box.pack(anchor="w", pady=4)
         ctk.CTkButton(self, text="+ Add time window", width=140, **theme.OUTLINE,
@@ -124,8 +127,8 @@ class HoursEditor(ctk.CTkFrame):
         self.allowance = ctk.CTkEntry(allowance, width=56)
         self.allowance.pack(side="left", padx=8)
         ctk.CTkLabel(allowance, text="minutes").pack(side="left")
-        ctk.CTkLabel(self, text="0 = fully blocked; the minutes start again in each blocked period",
-                     text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w")
+        help_icon(allowance, "0 = fully blocked. Otherwise you can still use it this many minutes in each blocked "
+                             "period; they start again in the next one.").pack(side="left", padx=8)
         self.rows: list[WindowRow] = []
         self.load(None)
 

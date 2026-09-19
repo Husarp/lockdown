@@ -30,6 +30,45 @@ HEAT = (("#EFEFEF", "#F6D9CD", "#EEB79E", "#E4886A", "#DB5126"),
         ("#20262E", "#4A2A1C", "#8A3F20", "#C04A22", "#DB5126"))
 WHITE = ("#FFFFFF", "#FFFFFF")
 
+# ---- your theme + accent colour (Settings > Appearance). Read here, before any widget exists, because colours are
+# fixed when widgets are made - so a new theme / accent applies after a restart (light / dark switch at once).
+THEME_KEY, ACCENT_KEY = "ui.theme", "ui.accent"
+THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "Match Windows": "system"}
+MODES = {"dark": "dark", "amoled": "dark", "light": "light", "system": "system"}   # theme -> customtkinter mode
+ACCENTS = {"Orange": "#DB5126", "Red": "#D1342F", "Pink": "#D63F8C", "Purple": "#7C4DDB", "Blue": "#2F6FEB",
+           "Teal": "#12948A", "Green": "#23945A", "Yellow": "#C99A0E"}
+
+
+def _saved(key: str) -> str | None:
+    import sqlite3
+    from paths import DB_PATH
+    try:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=1) as con:
+            row = con.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    """Colour a..b at t (0-1)."""
+    ca, cb = (int(a[i:i + 2], 16) for i in (1, 3, 5)), (int(b[i:i + 2], 16) for i in (1, 3, 5))
+    return "#" + "".join(f"{round(x + (y - x) * t):02X}" for x, y in zip(ca, cb))
+
+
+THEME = _saved(THEME_KEY) or {"light": "light", "system": "system"}.get(_saved("ui.appearance") or "", "dark")
+if THEME == "amoled":   # pure black for OLED screens
+    BG, SIDEBAR = (BG[0], "#000000"), (SIDEBAR[0], "#000000")
+    SURFACE, SURFACE2, NAV_ACTIVE = (SURFACE[0], "#0B0B0C"), (SURFACE2[0], "#18181A"), (NAV_ACTIVE[0], "#18181A")
+    BORDER, TRACK = (BORDER[0], "#26262A"), (TRACK[0], "#1C1C1F")
+ACCENT_HEX = _saved(ACCENT_KEY) or ACCENTS["Orange"]
+if ACCENT_HEX != ACCENTS["Orange"] and len(ACCENT_HEX) == 7:   # (orange keeps the design's hand-picked shades)
+    ACCENT = (ACCENT_HEX, ACCENT_HEX)
+    ACCENT_PRESS = (_mix(ACCENT_HEX, "#000000", 0.2),) * 2
+    HEAT = (tuple(_mix("#EFEFEF", ACCENT_HEX, t) for t in (0, 0.25, 0.5, 0.75, 1)),
+            tuple(_mix(SURFACE2[1], ACCENT_HEX, t) for t in (0, 0.25, 0.5, 0.8, 1)))
+    BAR_OVER = (_mix("#FFFFFF", ACCENT_HEX, 0.4), _mix("#000000", ACCENT_HEX, 0.6))
+
 # Status (blocked = red, allowed = green - the user's choice over the design's green "blocked")
 BLOCKED, ALLOWED, PENDING = DANGER, SUCCESS, WARNING
 CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": ACCENT}

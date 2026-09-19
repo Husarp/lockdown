@@ -1308,8 +1308,14 @@ sleep / forced-break overlays still show.
 - [x] "+ Popular sites" button removed (the site box suggests them) (requested 2026-09-19)
 - [x] "Real keyboard only" Anti-Bypass option removed (requested 2026-09-19)
 - [x] 3×3 grid: continues by itself once every word is typed (requested 2026-09-19)
-- [ ] Proposed (waiting for OK, asked 2026-09-19): apps in the same search box as sites (one list of suggestions:
-  sites + installed apps + Steam games), "Browse apps" kept for browsing / "Other .exe"
+- [x] Apps in the same search box as sites (sites + installed apps + Steam games), "Browse apps" kept
+  (approved 2026-09-19)
+- [x] Grey hint lines -> "?" that shows the text on hover (important hints / half-titles stay) (requested 2026-09-19)
+- [x] Smoother page / tab switching: the new page is drawn behind a cover, then shown at once (requested 2026-09-19)
+- [x] Locked modes can be stopped (or replaced) with the Anti-Bypass challenge - always asks for the phrase
+  (requested 2026-09-19)
+- [x] Themes (Dark / AMOLED / Light / Match Windows) and accent colour (8 swatches + colour picker), restart button
+  (requested 2026-09-19)
 - [ ] Better app icon + tray icon - added to the designer brief (design/DESIGN.md 7c, requested 2026-09-19)
 - [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
   designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
