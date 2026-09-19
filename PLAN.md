@@ -1323,6 +1323,9 @@ sleep / forced-break overlays still show.
 - [x] Dashboard blocked-visits card small while hidden (was an older running copy; checked 2026-09-19)
 - [x] Distracting by default: every Steam game + a list of pure-fun games / launchers / streaming / short-video
   sites (not work-too ones like YouTube, Reddit, Discord); only once, your own choices win (requested 2026-09-19)
+- [x] Categories are discoverable: a "Categories" section on Settings (chips + "Manage categories...") opening the
+  existing editor, instead of only via the per-app category menu (2026-09-19)
+
 ### Word blocking - questions & improvements (raised 2026-09-19)
 - [x] On/off switches for "Your words" and "Exceptions" (disable without deleting); your-words off needs the
   challenge, exceptions off is instant (2026-09-19)
