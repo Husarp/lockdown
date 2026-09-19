@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.39.0 - 2026-09-19 19:55
+- **Calendar: click a day** on Screen Time > Calendar to see that day's details (what you spent time on) -
+  handy for looking back / for parents. The picked day is ringed.
+- **Trend follows the range**: the Overview trend line is 7 days when "7 days" is selected, 30 otherwise,
+  and hovering it shows a marker dot on the day under the cursor.
+- **Day timeline** only shows for a single day (Today / Yesterday) - it's hidden for the 7 / 30-day ranges
+  where the bars and heatmap already cover the span.
+- **Mis-click grace**: after turning a protection switch stricter (SafeSearch, a word list, a blocklist),
+  you have ~10 seconds to switch it back without the Anti-Bypass challenge; after that it needs the challenge.
+
 ## 0.38.0 - 2026-09-19 19:43
 - **Lockdown can't be blocked**: lockdown.exe / lockdownservice.exe are protected, so you can't add them as
   a blocked app (or have a mode close them) and soft-lock yourself out.

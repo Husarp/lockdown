@@ -240,14 +240,20 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             self.refresh()
 
     def _store(self, cfg: dict, what: str):
-        """Save; switching a list off / allowing a site loosens blocks, so that goes through Anti-Bypass."""
+        """Save; switching a list off / allowing a site loosens blocks, so that goes through Anti-Bypass (unless it
+        undoes a tightening from a few seconds ago - a mis-click grace)."""
+        old = protection.settings(self.db)
+
         def save():   # (the service may have updated the lists' info meanwhile: keep that)
             protection.save_settings(self.db, {**protection.settings(self.db), "enabled": cfg["enabled"],
                                                "allowed": cfg["allowed"], "custom": cfg["custom"]})
             self.refresh()
-        if antibypass.protection_looser(protection.settings(self.db), cfg):
+        key = (sorted(cfg["enabled"]), sorted(cfg["allowed"]), cfg["custom"])
+        if antibypass.protection_looser(old, cfg) and not self.page.app.grace_ok("protection", key):
             self.page.app.guard([what], save, self.refresh)
         else:
+            if not antibypass.protection_looser(old, cfg):   # a tightening: remember how to undo it quickly
+                self.page.app.grace_note("protection", (sorted(old["enabled"]), sorted(old["allowed"]), old["custom"]))
             save()
 
     def _save(self):

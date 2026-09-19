@@ -207,10 +207,30 @@ class TrendLine(Chart):
         super().__init__(master, height=height)
         self.days: list[tuple] = []
         self.goal: float | None = None
+        self.points: list[tuple[float, float]] = []   # each day's data point (canvas px), for the hover marker
+        self._marker = None
+        self.bind("<Leave>", lambda e: self._clear_marker(), add="+")
 
     def set(self, days, goal: float | None):
         self.days, self.goal = days, goal
+        self._marker = None   # the old marker id is dropped when the canvas is redrawn
         self._schedule()
+
+    def _clear_marker(self):
+        if self._marker is not None:
+            self.delete(self._marker)
+            self._marker = None
+
+    def _hover(self, event):
+        super()._hover(event)   # the tooltip
+        self._clear_marker()
+        i = next((k for k, (x0, y0, x1, y1, _t) in enumerate(self.hits) if x0 <= event.x <= x1 and y0 <= event.y <= y1),
+                 None)
+        if i is not None and i < len(self.points):   # a filled dot on the day under the cursor
+            x, y = self.points[i]
+            r = self.px(4)
+            self._marker = self.create_oval(x - r, y - r, x + r, y + r, fill=theme.pick(theme.ACCENT),
+                                            outline=self.bg, width=max(1, int(self.s * 2)))
 
     def draw(self, w, h):
         if len(self.days) < 2:
@@ -250,6 +270,7 @@ class TrendLine(Chart):
             if i == 0 or i == n - 1 or i % 7 == 0:
                 self.text(x, bottom + self.px(4), label)
             self.hit(xs[i] - (right - left) / (2 * n), 0, xs[i] + (right - left) / (2 * n), h, tip)
+        self.points = pts   # for the hover marker (canvas px, same frame as the tooltip hit boxes)
 
 
 class Heatmap(Chart):
@@ -308,18 +329,29 @@ class MonthCalendar(Chart):
     LEVELS = (1, 2, 4, 6)   # hours: below 1 = level 0 ... 6 h and more = level 4
     WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
-    def __init__(self, master):
+    def __init__(self, master, on_click=None):
         super().__init__(master, height=330)
         self.first: date | None = None
         self.per_day: dict[date, float] = {}
         self.goal: float | None = None
         self.today: date | None = None
         self.tip_of = lambda d, sec: ""
+        self.on_click = on_click
+        self.click_hits: list[tuple[float, float, float, float, date]] = []
+        self.selected: date | None = None
+        self.bind("<Button-1>", self._click)
 
     def set(self, first: date, per_day: dict[date, float], goal: float | None, today: date, tip_of):
         """first: the month's 1st day; per_day: active seconds; tip_of(day, seconds) -> tooltip text."""
         self.first, self.per_day, self.goal, self.today, self.tip_of = first, per_day, goal, today, tip_of
         self._schedule()
+
+    def _click(self, event):
+        day = next((d for x0, y0, x1, y1, d in self.click_hits if x0 <= event.x <= x1 and y0 <= event.y <= y1), None)
+        if day and self.on_click:
+            self.selected = day
+            self.on_click(day)
+            self._schedule()
 
     def draw(self, w, h):
         if not self.first:
@@ -328,6 +360,7 @@ class MonthCalendar(Chart):
         from stats import hm
         palette = theme.HEAT[1] if ctk.get_appearance_mode() == "Dark" else theme.HEAT[0]
         weeks = calendar.Calendar().monthdatescalendar(self.first.year, self.first.month)
+        self.click_hits = []
         top = self.fh + self.px(8)
         cw, ch = w / 7, (h - top) / len(weeks)
         gap = self.px(4)
@@ -355,8 +388,13 @@ class MonthCalendar(Chart):
                 if sec >= 60 and not future:
                     self.text(x + cw - gap - self.px(8), y + ch - gap - self.px(6), hm(sec), "se",
                               theme.WHITE if level >= 3 else theme.MUTED)
+                if day == self.selected and not future:   # ring the day whose details are shown
+                    self.pen.rounded_rectangle([x * SS, y * SS, (x + cw - gap) * SS, (y + ch - gap) * SS],
+                                               radius=self.px(4) * SS, outline=theme.pick(theme.ACCENT),
+                                               width=max(1, int(2 * self.s * SS)))
                 if not future:
                     self.hit(x, y, x + cw - gap, y + ch - gap, self.tip_of(day, sec))
+                    self.click_hits.append((x, y, x + cw - gap, y + ch - gap, day))
 
 
 class Donut(Chart):

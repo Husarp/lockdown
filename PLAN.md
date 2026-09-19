@@ -1369,17 +1369,18 @@ Approved, still to do (no open questions):
 - [x] Limit reset time: clearer wording + cap so toggling the hour can't stack past the end of the next day
   (test_toggling_the_reset_time_cannot_stack_past_the_next_day). (0.38.0)
 - [x] Lockdown itself can't be blocked (lockdown.exe / lockdownservice.exe added to PROTECTED). (0.38.0)
-- [ ] Screen Time Calendar: click a day to see that day's details (per-app time) - for history / parents.
+- [x] Screen Time Calendar: click a day to see that day's details (per-app time) - detail panel + ringed day. (0.39.0)
 
 Proposed, need a decision (I asked "what do you think"):
-- [ ] Grace undo: after turning something stricter (e.g. SafeSearch on) you can turn it back off within ~10 s
-  without unlocking (accidental clicks); after that it needs the challenge.
+- [x] Grace undo: after turning something stricter (e.g. SafeSearch on) you can turn it back off within ~10 s
+  without unlocking (accidental clicks); after that it needs the challenge. Done 0.39.0 (keywords + protection
+  lists, via app.grace_note / grace_ok).
 - [x] Confirm dialog when changing Anti-Bypass challenge settings (so you don't accidentally set a 250-char phrase
   and lock yourself out). Done in 0.36.0 (ConfirmDialog before tightening the challenge).
 - [ ] Import settings: show a review of what would change vs current settings before applying (confirm/cancel).
 - [ ] Settings > Appearance: a live preview of a theme/accent without restarting.
-- [ ] Trend chart: hover marker (dot/line) on the day; and make it follow the Today/7/30 range selector.
-- [ ] Day timeline: only works for today (yesterday from 06:00); decide behaviour for 7 / 30-day ranges.
+- [x] Trend chart: hover marker (dot) on the day + follows the 7/30 range selector. Done 0.39.0.
+- [x] Day timeline: shown only for a single day (Today/Yesterday); hidden for 7/30-day ranges. Done 0.39.0.
 - [ ] Anti-Bypass unlocked: a ring that drains (currently a bar) - optional nicety.
 - [ ] Pass over the round-2 design again for subtle polish (edges/rounding) not yet copied.
 

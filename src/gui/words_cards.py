@@ -190,14 +190,19 @@ class WordsCards:
     # ---------- changes ----------
 
     def _store(self, cfg: dict):
-        """Save; anything that weakens the check goes through Anti-Bypass first."""
+        """Save; anything that weakens the check goes through Anti-Bypass first (unless it's undoing a tightening
+        you made a few seconds ago - a mis-click grace)."""
+        old = keywords.settings(self.db)
+
         def save():
             keywords.save(self.db, cfg)
             self.refresh()
-        changes = keywords.looser(keywords.settings(self.db), cfg)
-        if changes:
+        changes = keywords.looser(old, cfg)
+        if changes and not self.app.grace_ok("keywords", cfg):
             self.app.guard(changes, save, self.refresh)
         else:
+            if not changes and cfg != old:   # a tightening: allow a quick undo back to the old state
+                self.app.grace_note("keywords", old)
             save()
 
     def _changed(self, **values):

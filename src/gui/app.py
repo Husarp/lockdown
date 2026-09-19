@@ -56,6 +56,7 @@ EVENT_POLL_MS = 1000
 WATCH_MS = 5000
 MINIMIZE_MS = 250
 GC_MS = 2000
+GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
 TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
 APP_ID = "Lockdown.App"   # Windows app identity (matches main.py); used to clear only our own notifications
@@ -92,6 +93,7 @@ class LockdownApp(ctk.CTk):
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         self.last_event_id = self.db.last_block_event_id()  # only notify about new visits
         self.last_alert: dict[int, float] = {}               # item id -> when last notified
+        self._grace: dict[str, tuple] = {}                   # domain -> (revert-to state, expiry) for grace-undo
         self.popup: Popup | None = None
 
         self.grid_columnconfigure(1, weight=1)
@@ -345,6 +347,20 @@ class LockdownApp(ctk.CTk):
             self.challenge.destroy()
         self.deiconify()   # (tray Exit while the window is hidden)
         self.challenge = ChallengeWindow(self, changes, proceed, cancel)
+
+    def grace_note(self, domain: str, revert_to):
+        """Remember the state to revert to after a tightening change, so an accidental toggle can be undone within
+        a few seconds without the Anti-Bypass challenge (see grace_ok)."""
+        self._grace[domain] = (revert_to, time.monotonic() + GRACE_SEC)
+
+    def grace_ok(self, domain: str, new_state) -> bool:
+        """True if `new_state` exactly reverts a tightening made in this domain in the last few seconds - then the
+        loosening is allowed without the challenge (and the grace is spent)."""
+        state, until = self._grace.get(domain, (None, 0))
+        if state == new_state and time.monotonic() < until:
+            del self._grace[domain]
+            return True
+        return False
 
     def refresh_antibypass(self):
         if "Anti-Bypass" in self.pages:

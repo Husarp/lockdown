@@ -68,6 +68,18 @@ def _legend_row(parent):
     return f
 
 
+def _day_row(parent):
+    """One app's time on a day, for the calendar day-details panel."""
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.icon = ctk.CTkLabel(f, text="", width=24)
+    f.icon.pack(side="left")
+    f.name = ctk.CTkLabel(f, text="", height=18, anchor="w")
+    f.name.pack(side="left", padx=(6, 0))
+    f.time = ctk.CTkLabel(f, text="", font=theme.semi(12), height=18)
+    f.time.pack(side="right")
+    return f
+
+
 class Context:
     """Everything a tab needs for one refresh."""
 
@@ -109,9 +121,9 @@ class OverviewView(ctk.CTkScrollableFrame):
         self.timeline_card.pack(fill="x", pady=(0, 12))
         self.timeline = TimelineBar(self.timeline_card.body)
         self.timeline.pack(fill="x")
-        card = Card(left, "Active hours - last 7 days")
-        card.pack(fill="x")
-        self.heat = Heatmap(card.body)
+        self.heat_card = Card(left, "Active hours - last 7 days")
+        self.heat_card.pack(fill="x")
+        self.heat = Heatmap(self.heat_card.body)
         self.heat.pack(fill="x")
         self.bars_card = Card(right, "Last 7 days")
         self.bars_card.pack(fill="x", pady=(0, 12))
@@ -145,12 +157,18 @@ class OverviewView(ctk.CTkScrollableFrame):
         n = 30 if c.range == "30 days" else 7
         first = c.today - timedelta(days=n - 1)
         span_rows = stats.activity(c.db, first, c.today + timedelta(days=1))   # bars, heatmap, today's timeline
-        day = c.start if single_day else c.today
-        day_rows = c.rows if single_day else [r for r in span_rows if r["minute"][:10] == day.isoformat()]
-        self.timeline_card.title.configure(text="Day timeline" if single_day else "Day timeline - today")
-        start_hour = min(6, int(day_rows[0]["minute"][11:13])) if day_rows else 6
-        self.timeline.set(stats.timeline(day_rows, day, c.category_of_row), start_hour,
-                          {**c.colors, "idle": theme.TRACK}, {**c.names, "idle": "Idle"})
+        # the day timeline only makes sense for a single day - hide it for the 7 / 30-day ranges (the bars and
+        # the heatmap cover those). For Today / Yesterday it shows that day from the first activity (or 06:00).
+        if single_day:
+            day, day_rows = c.start, c.rows
+            self.timeline_card.title.configure(text="Day timeline")
+            start_hour = min(6, int(day_rows[0]["minute"][11:13])) if day_rows else 6
+            self.timeline.set(stats.timeline(day_rows, day, c.category_of_row), start_hour,
+                              {**c.colors, "idle": theme.TRACK}, {**c.names, "idle": "Idle"})
+            if not self.timeline_card.winfo_manager():
+                self.timeline_card.pack(fill="x", pady=(0, 12), before=self.heat_card)
+        else:
+            self.timeline_card.pack_forget()
 
         week = [c.today - timedelta(days=6 - i) for i in range(7)]
         week_rows = [r for r in span_rows if r["minute"][:10] >= week[0].isoformat()]
@@ -181,13 +199,16 @@ class OverviewView(ctk.CTkScrollableFrame):
         self._update_trend(c)
 
     def _update_trend(self, c: Context):
-        """The 30-day line, its 7-day average and a "vs last week" figure (down = green = improving)."""
-        first = c.today - timedelta(days=29)
+        """The trend line, its 7-day average and a "vs last week" figure (down = green = improving). The window
+        follows the range selector: 7 days for "7 days", otherwise 30 (a single day isn't a trend)."""
+        span = 7 if c.range == "7 days" else 30
+        self.trend_card.title.configure(text=f"Trend - last {span} days")
+        first = c.today - timedelta(days=span - 1)
         per_day = stats.per_day(stats.activity(c.db, first, c.today + timedelta(days=1)))
-        days = [first + timedelta(days=i) for i in range(30)]
+        days = [first + timedelta(days=i) for i in range(span)]
         vals = [per_day.get(d.isoformat(), 0) for d in days]
         unlocks = unlocks_per_day(c.db, first)
-        avg7 = [sum(vals[max(0, i - 6):i + 1]) / len(vals[max(0, i - 6):i + 1]) for i in range(30)]
+        avg7 = [sum(vals[max(0, i - 6):i + 1]) / len(vals[max(0, i - 6):i + 1]) for i in range(span)]
         self.trend.set([(str(d.day), vals[i], day_tip(d, vals[i]), avg7[i], unlocks.get(d, 0))
                         for i, d in enumerate(days)], goal_seconds(c.db))
         last7, prev7 = sum(vals[-7:]) / 7, sum(vals[-14:-7]) / 7
@@ -397,10 +418,34 @@ class CalendarView(ctk.CTkScrollableFrame):
         self.title = card.title
         help_icon(head, "Each day is coloured by its active screen time (darker = more); days over your daily goal "
                         "have a red dot. Hover a day for its time.").pack(side="left")
-        self.cal = MonthCalendar(card.body)
+        self.cal = MonthCalendar(card.body, on_click=self._show_day)
         self.cal.pack(fill="x")
         self.stats = _stat_row(self, ["This month", "Average day", "Within goal", "Busiest day"])
+        self.detail = Card(self, "Day details", note="")
+        self.detail.pack(fill="x", pady=(12, 0))
+        self.detail_hint = ctk.CTkLabel(self.detail.body, text="Click a day to see what you spent time on.",
+                                        text_color=theme.MUTED)
+        self.detail_hint.pack(anchor="w")
+        self.detail_rows = Rows(self.detail.body, _day_row, item_pack={"fill": "x", "pady": 3})
         self.ctx = None
+
+    def _show_day(self, day):
+        c = self.ctx
+        if not c:
+            return
+        rows = stats.activity(c.db, day, day + timedelta(days=1))
+        active, _total = stats.totals(rows)
+        ranked = [(n, s) for n, s in stats.per_app(rows).most_common(10) if s >= 60]
+        self.detail.title.configure(text=day.strftime("%A %d %b %Y"))
+        self.detail.note.configure(text=f"{stats.hm(active)} active" if active else "nothing recorded")
+        self.detail_hint.pack_forget()
+        for row, (name, sec) in zip(self.detail_rows.take(len(ranked)), ranked):
+            row.icon.configure(image=appinfo.icon_of("app", name, c.items, 20))
+            row.name.configure(text=appinfo.name_of("app", name, c.items))
+            row.time.configure(text=stats.hm(sec))
+        if not ranked:
+            self.detail_hint.configure(text="Nothing recorded that day.")
+            self.detail_hint.pack(anchor="w")
 
     def _step(self, months: int):
         m = self.month.month - 1 + months
