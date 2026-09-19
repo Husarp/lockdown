@@ -1246,13 +1246,24 @@ sites that you have visited"). Windows' own + local traffic hidden by default; b
 - Dropped: UDP (no remote address in Windows' table; browsers use TCP since QUIC is off), "Lookup domain info" (WHOIS)
 
 ### Phase 6 — Modes & Reminders
-- [ ] Built-in modes (Work, Study, Focus/Pomodoro, DND, Relax)
-- [ ] Custom mode creation
-- [ ] Mode scheduling (auto-switch by time/day)
-- [ ] Quick-switch from tray
+Approved 2026-09-19 (all suggestions OK): 6a Modes, then 6b Reminders. A mode blocks a category (e.g. Distracting)
+plus picked sites/apps/groups while it's on; one mode at a time; start from the Modes page or tray, for a time /
+until a time / until stopped (optionally locked), or on a schedule. Relax keeps the normal blockers ("allow only
+X" isn't possible with hosts-file blocking). Reminders: sleep, breaks, custom (interval / fixed time / random),
+Done / Snooze, "did you really do it?" check, quotes; popups wait while a full-screen app is in front (toast instead),
+sleep / forced-break overlays still show.
+- [x] Built-in modes (Work, Study, Focus/Pomodoro, DND, Relax)
+- [x] Custom mode creation
+- [x] Mode scheduling (auto-switch by time/day)
+- [x] Quick-switch from tray
 - [ ] Sleep reminder (bedtime, escalating alerts)
 - [ ] Break reminder (interval, forced break option)
 - [ ] Custom reminders
+
+### Protection lists (requested 2026-09-19, waiting for decisions)
+- [ ] Always-on lists of scam / phishing / malware sites (community lists, updated automatically by the service),
+  kept separate from your own blocklist; optional adult / gambling lists; "allow this site anyway" exceptions;
+  not affected by modes or the emergency unlock. Watch: very large hosts files slow Windows' DNS.
 
 ### Phase 7 — Anti-Bypass
 - [ ] Settings change window (specific hours only)

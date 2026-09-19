@@ -29,6 +29,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 - **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
   categories (productive / neutral / distracting + your own, with your colours - click a category to change it).
   Hover a chart for details. Dark and light theme (Settings > Appearance).
+- **Modes** (Phase 6a): Work / Study / Focus (Pomodoro) / Do Not Disturb / Relax + your own - each blocks a
+  category plus picked sites/apps while it's on; start for a while, until a time or until stopped (optionally locked),
+  or on a schedule; also from the tray menu.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
   cache); table or graph, filters, export; click a row to block the site/app or copy it.
 

@@ -10,6 +10,7 @@ REASONS = {  # reason -> (label in settings, text for {reason})
     "limit": ("Over its time limit", "over its time limit"),
     "switches": ("Opened too often", "opened too many times"),
     "temporary": ("Temporarily blocked", "temporarily blocked"),
+    "mode": ("Blocked by a mode", "blocked while a mode is on"),
 }
 DEFAULT_MESSAGES = {
     "permanent": "{site} is permanently blocked.",
@@ -17,6 +18,7 @@ DEFAULT_MESSAGES = {
     "limit": "{site}: time limit reached - blocked until {until}.",
     "switches": "{site}: opened too many times - blocked until {until}.",
     "temporary": "{site} is blocked for now - until {until}.",
+    "mode": "{site} is blocked while this mode is on - until {until}.",
 }
 FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "Both"}
 COOLDOWN_OPTIONS = [1, 5, 15, 30, 60]

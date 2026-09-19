@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import customtkinter as ctk
 
+import modes
 import stats
 from gui import app_browser, appinfo, categories, icons, theme
 from gui.charts import DayBars, TimelineBar
@@ -238,6 +239,11 @@ class DashboardPage(ctk.CTkFrame):
         events = stats.switches(db, today, today + timedelta(days=1))
         if rows:
             self.date.configure(text=self.date.cget("text") + f"  ·  tracking since {rows[0]['minute'][11:]}")
+        state = modes.active(db, now)
+        if state:
+            end = state["phase"][1] if state["phase"] else state["until"]
+            what = f"{state['mode']['name']} mode" + (f", {state['phase'][0]}" if state["phase"] else "")
+            self.date.configure(text=self.date.cget("text") + f"  ·  {what}" + (f" until {end:%H:%M}" if end else ""))
 
         self._stat_cards(now, rows, events, items, groups, usage)
         self._limits(now, items, groups, usage)

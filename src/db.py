@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import modes
 from paths import DB_PATH
 from rules import RESET_KEY, TIME_FMT, LimitClock, Usage, effective_rules, item_block
 
@@ -284,15 +285,27 @@ class Database:
     # ---------- evaluation ----------
 
     def blocks(self, now: datetime | None = None) -> list[dict]:
-        """Every item (site or app) blocked at `now`: {item, reason, until, rule}."""
+        """Every item (site or app) blocked at `now`: {item, reason, until, rule} - by its own rules, its groups,
+        or the mode that's on (made-up items with id None for things a mode blocks that aren't on the list)."""
         now = now or datetime.now()
         usage = self.usage_lookup(now)
         groups = self.list_groups()
+        items = self.list_items()
         out = []
-        for item in self.list_items():
+        for item in items:
             block = item_block(effective_rules(item, groups), now, usage)
             if block:
                 out.append({"item": item, "reason": block[0], "until": block[1], "rule": block[2]})
+        state = modes.active(self, now)
+        if modes.blocking(state):
+            done = {b["item"]["id"] for b in out}
+            until = state["phase"][1] if state["phase"] else state["until"]
+            rule = {"rule_type": "mode", "group": None, "mode": state["mode"]["name"]}
+            for item in modes.targets(state["mode"], items, groups, self.categories()):
+                unlocked = usage.unlocks.get(f"item:{item['id']}")
+                if item["id"] is not None and (item["id"] in done or (unlocked and now < unlocked)):
+                    continue
+                out.append({"item": item, "reason": "mode", "until": until, "rule": rule})
         return out
 
     def active_blocks(self, now: datetime | None = None) -> dict[str, dict]:

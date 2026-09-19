@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.0 — 2026-09-19 02:22
+- **Modes** (Phase 6a): a mode blocks a category (e.g. everything marked Distracting) plus picked sites / apps / groups, on top of the normal blockers; one at a time
+  - built in: Work, Study, Focus (Pomodoro 25/5 x4 + 15, blocked only in focus rounds), Do Not Disturb (also mutes Lockdown's notifications), Relax (nothing extra); make your own
+  - start for 30 min / 1 h / 2 h / until a time / until stopped; optional "lock until it ends" (Stop is disabled; the emergency unlock still works); or on its own schedule (days + times)
+  - Modes page (now / your modes / editor), tray menu "Modes" (quick switch + Stop), Dashboard shows the mode; notifications when a mode starts / stops and when Pomodoro breaks start / end
+  - blocked visits show "blocked while this mode is on" (new alert reason, set on the Notifications page)
+- 126 tests passing
+
 ## 0.13.0 — 2026-09-19 01:55
 - **Network Log** (Phase 5): which app connected to which site in the last hour
   - the service reads Windows' TCP tables (every 2 s, own thread) with the owning app, names each address from the Windows DNS cache (the name the app looked up), and keeps one hour

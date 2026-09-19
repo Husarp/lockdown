@@ -10,12 +10,14 @@ import uiautomation  # noqa: F401
 import customtkinter as ctk
 
 import alerts
+import modes
 from blocker.apps import minimizes
 from db import Database
 from gui import theme
 from gui.blocking import BlockingPage
 from gui.dashboard import DashboardPage
 from gui.draft import Draft
+from gui.modes_page import ModesPage
 from gui.network import NetworkPage
 from gui.notifications import NotificationsPage, Popup
 from gui.screen_time import ScreenTimePage
@@ -34,7 +36,7 @@ PAGES = [
     ("Anti-Bypass", 7, "shield-check"),
     ("Screen Time", ScreenTimePage, "bar-chart-3"),
     ("Network Log", NetworkPage, "activity"),
-    ("Modes", 6, "sliders-horizontal"),
+    ("Modes", ModesPage, "sliders-horizontal"),
     ("Notifications", NotificationsPage, "bell"),
     ("Settings", SettingsPage, "settings"),
 ]
@@ -87,7 +89,9 @@ class LockdownApp(ctk.CTk):
 
         # Tray / second-launch callbacks arrive on other threads; hand them to Tk via a queue.
         self.events = events
-        self.tray = Tray(on_open=lambda: self.events.put("open"), on_exit=lambda: self.events.put("exit"))
+        self.tray = Tray(on_open=lambda: self.events.put("open"), on_exit=lambda: self.events.put("exit"),
+                         on_mode=lambda mode_id: self.events.put(("mode", mode_id)))
+        self.last_phase = None   # Pomodoro phase last announced
         self.tray.start()
         self.protocol("WM_DELETE_WINDOW", self.withdraw)  # close = minimize to tray
 
@@ -208,6 +212,14 @@ class LockdownApp(ctk.CTk):
                 self.tray.stop()
                 self.destroy()
                 return
+            elif isinstance(event, tuple) and event[0] == "mode":   # from the tray menu
+                try:
+                    if event[1]:
+                        self.start_mode(next(m for m in modes.load(self.db) if m["id"] == event[1]), None, False)
+                    else:
+                        self.stop_mode()
+                except (ValueError, StopIteration) as e:
+                    self._show(str(e) or "That mode doesn't exist any more.", force=True)
         self.after(200, self._poll_events)
 
     def _poll_status(self):
@@ -222,8 +234,17 @@ class LockdownApp(ctk.CTk):
         self.status_label.configure(
             text=("● Service running" if running else "● Service not running"),
             text_color=(theme.SUCCESS if running else theme.DANGER))
-        self.tray.update(running, f"{blocked} sites/apps blocked")
+        state = modes.active(self.db, now_from_db(self.db))
+        mode_text = f" · {state['mode']['name']} mode" if state else ""
+        self.tray.update(running, f"{blocked} sites/apps blocked{mode_text}")
+        self.tray.set_modes([(m["id"], m["name"]) for m in modes.load(self.db)],
+                            state["mode"]["id"] if state else None)
         self.after(3000, self._poll_status)
+
+    def _poll_status_once(self):
+        state = modes.active(self.db, now_from_db(self.db))
+        self.tray.set_modes([(m["id"], m["name"]) for m in modes.load(self.db)],
+                            state["mode"]["id"] if state else None)
 
     def _poll_block_events(self):
         events = self.db.block_events_after(self.last_event_id)
@@ -252,6 +273,7 @@ class LockdownApp(ctk.CTk):
         try:
             now = now_from_db(self.db)
             settings = {k: alerts.get(self.db, k) for k in alerts.DEFAULTS}
+            self._announce_phase(now)
             for message in self.watcher.check(self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now),
                                               now, self.usage_tracker.in_use, settings):
                 self._show(message)
@@ -274,7 +296,57 @@ class LockdownApp(ctk.CTk):
         finally:
             self.after(MINIMIZE_MS, self._poll_minimize)
 
-    def _show(self, message: str):
+    # ---------- modes ----------
+
+    def start_mode(self, mode: dict, until, locked: bool):
+        now = now_from_db(self.db)
+        current = modes.active(self.db, now)
+        if current and current["locked"] and not current["scheduled"]:
+            raise ValueError(f"{current['mode']['name']} is locked until {current['until']:%H:%M}.")
+        modes.start(self.db, mode["id"], now, until, locked)
+        state = modes.active(self.db, now)
+        end = state["until"] if state else until
+        self._show(f"{mode['name']} mode on" + (f" until {end:%H:%M}" if end else "") +
+                   (" (locked)" if locked and end else ""), force=True)
+        self._mode_changed()
+
+    def stop_mode(self):
+        now = now_from_db(self.db)
+        state = modes.active(self.db, now)
+        modes.stop(self.db, now)
+        if state and not state["scheduled"]:
+            self._show(f"{state['mode']['name']} mode off", force=True)
+        self._mode_changed()
+
+    def _mode_changed(self):
+        self.last_phase = None
+        for page in ("Blocking", "Dashboard", "Modes"):
+            if page in self.pages:
+                self.pages[page].refresh()
+        self._poll_status_once()
+
+    def _announce_phase(self, now):
+        """Pomodoro: say when a break starts and when focus is back."""
+        state = modes.active(self.db, now)
+        phase = (state["mode"]["id"], state["started"], state["phase"][0], state["phase"][2]) \
+            if state and state["phase"] else None
+        if phase and self.last_phase and phase != self.last_phase:
+            name, end, rnd = state["phase"]
+            if name == "focus":
+                self._show(f"Focus - round {rnd} of {state['mode']['pomodoro']['rounds']}, until {end:%H:%M}. "
+                           "Blocks are back on.", force=True)
+            else:
+                self._show(f"{name.capitalize()} until {end:%H:%M} - blocks are off.", force=True)
+        elif self.last_phase and not phase:
+            self._show("Focus session done.", force=True)
+        self.last_phase = phase
+
+    def _show(self, message: str, force: bool = False):
+        """Notification in the chosen format. Muted while a mode with "mute" is on (unless force)."""
+        if not force:
+            state = modes.active(self.db, now_from_db(self.db))
+            if state and state["mode"].get("mute"):
+                return
         fmt = alerts.get(self.db, "notify.format")
         if fmt in ("toast", "both"):
             self.tray.notify(message)
