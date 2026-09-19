@@ -41,6 +41,8 @@ class SettingsPage(ctk.CTkFrame):
         box.pack(fill="x", pady=(0, 14))
         head = ctk.CTkFrame(box, fg_color="transparent")
         head.pack(anchor="w", padx=16, pady=(12, 4))
+        from gui.components import accent_bar
+        accent_bar(head).pack(side="left", padx=(0, 9))
         ctk.CTkLabel(head, text=title, font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         if help_text:
             help_icon(head, help_text).pack(side="left", padx=8)

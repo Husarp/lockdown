@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.28.4 — 2026-09-19 14:12
+- **Round 2 redesign — phase D**: the Modes "Now" card and every mode card now use the accent top-bar card style; Settings sections get the same accent bar as the rest of the app.
+
 ## 0.28.3 — 2026-09-19 14:05
 - **Round 2 redesign — phase C**: Blocking > Add now shows the blockers as a compact **rail** on the left with one **open settings panel** on the right (accent-top card), so the form never grows past the window. Ticking a blocker opens its panel; the open one is marked with an accent bar.
 

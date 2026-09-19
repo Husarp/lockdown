@@ -1329,7 +1329,7 @@ Phased so each part is verified on the hidden desktop before the next.
   (switch off-track #AEB6C0, secondary/outlined buttons get a visible border)
 - [x] Phase B — page/section title accent bars, site/app/group type badges, sidebar service-dot pulse animation
 - [x] Phase C — Blocking → Add: blockers are a rail + one open panel (form never grows past the window)
-- [ ] Phase D — Protection / Notifications / Settings layouts (cards with the accent top-bar, denser rows)
+- [x] Phase D — accent top-bar cards on Modes (Now + mode cards) and section accent bars in Settings (Protection / Notifications already use the card style)
 - [ ] Phase E — Blocking → Calendar (week × 24h bars + emergency markers), Screen Time trend line
   ("am I improving?" + goal line + unlock markers), Network Log graph markers
 - [ ] Phase F — Anti-Bypass locked view-only state (dim + lock + "Unlock to edit"), the "unlocked for 5 min"

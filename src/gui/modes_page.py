@@ -279,7 +279,7 @@ class ModeEditor(ctk.CTkFrame):
 
 
 def _mode_card(parent):
-    c = Card(parent)
+    c = Card(parent, accent_top=True)
     c.name = ctk.CTkLabel(c.body, text="", font=theme.semi(15), anchor="w")
     c.name.pack(anchor="w", pady=(4, 0))
     c.what = ctk.CTkLabel(c.body, text="", text_color=MUTED, font=theme.body(11), anchor="w", justify="left",
@@ -313,7 +313,7 @@ class ModesPage(ctk.CTkFrame):
         self.body.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         self.reminders = RemindersView(self, self)
 
-        self.now_card = Card(self.body, "Now")
+        self.now_card = Card(self.body, "Now", accent_top=True)
         self.now_card.pack(fill="x", pady=(0, 12))
         line = ctk.CTkFrame(self.now_card.body, fg_color="transparent")
         line.pack(fill="x")
