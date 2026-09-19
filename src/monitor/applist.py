@@ -1,4 +1,4 @@
-"""Apps the user can pick to block: Start Menu shortcuts + apps with an open window."""
+"""Apps the user can pick to block: Start Menu shortcuts, installed Steam games and apps with an open window."""
 import os
 from pathlib import Path
 
@@ -35,7 +35,8 @@ def _resolve_shortcuts() -> list[tuple[str, str]]:
 
 
 def list_apps() -> list[dict]:
-    """[{name, exe, path, running}] sorted by name; one entry per exe."""
+    """[{name, exe, path, running, steam}] sorted by name; one entry per exe."""
+    from monitor import steam
     running = {}
     for _hwnd, title, path in win.top_windows():
         if path.lower().endswith(".exe"):
@@ -45,10 +46,16 @@ def list_apps() -> list[dict]:
         exe = win.exe_name(path)
         if any(w in name.lower() or w in exe for w in SKIP_WORDS):
             continue
-        apps.setdefault(exe, {"name": name, "exe": exe, "path": path, "running": exe in running})
+        apps.setdefault(exe, {"name": name, "exe": exe, "path": path, "running": exe in running, "steam": False})
+    try:
+        games = steam.games()
+    except OSError:
+        games = []
+    for game in games:   # Steam's own name wins over a shortcut's
+        apps[game["exe"]] = {**game, "running": game["exe"] in running}
     for exe, (title, path) in running.items():
         if exe not in apps:
             name = Path(path).stem.replace("_", " ").title()
-            apps[exe] = {"name": name, "exe": exe, "path": path, "running": True}
+            apps[exe] = {"name": name, "exe": exe, "path": path, "running": True, "steam": False}
     hidden = HIDDEN | PROTECTED
     return sorted((a for a in apps.values() if a["exe"] not in hidden), key=lambda a: a["name"].lower())

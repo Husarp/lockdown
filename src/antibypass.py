@@ -3,6 +3,7 @@
 Challenges (any combination, both off = Anti-Bypass off):
 - phrase: type a random phrase (no pasting). Passing it unlocks loosening changes for UNLOCK_MIN minutes.
   Optional "real keyboard only" (off by default): keys typed by a program (macros, auto-typers) are blocked.
+  Optional "3×3 grid" (off by default): one word at a time into a box picked at random (you have to click it).
 - hours: loosening changes only during the chosen time windows (e.g. Sunday 18:00-20:00).
 The emergency unlock stays outside (it has its own weekly limit). UI-free, so it can be tested."""
 import json
@@ -18,7 +19,7 @@ SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": 
 UNLOCK_MIN = 5
 EXITED_KEY = "agent.exited"   # "1" after tray Exit: the watchdog doesn't bring the tray app back until next login
 LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
-DEFAULTS = {"phrase": False, "length": 60, "real_keys": False, "hours": False,
+DEFAULTS = {"phrase": False, "length": 60, "real_keys": False, "grid": False, "hours": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "unlocked_until": None}
 _PHRASE_CHARS = string.ascii_lowercase + string.digits
 
@@ -171,5 +172,6 @@ def protection_looser(old: dict, new: dict) -> bool:
 def settings_looser(old: dict, new: dict) -> bool:
     """Anti-Bypass itself: a challenge switched off, a shorter phrase, other allowed hours."""
     return ((old["phrase"] and (not new["phrase"] or new["length"] < old["length"]
-                                or (old["real_keys"] and not new["real_keys"])))
+                                or (old["real_keys"] and not new["real_keys"])
+                                or (old["grid"] and not new["grid"])))
             or (old["hours"] and (not new["hours"] or new["windows"] != old["windows"])))

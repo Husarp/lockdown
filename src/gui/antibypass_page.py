@@ -7,6 +7,7 @@ import antibypass
 from gui import theme
 from gui.components import Card, Segmented
 from gui.real_keys import RealKeysOnly
+from gui.word_grid import WordGrid, block_paste
 from gui.rule_editors import WindowRow
 from rules import days_text, make_schedule, load_schedule
 from trusted_time import now_from_db
@@ -28,7 +29,8 @@ def hours_text(cfg: dict) -> str:
 def describe(cfg: dict) -> str:
     parts = []
     if cfg["phrase"]:
-        parts.append(f"typing a {cfg['length']}-character phrase" + (" on a real keyboard" if cfg["real_keys"] else ""))
+        parts.append(f"typing a {cfg['length']}-character phrase" + (" in a 3×3 grid" if cfg["grid"] else "")
+                     + (" on a real keyboard" if cfg["real_keys"] else ""))
     if cfg["hours"]:
         parts.append(f"only {hours_text(cfg)}")
     return "Loosening a block needs: " + " · ".join(parts) if parts else "Off - loosening a block needs nothing."
@@ -68,28 +70,37 @@ class ChallengeWindow(ctk.CTkToplevel):
             ctk.CTkButton(buttons, text="OK", width=90, command=self._cancel).pack(side="right")
         else:
             self.phrase = antibypass.new_phrase(cfg["length"])
-            ctk.CTkLabel(box, text=f"Type this phrase to continue (no pasting). It unlocks changes like this for "
-                                   f"{antibypass.UNLOCK_MIN} minutes.", justify="left", wraplength=520).pack(anchor="w")
-            ctk.CTkLabel(box, text=self.phrase, font=ctk.CTkFont("Consolas", 16), wraplength=520, justify="left",
-                         fg_color=theme.SURFACE, corner_radius=6).pack(anchor="w", fill="x", pady=8, ipadx=10, ipady=8)
-            self.entry = ctk.CTkEntry(box, font=ctk.CTkFont("Consolas", 14))
-            self.entry.pack(fill="x")
-            inner = self.entry._entry   # block pasting (keyboard, menu) - the phrase must be typed
-            for seq in ("<<Paste>>", "<Control-v>", "<Control-V>", "<Shift-Insert>", "<Button-3>", "<<PasteSelection>>"):
-                inner.bind(seq, lambda e: "break")
-            inner.bind("<KeyRelease>", lambda e: self._typed())
+            self.grid = None
+            if cfg["grid"]:
+                ctk.CTkLabel(box, text=f"Type each word into the orange box (click it first; no pasting). It unlocks "
+                                       f"changes like this for {antibypass.UNLOCK_MIN} minutes.", justify="left",
+                             wraplength=520).pack(anchor="w", pady=(0, 8))
+                self.grid = WordGrid(box, self.phrase.split(), lambda: self.go.configure(state="normal"),
+                                     self._grid_status)
+                self.grid.pack(anchor="w")
+            else:
+                ctk.CTkLabel(box, text=f"Type this phrase to continue (no pasting). It unlocks changes like this for "
+                                       f"{antibypass.UNLOCK_MIN} minutes.", justify="left", wraplength=520).pack(anchor="w")
+                ctk.CTkLabel(box, text=self.phrase, font=ctk.CTkFont("Consolas", 16), wraplength=520, justify="left",
+                             fg_color=theme.SURFACE, corner_radius=6).pack(anchor="w", fill="x", pady=8, ipadx=10,
+                                                                          ipady=8)
+                self.entry = ctk.CTkEntry(box, font=ctk.CTkFont("Consolas", 14))
+                self.entry.pack(fill="x")
+                block_paste(self.entry)   # the phrase must be typed
+                self.entry._entry.bind("<KeyRelease>", lambda e: self._typed())
             self.keys = RealKeysOnly(lambda: self.after(0, self._program_typed)) if cfg["real_keys"] else None
-            self.progress = ctk.CTkLabel(box, text=f"0 / {len(self.phrase)}", text_color=MUTED, height=18)
+            self.progress = ctk.CTkLabel(box, text=f"0 / {len(self.phrase)}", text_color=MUTED, height=18, anchor="w")
             if cfg["real_keys"]:
                 ctk.CTkLabel(box, text="Real keyboard only - keys typed by macros or other programs are blocked.",
                              text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w")
-            self.progress.pack(anchor="w", pady=(4, 0))
+            self.progress.pack(anchor="w", fill="x", pady=(4, 0))
             buttons.pack(fill="x", pady=(12, 0))
             self.go = ctk.CTkButton(buttons, text="Continue", width=110, state="disabled", command=self._pass)
             self.go.pack(side="right")
             ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self._cancel).pack(
                 side="right", padx=8)
-            self.after(100, self.entry.focus_force)
+            if not self.grid:
+                self.after(100, self.entry.focus_force)
         if app.winfo_viewable():   # (not when shown alone, e.g. by the uninstaller)
             self.transient(app)
         self.after(50, self._modal)
@@ -110,6 +121,10 @@ class ChallengeWindow(ctk.CTkToplevel):
             self.progress.configure(text="A program tried to type here - blocked. Type it yourself.",
                                     text_color=theme.DANGER)
 
+    def _grid_status(self, text: str, error: bool):
+        if hasattr(self, "progress"):
+            self.progress.configure(text=text, text_color=theme.DANGER if error else MUTED)
+
     def _typed(self):
         typed = self.entry.get()
         correct = next((i for i, (a, b) in enumerate(zip(typed, self.phrase)) if a != b), min(len(typed), len(self.phrase)))
@@ -120,7 +135,7 @@ class ChallengeWindow(ctk.CTkToplevel):
         self.go.configure(state="normal" if typed == self.phrase else "disabled")
 
     def _pass(self):
-        if self.entry.get() != self.phrase:
+        if not (self.grid.done if self.grid else self.entry.get() == self.phrase):
             return
         antibypass.unlock(self.db, now_from_db(self.db))
         self.destroy()
@@ -171,7 +186,10 @@ class AntiBypassPage(ctk.CTkFrame):
         self.length_note.pack(side="left", padx=10)
         self.real_keys = ctk.CTkCheckBox(challenges.body, text="Real keyboard only - block macros and auto-typers "
                                          "(keys typed by a program)", command=self._apply)
-        self.real_keys.pack(anchor="w", padx=(46, 0), pady=(0, 12))
+        self.real_keys.pack(anchor="w", padx=(46, 0), pady=(0, 4))
+        self.grid_box = ctk.CTkCheckBox(challenges.body, text="3×3 grid - one word at a time into a box picked at "
+                                        "random (you click it; macros can't just type blindly)", command=self._apply)
+        self.grid_box.pack(anchor="w", padx=(46, 0), pady=(0, 12))
         line.pack_configure(pady=(4, 6))
         self.hours_sw = ctk.CTkSwitch(challenges.body, text="Only during these hours", font=theme.semi(13),
                                       command=self._apply)
@@ -209,7 +227,7 @@ class AntiBypassPage(ctk.CTkFrame):
         self.refresh()
 
     def _add_row(self, days, start, end):
-        row = WindowRow(self.rows_box, days, start, end)
+        row = WindowRow(self.rows_box, days, start, end, on_remove=lambda r: (self.rows.remove(r), r.destroy()))
         row.pack(anchor="w", pady=2)
         self.rows.append(row)
 
@@ -222,6 +240,7 @@ class AntiBypassPage(ctk.CTkFrame):
         self.summary.configure(text=describe(cfg), text_color=theme.TEXT if antibypass.active(cfg) else MUTED)
         self.phrase_sw.select() if cfg["phrase"] else self.phrase_sw.deselect()
         self.real_keys.select() if cfg["real_keys"] else self.real_keys.deselect()
+        self.grid_box.select() if cfg["grid"] else self.grid_box.deselect()
         self.length.set(next((k for k, v in antibypass.LENGTHS.items() if v == cfg["length"]), "Medium"))
         self.length_note.configure(text=f"{cfg['length']} characters")
         self.hours_sw.select() if cfg["hours"] else self.hours_sw.deselect()
@@ -257,7 +276,7 @@ class AntiBypassPage(ctk.CTkFrame):
         if self.hours_sw.get() and not windows:
             raise ValueError("Turn on at least one day.")
         return {**cfg, "phrase": bool(self.phrase_sw.get()), "length": antibypass.LENGTHS[self.length.get()],
-                "real_keys": bool(self.real_keys.get()),
+                "real_keys": bool(self.real_keys.get()), "grid": bool(self.grid_box.get()),
                 "hours": bool(self.hours_sw.get()),
                 "windows": load_schedule(make_schedule("allow", windows))["windows"] if windows else cfg["windows"]}
 

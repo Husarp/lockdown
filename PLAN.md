@@ -1286,6 +1286,15 @@ sleep / forced-break overlays still show.
 - [x] Network Log scrolling glitch: the table is one native Treeview (requested 2026-09-19)
 - [x] Anti-Bypass option "Real keyboard only" (blocks macros / auto-typers in the phrase box), off by default
   (requested 2026-09-19)
+- [x] App browser: searching was slow / apps missing (Steam games have no .lnk), odd scrollbar after searching
+  (requested 2026-09-19)
+- [x] Steam games: found from Steam's libraries, blocking one closes everything in its folder (requested 2026-09-19)
+- [x] "+ Add" button not orange until a blocker is ticked - repainted when the tab is shown (couldn't reproduce;
+  requested 2026-09-19)
+- [x] "By hours" renamed "By time", all days selected by default, × removes a time window (requested 2026-09-19)
+- [x] Anti-Bypass option "3×3 grid" (one word at a time into a random box you click), off by default
+  (requested 2026-09-19)
+- [ ] Better app icon + tray icon - added to the designer brief (design/DESIGN.md 7c, requested 2026-09-19)
 - [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
   designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
 

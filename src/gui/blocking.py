@@ -321,6 +321,10 @@ class AddTab(ctk.CTkScrollableFrame):
         self.reset()
         self.after(SUMMARY_MS, self._follow_summaries)
 
+    def on_show(self):
+        # repaint the buttons: made while the tab was hidden (built in the background) they could stay unpainted
+        self.after(50, lambda: self.submit_btn.configure(fg_color=theme.ACCENT))
+
     def _toggle(self, t: str):
         """Open/close the card after its tick box changed (also used by tests)."""
         card = self.cards[t]
@@ -458,6 +462,8 @@ class BlockingPage(ctk.CTkFrame):
         for frame in self.tabs.values():
             frame.grid_forget()
         self.tabs[tab].grid(row=0, column=0, sticky="nsew")
+        if hasattr(self.tabs[tab], "on_show"):
+            self.tabs[tab].on_show()
         self.refresh()
 
     def confirm(self, text: str, immediate: bool = False):

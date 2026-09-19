@@ -131,6 +131,16 @@ Several elements don't stand out in the **light** theme - mostly white things on
 Please give light-mode tokens (switch track on/off, knob, secondary button fill/border, selected nav item) that
 keep enough contrast, and check every page in light mode. Screenshots: `screenshots/light_*.png`.
 
+## 7c. Next design round: app icon + tray icon (requested 2026-09-19)
+
+- **App icon** (window title bar, taskbar, Windows notifications, desktop shortcut): today a placeholder I drew -
+  a white shield with a check on the orange accent (`assets/lockdown.png`). Please design a proper one that reads well
+  from 16 px (title bar) to 256 px, in dark and light Windows themes. Deliver as SVG + PNGs (16, 24, 32, 48, 64, 128,
+  256) or a multi-size .ico.
+- **Tray icon** (next to the clock, 16-24 px): today just a plain green dot (service running / blocking) or red dot
+  (service not running). Please design a small Lockdown mark with those two states (and maybe a third: a mode is on)
+  that is still clear at 16 px on both a dark and a light taskbar.
+
 ## 8. Screenshots (current app)
 
 | File | Shows |

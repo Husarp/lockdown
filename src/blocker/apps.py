@@ -113,6 +113,10 @@ def helper_folder(app_path: str | None) -> str | None:
     if not app_path:
         return None
     folder = PureWindowsPath(app_path).parent
+    lowered = [p.lower() for p in folder.parts]
+    for i in range(len(lowered) - 2):   # a Steam game: its whole folder (the exe may sit in bin\win64 etc.)
+        if lowered[i:i + 2] == ["steamapps", "common"]:
+            return str(PureWindowsPath(*folder.parts[:i + 3])).lower()
     windows = PureWindowsPath(os.environ.get("SystemRoot", r"C:\Windows"))
     parts = [p.lower() for p in folder.parts[1:]]
     if len(parts) < 2 or folder == windows or windows in folder.parents:

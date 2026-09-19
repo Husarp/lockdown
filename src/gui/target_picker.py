@@ -81,6 +81,8 @@ class TargetPicker(ctk.CTkFrame):
         self.app = app
         self._set(self.entry, app["exe"])
         self._set(self.name, app["name"])
+        if app.get("steam"):   # a game can run from several exes / a launcher: close everything in its folder
+            self._set_block_type("close,background")
         self._update_block_row()
 
     def _typed(self):

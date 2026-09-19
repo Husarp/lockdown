@@ -112,6 +112,21 @@ def _exe_icon(path: str) -> Image.Image | None:
     return img.copy()
 
 
+def cache_app_icons(apps: list[dict]):
+    """Extract apps' icons to the disk cache ahead of time (background thread; no Tk objects made here)."""
+    for app in apps:
+        cached = CACHE_DIR / f"app_{app['exe']}.png"
+        if cached.exists() or not app.get("path"):
+            continue
+        try:
+            img = _exe_icon(app["path"])
+            if img:
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                img.save(cached)
+        except Exception:
+            continue
+
+
 def get_app(exe: str, path: str | None, size: int = 20) -> ctk.CTkImage:
     """Icon for an app: its exe icon (cached), else a letter icon. Never raises."""
     key = (f"app:{exe}", size)

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.22.0 — 2026-09-19 04:31
+- **Steam games** in Browse apps: read from Steam's own library list (every Steam library folder, the game's real name,
+  "· Steam" tag); the game's main .exe is guessed (named like the game, else the biggest; crash reporters,
+  installers and anti-cheat skipped). Picking one ticks "Also close its background processes", and for a Steam game
+  that means everything running from its whole game folder (launchers, second exes, e.g. tModLoader via dotnet.exe)
+- **Browse apps**: search is instant (rows reused instead of rebuilt on every key, waits until you pause typing,
+  every word must match, first 60 results + a count); the list jumps back to the top after each search (the scrollbar
+  no longer behaves oddly when there's nothing to scroll); app icons are extracted in the background
+- **By time** (was "By hours"): all seven days are selected by default; × removes a time window (also in Modes'
+  automatic times and Anti-Bypass' allowed hours)
+- **"+ Add" button** is repainted when the Add tab is shown (it could stay unpainted after being built in the
+  background)
+- **Anti-Bypass "3×3 grid"** (off by default): instead of one long line, nine boxes - a random box lights up, you
+  click it and type the word shown, then another box lights up with the next word; boxes are never focused for you
+  (Tab skips them), so a macro can't type blindly; pasting blocked; turning it off needs the challenge
+- Designer brief: a proper app icon + tray icon (DESIGN.md 7c)
+- Anti-Bypass turned off in your settings again (you asked)
+- 161 tests passing
+
 ## 0.21.0 — 2026-09-19 04:19
 - **Lockdown logo** (assets/lockdown.ico - white shield with a check on orange): Windows notifications now show the
   logo and "Lockdown" (Windows app identity registered for your user) instead of the red status dot and "Python";

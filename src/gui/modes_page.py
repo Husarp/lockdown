@@ -221,7 +221,7 @@ class ModeEditor(ctk.CTkFrame):
             self.pomo.pack_forget()
 
     def _add_window(self, days, start, end):
-        row = WindowRow(self.windows_box, days, start, end)
+        row = WindowRow(self.windows_box, days, start, end, on_remove=lambda r: (self.rows.remove(r), r.destroy()))
         row.pack(anchor="w", pady=2)
         self.rows.append(row)
 

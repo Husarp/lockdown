@@ -74,10 +74,14 @@ class DayToggle(ctk.CTkButton):
         return self.on
 
 
-class WindowRow(ctk.CTkFrame):
-    """One time window: day buttons + from/to. A window with no days on is ignored."""
+ALL_DAYS = list(range(7))
 
-    def __init__(self, master, days, start, end):
+
+class WindowRow(ctk.CTkFrame):
+    """One time window: day buttons + from/to (+ × to remove it, when on_remove is given). A window with no days on
+    is ignored."""
+
+    def __init__(self, master, days, start, end, on_remove=None):
         super().__init__(master, border_width=1, border_color=theme.BORDER, corner_radius=6, fg_color="transparent")
         # no Tk variables here: rows get destroyed, and orphaned variables warn when collected off the Tk thread
         line = ctk.CTkFrame(self, fg_color="transparent")
@@ -94,6 +98,10 @@ class WindowRow(ctk.CTkFrame):
         self.end = ctk.CTkEntry(line, width=58, justify="center")
         self.end.insert(0, end)
         self.end.pack(side="left")
+        if on_remove:
+            ctk.CTkButton(line, text="×", width=28, height=28, fg_color="transparent", hover_color=theme.SURFACE2,
+                          text_color=MUTED, font=theme.body(16), command=lambda: on_remove(self)).pack(
+                side="left", padx=(8, 0))
 
     def value(self):
         return [i for i, b in enumerate(self.day_boxes) if b.get()], self.start.get(), self.end.get()
@@ -104,15 +112,15 @@ class HoursEditor(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.mode = Segmented(self, values=list(MODES))
         self.mode.pack(anchor="w")
-        ctk.CTkLabel(self, text="these hours - end before start = overnight; turn all days off to drop a window",
+        ctk.CTkLabel(self, text="these times - end before start = overnight; × removes a time window",
                      text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w", pady=(2, 0))
         self.rows_box = ctk.CTkFrame(self, fg_color="transparent")
         self.rows_box.pack(anchor="w", pady=4)
         ctk.CTkButton(self, text="+ Add time window", width=140, **theme.OUTLINE,
-                      command=lambda: self._add_row([0, 1, 2, 3, 4], "09:00", "17:00")).pack(anchor="w")
+                      command=lambda: self._add_row(ALL_DAYS, "09:00", "17:00")).pack(anchor="w")
         allowance = ctk.CTkFrame(self, fg_color="transparent")
         allowance.pack(anchor="w", pady=(8, 0))
-        ctk.CTkLabel(allowance, text="During blocked hours, still allow").pack(side="left")
+        ctk.CTkLabel(allowance, text="During blocked times, still allow").pack(side="left")
         self.allowance = ctk.CTkEntry(allowance, width=56)
         self.allowance.pack(side="left", padx=8)
         ctk.CTkLabel(allowance, text="minutes").pack(side="left")
@@ -122,9 +130,13 @@ class HoursEditor(ctk.CTkFrame):
         self.load(None)
 
     def _add_row(self, days, start, end):
-        row = WindowRow(self.rows_box, days, start, end)
+        row = WindowRow(self.rows_box, days, start, end, on_remove=self._remove_row)
         row.pack(anchor="w", pady=2)
         self.rows.append(row)
+
+    def _remove_row(self, row):
+        self.rows.remove(row)
+        row.destroy()
 
     def load(self, rule: dict | None):
         for row in self.rows:
@@ -139,13 +151,13 @@ class HoursEditor(ctk.CTkFrame):
                 self._add_row(w["days"], w["start"], w["end"])
         else:
             self.mode.set("Allow only during")
-            self._add_row([0, 1, 2, 3, 4], "09:00", "17:00")
+            self._add_row(ALL_DAYS, "09:00", "17:00")
 
     def value(self) -> dict:
         allowance = _minutes(self.allowance.get(), 0, 1440, "Allowance")
         windows = [w for w in (r.value() for r in self.rows) if w[0]]   # windows without days are ignored
         if not windows:
-            raise ValueError("Turn on at least one day.")
+            raise ValueError("Add a time window (with at least one day on).")
         return {"rule_type": "scheduled", "schedule": make_schedule(MODES[self.mode.get()], windows),
                 "allowance_min": allowance or None}
 
@@ -331,7 +343,7 @@ class PermanentEditor(ctk.CTkFrame):
 
 EDITORS = {"scheduled": HoursEditor, "time_limit": LimitEditor, "switch_limit": SwitchEditor,
            "permanent": PermanentEditor, "temporary": TemporaryEditor}
-RULE_NAMES = {"scheduled": "By hours", "time_limit": "Time limit", "switch_limit": "Opening limit",
+RULE_NAMES = {"scheduled": "By time", "time_limit": "Time limit", "switch_limit": "Opening limit",
               "permanent": "Permanent", "temporary": "Temporary"}
 
 

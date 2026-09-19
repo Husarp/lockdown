@@ -1,13 +1,18 @@
-"""Popup for picking an app to block: Start Menu apps + apps with an open window, with icons and search."""
+"""Popup for picking an app to block: Start Menu apps, Steam games + apps with an open window, with icons and search.
+Rows are made once and reused (rebuilding hundreds of buttons on every key made searching slow); the search waits
+until you pause typing and shows the first MAX_SHOWN matches."""
 import threading
 from tkinter import filedialog
 
 import customtkinter as ctk
 
 from gui import icons, theme
+from gui.components import Rows
 from monitor import win
 
 MUTED = theme.MUTED
+MAX_SHOWN = 60
+SEARCH_DELAY_MS = 150
 _cache: list[dict] | None = None   # the app list takes a few seconds; keep it for the session
 _loading = threading.Lock()
 
@@ -23,14 +28,23 @@ def _load() -> list[dict]:
         if _cache is None:
             from monitor.applist import list_apps
             try:
-                _cache = list_apps()
+                apps = list_apps()
             except Exception:
-                _cache = []
+                apps = []
+            icons.cache_app_icons(apps)   # (first search of a broad word would otherwise extract dozens at once)
+            _cache = apps
         return _cache
 
 
+def matches(apps: list[dict], text: str) -> list[dict]:
+    """Apps whose name or exe has every word of `text`, running ones first."""
+    words = text.lower().split()
+    shown = [a for a in apps if all(w in a["name"].lower() or w in a["exe"] for w in words)]
+    return sorted(shown, key=lambda a: (not a["running"], a["name"].lower()))
+
+
 class AppBrowser(ctk.CTkToplevel):
-    """on_pick(app) with app = {name, exe, path}."""
+    """on_pick(app) with app = {name, exe, path, steam}."""
 
     def __init__(self, master, on_pick):
         super().__init__(master)
@@ -41,17 +55,25 @@ class AppBrowser(ctk.CTkToplevel):
         self.after(50, self.grab_set)
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=12, pady=(12, 6))
-        self.search = ctk.CTkEntry(top, placeholder_text="Search apps...")
+        self.search = ctk.CTkEntry(top, placeholder_text="Search apps and Steam games...")
         self.search.pack(side="left", fill="x", expand=True)
-        self.search.bind("<KeyRelease>", lambda e: self._render())
-        ctk.CTkButton(top, text="Other .exe...", width=110, fg_color="transparent", border_width=1,
-                      command=self._browse_file).pack(side="left", padx=(8, 0))
+        self.search.bind("<KeyRelease>", lambda e: self._search_soon())
+        ctk.CTkButton(top, text="Other .exe...", width=110, **theme.OUTLINE, command=self._browse_file).pack(
+            side="left", padx=(8, 0))
+        self.status = ctk.CTkLabel(self, text="Loading apps...", text_color=MUTED, height=18)
+        self.status.pack(anchor="w", padx=14)
         self.body = ctk.CTkScrollableFrame(self)
         self.body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.rows = Rows(self.body, self._make_row, "No apps found.", {"fill": "x", "pady": 1})
         self.apps: list[dict] | None = None
-        ctk.CTkLabel(self.body, text="Loading apps...", text_color=MUTED).pack(pady=20)
+        self._pending = None
         preload()
         self._wait_for_list()
+
+    def _make_row(self, parent):
+        row = ctk.CTkButton(parent, text="", anchor="w", height=32, fg_color="transparent",
+                            hover_color=theme.SURFACE2, text_color=theme.TEXT)
+        return row
 
     def _wait_for_list(self):
         """Poll from the Tk thread (Tk must not be called from the loader thread)."""
@@ -63,21 +85,26 @@ class AppBrowser(ctk.CTkToplevel):
         self.apps = _cache
         self._render()
 
+    def _search_soon(self):
+        if self._pending:
+            self.after_cancel(self._pending)
+        self._pending = self.after(SEARCH_DELAY_MS, self._render)
+
     def _render(self):
+        self._pending = None
         if self.apps is None:
             return
-        for w in self.body.winfo_children():
-            w.destroy()
-        text = self.search.get().strip().lower()
-        shown = [a for a in self.apps if text in a["name"].lower() or text in a["exe"]]
-        shown.sort(key=lambda a: (not a["running"], a["name"].lower()))   # running apps first
-        if not shown:
-            ctk.CTkLabel(self.body, text="No apps found.", text_color=MUTED).pack(pady=20)
-        for a in shown:
-            label = f"  {a['name']}   ·   {a['exe']}" + ("   ● running" if a["running"] else "")
-            ctk.CTkButton(self.body, text=label, image=icons.get_app(a["exe"], a["path"], 20), anchor="w",
-                          height=32, fg_color="transparent", hover_color=theme.SURFACE2,
-                          text_color=theme.TEXT, command=lambda a=a: self._pick(a)).pack(fill="x", pady=1)
+        found = matches(self.apps, self.search.get().strip())
+        shown = found[:MAX_SHOWN]
+        for row, a in zip(self.rows.take(len(shown)), shown):
+            label = f"  {a['name']}   ·   {a['exe']}" + ("   · Steam" if a.get("steam") else "") + \
+                    ("   ● running" if a["running"] else "")
+            row.configure(text=label, image=icons.get_app(a["exe"], a["path"], 20), command=lambda a=a: self._pick(a))
+        more = len(found) - len(shown)
+        count = f"{len(found)} app{'s' * (len(found) != 1)}"
+        self.status.configure(text=count + (f" - showing the first {len(shown)}, type to narrow down"
+                                                            if more else ""))
+        self.body._parent_canvas.yview_moveto(0)   # back to the top (a shorter list keeps no stale scroll position)
 
     def _browse_file(self):
         path = filedialog.askopenfilename(parent=self, title="Choose an app", filetypes=[("Programs", "*.exe")])
