@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.29.1 — 2026-09-19 15:20
+- **Round 2 redesign — phase F (part 1)**: the Anti-Bypass page now shows a coloured **locked / unlocked banner** - red "Locked - you can look at everything, but loosening a block needs the challenge" with an "Unlock to edit" button, or a green "Unlocked until HH:MM" with "Lock now" during the 5-minute window.
+
 ## 0.29.0 — 2026-09-19 15:05
 - **Notifications don't pile up as unread**: after a Windows notification shows, Lockdown removes *its own* entries from the Windows notification centre (the bell) a few seconds later, so one-time block/word alerts don't accumulate. Only Lockdown's notifications are cleared - never other apps'. Both display options stay (Windows notification / Lockdown popup / Both).
 

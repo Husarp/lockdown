@@ -1345,8 +1345,8 @@ Phased so each part is verified on the hidden desktop before the next.
 - [x] Phase D — accent top-bar cards on Modes (Now + mode cards) and section accent bars in Settings (Protection / Notifications already use the card style)
 - [~] Phase E — Screen Time trend line done ("am I improving?" + 7-day avg + goal line + unlock markers).
   Still to do: Blocking → Calendar (week × 24h bars + emergency markers) and Network Log graph blocked-minute markers
-- [ ] Phase F — Anti-Bypass locked view-only state (dim + lock + "Unlock to edit"), the "unlocked for 5 min"
-  banner, and the challenge / browse / suggestion / display / popup windows restyled
+- [~] Phase F — Anti-Bypass locked/unlocked banner done (red locked + "Unlock to edit" / green unlocked + "Lock now").
+  Still to do: dim view-only controls on other pages, and restyle the challenge / browse / suggestion / display / popup windows
 - Animation notes to honour (all show/hide or a repainted canvas): service-dot pulse (2.4s, stops when hidden),
   Live-dot blink (1s), Remove "Confirm?" 3s draining bar, bars/progress grow once (250ms) on page open, blocker
   panel body fades in 150ms, challenge target box border breathes (2.4s), popup slides up 14px + fades in 250ms

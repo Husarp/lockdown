@@ -139,18 +139,21 @@ class AntiBypassPage(ctk.CTkFrame):
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        status = Card(body, "Status")
-        status.pack(fill="x", pady=(0, 12))
-        self.summary = ctk.CTkLabel(status.body, text="", font=theme.semi(14), anchor="w", justify="left",
-                                    wraplength=820)
-        self.summary.pack(anchor="w")
-        line = ctk.CTkFrame(status.body, fg_color="transparent")
-        line.pack(fill="x", pady=(6, 0))
-        self.state = ctk.CTkLabel(line, text="", anchor="w")
-        self.state.pack(side="left")
-        self.lock_btn = ctk.CTkButton(line, text="Lock now", width=100, **theme.OUTLINE, command=self._lock)
-        self.unlock_btn = ctk.CTkButton(line, text=f"Unlock for {antibypass.UNLOCK_MIN} minutes", width=170,
-                                        **theme.OUTLINE, command=self._unlock)
+        self.banner = ctk.CTkFrame(body, corner_radius=4, border_width=1)
+        self.banner.pack(fill="x", pady=(0, 12))
+        strip = ctk.CTkFrame(self.banner, fg_color="transparent")
+        strip.pack(fill="x", padx=16, pady=13)
+        self.banner_icon = ctk.CTkLabel(strip, text="", width=22)
+        self.banner_icon.pack(side="left", padx=(0, 12), anchor="n")
+        texts = ctk.CTkFrame(strip, fg_color="transparent")
+        texts.pack(side="left", fill="x", expand=True)
+        self.banner_title = ctk.CTkLabel(texts, text="", font=theme.semi(14), anchor="w", justify="left",
+                                         wraplength=740)
+        self.banner_title.pack(anchor="w")
+        self.summary = ctk.CTkLabel(texts, text="", text_color=MUTED, anchor="w", justify="left", wraplength=740)
+        self.summary.pack(anchor="w", pady=(3, 0))
+        self.lock_btn = ctk.CTkButton(strip, text="Lock now", width=100, **theme.OUTLINE, command=self._lock)
+        self.unlock_btn = ctk.CTkButton(strip, text="Unlock to edit", width=130, command=self._unlock)
 
         challenges = Card(body, "Challenges")
         challenges.pack(fill="x", pady=(0, 12))
@@ -219,7 +222,6 @@ class AntiBypassPage(ctk.CTkFrame):
     def refresh(self, *_):
         cfg = antibypass.settings(self.db)
         now = now_from_db(self.db)
-        self.summary.configure(text=describe(cfg), text_color=theme.TEXT if antibypass.active(cfg) else MUTED)
         self.phrase_sw.select() if cfg["phrase"] else self.phrase_sw.deselect()
         self.grid_box.select() if cfg["grid"] else self.grid_box.deselect()
         self.length.set(next((k for k, v in antibypass.LENGTHS.items() if v == cfg["length"]), "Medium"))
@@ -236,20 +238,30 @@ class AntiBypassPage(ctk.CTkFrame):
         status = antibypass.status(cfg, now)
         until = antibypass.unlocked_until(cfg, now)
         if not antibypass.active(cfg):
-            self.state.configure(text="Turn on a challenge below.", text_color=MUTED)
+            self._banner(theme.MUTED, "Anti-Bypass is off",
+                         "Turn on a challenge below - then anything that loosens a block will need it first.")
         elif status == "closed":
             nxt = antibypass.next_hours(cfg, now)
-            self.state.configure(text="Locked - outside the allowed hours" + (f" (next: {when(nxt, now)})" if nxt else ""),
-                                 text_color=theme.BLOCKED)
+            self._banner(theme.DANGER, "Locked - outside the allowed hours",
+                         describe(cfg) + (f"   ·   next chance {when(nxt, now)}" if nxt else ""))
         elif until:
-            self.state.configure(text=f"Unlocked until {until:%H:%M} - loosening changes are allowed",
-                                 text_color=theme.WARNING)
-            self.lock_btn.pack(side="left", padx=12)
+            self._banner(theme.SUCCESS, f"Unlocked until {until:%H:%M} - loosening changes are allowed",
+                         "Changes that loosen your blocks are allowed until the timer runs out.")
+            self.lock_btn.pack(side="right")
         elif status == "phrase":
-            self.state.configure(text="Locked", text_color=theme.ALLOWED)
-            self.unlock_btn.pack(side="left", padx=12)
+            self._banner(theme.DANGER, "Locked - you can look at everything, but loosening a block needs the challenge",
+                         describe(cfg))
+            self.unlock_btn.pack(side="right")
         else:   # only allowed hours, and they're now
-            self.state.configure(text="Inside the allowed hours - loosening changes are allowed", text_color=theme.WARNING)
+            self._banner(theme.SUCCESS, "Inside the allowed hours - loosening changes are allowed", describe(cfg))
+
+    def _banner(self, color, title: str, sub: str):
+        """Tint the status banner for the current lock state (red = locked, green = unlocked, grey = off)."""
+        tint = (theme._mix(color[0], theme.BG[0], 0.88), theme._mix(color[1], theme.BG[1], 0.86))
+        self.banner.configure(fg_color=tint, border_color=color)
+        self.banner_icon.configure(image=theme.icon("shield-check", color, 20), text="")
+        self.banner_title.configure(text=title, text_color=theme.TEXT)
+        self.summary.configure(text=sub, text_color=MUTED)
 
     def _read(self) -> dict:
         cfg = antibypass.settings(self.db)
