@@ -54,9 +54,15 @@ class ChallengeWindow(ctk.CTkToplevel):
         box = ctk.CTkFrame(self, fg_color="transparent")
         box.pack(fill="both", expand=True, padx=24, pady=20)
         ctk.CTkLabel(box, text="This loosens your blocks", font=theme.card_title()).pack(anchor="w")
-        shown = changes[:5] + ([f"... and {len(changes) - 5} more"] if len(changes) > 5 else [])
-        ctk.CTkLabel(box, text="\n".join(f"•  {c}" for c in shown), justify="left", text_color=MUTED,
-                     wraplength=520).pack(anchor="w", pady=(4, 12))
+        shown = changes[:5] + ([f"and {len(changes) - 5} more"] if len(changes) > 5 else [])
+        items = ctk.CTkFrame(box, fg_color="transparent")
+        items.pack(anchor="w", fill="x", pady=(5, 12))
+        for c in shown:
+            row = ctk.CTkFrame(items, fg_color="transparent")
+            row.pack(anchor="w", fill="x")
+            ctk.CTkLabel(row, text="→", text_color=theme.ACCENT, font=theme.semi(13), width=16, anchor="w").pack(
+                side="left", anchor="n")
+            ctk.CTkLabel(row, text=c, text_color=MUTED, justify="left", wraplength=496, anchor="w").pack(side="left")
         buttons = ctk.CTkFrame(box, fg_color="transparent")
         self.phrase = None
         if antibypass.status(cfg, now) == "closed":

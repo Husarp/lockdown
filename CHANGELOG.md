@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.30.2 - 2026-09-19 15:50
+- **Round 2 redesign - phase F**: the in-app pop-up now slides up and fades in at the bottom-right with an accent edge, the Lockdown mark, a "now" label and a close X (stays while the mouse is over it). The Anti-Bypass challenge window lists the changes with accent arrows to match the round-2 look.
+
 ## 0.30.1 - 2026-09-19 15:35
 - **Round 2 redesign - phase E finished**: the Network Log graph now draws the minutes that had a blocked attempt in **red** (with a small legend), so you can see at a glance when something was turned away.
 

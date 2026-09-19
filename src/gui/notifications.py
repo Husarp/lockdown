@@ -10,7 +10,7 @@ import digest
 from rules import DAY_NAMES
 
 MUTED = theme.MUTED
-POPUP_MS = 6000
+POPUP_MS = 8000
 
 
 class NotificationsPage(ctk.CTkFrame):
@@ -163,23 +163,57 @@ class NotificationsPage(ctk.CTkFrame):
 
 
 class Popup(ctk.CTkToplevel):
-    """Small always-on-top message in the bottom-right corner; click or wait to dismiss."""
+    """Small message that slides up and fades in at the bottom-right; an accent edge, the Lockdown mark and a
+    close ✕. Click it or wait (it stays while the mouse is over it) to dismiss."""
 
     def __init__(self, root, message: str):
         super().__init__(root)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        w, h = 360, 90
-        x = self.winfo_screenwidth() - w - 16
-        y = self.winfo_screenheight() - h - 64
-        self.geometry(f"{w}x{h}+{x}+{y}")
-        frame = ctk.CTkFrame(self, border_width=1)
+        try:
+            self.attributes("-alpha", 0.0)
+        except Exception:
+            pass
+        self.w, self.h = 372, 96
+        self.x = self.winfo_screenwidth() - self.w - 16
+        self.target_y = self.winfo_screenheight() - self.h - 64
+        self.geometry(f"{self.w}x{self.h}+{self.x}+{self.target_y + 14}")
+        frame = ctk.CTkFrame(self, border_width=1, corner_radius=4)
         frame.pack(fill="both", expand=True)
-        ctk.CTkLabel(frame, text="Lockdown", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=14, pady=(10, 0))
-        ctk.CTkLabel(frame, text=message, wraplength=330, justify="left").pack(anchor="w", padx=14, pady=(2, 10))
-        for widget in (self, frame, *frame.winfo_children()):
+        ctk.CTkFrame(frame, width=3, height=1, fg_color=theme.ACCENT, corner_radius=0).pack(side="left", fill="y")
+        inner = ctk.CTkFrame(frame, fg_color="transparent")
+        inner.pack(side="left", fill="both", expand=True, padx=12, pady=10)
+        head = ctk.CTkFrame(inner, fg_color="transparent")
+        head.pack(fill="x")
+        ctk.CTkLabel(head, text="", image=theme.icon("shield-check", theme.ACCENT, 15), width=15).pack(side="left")
+        ctk.CTkLabel(head, text=" Lockdown", font=theme.semi(12)).pack(side="left")
+        ctk.CTkLabel(head, text="✕", text_color=MUTED, font=theme.body(11), cursor="hand2").pack(side="right")
+        ctk.CTkLabel(head, text="now", text_color=MUTED, font=theme.body(10)).pack(side="right", padx=(0, 8))
+        ctk.CTkLabel(inner, text=message, wraplength=322, justify="left", font=theme.body(12), anchor="w").pack(
+            anchor="w", pady=(6, 0))
+        self.hovered = False
+        for widget in (self, frame, inner, head, *head.winfo_children(), *inner.winfo_children()):
             widget.bind("<Button-1>", lambda e: self.close())
-        self.after(POPUP_MS, self.close)
+        self.bind("<Enter>", lambda e: setattr(self, "hovered", True))
+        self.bind("<Leave>", lambda e: (setattr(self, "hovered", False), self.after(POPUP_MS, self._maybe_close)))
+        self._animate(0)
+        self.after(POPUP_MS, self._maybe_close)
+
+    def _animate(self, step: int):
+        if not self.winfo_exists():
+            return
+        frac = min(1.0, step / 6)
+        self.geometry(f"{self.w}x{self.h}+{self.x}+{int(self.target_y + 14 * (1 - frac))}")
+        try:
+            self.attributes("-alpha", frac)
+        except Exception:
+            pass
+        if frac < 1.0:
+            self.after(22, lambda: self._animate(step + 1))
+
+    def _maybe_close(self):
+        if not self.hovered:
+            self.close()
 
     def close(self):
         if self.winfo_exists():
