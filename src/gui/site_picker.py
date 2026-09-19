@@ -1,6 +1,8 @@
 """Site input with suggestions (popular + previously blocked sites) and the "Popular sites" popup."""
 import customtkinter as ctk
 
+import search
+
 from gui import icons, theme
 from importer.popular import POPULAR_SITES
 
@@ -51,14 +53,14 @@ class SiteEntry(ctk.CTkEntry):
         text = text.strip().lower()
         if not text:
             return []
-        seen, out = set(), []
+        seen, entries = set(), []
         mine = [(h["display_name"], h["hostname"], True) for h in self.db.history()]
         for name, host, is_mine in mine + [(n, h, False) for n, h in popular_entries()]:
-            if host in seen or (text not in host and text not in name.lower()):
-                continue
-            seen.add(host)
-            out.append((name, host, is_mine))
-        return out[:MAX_SUGGESTIONS]
+            if host not in seen:
+                seen.add(host)
+                entries.append((name, host, is_mine))
+        # small typos are fine ("yotube" -> youtube.com); exact matches first
+        return search.rank(entries, text, lambda e: f"{e[0]} {e[1]}")[:MAX_SUGGESTIONS]
 
     def _on_key(self, event):
         if event.keysym in ("Return", "Escape", "Tab"):

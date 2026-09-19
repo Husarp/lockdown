@@ -6,6 +6,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+import search
 from gui import icons, theme
 from gui.components import Rows
 from monitor import win
@@ -37,10 +38,10 @@ def _load() -> list[dict]:
 
 
 def matches(apps: list[dict], text: str) -> list[dict]:
-    """Apps whose name or exe has every word of `text`, running ones first."""
-    words = text.lower().split()
-    shown = [a for a in apps if all(w in a["name"].lower() or w in a["exe"] for w in words)]
-    return sorted(shown, key=lambda a: (not a["running"], a["name"].lower()))
+    """Apps matching `text` (small typos are fine), best first; then running ones, then by name. Steam games also
+    match "steam" - listed after Steam itself."""
+    return search.rank(apps, text, lambda a: f"{a['name']} {a['exe']}" + (" steam" if a.get("steam") else ""),
+                       tie=lambda a: (bool(a.get("steam")), not a["running"], a["name"].lower()))
 
 
 class AppBrowser(ctk.CTkToplevel):
@@ -73,6 +74,9 @@ class AppBrowser(ctk.CTkToplevel):
     def _make_row(self, parent):
         row = ctk.CTkButton(parent, text="", anchor="w", height=32, fg_color="transparent",
                             hover_color=theme.SURFACE2, text_color=theme.TEXT)
+        row.running = ctk.CTkLabel(row, text="● running", text_color=theme.SUCCESS, font=theme.body(11),
+                                   fg_color="transparent", height=16)
+        row.running.bind("<Button-1>", lambda e, r=row: r.invoke())
         return row
 
     def _wait_for_list(self):
@@ -97,9 +101,12 @@ class AppBrowser(ctk.CTkToplevel):
         found = matches(self.apps, self.search.get().strip())
         shown = found[:MAX_SHOWN]
         for row, a in zip(self.rows.take(len(shown)), shown):
-            label = f"  {a['name']}   ·   {a['exe']}" + ("   · Steam" if a.get("steam") else "") + \
-                    ("   ● running" if a["running"] else "")
+            label = f"  {a['name']}   ·   {a['exe']}" + ("   · Steam" if a.get("steam") else "")
             row.configure(text=label, image=icons.get_app(a["exe"], a["path"], 20), command=lambda a=a: self._pick(a))
+            if a["running"]:   # small green tag at the right end
+                row.running.place(relx=1.0, rely=0.5, x=-12, anchor="e")
+            else:
+                row.running.place_forget()
         more = len(found) - len(shown)
         count = f"{len(found)} app{'s' * (len(found) != 1)}"
         self.status.configure(text=count + (f" - showing the first {len(shown)}, type to narrow down"

@@ -71,6 +71,8 @@ def challenge(text: str) -> int:
     theme.apply()
     root = ctk.CTk()
     root.db = db
+    from gui import shortcuts
+    shortcuts.install(root)
     root.withdraw()
     passed = []
     ChallengeWindow(root, [text], lambda: passed.append(True), root.destroy)

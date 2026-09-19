@@ -23,6 +23,7 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augus
 GOAL_KEY = "stats.goal_hours"      # daily screen-time goal, "0" = off
 DEFAULT_GOAL_HOURS = "5"
 TASK_NAME = "Lockdown Enforcer"
+VISITS_OPEN_KEY = "dash.visits_open"   # "1": the list of blocked visits is shown (default: only the count)
 BANNER_BG = ("#FBEEE8", "#2A1E19")
 
 
@@ -176,7 +177,12 @@ class DashboardPage(ctk.CTkFrame):
         self.visits = Card(right, "Blocked visits today")
         self.visits.pack(fill="x", pady=(0, 12))
         self.visits.note.configure(font=theme.numeral(22), text_color=theme.ACCENT)
+        # the list is hidden until you click Show (the count is always there); the choice is remembered
+        self.visits_toggle = ctk.CTkButton(self.visits.title.master, text="", width=60, height=24, **theme.OUTLINE,
+                                           command=self._toggle_visits)
+        self.visits_toggle.pack(side="right", padx=(0, 10))
         self.visit_rows = Rows(self.visits.body, _visit_row, "No blocked visits today.", {"fill": "x", "pady": 1})
+        self._show_visits(self.db.get_setting(VISITS_OPEN_KEY, "0") == "1")
         self.glance = Card(right, "At a glance")
         self.glance.pack(fill="x")
         self.glance_rows = Rows(self.glance.body, _glance_entry, "Not enough data yet.", {"anchor": "w"})
@@ -400,6 +406,18 @@ class DashboardPage(ctk.CTkFrame):
                 row.sub.pack(anchor="w")
             else:
                 row.sub.pack_forget()
+
+    def _toggle_visits(self):
+        opened = self.visits_toggle.cget("text") == "Show"
+        self.db.set_setting(VISITS_OPEN_KEY, "1" if opened else "0")
+        self._show_visits(opened)
+
+    def _show_visits(self, opened: bool):
+        self.visits_toggle.configure(text="Hide" if opened else "Show")
+        if opened:
+            self.visit_rows.frame.pack(fill="x")
+        else:
+            self.visit_rows.frame.pack_forget()
 
     def _visits(self, today, items):
         events = stats.blocked_events(self.db, today)

@@ -1294,6 +1294,15 @@ sleep / forced-break overlays still show.
 - [x] "By hours" renamed "By time", all days selected by default, × removes a time window (requested 2026-09-19)
 - [x] Anti-Bypass option "3×3 grid" (one word at a time into a random box you click), off by default
   (requested 2026-09-19)
+- [x] Window didn't come back from the taskbar / Alt+Tab after minimizing while a pop-up was open (the pop-up's
+  focus grab blocked the restore) - the grab is let go while minimized (reported 2026-09-19)
+- [x] Shortcuts: Esc closes pop-ups; in text boxes Ctrl+Z / Ctrl+Y, Ctrl+Backspace / Ctrl+Delete, Ctrl+A
+  (requested 2026-09-19)
+- [x] Browse apps: typing "steam" lists every Steam game under Steam; "running" tag small and green
+  (requested 2026-09-19)
+- [x] Search tolerates small typos - Browse apps, site suggestions, Network Log, word lists (requested 2026-09-19)
+- [x] Dashboard "Blocked visits today": only the count by default, "Show" opens the list (remembered)
+  (requested 2026-09-19)
 - [ ] Better app icon + tray icon - added to the designer brief (design/DESIGN.md 7c, requested 2026-09-19)
 - [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
   designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
@@ -1322,15 +1331,23 @@ stays outside (own limit). Built: 7a + the hardening that doesn't change how set
 - Moved to Phase 8: convert the enforcement scheduled task into a real Windows Service (with PyInstaller packaging)
 
 ### Phase 8 — Import & Polish
-- [ ] GitHub blocklist import (StevenBlack, oisd, Energized)
+Proposed 2026-09-19 (waiting for OK): 8a in the app - your own lists by URL on the Protection tab (preview first),
+settings export / import + CSV exports, weekly digest, streaks, a month calendar on Screen Time, and the per-page
+display settings (show / hide / reorder cards - planned in 3.1 but never scheduled); 8b packaging - Lockdown.exe
+(PyInstaller), a real Windows service instead of the scheduled task, and an installer.
+- [ ] GitHub blocklist import (StevenBlack, oisd, Energized) - mostly done by the protection lists; left: your own
+  list by URL
 - [ ] Import from custom URL
 - [ ] Import preview (count, sample domains, categories)
 - [ ] Export settings / logs
 - [ ] Weekly digest notification
 - [ ] Streak tracker
 - [ ] Heatmap calendar view
-- [ ] SVG sidebar/UI icons (Lucide or Phosphor, pre-rendered to PNG) — Phase 1 uses a text-only sidebar
+- [x] SVG sidebar/UI icons (Lucide, pre-rendered to PNG) - done in the design batch
+- [ ] Per-page display settings (⚙: show / hide / reorder cards, default range) - planned in 3.1, never scheduled
+  (asked about 2026-09-19)
 - [ ] PyInstaller packaging (.exe)
+- [ ] Real Windows Service (moved from Phase 7)
 - [ ] Installer with service registration
 
 ---

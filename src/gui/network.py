@@ -16,6 +16,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 from PIL import ImageTk
 
+import search
 from gui import appinfo, icons, theme
 from gui.charts import MinuteBars
 from gui.components import Card, Rows, Segmented
@@ -216,7 +217,7 @@ class NetworkPage(ctk.CTkFrame):
                 continue
             if status == "Allowed" and r["blocked"] or status == "Blocked" and not r["blocked"]:
                 continue
-            if text and text not in f"{r['domain']} {r['ip']} {r['exe']} {self._app_name(r['exe'])}".lower():
+            if text and search.score(text, f"{r['domain']} {r['ip']} {r['exe']} {self._app_name(r['exe'])}") is None:
                 continue
             out.append(r)
         return out

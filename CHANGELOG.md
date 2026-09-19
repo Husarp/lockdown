@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.23.0 — 2026-09-19 04:49
+- **Fix: the window didn't come back** (taskbar / Alt+Tab) after minimizing Lockdown while a pop-up was open
+  (Browse apps, a word list, the phrase window...): the pop-up held the focus and Tk ignored Windows' "restore"; now
+  it lets go while Lockdown is minimized and takes it back when the window returns
+- **Shortcuts**: Esc closes pop-up windows (like their X / Cancel; the bedtime and forced-break screens and reminder
+  pop-ups don't); in every text box Ctrl+Z / Ctrl+Y undo / redo, Ctrl+Backspace / Ctrl+Delete delete a word,
+  Ctrl+A selects all
+- **Search forgives small typos** (1 wrong letter in 4-6 letter words, 2 in longer ones, swapped letters count as
+  one, also while still typing; exact matches first) - Browse apps, site suggestions in Add, Network Log search,
+  word list windows
+- **Browse apps**: typing "steam" lists all Steam games right under Steam; "running" is a small green tag
+- **Dashboard**: "Blocked visits today" shows only the count; "Show" opens the list (remembered)
+- 164 tests passing
+
 ## 0.22.0 — 2026-09-19 04:31
 - **Steam games** in Browse apps: read from Steam's own library list (every Steam library folder, the game's real name,
   "· Steam" tag); the game's main .exe is guessed (named like the game, else the biggest; crash reporters,

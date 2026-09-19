@@ -4,6 +4,7 @@ the check (switching off, a list or word off, an exception) goes through Anti-By
 import customtkinter as ctk
 
 import keywords
+import search
 from gui import theme
 from gui.components import Card, Segmented
 from gui.widgets import clear_entry
@@ -59,8 +60,7 @@ class WordListWindow(ctk.CTkToplevel):
     def _fill(self):
         for w in self.list.winfo_children():
             w.destroy()
-        text = keywords.normalize(self.search.get().strip())
-        for word in [w for w in self.words if text in keywords.normalize(w)]:
+        for word in search.rank(self.words, self.search.get(), lambda w: w):
             if self.can_add:
                 row = ctk.CTkFrame(self.list, fg_color="transparent")
                 row.pack(fill="x")

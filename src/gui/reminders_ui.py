@@ -24,6 +24,7 @@ CHECKS = {"Off": 0, "5 min": 5, "10 min": 10, "15 min": 15, "30 min": 30}
 
 class ReminderPopup(ctk.CTkToplevel):
     """Bottom-right, always on top, stays until you answer."""
+    escape_closes = False   # (it waits for an answer)
 
     def __init__(self, root, title: str, text: str, buttons, on_answer):
         super().__init__(root)
@@ -46,6 +47,7 @@ class ReminderPopup(ctk.CTkToplevel):
 
 class Overlay(ctk.CTkToplevel):
     """Covers the screen (sleep / breaks). With no buttons it can't be closed - it goes away by itself."""
+    escape_closes = False
 
     def __init__(self, root, title: str, text: str, until: datetime | None, buttons, on_answer, now):
         super().__init__(root, fg_color=("#101316", "#0B0D10"))

@@ -15,7 +15,7 @@ import modes
 import reminders
 from blocker.apps import minimizes
 from db import Database
-from gui import theme
+from gui import shortcuts, theme
 from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
 from gui.dashboard import DashboardPage
@@ -68,6 +68,7 @@ class LockdownApp(ctk.CTk):
         self._collect_garbage()
         self.title("Lockdown")
         self.iconbitmap(default=str(theme.APP_ICON))   # (default=: every Lockdown window gets the logo)
+        shortcuts.install(self)   # Esc closes pop-ups; Ctrl+Z / Ctrl+Backspace / ... in text boxes
         self.geometry("1100x720")
         self.minsize(900, 560)
         if start_hidden:
@@ -107,6 +108,9 @@ class LockdownApp(ctk.CTk):
         self.last_phase = None   # Pomodoro phase last announced
         self.tray.start()
         self.protocol("WM_DELETE_WINDOW", self.withdraw)  # close = minimize to tray
+        # A pop-up that holds the focus (grab) makes Tk ignore the taskbar's / Alt+Tab's "restore" of the minimized
+        # window: let go of it while minimized, take it back when the window is restored.
+        self.held_grab = None   # (checked in _poll_events; doing it in <Unmap> / <Map> events can crash Tk)
 
         self.show_page("Dashboard")
         self._update_save_bar()
@@ -125,6 +129,19 @@ class LockdownApp(ctk.CTk):
         self.reminders = self.reminder_ui.engine = reminders.Engine(self.db, self.reminder_ui)
         self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
         self.after(PREBUILD_MS[0], self._prebuild)
+
+    def _check_grab(self):
+        """Minimized with a pop-up holding the focus: let go (else the taskbar / Alt+Tab can't restore the window);
+        take it back once the window is restored."""
+        iconic = self.state() == "iconic"
+        if iconic and self.held_grab is None and (grab := self.grab_current()):
+            self.held_grab = grab
+            grab.grab_release()
+        elif not iconic and self.held_grab is not None:
+            grab, self.held_grab = self.held_grab, None
+            if grab.winfo_exists():
+                grab.grab_set()
+                grab.lift()
 
     def _collect_garbage(self):
         gc.collect()
@@ -232,6 +249,7 @@ class LockdownApp(ctk.CTk):
             marker.configure(fg_color=theme.ACCENT if on else "transparent")
 
     def _poll_events(self):
+        self._check_grab()
         while not self.events.empty():
             event = self.events.get()
             if event == "open":
