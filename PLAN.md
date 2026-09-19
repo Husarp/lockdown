@@ -1334,9 +1334,9 @@ sleep / forced-break overlays still show.
   challenge, exceptions off is instant (2026-09-19)
 - [x] Single word notification instead of two ("<word> is a blocked word - closing the tab / going back");
   no second notice when "go back" escalates to closing (2026-09-19)
-- [ ] Break reminder ("time for a break"): default = snooze (customizable minutes), OK/dismiss, trust the user;
-  optional strict mode = minimize everything / block distracting apps until the break ends, with a snooze - all
-  customizable. PROPOSED, waiting for OK (design choices).
+- [x] Break reminder reworked: gentle default (Start break dismisses, customizable snooze) + Strict (limited
+  snoozes -> auto-start -> minimise all windows until over, re-minimise + "break in progress" notice). Customisable
+  every/length/snooze/max-snooze (2026-09-19)
 - [x] Word block last-tab: opens a fresh tab (Ctrl+T) before closing the only tab so the browser window stays open
   (Chromium; UIA tab count; falls back to Ctrl+W). Needs live testing on Brave (2026-09-19)
 - Already works: the URL check decodes `+` (unquote_plus) and `%xx`, lowercases, strips accents (ł->l) and splits

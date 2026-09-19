@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.33.0 - 2026-09-19 18:20
+- **Break reminders reworked** (Modes > Reminders > Breaks):
+  - **Default (gentle)**: the reminder pops up; "Start break" just closes it (it trusts you) and "Snooze" reminds you again after a customisable number of minutes.
+  - **Strict break** (off by default): allows only a set number of snoozes, then the break starts on its own; while it runs it **minimises all your windows** until the time is up, and if you open something it re-minimises it with a "Break in progress - N min left" notice.
+  - Customisable: how often, break length, snooze minutes, snoozes-before-auto-start. (Replaces the old "forced break" screen cover.)
+
 ## 0.32.1 - 2026-09-19 17:50
 - **Blocked word on the last tab no longer closes the browser**: when the tab being closed is the only one open (which would close the whole window), Lockdown opens a fresh tab first, then closes the blocked one - so the window stays. (Chromium browsers; falls back to the old behaviour elsewhere.)
 

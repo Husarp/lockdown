@@ -19,7 +19,8 @@ LATE_FIRE_MIN = 30             # a set-time reminder still fires up to 30 min la
 
 SLEEP_KEY, BREAK_KEY, CUSTOM_KEY = "reminders.sleep", "reminders.break", "reminders.custom"
 DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat": 5, "mode": ""}
-DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "forced": False, "twenty": False}
+DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "strict": False, "snooze": 5, "max_snooze": 2,
+                 "twenty": False}
 DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
                   "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
                   "check": 0, "packs": [], "quotes": ""}
@@ -87,6 +88,7 @@ class Engine:
         self.continuous = 0.0                # seconds of use since the last break
         self.twenty = 0.0
         self.break_until: datetime | None = None
+        self.break_snoozes = 0               # snoozes used for the current break prompt (strict mode limits these)
         self.snoozed: dict[str, datetime] = {}               # key -> fire again at
         self.snoozes_used: dict[str, int] = {}               # key -> snoozes since it was last done
         self.counters: dict[str, float] = {}                 # interval reminders: seconds of use so far
@@ -138,9 +140,10 @@ class Engine:
         b = load(self.db, BREAK_KEY, DEFAULT_BREAK)
         if self.break_until:
             if now >= self.break_until:
-                self._close("break-overlay")
+                self.ui.break_end()
                 self.break_until = None
                 self.continuous = 0
+                self.break_snoozes = 0
                 log(self.db, "break", "taken", now)
             return
         if not b["on"]:
@@ -161,17 +164,27 @@ class Engine:
         if now < self.snoozed.get("break", now):
             return
         if self.continuous >= b["every"] * 60 and "break" not in self.open:
-            if b["forced"]:
-                self._start_break(now, b, closable=False)
-            else:
-                self._popup("break", "Time for a break", f"You've been at the PC for {b['every']} min. "
-                                                         f"Take {b['length']} min away from the screen.",
-                            [("Start break", "start"), ("Snooze 5 min", "snooze")])
+            strict = b.get("strict")
+            snoozes_left = self.break_snoozes < b.get("max_snooze", 2)
+            if strict and not snoozes_left:
+                self._start_break(now, b)   # strict, out of snoozes -> the break starts by itself
+                return
+            buttons = [("Start break", "start")]
+            if not strict or snoozes_left:
+                buttons.append((f"Snooze {b.get('snooze', 5)} min", "snooze"))
+            self._popup("break", "Time for a break",
+                        f"You've been at the PC for {b['every']} min. Take {b['length']} min away from the screen."
+                        + (f"\n\nStrict break: {b.get('max_snooze', 2) - self.break_snoozes} snooze"
+                           f"{'s' * (b.get('max_snooze', 2) - self.break_snoozes != 1)} left, then it starts on its "
+                           "own." if strict else ""), buttons)
 
-    def _start_break(self, now, b, closable: bool):
+    def _start_break(self, now, b):
+        """A strict break: your windows are minimised until it's over (the UI enforces it)."""
         self.break_until = now + timedelta(minutes=b["length"])
-        self._overlay("break-overlay", "Break time", "Stand up, look away, stretch.", self.break_until,
-                      [("End break early", "end")] if closable else [])
+        self.break_snoozes = 0
+        self._close("break")
+        self.ui.break_start(self.break_until)
+        log(self.db, "break", "started", now)
 
     # ---------- sleep ----------
 
@@ -277,14 +290,18 @@ class Engine:
         now = self.now
         self.open.discard(key)
         if key == "break":
+            b = load(self.db, BREAK_KEY, DEFAULT_BREAK)
             if action == "start":
-                self._start_break(now, load(self.db, BREAK_KEY, DEFAULT_BREAK), closable=True)
+                if b.get("strict"):
+                    self._start_break(now, b)          # strict: enforce it (minimise windows)
+                else:                                   # gentle: trust you took it
+                    self.continuous = 0
+                    self.break_snoozes = 0
+                    log(self.db, "break", "taken", now)
             elif action == "snooze":
-                self.snoozed["break"] = now + timedelta(minutes=5)
-        elif key == "break-overlay" and action == "end":
-            self.break_until = None
-            self.continuous = 0
-            log(self.db, "break", "ended early", now)
+                self.break_snoozes += 1
+                self.snoozed["break"] = now + timedelta(minutes=b.get("snooze", 5))
+                log(self.db, "break", "snoozed", now)
         elif key == "sleep":
             s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
             night = self._night(s, now)

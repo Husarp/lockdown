@@ -429,8 +429,10 @@ class LockdownApp(ctk.CTk):
             self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
 
     def _poll_minimize(self):
-        """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front."""
+        """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front.
+        Also enforces a strict break: while one is on, anything brought to the front is sent back down."""
         try:
+            self._enforce_break()
             if self.minimize_blocks:
                 _hwnd, exe = win.foreground()
                 block = self.minimize_blocks.get(exe)
@@ -441,6 +443,20 @@ class LockdownApp(ctk.CTk):
                                  "until": until}, item["notify"])
         finally:
             self.after(MINIMIZE_MS, self._poll_minimize)
+
+    def _enforce_break(self):
+        ui = getattr(self, "reminder_ui", None)
+        until = getattr(ui, "break_until", None) if ui else None
+        if not until:
+            return
+        now = now_from_db(self.db)
+        if now >= until:   # safety net; the reminders engine also ends it on its own tick
+            return
+        if win.minimize_foreground():   # you tried to open something - send it back and say why
+            if now.timestamp() - getattr(self, "_break_notice_at", 0) > 12:
+                self._break_notice_at = now.timestamp()
+                self._show(f"Break in progress - {max(1, round((until - now).total_seconds() / 60))} min left.",
+                           force=True)
 
     # ---------- modes ----------
 

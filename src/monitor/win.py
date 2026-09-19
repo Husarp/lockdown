@@ -107,6 +107,25 @@ def minimize_app(exe: str) -> int:
     return count
 
 
+def minimize_all() -> int:
+    """Minimize every visible top-level window except Lockdown's own (used for a strict break)."""
+    count = 0
+    for hwnd, _title, _path in top_windows():
+        if window_pid(hwnd) != os.getpid() and not _user32.IsIconic(hwnd):
+            _user32.ShowWindow(hwnd, SW_MINIMIZE)
+            count += 1
+    return count
+
+
+def minimize_foreground() -> bool:
+    """Minimize the window in front unless it's Lockdown - so opening something during a strict break sends it back."""
+    hwnd = _user32.GetForegroundWindow()
+    if hwnd and window_pid(hwnd) != os.getpid() and not _user32.IsIconic(hwnd):
+        _user32.ShowWindow(hwnd, SW_MINIMIZE)
+        return True
+    return False
+
+
 def window_title(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(512)
     _user32.GetWindowTextW(hwnd, buf, 512)

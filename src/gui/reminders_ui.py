@@ -84,6 +84,7 @@ class ReminderUI:
     def __init__(self, app):
         self.app, self.windows = app, {}
         self.engine = None
+        self.break_until = None   # set during a strict break: the app minimises windows until then
 
     def popup(self, key, title, text, buttons):
         self.close(key)
@@ -101,6 +102,19 @@ class ReminderUI:
 
     def toast(self, text):
         self.app._show(text)
+
+    def break_start(self, until):
+        """Strict break: minimise everything now; the app keeps windows down until `until` (see _poll_minimize)."""
+        from monitor import win
+        self.break_until = until
+        win.minimize_all()
+        left = max(1, round((until - now_from_db(self.app.db)).total_seconds() / 60))
+        self.app._show(f"Break started - your windows are minimised for {left} min. Step away from the screen.",
+                       force=True)
+
+    def break_end(self):
+        self.break_until = None
+        self.app._show("Break over - welcome back.", force=True)
 
     def start_mode(self, mode_id, until):
         mode = next((m for m in modes.load(self.app.db) if m["id"] == mode_id), None)
@@ -182,11 +196,14 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.break_on.pack(anchor="w", pady=(0, 4))
         self.every = _option(b, "After", ["20 min", "30 min", "45 min", "60 min", "90 min"], "of use without a break")
         self.length = _option(b, "Break length", ["2 min", "5 min", "10 min", "15 min"])
-        for menu in (self.every, self.length):
+        self.snooze = _option(b, "Snooze", ["5 min", "10 min", "15 min", "20 min"], "each time")
+        for menu in (self.every, self.length, self.snooze):
             menu.configure(command=lambda v: self._save_break())
-        self.forced = ctk.CTkSwitch(b, text="Forced break: cover the screen for the whole break",
-                                    command=self._save_break)
-        self.forced.pack(anchor="w", pady=3)
+        self.strict = ctk.CTkSwitch(b, text="Strict break: minimise everything until it's over (you can't just "
+                                    "dismiss it)", command=self._save_break)
+        self.strict.pack(anchor="w", pady=3)
+        self.max_snooze = _option(b, "In a strict break, snoozes before it starts on its own", ["1", "2", "3", "5"])
+        self.max_snooze.configure(command=lambda v: self._save_break())
         self.twenty = ctk.CTkSwitch(b, text="20-20-20: every 20 min, look 20 feet (6 m) away for 20 seconds",
                                     command=self._save_break)
         self.twenty.pack(anchor="w", pady=3)
@@ -220,7 +237,9 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.break_on.select() if b["on"] else self.break_on.deselect()
         self.every.set(f"{b['every']} min")
         self.length.set(f"{b['length']} min")
-        self.forced.select() if b["forced"] else self.forced.deselect()
+        self.snooze.set(f"{b.get('snooze', 5)} min")
+        self.strict.select() if b.get("strict") else self.strict.deselect()
+        self.max_snooze.set(str(b.get("max_snooze", 2)))
         self.twenty.select() if b["twenty"] else self.twenty.deselect()
         today = datetime.combine(now_from_db(self.db).date(), datetime.min.time())
         c = reminders.counts(self.db, "break", today)
@@ -257,7 +276,8 @@ class RemindersView(ctk.CTkScrollableFrame):
     def _save_break(self):
         reminders.save(self.db, reminders.BREAK_KEY, {
             "on": bool(self.break_on.get()), "every": int(self.every.get().split()[0]),
-            "length": int(self.length.get().split()[0]), "forced": bool(self.forced.get()),
+            "length": int(self.length.get().split()[0]), "strict": bool(self.strict.get()),
+            "snooze": int(self.snooze.get().split()[0]), "max_snooze": int(self.max_snooze.get()),
             "twenty": bool(self.twenty.get())})
 
     # ---------- your reminders ----------

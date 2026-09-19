@@ -25,6 +25,12 @@ class FakeUI:
     def start_mode(self, mode_id, until):
         self.modes.append((mode_id, until))
 
+    def break_start(self, until):
+        self.shown.append(("break_start", until))
+
+    def break_end(self):
+        self.shown.append(("break_end",))
+
 
 def run(engine, start, minutes, idle=0, fullscreen=False):
     t = start
@@ -39,24 +45,27 @@ def setup(tmp_path):
     return db, ui, reminders.Engine(db, ui)
 
 
-def test_break_after_45_minutes_of_use_and_reset_when_away(tmp_path):
+def test_gentle_break_start_just_dismisses(tmp_path):
     db, ui, e = setup(tmp_path)
     t = run(e, NOW, 44)
     assert not ui.shown
-    t = run(e, t, 2)
+    run(e, t, 2)
     assert ui.shown[0][:3] == ("popup", "break", "Time for a break")
-    e.answer("break", "start")
-    assert ui.shown[-1][:2] == ("overlay", "break-overlay")
-    t = run(e, t, 6, idle=400)
-    assert "break-overlay" in ui.closed and e.continuous == 0
+    e.answer("break", "start")                          # gentle default: trust the user, no enforcement
+    assert e.continuous == 0 and e.break_until is None
+    assert not any(s[0] == "break_start" for s in ui.shown)
     assert reminders.counts(db, "break", NOW)["taken"] == 1
 
 
-def test_forced_break_has_no_way_out(tmp_path):
+def test_strict_break_starts_itself_after_the_snoozes_run_out(tmp_path):
     db, ui, e = setup(tmp_path)
-    reminders.save(db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "forced": True, "every": 30})
-    run(e, NOW, 31)
-    assert ui.shown[0] == ("overlay", "break-overlay", "Break time", e.break_until, [])
+    reminders.save(db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "strict": True, "every": 30,
+                                             "max_snooze": 1, "snooze": 5, "length": 5})
+    t = run(e, NOW, 31)
+    assert ui.shown[0][:3] == ("popup", "break", "Time for a break")
+    e.answer("break", "snooze")                         # one snooze allowed
+    run(e, t, 6)                                        # snooze passes, still using -> it starts on its own
+    assert any(s[0] == "break_start" for s in ui.shown) and e.break_until is not None
 
 
 def test_popups_wait_during_full_screen_apps(tmp_path):
