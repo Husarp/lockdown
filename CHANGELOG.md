@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.37.0 - 2026-09-19 19:35
+- **Reminders in the sidebar**: breaks, sleep and your own reminders are now their own top-level page
+  (hourglass icon) instead of a hidden tab under Modes - much easier to find. Modes now just shows modes.
+- **Editors close when you leave**: opening a mode's Start panel / editor or the reminder editor and then
+  switching pages returns to the default view, so you don't have to click Cancel first.
+
 ## 0.36.0 - 2026-09-19 18:43
 - **New sub-tabs (Round 3 design)**: the page sub-tabs (Blocking, Screen Time, Modes, Network Log) are now the
   underline / ink-bar style from the design - a row on the title line, the selected tab with an accent underline

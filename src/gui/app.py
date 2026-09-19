@@ -27,7 +27,7 @@ from gui.draft import Draft
 from gui.modes_page import ModesPage
 from gui.network import NetworkPage
 from gui.notifications import NotificationsPage, Popup
-from gui.reminders_ui import ReminderUI
+from gui.reminders_ui import ReminderUI, RemindersPage
 from gui.screen_time import ScreenTimePage
 from gui.settings import SettingsPage
 from gui.tray import Tray
@@ -46,6 +46,7 @@ PAGES = [
     ("Screen Time", ScreenTimePage, "bar-chart-3"),
     ("Network Log", NetworkPage, "activity"),
     ("Modes", ModesPage, "sliders-horizontal"),
+    ("Reminders", RemindersPage, "hourglass"),
     ("Notifications", NotificationsPage, "bell"),
     ("Settings", SettingsPage, "settings"),
 ]

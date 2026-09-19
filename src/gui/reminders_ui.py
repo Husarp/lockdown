@@ -8,7 +8,7 @@ import customtkinter as ctk
 import modes
 import reminders
 from gui import theme
-from gui.components import Card, Rows, Segmented, eyebrow
+from gui.components import Card, Rows, Segmented, eyebrow, page_head
 from gui.rule_editors import DayToggle
 from gui.widgets import ConfirmButton
 from rules import DAY_NAMES, parse_hhmm
@@ -424,3 +424,25 @@ class RemindersView(ctk.CTkScrollableFrame):
         reminders.save(self.db, reminders.CUSTOM_KEY, [x for x in items if x["id"] != r["id"]])
         self.editor.pack_forget()
         self.refresh()
+
+    def reset(self):
+        """Close the open reminder editor (so leaving the page returns it to the default view)."""
+        self.editor.pack_forget()
+
+
+class RemindersPage(ctk.CTkFrame):
+    """Sidebar page for breaks, sleep and your own reminders (was the Reminders tab under Modes)."""
+
+    def __init__(self, master, app):
+        super().__init__(master, fg_color="transparent")
+        self.app = app
+        page_head(self, "Reminders").pack(anchor="w", padx=30, pady=(12, 8))
+        self.view = RemindersView(self, app)   # RemindersView only needs .db, which the app has
+        self.view.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+
+    def on_show(self):
+        self.view.reset()
+        self.view.refresh()
+
+    def refresh(self):
+        self.view.refresh()

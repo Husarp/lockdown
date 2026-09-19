@@ -6,8 +6,7 @@ import customtkinter as ctk
 
 import modes
 from gui import categories, icons, theme
-from gui.components import Curtain, Card, Rows, Segmented, TabBar, eyebrow, help_icon, page_head
-from gui.reminders_ui import RemindersView
+from gui.components import Card, Rows, Segmented, eyebrow, help_icon, page_head
 from gui.rule_editors import MUTED, WindowRow
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
@@ -304,14 +303,10 @@ class ModesPage(ctk.CTkFrame):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
         page_head(head, "Modes").pack(side="left")
-        self.tab = TabBar(head, ["Modes", "Reminders"], command=lambda v: self._switch())
-        self.tab.set("Modes")
-        self.tab.pack(side="right", anchor="s")
         self.new_btn = ctk.CTkButton(head, text="+ New mode", width=120, command=lambda: self.open_editor(None))
-        self.new_btn.pack(side="right", padx=(0, 16))
+        self.new_btn.pack(side="right")
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.body.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
-        self.reminders = RemindersView(self, self)
 
         self.now_card = Card(self.body, "Now", accent_top=True)
         self.now_card.pack(fill="x", pady=(0, 12))
@@ -355,27 +350,11 @@ class ModesPage(ctk.CTkFrame):
     # ---------- showing ----------
 
     def on_show(self):
-        self.tab.set("Modes")   # back to Modes, not the Reminders tab
-        self._switch()          # (this refreshes)
-
-    def _switch(self):
-        reminders_tab = self.tab.get() == "Reminders"
-        (self.body if reminders_tab else self.reminders).pack_forget()
-        shown = self.reminders if reminders_tab else self.body
-        shown.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
-        if not hasattr(self, "curtain"):
-            self.curtain = Curtain(self)
-        self.curtain.cover(shown)
-        if reminders_tab:
-            self.new_btn.pack_forget()
-        else:
-            self.new_btn.pack(side="right")
+        self.start_panel.pack_forget()   # leaving and coming back returns to the default view (no open editor)
+        self.editor.pack_forget()
         self.refresh()
 
     def refresh(self):
-        if self.tab.get() == "Reminders":
-            self.reminders.refresh()
-            return
         now = now_from_db(self.db)
         all_modes = modes.load(self.db)
         names = categories.names_of(categories.load(self.db))

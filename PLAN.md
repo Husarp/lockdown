@@ -1406,17 +1406,18 @@ section-4 rebuild (Blocking Overview table, Protection tab, Calendar screen).
 ### Round 5 requests (2026-09-19, evening)
 - [ ] Verify the round-4 design changes look right with a second agent BEFORE the next feature work
   (in progress).
-- [ ] Add a piracy / "unmonitored manga & streaming" protection list (find a reputable public GitHub
-  source). Big list, catches sites the adult list misses.
-- [ ] "No site in two lists": disabling/removing a site should be a single action that works no matter
-  which list it's on (so you don't hunt through every list). NOTE: the existing "Allowed anyway"
-  overrides ALL lists already; need to decide dedup vs. rely on allow-anyway. NEEDS A DECISION.
+- [ ] Add a piracy / "unofficial streaming & reading" protection list (find a reputable public GitHub
+  source). Should cover pirated manga, manhwa, anime and similar streaming/reading sites - the big
+  long-tail the adult list misses.
+- [ ] "No site in two lists" -> DECIDED: rely on "Allowed anyway" (it already overrides ALL lists), and
+  surface a one-click Remove/Allow wherever a blocked site is shown (Check-a-site, list previews), so you
+  never hunt per-list. No fragile cross-list de-duplication.
 - [ ] Protection lists: see what's blocked - preview a list's sites, and add / remove entries yourself
   (removing needs the Anti-Bypass unlock, since it loosens).
-- [ ] Auto-close transient editors/panels when you leave a tab/page (mode editor, Start panel, add-list
-  form, etc.) so you don't have to click Cancel every time. Return to the default view on exit.
-- [ ] Discoverability: breaks live under Modes -> Reminders. Consider promoting important sub-tabs to
-  their own sidebar item (e.g. Reminders / Breaks). NEEDS A DECISION.
+- [x] Auto-close transient editors/panels when you leave a page: Modes Start panel + mode editor and the
+  reminder editor reset on on_show. (0.37.0) Blocking/Screen Time already reset to their default sub-tab.
+- [x] Promote "Reminders" (breaks / sleep / your reminders) to its own top-level sidebar item (hourglass
+  icon), removed from under Modes. (0.37.0)
 
 ## Round 2 redesign — implementing (design/Lockdown Round 2.dc.html, provided 2026-09-19)
 Phased so each part is verified on the hidden desktop before the next.
