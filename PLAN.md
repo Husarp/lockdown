@@ -1326,9 +1326,28 @@ sleep / forced-break overlays still show.
 - [x] Design round 2: 32 screenshots each dark + light (design/screenshots/round2) and the prompt in
   design/DESIGN.md section 9 - all remaining pages, locked state, badges, trend lines, weekly calendar, icons
   (requested 2026-09-19)
-- [ ] Waiting for OK (asked 2026-09-19): Settings > "Strict protection" (make the app hard to stop / uninstall)
-- [ ] Waiting for OK (asked 2026-09-19): YouTube Restricted Mode as its own switch (it always hides comments), so
-  search-engine SafeSearch can stay on while YouTube comments show
+### Strict protection ("make the app important") - approved 2026-09-19 (all 6, everything reversible with the challenge)
+One Settings > "Strict protection" master switch. Turning it ON is instant; turning it OFF, and every part below,
+needs the Anti-Bypass challenge. All parts are fully reversible (uninstall / turning off restores everything).
+The user's rule: "if there is no other way then switch and after you're done switch back" (e.g. a temporary ACL
+change that is put back afterwards).
+- [ ] 1. Service can't be stopped / deleted / reconfigured except by SYSTEM (a service security descriptor); admins
+  included. Restored when strict is off / on uninstall.
+- [ ] 2. Program files + hosts file read-only (deny write to Users via icacls); restored when off / on uninstall.
+- [ ] 3. Settings read-only for the user - only the service writes config.db. The GUI asks the service over a local
+  pipe (this is the biggest part: a small local IPC + routing GUI writes through it). Editing config.db by hand
+  then can't loosen anything. (Was the Phase 7 "service owns the settings" item.)
+- [ ] 4. Works in Safe Mode (register the service under SafeBoot\Minimal + Network so it runs there too).
+- [ ] 5. Uninstall only from inside Lockdown: grey out / block the "Apps & features" Uninstall button (NoRemove)
+  while strict is on; uninstalling still needs the challenge.
+- [ ] 6. Optional, OFF by default and separate: while locked, block the tools used to get around it (Task Manager,
+  Services, Registry Editor, cmd / PowerShell). RISK: this also removes your own recovery tools - so it must always
+  have a guaranteed way out (Safe Mode always restores them, and the challenge always turns it off). Confirm the
+  exact tool list before building.
+- Note: the strongest protection is using a standard (non-admin) Windows account day-to-day; a determined admin can
+  eventually undo anything. Lockdown doesn't need admin for itself (the service already runs as SYSTEM).
+- [ ] YouTube Restricted Mode as its own switch (it always hides comments), so search-engine SafeSearch can stay on
+  while YouTube comments show
 
 ### Phase 7 — Anti-Bypass
 Approved 2026-09-19 with changes: challenges are only "type a random phrase" and "only during these hours" (no

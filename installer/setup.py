@@ -35,10 +35,21 @@ UNINSTALL_KEY = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{APP}"
 START_MENU = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / r"Microsoft\Windows\Start Menu\Programs"
 DESKTOP = Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
+WINDIR = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+SYSTEM32 = WINDIR / "System32"
+# Windows tools by full path - the admin account's PATH may not include System32 (it didn't on one PC)
+TOOLS = {"schtasks": SYSTEM32 / "schtasks.exe", "taskkill": SYSTEM32 / "taskkill.exe", "sc": SYSTEM32 / "sc.exe",
+         "icacls": SYSTEM32 / "icacls.exe", "cmd": SYSTEM32 / "cmd.exe",
+         "powershell": SYSTEM32 / r"WindowsPowerShell\v1.0\powershell.exe", "explorer.exe": WINDIR / "explorer.exe"}
+
+
+def tool(name: str) -> str:
+    return str(TOOLS.get(name, name))
 
 
 def run(*args, check=False) -> subprocess.CompletedProcess:
-    return subprocess.run(list(args), capture_output=True, text=True, creationflags=NO_WINDOW, check=check)
+    return subprocess.run([tool(args[0]), *args[1:]], capture_output=True, text=True, creationflags=NO_WINDOW,
+                          check=check)
 
 
 def payload() -> Path:
@@ -104,7 +115,7 @@ def register_service(log):
     run("sc", "description", SERVICE, "Enforces Lockdown's blocks. Lockdown starts it again if it's stopped.")
     # watchdog: every minute, start it if it was stopped (does nothing while it runs)
     run("schtasks", "/Create", "/F", "/RU", "SYSTEM", "/SC", "MINUTE", "/MO", "1", "/TN", WATCHDOG,
-        "/TR", f"sc start {SERVICE}")
+        "/TR", f'"{tool("sc")}" start {SERVICE}')
 
 
 def shortcuts(log):
@@ -133,7 +144,7 @@ def start(log):
     run("schtasks", "/Change", "/TN", WATCHDOG, "/ENABLE")
     run("sc", "start", SERVICE)
     # the app runs as you, not as admin: let Explorer start it
-    subprocess.Popen(["explorer.exe", str(INSTALL_DIR / "Lockdown.exe")], creationflags=NO_WINDOW)
+    subprocess.Popen([tool("explorer.exe"), str(INSTALL_DIR / "Lockdown.exe")], creationflags=NO_WINDOW)
 
 
 def install(log):
@@ -185,7 +196,8 @@ def uninstall(log, delete_data: bool):
 
 def remove_program_folder():
     """This uninstaller runs from the program folder: delete it a moment after we've quit."""
-    subprocess.Popen(f'cmd /c ping 127.0.0.1 -n 3 >nul & rmdir /s /q "{INSTALL_DIR}"', creationflags=NO_WINDOW)
+    subprocess.Popen(f'"{tool("cmd")}" /c "{SYSTEM32 / "PING.EXE"}" 127.0.0.1 -n 3 >nul & rmdir /s /q "{INSTALL_DIR}"',
+                     creationflags=NO_WINDOW)
 
 
 # ---------- window ----------

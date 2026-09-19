@@ -1,6 +1,7 @@
 """Dashboard: "how am I doing today?" - stat cards, limits in progress, today's timeline, the last 7 days,
 what's coming up, blocked visits and a quick glance. Refreshed when shown and every 30 s while shown."""
 import ctypes
+import os
 import time
 from collections import Counter
 from datetime import datetime, timedelta
@@ -31,8 +32,10 @@ def start_service():
     """(Re)start the enforcement service (Windows asks for admin rights). A copy that's still running but stuck
     is ended first - otherwise Windows ignores the start, as only one copy may run."""
     from paths import FROZEN, SERVICE_NAME
-    if FROZEN:   # installed: a real Windows service
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe",
+    if FROZEN:   # installed: a real Windows service (PowerShell by full path - it isn't always on PATH)
+        powershell = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                                  r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", powershell,
                                             f"-NoProfile -Command Restart-Service -Name {SERVICE_NAME} -Force",
                                             None, 0)
         return

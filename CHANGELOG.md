@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.1 — 2026-09-19 12:44
+- **Installer fix**: `LockdownSetup.exe` failed with "[WinError 2] The system cannot find the file specified" when
+  the admin account's PATH didn't include System32 (some PCs). It now calls every Windows tool (powershell, sc,
+  schtasks, taskkill, icacls, cmd, explorer) by full path. The "Start service" button on the Dashboard was fixed
+  the same way.
+
 ## 0.27.0 — 2026-09-19 06:21
 - **Distracting by default**: every Steam game you have, plus popular sites / apps that are purely for fun (game
   launchers and games, Twitch, Netflix and other streaming, TikTok, 9gag...) - not ones also used for work or
