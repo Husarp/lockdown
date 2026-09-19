@@ -1215,19 +1215,19 @@ items, neutral otherwise, click to change; time saved = attempts x usual visit l
 Appearance setting (dark default); fonts bundled; Start service button asks for admin.
 - [x] Batch 1: new look everywhere (tokens dark + light, Inter / Barlow Condensed, Lucide sidebar icons) + Dashboard + Screen Time tabs
 - [x] Batch 2: Blocking page restyle (rule chips, collapsible blocker cards, groups split view)
-- [ ] Later, with the next designs: Settings / emergency panel / Notifications / other pages in the new style (not designed yet)
+- [x] All pages restyled in the new look (Round 2 redesign, 2026-09-19)
 - [x] Foreground window tracking (per-app time) — data collection: per-minute seconds per app/site (`activity` table)
 - [x] Mouse/keyboard activity detection (active vs idle) — active = input in the last 5 min
 - [x] Switch counting data (`switch_events` table)
 - [x] Overall screen time calculation
 - [x] Screen Time page: Overview / Apps / Websites / Switches tabs (per design/DESIGN.md)
 - [x] Per-app usage graphs (bar chart, pie chart)
-- [ ] Daily/weekly/monthly trend line graphs (7/30-day bars done; trend lines not yet)
+- [x] Trend line done (Screen Time > Overview, 30-day daily + 7-day avg + goal + unlock markers). Weekly/monthly toggle still to add.
 - [x] Category breakdown (productive/neutral/distracting)
 - [ ] Screen time limits (warning, soft lock, hard lock)
 - [x] Dashboard with stat cards and graphs
 - [x] Dashboard: "limits today" list — every time/switch limit with a progress bar, time left and % used (requested 2026-09-18)
-- [ ] Weekly block calendar: week view with coloured bars per site/app showing when each is blocked (requested 2026-09-18)
+- [x] Weekly block calendar done (Blocking > Calendar, 2026-09-19)
 - [x] Graphs (weekly / history): mark when emergency unlocks were used (requested 2026-09-18; blue dot on day bars)
 - [x] Polish (requested 2026-09-19): rounded tab highlight, smooth donut/charts, heatmap legend not cut, hover
   tooltips on charts, no giant single bars, faster tab switching
