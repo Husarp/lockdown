@@ -3,7 +3,7 @@ you open (built the first time) - fewer widgets = no lag. (Blocked visits are on
 import customtkinter as ctk
 
 from gui import theme
-from gui.components import Collapsible, Segmented, help_icon, page_head
+from gui.components import Collapsible, Segmented, help_icon, page_head, accent_bar
 
 import alerts
 import digest
@@ -29,8 +29,10 @@ class NotificationsPage(ctk.CTkFrame):
         box = ctk.CTkFrame(parent)
         box.pack(fill="x", pady=(0, 12))
         box.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(box, text="Blocked Visit Alerts", font=ctk.CTkFont(size=16, weight="bold")).grid(
-            row=0, column=0, columnspan=2, padx=16, pady=(12, 2), sticky="w")
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.grid(row=0, column=0, columnspan=2, padx=16, pady=(12, 2), sticky="w")
+        accent_bar(head).pack(side="left", padx=(0, 9))
+        ctk.CTkLabel(head, text="Blocked Visit Alerts", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         ctk.CTkLabel(box, text="Notify me when I try to open a site (or start an app) that is:", text_color=MUTED).grid(
             row=1, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
 
@@ -81,8 +83,10 @@ class NotificationsPage(ctk.CTkFrame):
     def _build_digest(self, parent):
         box = ctk.CTkFrame(parent)
         box.pack(fill="x", pady=(0, 12))
-        ctk.CTkLabel(box, text="Weekly Summary", font=ctk.CTkFont(size=16, weight="bold")).pack(
-            anchor="w", padx=16, pady=(12, 6))
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.pack(anchor="w", padx=16, pady=(12, 6))
+        accent_bar(head).pack(side="left", padx=(0, 9))
+        ctk.CTkLabel(head, text="Weekly Summary", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         line = ctk.CTkFrame(box, fg_color="transparent")
         line.pack(anchor="w", padx=16, pady=(0, 12))
         self.digest_switch = ctk.CTkSwitch(line, text="Once a week, show how it went on", command=self._save_digest)
@@ -108,8 +112,10 @@ class NotificationsPage(ctk.CTkFrame):
     def _build_warnings(self, parent):
         box = ctk.CTkFrame(parent)
         box.pack(fill="x", pady=(0, 12))
-        ctk.CTkLabel(box, text="Upcoming Blocks", font=ctk.CTkFont(size=16, weight="bold")).pack(
-            anchor="w", padx=16, pady=(12, 6))
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.pack(anchor="w", padx=16, pady=(12, 6))
+        accent_bar(head).pack(side="left", padx=(0, 9))
+        ctk.CTkLabel(head, text="Upcoming Blocks", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         warn = ctk.CTkFrame(box, fg_color="transparent")
         warn.pack(anchor="w", padx=16, pady=4)
         self.warn_switch = ctk.CTkSwitch(warn, text="Warn me", command=lambda: self.draft.set_setting(

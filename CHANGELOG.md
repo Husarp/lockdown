@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.28.6 — 2026-09-19 14:40
+- **Redesign fix (from verification pass)**: the Notifications page section titles ("Blocked Visit Alerts", "Upcoming Blocks", "Weekly Summary") now show the accent bar like every other page. A background verification agent checked all 11 pages in dark + light and found this as the only accent-bar inconsistency; everything else passed.
+
 ## 0.28.5 — 2026-09-19 14:30
 - **Round 2 redesign — phase E (part 1): Screen Time trend line**. A new "Trend - last 30 days" card shows daily screen time as a line over a filled area, with a dashed 7-day average, the daily-goal line, hollow markers on days you used an emergency unlock, and a "vs last week" figure (down = green = improving).
 
