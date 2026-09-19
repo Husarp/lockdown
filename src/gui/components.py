@@ -114,7 +114,8 @@ class Card(ctk.CTkFrame):
     """Surface card with an optional title and a muted note on the right. Content goes in `self.body`.
     `accent_top`: a 3px accent bar along the top edge (squared top corners so it never looks clipped)."""
 
-    def __init__(self, master, title: str | None = None, note: str = "", accent_top: bool = False, **kw):
+    def __init__(self, master, title: str | None = None, note: str = "", accent_top: bool = False, accent=None,
+                 **kw):
         super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=4,
                          **kw)
         if accent_top:
@@ -123,7 +124,7 @@ class Card(ctk.CTkFrame):
         if title is not None:
             head = ctk.CTkFrame(self, fg_color="transparent")
             head.pack(fill="x", padx=15, pady=(12, 4))
-            accent_bar(head).pack(side="left", padx=(0, 9))
+            accent_bar(head, color=accent).pack(side="left", padx=(0, 9))
             self.title = ctk.CTkLabel(head, text=title, font=theme.card_title(), height=20)
             self.title.pack(side="left")
             self.note = ctk.CTkLabel(head, text=note, font=theme.body(11), text_color=theme.MUTED, height=20)

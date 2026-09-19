@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.49.0 - 2026-09-20 01:35
+- **Settings (design 3j)**: two columns. Left: Appearance (theme, accent, daily goal) and "When limits reset" in
+  one card, then Categories. Right: Emergency unlock with a yellow bar and a usage meter ("2 of 3 left this
+  week · resets …"), and Backup & export. Status lines (reset error, backup result) only take space while they
+  say something.
+
 ## 0.48.1 - 2026-09-20 01:23
 - Site protection: the thin separators between list rows (and above "Your blocking lists") now actually draw -
   a 1px CTkFrame renders nothing, so hairlines are plain Tk frames (`components.hairline`).

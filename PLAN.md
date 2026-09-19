@@ -1368,7 +1368,7 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
   Live switch and the new underline tabs (user-approved).
 - [x] B5 (0.48.0, agent-reviewed; clipped label fixed 0.48.1). Notifications (3i, ~773-826): alerts as a BORDERED BOXED GRID (each alert in its own padded cell, 4
   columns), message templates open/edit in place. Currently bare checkboxes stacked.
-- [ ] B6. Settings (3j, ~827-871): TWO-column grouped layout - left: Appearance (theme + accents + daily goal in
+- [x] B6 (0.49.0, agent-reviewed PASS). Settings (3j, ~827-871): TWO-column grouped layout - left: Appearance (theme + accents + daily goal in
   one card) then "When limits reset"; right (~400px): Emergency unlock (YELLOW accent bar + a small usage
   meter "2 of 3 left") and Backup & export. Currently single column stacked.
 - [ ] B7. Small windows (3l, ~937-1050): Browse apps window (sort: all / running / games; list styling), the
