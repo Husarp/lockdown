@@ -1,9 +1,9 @@
-"""Notifications page (blocked-visit alert settings + recent visits) and the in-app popup.
-The alert messages and the recent visits are in sections you open (built the first time) - fewer widgets = no lag."""
+"""Notifications page (alert settings, weekly summary) and the in-app popup. The alert messages are in a section
+you open (built the first time) - fewer widgets = no lag. (Blocked visits are on the Dashboard.)"""
 import customtkinter as ctk
 
 from gui import theme
-from gui.components import Collapsible, Rows, Segmented, help_icon
+from gui.components import Collapsible, Segmented, help_icon
 
 import alerts
 import digest
@@ -23,9 +23,6 @@ class NotificationsPage(ctk.CTkFrame):
         body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         self.msg_entries: dict[str, ctk.CTkEntry] = {}
         self._build_settings(body)
-        self.visits = Collapsible(body, "Recent blocked visits", self._build_visits, note="last 20",
-                                  on_open=self.refresh)
-        self.visits.pack(fill="x", pady=(0, 12))
         self.load()
 
     def _build_settings(self, parent):
@@ -80,21 +77,6 @@ class NotificationsPage(ctk.CTkFrame):
             self.msg_entries[reason] = msg
         ctk.CTkLabel(parent, text="Placeholders: {site}  {reason}  {until}", text_color=MUTED).grid(
             row=len(alerts.REASONS), column=1, sticky="w")
-
-    def _build_visits(self, parent):
-        def make(frame):
-            f = ctk.CTkFrame(frame, fg_color="transparent")
-            for col, width in enumerate((150, 180, 260, 0)):
-                f.grid_columnconfigure(col, minsize=width, weight=1 if col == 3 else 0)
-            f.cells = [ctk.CTkLabel(f, text="", anchor="w", height=22) for _ in range(4)]
-            for col, cell in enumerate(f.cells):
-                cell.grid(row=0, column=col, sticky="w", padx=(0, 8))
-            return f
-        head = make(parent)
-        head.pack(fill="x")
-        for cell, text in zip(head.cells, ["Time", "Site", "Hostname", "Reason"]):
-            cell.configure(text=text, text_color=MUTED)
-        self.visit_rows = Rows(parent, make, "No blocked visits yet.")
 
     def _build_digest(self, parent):
         box = ctk.CTkFrame(parent)
@@ -169,16 +151,6 @@ class NotificationsPage(ctk.CTkFrame):
         self.warn_minutes.set(f"{s['notify.warn.minutes']} min")
         self.repeat.set(self._repeat_label(int(s["notify.warn.repeat_min"])))
         self.started_switch.select() if s["notify.started.enabled"] == "1" else self.started_switch.deselect()
-
-    def refresh(self):
-        """Recent blocked visits (only while that section is open)."""
-        if not self.visits.opened:
-            return
-        events = self.db.block_events_after(self.db.last_block_event_id() - 20)[::-1]
-        for row, e in zip(self.visit_rows.take(len(events)), events):
-            reason = alerts.REASONS.get(alerts.base_reason(e["reason"]), (e["reason"],))[0]
-            for cell, text in zip(row.cells, [e["timestamp"], e["display_name"], e["hostname"], reason]):
-                cell.configure(text=text)
 
 
 class Popup(ctk.CTkToplevel):

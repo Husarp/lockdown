@@ -28,7 +28,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   (Blocking > Overview: unblock chosen items for 20 min; 3 uses per week by default, configurable in Settings).
 
 - **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
-  categories (productive / neutral / distracting + your own, with your colours - click a category to change it).
+  categories (productive / neutral / distracting + your own, with your colours - click a category to change it). Your Steam games and purely-for-fun sites / apps (game
+  launchers, streaming, short video) start as Distracting.
   Hover a chart for details. Themes: Dark, AMOLED, Light, Match Windows + any accent colour (Settings > Appearance).
 - **Protection lists** (Blocking > Protection): always-on community lists of scam, phishing, malware and adult sites
   (gambling optional; ~4.3M sites from HaGeZi, Block List Project, Phishing Army, URLhaus), updated daily with a

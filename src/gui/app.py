@@ -12,6 +12,7 @@ import customtkinter as ctk
 import alerts
 import antibypass
 import digest
+from importer import distracting
 import modes
 import reminders
 from blocker import protection
@@ -132,6 +133,8 @@ class LockdownApp(ctk.CTk):
         self.reminders = self.reminder_ui.engine = reminders.Engine(self.db, self.reminder_ui)
         self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
         self.after(PREBUILD_MS[0], self._prebuild)
+        distracting.seed(self.db)          # games, streaming ... are Distracting by default
+        self.after(5000, self._seed_games)
 
     def _check_grab(self):
         """Minimized with a pop-up holding the focus: let go (else the taskbar / Alt+Tab can't restore the window);
@@ -233,6 +236,14 @@ class LockdownApp(ctk.CTk):
         page.grid(row=0, column=0, sticky="nsew")
         page.lower()   # (built in the background: stays behind the page you're on)
         self.pages[name] = page
+
+    def _seed_games(self):
+        """Once the app list (loaded in the background) is there: Steam games are Distracting by default."""
+        from gui import app_browser
+        if app_browser._cache is None:
+            self.after(5000, self._seed_games)
+            return
+        distracting.seed_games(self.db, [a["exe"] for a in app_browser._cache if a.get("steam")])
 
     def _prebuild(self):
         """Build pages you haven't opened yet, one at a time, so switching to them later is instant."""
@@ -364,8 +375,6 @@ class LockdownApp(ctk.CTk):
                 if event["hostname"].endswith(".exe"):
                     win.close_app(event["hostname"])   # ask nicely; the service force-closes after 10 s
                 self._alert(event, notify_override.get(event["item_id"]))
-            if "Notifications" in self.pages:
-                self.pages["Notifications"].refresh()
         self.after(EVENT_POLL_MS, self._poll_block_events)
 
     def _alert(self, event: dict, item_notify: str | None):

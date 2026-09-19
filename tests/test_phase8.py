@@ -124,3 +124,18 @@ def test_update_keeps_an_older_database(tmp_path):
     assert db.get_setting("ui.accent") == "#2F6FEB"
     db.add_item("New", ["new.example"], "site", "manual", [{"rule_type": "time_limit", "weekly_limit_min": 300}])
     assert len(db.list_items()) == 2
+
+
+def test_distracting_by_default(tmp_path):
+    from importer import distracting
+    db = Database(tmp_path / "a.db")
+    db.set_category("site", "twitch.tv", "productive")             # your own choice stays
+    assert distracting.seed(db) == len(distracting.SITES) + len(distracting.APPS) - 1
+    cats = db.categories()
+    assert cats[("site", "tiktok.com")] == "distracting" and cats[("app", "steam.exe")] == "distracting"
+    assert cats[("site", "twitch.tv")] == "productive" and ("site", "youtube.com") not in cats
+    assert distracting.seed(db) == 0                                 # once
+    assert distracting.seed_games(db, ["peak.exe", "repo.exe"]) == 2
+    db.set_category("app", "peak.exe", "neutral")                    # changed by you: not set back
+    assert distracting.seed_games(db, ["peak.exe", "repo.exe", "new.exe"]) == 1
+    assert db.categories()[("app", "peak.exe")] == "neutral"

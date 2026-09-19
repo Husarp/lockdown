@@ -1316,9 +1316,19 @@ sleep / forced-break overlays still show.
   (requested 2026-09-19)
 - [x] Themes (Dark / AMOLED / Light / Match Windows) and accent colour (8 swatches + colour picker), restart button
   (requested 2026-09-19)
-- [ ] Better app icon + tray icon - added to the designer brief (design/DESIGN.md 7c, requested 2026-09-19)
-- [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
-  designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
+- [ ] Better app icon + tray icon (3 states) - in the designer brief (design/DESIGN.md 7c + 9.4, requested 2026-09-19)
+- [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - in the designer
+  brief (design/DESIGN.md 7b + 9.3, requested 2026-09-19)
+- [x] Notifications page: "Recent blocked visits" removed (they're on the Dashboard) (reported 2026-09-19)
+- [x] Dashboard blocked-visits card small while hidden (was an older running copy; checked 2026-09-19)
+- [x] Distracting by default: every Steam game + a list of pure-fun games / launchers / streaming / short-video
+  sites (not work-too ones like YouTube, Reddit, Discord); only once, your own choices win (requested 2026-09-19)
+- [x] Design round 2: 32 screenshots each dark + light (design/screenshots/round2) and the prompt in
+  design/DESIGN.md section 9 - all remaining pages, locked state, badges, trend lines, weekly calendar, icons
+  (requested 2026-09-19)
+- [ ] Waiting for OK (asked 2026-09-19): Settings > "Strict protection" (make the app hard to stop / uninstall)
+- [ ] Waiting for OK (asked 2026-09-19): YouTube Restricted Mode as its own switch (it always hides comments), so
+  search-engine SafeSearch can stay on while YouTube comments show
 
 ### Phase 7 — Anti-Bypass
 Approved 2026-09-19 with changes: challenges are only "type a random phrase" and "only during these hours" (no

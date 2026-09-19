@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.27.0 — 2026-09-19 06:21
+- **Distracting by default**: every Steam game you have, plus popular sites / apps that are purely for fun (game
+  launchers and games, Twitch, Netflix and other streaming, TikTok, 9gag...) - not ones also used for work or
+  school (YouTube, Reddit, X, Discord, Spotify). Added once; anything you already categorised is kept, and you can
+  change them on Screen Time
+- Notifications page: "Recent blocked visits" removed (they're on the Dashboard)
+- Design brief round 2 (`design/DESIGN.md` section 9 + 64 screenshots in `design/screenshots/round2`)
+- 172 tests passing
+
 ## 0.26.0 — 2026-09-19 05:52
 - **Phase 8b - Lockdown as a real Windows program**:
   - `Lockdown.exe` (app + tray) and `LockdownService.exe` - no Python needed (PyInstaller; `scripts\build.ps1`
