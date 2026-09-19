@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.30.4 - 2026-09-19 16:20
+- **Round 2 redesign - animations**: the Remove "Confirm?" button now shows a thin bar that drains over its 3-second window, and the 3x3 challenge grid's active box gently pulses its border so the eye finds it. (With the sidebar pulse and the pop-up slide/fade, these are all the calm, buildable animations from the design; the deliberately-skipped ones would have felt busy or clashed with an existing control.)
+
 ## 0.30.3 - 2026-09-19 16:05
 - **Round 2 redesign - small windows**: the site/app suggestion dropdown now shows a SITE / APP type badge on each row (site = grey, app = blue) and a cleaner name + detail layout. The Browse apps and Display settings windows already follow the round-2 look via the shared tokens.
 

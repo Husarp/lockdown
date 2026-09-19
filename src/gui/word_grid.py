@@ -24,6 +24,8 @@ class WordGrid(ctk.CTkFrame):
         self.words, self.on_done, self.status, self.rng = words, on_done, status, rng
         self.index, self.active = 0, None
         self.done = False
+        self._error = False
+        self._phase = 0
         self.prompt = ctk.CTkLabel(self, text="", font=ctk.CTkFont("Consolas", 18), anchor="w")
         self.prompt.pack(anchor="w", pady=(0, 8))
         board = ctk.CTkFrame(self, fg_color="transparent")
@@ -38,6 +40,21 @@ class WordGrid(ctk.CTkFrame):
             box._entry.bind("<KeyRelease>", lambda e, b=box: self._typed(b))
             self.boxes.append(box)
         self._next()
+        self._breathe()
+
+    def _breathe(self):
+        """The lit box's border gently pulses between the accent and a softer accent (~2.4 s) so the eye finds it."""
+        if not self.winfo_exists() or self.done:
+            return
+        self._phase = (self._phase + 1) % 16
+        t = self._phase / 8 if self._phase <= 8 else (16 - self._phase) / 8
+        if self.active is not None and self.active.winfo_exists() and not self._error:
+            try:
+                self.active.configure(border_color=theme._mix(theme.pick(theme.ACCENT), theme.pick(theme.SURFACE2),
+                                                              t * 0.55))
+            except Exception:
+                pass
+        self.after(150, self._breathe)
 
     def _next(self):
         if self.index == len(self.words):
@@ -55,6 +72,7 @@ class WordGrid(ctk.CTkFrame):
             lit = box is self.active
             box.configure(state="normal" if lit else "disabled", border_color=theme.ACCENT if lit else theme.BORDER,
                           fg_color=theme.SURFACE2 if lit else theme.SURFACE)
+        self._error = False
         self.master.focus_set()   # nothing focused: the lit box has to be clicked
         self.prompt.configure(text=f"Word {self.index + 1} of {len(self.words)}:   {self.words[self.index]}")
         self.status("Click the orange box and type the word.", False)
@@ -67,8 +85,10 @@ class WordGrid(ctk.CTkFrame):
             self.index += 1
             self._next()
         elif not word.startswith(text):
+            self._error = True
             box.configure(border_color=theme.DANGER)
             self.status("Typo - fix it to go on.", True)
         else:
+            self._error = False
             box.configure(border_color=theme.ACCENT)
             self.status(f"{self.index} of {len(self.words)} words done.", False)

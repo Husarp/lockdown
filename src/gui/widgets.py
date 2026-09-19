@@ -24,15 +24,32 @@ class ConfirmButton(ctk.CTkButton):
         if self._job is None:   # first click: arm
             self.configure(text=self._confirm_text, fg_color=CONFIRM_RED, hover_color=CONFIRM_RED,
                            text_color=theme.WHITE)
+            self._bar = ctk.CTkFrame(self, height=2, fg_color=theme.WHITE, corner_radius=0)
+            self._bar.place(relx=0, rely=1.0, anchor="sw", relwidth=1.0)
+            self._drain(0)
             self._job = self.after(CONFIRM_MS, self._disarm)
             return
         self._disarm()
         self._on_confirm()      # may destroy this button (lists get rebuilt)
 
+    def _drain(self, step: int):
+        """The 2px bar empties over the 3 s confirm window, then the button falls back."""
+        bar = getattr(self, "_bar", None)
+        if bar is None or not bar.winfo_exists() or self._job is None:
+            return
+        frac = max(0.0, 1 - step * 40 / CONFIRM_MS)
+        bar.place_configure(relwidth=frac)
+        if frac > 0:
+            self.after(40, lambda: self._drain(step + 1))
+
     def _disarm(self):
         if self._job is not None:
             self.after_cancel(self._job)
             self._job = None
+        bar = getattr(self, "_bar", None)
+        if bar is not None and bar.winfo_exists():
+            bar.destroy()
+        self._bar = None
         if self.winfo_exists():
             self.configure(**self._normal)
 
