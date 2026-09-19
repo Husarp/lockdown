@@ -16,7 +16,7 @@ import customtkinter as ctk
 import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
-from gui.components import Curtain, BlockerCard, Segmented, eyebrow, rule_chip, help_icon, page_head, type_badge
+from gui.components import Curtain, Card, BlockerCard, Segmented, eyebrow, rule_chip, help_icon, page_head, type_badge
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, summary
@@ -305,12 +305,21 @@ class AddTab(ctk.CTkScrollableFrame):
         eyebrow(line, "Blockers - tick any number, they combine").pack(side="left")
         self.count = ctk.CTkLabel(line, text="", text_color=MUTED, font=theme.body(11))
         self.count.pack(side="right")
-        self.cards: dict[str, BlockerCard] = {}
-        for t in EDITORS:
-            card = BlockerCard(self, RULE_NAMES[t], EDITORS[t], lambda t=t: summary(t, self.cards[t].editor),
-                               on_change=self._changed)
-            card.pack(fill="x", pady=3)
-            self.cards[t] = card
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="x")
+        content.grid_columnconfigure(0, minsize=318)
+        content.grid_columnconfigure(1, weight=1)
+        self.rail = ctk.CTkFrame(content, fg_color="transparent")
+        self.rail.grid(row=0, column=0, sticky="new")
+        self.editors: dict[str, object] = {}   # built lazily, into the panel
+        self.ticked: set[str] = set()
+        self.open_t: str | None = None
+        self.rows = {t: self._rail_row(t) for t in EDITORS}
+        self.panel = Card(content, title="Blocker settings", accent_top=True)
+        self.panel.grid(row=0, column=1, sticky="nsew", padx=(14, 0))
+        self.placeholder = ctk.CTkLabel(self.panel.body, text="Tick a blocker on the left to set it up.",
+                                        text_color=MUTED)
+        self.placeholder.pack(anchor="w", pady=6)
 
         self.error = ctk.CTkLabel(self, text="", text_color=ERROR)
         self.error.pack(anchor="w", pady=(6, 0))
@@ -330,32 +339,100 @@ class AddTab(ctk.CTkScrollableFrame):
         # repaint the buttons: made while the tab was hidden (built in the background) they could stay unpainted
         self.after(50, lambda: self.submit_btn.configure(fg_color=theme.ACCENT))
 
-    def _toggle(self, t: str):
-        """Open/close the card after its tick box changed (also used by tests)."""
-        card = self.cards[t]
-        card.open = bool(card.check.get())
-        card.update_state()
+    def _rail_row(self, t: str):
+        """A compact blocker in the left rail: tick + name + one-line summary + chevron. Clicking it opens its
+        settings in the panel on the right (and ticks it on)."""
+        row = ctk.CTkFrame(self.rail, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER,
+                           corner_radius=3)
+        row.pack(fill="x", pady=3)
+        row.bar = ctk.CTkFrame(row, width=3, height=1, fg_color="transparent", corner_radius=0)
+        row.bar.pack(side="left", fill="y")
+        inner = ctk.CTkFrame(row, fg_color="transparent")
+        inner.pack(side="left", fill="both", expand=True, padx=(9, 10), pady=8)
+        top = ctk.CTkFrame(inner, fg_color="transparent")
+        top.pack(fill="x")
+        row.check = ctk.CTkCheckBox(top, text=RULE_NAMES[t], font=theme.semi(13), command=lambda: self._tick(t))
+        row.check.pack(side="left")
+        row.chev = ctk.CTkLabel(top, text="▸", text_color=MUTED, font=theme.body(11), width=14)
+        row.chev.pack(side="right")
+        row.summary = ctk.CTkLabel(inner, text="off", text_color=MUTED, font=theme.body(11), anchor="w",
+                                   justify="left")
+        row.summary.pack(anchor="w", pady=(3, 0))
+        for w in (inner, top, row.summary):
+            w.bind("<Button-1>", lambda e, t=t: self._open_panel(t, tick=True))
+        return row
+
+    def editor_of(self, t: str):
+        if t not in self.editors:
+            self.editors[t] = EDITORS[t](self.panel.body)
+        return self.editors[t]
+
+    def _tick(self, t: str):
+        if self.rows[t].check.get():
+            self.ticked.add(t)
+            self._open_panel(t)
+        else:
+            self.ticked.discard(t)
+            if self.open_t == t:
+                nxt = next(iter(self.ticked), None)
+                self._show_editor(nxt)
+        self._update_rail()
         self._changed()
 
+    def _open_panel(self, t: str | None, tick: bool = False):
+        if t is not None and tick and t not in self.ticked:
+            self.ticked.add(t)
+            self.rows[t].check.select()
+        self._show_editor(t)
+        self._update_rail()
+        self._changed()
+
+    def _show_editor(self, t: str | None):
+        self.placeholder.pack_forget()
+        for ed in self.editors.values():
+            ed.pack_forget()
+        self.open_t = t
+        if t is None:
+            self.panel.title.configure(text="Blocker settings")
+            self.placeholder.pack(anchor="w", pady=6)
+        else:
+            self.panel.title.configure(text=RULE_NAMES[t])
+            self.editor_of(t).pack(anchor="w", fill="x")
+
+    def _update_rail(self):
+        for t, row in self.rows.items():
+            on = t in self.ticked
+            row.bar.configure(fg_color=theme.ACCENT if self.open_t == t else "transparent")
+            row.check.configure(text_color=theme.TEXT if on else MUTED)
+            row.chev.configure(text="▾" if self.open_t == t else "▸")
+            row.summary.configure(text=summary(t, self.editors[t]) if on and t in self.editors else "off")
+
     def _changed(self):
-        on = [t for t, c in self.cards.items() if c.check.get()]
-        self.count.configure(text=f"{len(on)} of {len(self.cards)} on · blocked when any of them applies")
+        on = [t for t in EDITORS if t in self.ticked]
+        self.count.configure(text=f"{len(on)} of {len(self.rows)} on · blocked when any of them applies")
         name = self.picker.name.get().strip() or "It"
         self.sentence.configure(text=f"{name} will be blocked: " + "; ".join(
-            f"{RULE_NAMES[t].lower()} ({summary(t, self.cards[t].editor)})" for t in on) + "." if on else "")
+            f"{RULE_NAMES[t].lower()} ({summary(t, self.editor_of(t))})" for t in on) + "." if on else "")
 
     def _follow_summaries(self):
         if self.winfo_ismapped():
-            for card in self.cards.values():
-                card.refresh_summary()
+            self._update_rail()
             self._changed()
         self.after(SUMMARY_MS, self._follow_summaries)
 
     def _load_rules(self, rules: list[dict]):
         by_type = {r["rule_type"]: r for r in rules}
-        for t, card in self.cards.items():
-            card.load(by_type.get(t))
-        self._changed()
+        self.ticked = set(by_type)
+        for t in EDITORS:
+            if t in by_type:
+                self.editor_of(t).load(by_type[t])
+                self.rows[t].check.select()
+            else:
+                if t in self.editors:
+                    self.editors[t].load(None)
+                self.rows[t].check.deselect()
+        first = next((t for t in EDITORS if t in self.ticked), None)
+        self._open_panel(first)
 
     def reset(self):
         self.edit_id = None
@@ -385,7 +462,7 @@ class AddTab(ctk.CTkScrollableFrame):
         self._parent_canvas.yview_moveto(0)
 
     def _rules(self) -> list[dict]:
-        return [card.editor.value() for card in self.cards.values() if card.check.get()]
+        return [self.editor_of(t).value() for t in EDITORS if t in self.ticked]
 
     def _submit(self):
         self.picker.entry.hide()

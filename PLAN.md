@@ -1328,7 +1328,7 @@ Phased so each part is verified on the hidden desktop before the next.
 - [x] Phase A — design system: round-2 tokens (dark + light), 4px cards / 2px controls, light-mode 7b fixes
   (switch off-track #AEB6C0, secondary/outlined buttons get a visible border)
 - [x] Phase B — page/section title accent bars, site/app/group type badges, sidebar service-dot pulse animation
-- [ ] Phase C — Blocking → Add: blockers become a rail + one open panel (form never grows past the window)
+- [x] Phase C — Blocking → Add: blockers are a rail + one open panel (form never grows past the window)
 - [ ] Phase D — Protection / Notifications / Settings layouts (cards with the accent top-bar, denser rows)
 - [ ] Phase E — Blocking → Calendar (week × 24h bars + emergency markers), Screen Time trend line
   ("am I improving?" + goal line + unlock markers), Network Log graph markers

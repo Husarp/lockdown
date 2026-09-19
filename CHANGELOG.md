@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.28.3 — 2026-09-19 14:05
+- **Round 2 redesign — phase C**: Blocking > Add now shows the blockers as a compact **rail** on the left with one **open settings panel** on the right (accent-top card), so the form never grows past the window. Ticking a blocker opens its panel; the open one is marked with an accent bar.
+
 ## 0.28.2 — 2026-09-19 13:49
 - **Round 2 redesign — phase B**: a small accent bar now sits before every page title and every card / section title; site / app / group **type badges** appear next to blocked items; the sidebar service dot **pulses** while the service runs (green) and is a steady red when it is down.
 
