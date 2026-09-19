@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.42.1 - 2026-09-19 21:35
+- Renamed the Blocking sub-tab "Protection" to "Site protection".
+
 ## 0.42.0 - 2026-09-19 21:30
 - **Restart fixed**: "Restart now" (after a theme/colour change) no longer flashes a console window and now
   reliably starts a fresh copy - the relaunch helper waits (hidden) until this copy has fully quit before

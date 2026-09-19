@@ -30,7 +30,7 @@ from importer.popular import POPULAR_SITES
 from rules import DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block
 from trusted_time import now_from_db
 
-TABS = ["Overview", "Groups", "Add", "Protection", "Calendar"]
+TABS = ["Overview", "Groups", "Add", "Site protection", "Calendar"]
 SORTS = ["Blocked now first", "Next block", "Date added", "Name"]
 SORT_KEY = "ui.blocking.sort"
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
@@ -616,7 +616,7 @@ class BlockingPage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
         self.after(LIVE_MS, self._live_update)
 
-    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab, "Protection": ProtectionTab,
+    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab, "Site protection": ProtectionTab,
                    "Calendar": CalendarTab}
 
     def show_tab(self, tab: str):
