@@ -16,7 +16,7 @@ import customtkinter as ctk
 import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
-from gui.components import Curtain, BlockerCard, Segmented, eyebrow, rule_chip, help_icon
+from gui.components import Curtain, BlockerCard, Segmented, eyebrow, rule_chip, help_icon, page_head, type_badge
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, summary
@@ -228,7 +228,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
             ctk.CTkLabel(cell, text="", image=icons.for_item(item, 22), width=28).pack(side="left", anchor="n")
             texts = ctk.CTkFrame(cell, fg_color="transparent")
             texts.pack(side="left", padx=(6, 0))
-            ctk.CTkLabel(texts, text=item["display_name"], font=theme.semi(13), height=18, anchor="w").pack(anchor="w")
+            name_row = ctk.CTkFrame(texts, fg_color="transparent")
+            name_row.pack(anchor="w")
+            ctk.CTkLabel(name_row, text=item["display_name"], font=theme.semi(13), height=18, anchor="w").pack(
+                side="left")
+            type_badge(name_row, item["item_type"]).pack(side="left", padx=(7, 0))
             ctk.CTkLabel(texts, text=targets_text(item), text_color=MUTED, font=theme.body(10), height=14,
                          wraplength=COLS[0] - 44, justify="left", anchor="w").pack(anchor="w")
             rules_box = ctk.CTkFrame(table, fg_color="transparent")
@@ -430,7 +434,7 @@ class BlockingPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.draft = app, app.draft
-        ctk.CTkLabel(self, text="Blocking", font=theme.page_title()).pack(anchor="w", padx=30, pady=(12, 6))
+        page_head(self, "Blocking").pack(anchor="w", padx=30, pady=(12, 6))
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 10))
         self.tab_bar = Segmented(bar, values=TABS, command=self.show_tab, width=240, height=30,

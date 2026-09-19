@@ -5,7 +5,7 @@ import customtkinter as ctk
 
 import antibypass
 from gui import theme
-from gui.components import Card, Segmented, help_icon
+from gui.components import Card, Segmented, help_icon, page_head
 from gui.word_grid import WordGrid, block_paste
 from gui.rule_editors import WindowRow
 from rules import days_text, make_schedule, load_schedule
@@ -135,7 +135,7 @@ class AntiBypassPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.db = app, app.db
-        ctk.CTkLabel(self, text="Anti-Bypass", font=theme.page_title()).pack(anchor="w", padx=30, pady=(16, 8))
+        page_head(self, "Anti-Bypass").pack(anchor="w", padx=30, pady=(16, 8))
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 

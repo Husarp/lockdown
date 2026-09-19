@@ -19,7 +19,7 @@ from PIL import ImageTk
 import search
 from gui import appinfo, icons, theme
 from gui.charts import MinuteBars
-from gui.components import Card, Rows, Segmented
+from gui.components import Card, Rows, Segmented, page_head
 from gui.target_picker import guess_name, popular_hosts
 from trusted_time import now_from_db
 
@@ -139,7 +139,7 @@ class NetworkPage(ctk.CTkFrame):
         self.refreshed = 0.0
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
-        ctk.CTkLabel(head, text="Network Log", font=theme.page_title()).pack(side="left")
+        page_head(head, "Network Log").pack(side="left")
         self.summary = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
         self.summary.pack(side="right", anchor="s", pady=(0, 4))
 

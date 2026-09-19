@@ -21,7 +21,7 @@ from db import Database
 from gui import shortcuts, theme
 from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
-from gui.components import Curtain
+from gui.components import Curtain, page_head, PulseDot
 from gui.dashboard import DashboardPage
 from gui.draft import Draft
 from gui.modes_page import ModesPage
@@ -210,8 +210,13 @@ class LockdownApp(ctk.CTk):
             btn.pack(side="left", fill="x", expand=True)
             self.nav_buttons[name] = (btn, marker)
         bar.grid_rowconfigure(len(PAGES) + 1, weight=1)
-        self.status_label = ctk.CTkLabel(bar, text="", justify="left", anchor="w", font=ctk.CTkFont(theme.BODY, 12))
-        self.status_label.grid(row=len(PAGES) + 2, column=0, padx=22, pady=16, sticky="w")
+        status_row = ctk.CTkFrame(bar, fg_color="transparent")
+        status_row.grid(row=len(PAGES) + 2, column=0, padx=18, pady=16, sticky="w")
+        self.status_dot = PulseDot(status_row)
+        self.status_dot.pack(side="left", padx=(0, 6))
+        self.status_label = ctk.CTkLabel(status_row, text="", justify="left", anchor="w",
+                                         font=ctk.CTkFont(theme.BODY, 12))
+        self.status_label.pack(side="left")
 
     def set_appearance(self, label: str):
         """Dark / AMOLED / Light / Match Windows. Light / dark switch at once (charts - plain Tk canvases - are
@@ -229,7 +234,7 @@ class LockdownApp(ctk.CTk):
         spec = next(p[1] for p in PAGES if p[0] == name)
         if isinstance(spec, int):
             page = ctk.CTkFrame(self.content, fg_color="transparent")
-            ctk.CTkLabel(page, text=name, font=theme.page_title()).pack(anchor="w", padx=30, pady=(16, 8))
+            page_head(page, name).pack(anchor="w", padx=30, pady=(16, 8))
             ctk.CTkLabel(page, text=f"Coming in Phase {spec}.", text_color=theme.MUTED).pack(anchor="w", padx=30)
         else:
             page = spec(self.content, self)
@@ -351,8 +356,9 @@ class LockdownApp(ctk.CTk):
             for page in ("Blocking", "Dashboard"):   # statuses / the "not enforced" banner depend on it
                 if page in self.pages:
                     self.pages[page].refresh()
+        self.status_dot.set_state(running)
         self.status_label.configure(
-            text=("● Service running" if running else "● Service not running"),
+            text=("Service running" if running else "Service not running"),
             text_color=(theme.SUCCESS if running else theme.DANGER))
         state = modes.active(self.db, now_from_db(self.db))
         mode_text = f" · {state['mode']['name']} mode" if state else ""

@@ -6,7 +6,7 @@ import customtkinter as ctk
 
 import modes
 from gui import categories, icons, theme
-from gui.components import Curtain, Card, Rows, Segmented, eyebrow, help_icon
+from gui.components import Curtain, Card, Rows, Segmented, eyebrow, help_icon, page_head
 from gui.reminders_ui import RemindersView
 from gui.rule_editors import MUTED, WindowRow
 from gui.target_picker import TargetPicker
@@ -303,7 +303,7 @@ class ModesPage(ctk.CTkFrame):
         self.app, self.db = app, app.db
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
-        ctk.CTkLabel(head, text="Modes", font=theme.page_title()).pack(side="left")
+        page_head(head, "Modes").pack(side="left")
         self.new_btn = ctk.CTkButton(head, text="+ New mode", width=120, command=lambda: self.open_editor(None))
         self.new_btn.pack(side="right")
         self.tab = Segmented(self, ["Modes", "Reminders"], command=lambda v: self._switch())

@@ -1,22 +1,90 @@
 """Building blocks of the new design: cards, stat cards, chips, tab bars, blocker cards (charts: charts.py)."""
+import tkinter as tk
+
 import customtkinter as ctk
 
 from gui import theme
+
+
+class PulseDot(tk.Canvas):
+    """The sidebar service status dot: a solid dot with one expanding, fading ring every ~2.4 s while the service
+    runs (green) - a small canvas redraw that stops when the window is hidden. Red and still when it's down."""
+    SIZE = 18
+
+    def __init__(self, master, **kw):
+        self.bg = theme.pick(theme.SIDEBAR)
+        super().__init__(master, width=self.SIZE, height=self.SIZE, bg=self.bg, highlightthickness=0, bd=0, **kw)
+        self.color = theme.pick(theme.SUCCESS)
+        self.on = True
+        self.phase = 0.0
+        self._tick()
+
+    def set_state(self, running: bool):
+        self.color = theme.pick(theme.SUCCESS if running else theme.DANGER)
+        self.on = running
+        self._draw()
+
+    def _tick(self):
+        if self.on and self.winfo_viewable():   # don't animate while hidden
+            self.phase = (self.phase + 0.09) % 1.0
+        self._draw()
+        self.after(130, self._tick)
+
+    def _draw(self):
+        self.delete("all")
+        c = self.SIZE / 2
+        if self.on:
+            r = 3 + self.phase * 5.5
+            ring = theme._mix(self.color, self.bg, min(1.0, self.phase * 1.15))
+            self.create_oval(c - r, c - r, c + r, c + r, outline=ring, width=1)
+        self.create_oval(c - 3, c - 3, c + 3, c + 3, fill=self.color, outline="")
 
 
 def eyebrow(parent, text: str) -> ctk.CTkLabel:
     return ctk.CTkLabel(parent, text=text.upper(), font=theme.eyebrow(), text_color=theme.MUTED, height=14)
 
 
-class Card(ctk.CTkFrame):
-    """Surface card with an optional title and a muted note on the right. Content goes in `self.body`."""
+def accent_bar(parent, height: int = 16, width: int = 3, color=None):
+    """A small vertical accent bar that sits before a title (round-2 look)."""
+    bar = ctk.CTkFrame(parent, fg_color=color or theme.ACCENT, width=width, height=height, corner_radius=1)
+    bar.pack_propagate(False)
+    return bar
 
-    def __init__(self, master, title: str | None = None, note: str = "", **kw):
-        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=6,
+
+def page_head(parent, text: str) -> ctk.CTkFrame:
+    """Page heading: a 4px accent bar + the Barlow-condensed title, in a row you pack where the label used to go."""
+    row = ctk.CTkFrame(parent, fg_color="transparent")
+    accent_bar(row, height=26, width=4).pack(side="left", padx=(0, 11))
+    ctk.CTkLabel(row, text=text, font=theme.page_title()).pack(side="left")
+    return row
+
+
+_BADGE = {"site": ("MUTED", "BORDER"), "app": ("INFO", "INFO"), "group": ("WARNING", "WARNING")}
+
+
+def type_badge(parent, kind: str) -> ctk.CTkFrame:
+    """Small uppercase site / app / group badge (site = muted, app = blue, group = yellow)."""
+    fg, bd = (getattr(theme, name) for name in _BADGE.get(kind, ("MUTED", "BORDER")))
+    f = ctk.CTkFrame(parent, fg_color="transparent", border_width=1, border_color=bd, corner_radius=2)
+    ctk.CTkLabel(f, text=kind.upper(), font=ctk.CTkFont(theme.BODY_SEMI, 9), text_color=fg, height=13).pack(
+        padx=4, pady=0)
+    return f
+
+
+class Card(ctk.CTkFrame):
+    """Surface card with an optional title and a muted note on the right. Content goes in `self.body`.
+    `accent_top`: a 3px accent bar along the top edge (squared top corners so it never looks clipped)."""
+
+    def __init__(self, master, title: str | None = None, note: str = "", accent_top: bool = False, **kw):
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=4,
                          **kw)
+        if accent_top:
+            top = ctk.CTkFrame(self, fg_color=theme.ACCENT, height=3, corner_radius=0)
+            top.pack(fill="x", side="top")
         if title is not None:
             head = ctk.CTkFrame(self, fg_color="transparent")
             head.pack(fill="x", padx=15, pady=(12, 4))
+            accent_bar(head).pack(side="left", padx=(0, 9))
             self.title = ctk.CTkLabel(head, text=title, font=theme.card_title(), height=20)
             self.title.pack(side="left")
             self.note = ctk.CTkLabel(head, text=note, font=theme.body(11), text_color=theme.MUTED, height=20)

@@ -3,7 +3,7 @@ you open (built the first time) - fewer widgets = no lag. (Blocked visits are on
 import customtkinter as ctk
 
 from gui import theme
-from gui.components import Collapsible, Segmented, help_icon
+from gui.components import Collapsible, Segmented, help_icon, page_head
 
 import alerts
 import digest
@@ -17,7 +17,7 @@ class NotificationsPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.db, self.draft = app.db, app.draft
-        ctk.CTkLabel(self, text="Notifications", font=theme.page_title()).pack(
+        page_head(self, "Notifications").pack(
             anchor="w", padx=30, pady=(16, 12))
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=20, pady=(0, 20))

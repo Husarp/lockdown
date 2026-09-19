@@ -12,7 +12,7 @@ import modes
 import stats
 from gui import app_browser, appinfo, categories, icons, theme
 from gui.charts import DayBars, TimelineBar
-from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow
+from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow, page_head
 from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, effective_rules, item_block,
                    limits, next_block, opening_bucket, time_bucket)
 from trusted_time import now_from_db
@@ -120,7 +120,7 @@ class DashboardPage(ctk.CTkFrame):
         app_browser.preload()   # app names / icons
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
-        ctk.CTkLabel(head, text="Dashboard", font=theme.page_title()).pack(side="left")
+        page_head(head, "Dashboard").pack(side="left")
         from gui.display_settings import gear_button
         gear_button(head, app).pack(side="right", anchor="s")
         self.date = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))

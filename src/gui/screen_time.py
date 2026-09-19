@@ -10,7 +10,7 @@ import customtkinter as ctk
 import stats
 from gui import app_browser, appinfo, categories, theme
 from gui.charts import DayBars, Donut, Heatmap, HourBars, MonthCalendar, TimelineBar
-from gui.components import Curtain, Card, Chip, Rows, Segmented, StatCard, help_icon
+from gui.components import Curtain, Card, Chip, Rows, Segmented, StatCard, help_icon, page_head
 from gui.dashboard import goal_seconds
 from rules import DAY_NAMES
 from trusted_time import now_from_db
@@ -422,7 +422,7 @@ class ScreenTimePage(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.app, self.db = app, app.db
         app_browser.preload()
-        ctk.CTkLabel(self, text="Screen Time", font=theme.page_title()).pack(anchor="w", padx=30, pady=(12, 6))
+        page_head(self, "Screen Time").pack(anchor="w", padx=30, pady=(12, 6))
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 10))
         self.tab_bar = Segmented(bar, values=TABS, command=self.show_tab)

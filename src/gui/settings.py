@@ -9,7 +9,7 @@ import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton
-from gui.components import Segmented, help_icon
+from gui.components import Segmented, help_icon, page_head
 from trusted_time import now_from_db
 
 MUTED = theme.MUTED
@@ -26,7 +26,7 @@ class SettingsPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.db = app, app.db
-        ctk.CTkLabel(self, text="Settings", font=theme.page_title()).pack(
+        page_head(self, "Settings").pack(
             anchor="w", padx=30, pady=(16, 8))
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")   # (tkraise needs a plain frame on top)
         self.body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
