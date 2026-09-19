@@ -1352,6 +1352,42 @@ sleep / forced-break overlays still show.
 - [x] Notifications don't pile up as unread: auto-clear ONLY Lockdown's Action Center entries a few seconds after a
   toast (never other apps'); both "Show as" options kept (2026-09-19)
 
+### Design-fidelity batches (2026-09-20) - match design/Lockdown Round 3.dc.html plate by plate
+Process for EVERY batch: implement -> a review agent compares screenshots to the plate -> the user reviews ->
+adjust -> only then the next batch. Reference lines are in the Round 3 file.
+
+- [ ] B1. Blocking -> Add (3b, ~271-388): blockers as a LEFT RAIL + ONE OPEN PANEL on the right (side by side),
+  not stacked cards that expand downwards. Verify current AddTab and rebuild to the rail + panel.
+- [ ] B2. Site protection (3c, ~391-499): TWO columns - left (Always-on lists, Connect a list, Safe search,
+  Check a site), right (Blocked words, Allowed anyway). Currently everything is stacked.
+- [ ] B3. Anti-Bypass (3d, ~501-603): two-column layout (challenges left; "what needs the challenge" +
+  "keeping Lockdown running" right), locked view-only styling per the plate.
+- [ ] B4. Network Log (3f ~648-682, 3g ~683-724): table columns App · Time · Site · Rule · Port · Status (add
+  Rule), blocked rows tinted red, in-card footer with "Show more (N older)" on the RIGHT. Keep the working
+  Live switch and the new underline tabs (user-approved).
+- [ ] B5. Notifications (3i, ~773-826): alerts as a BORDERED BOXED GRID (each alert in its own padded cell, 4
+  columns), message templates open/edit in place. Currently bare checkboxes stacked.
+- [ ] B6. Settings (3j, ~827-871): TWO-column grouped layout - left: Appearance (theme + accents + daily goal in
+  one card) then "When limits reset"; right (~400px): Emergency unlock (YELLOW accent bar + a small usage
+  meter "2 of 3 left") and Backup & export. Currently single column stacked.
+- [ ] B7. Small windows (3l, ~937-1050): Browse apps window (sort: all / running / games; list styling), the
+  Suggestions dropdown, the grid challenge, and the alert popup (accent left edge + "Open Lockdown" /
+  "Mute 1 h" buttons). Verify each against the plate.
+- [ ] B8. Global controls (3m, ~1060-1116): SWITCHES to the design pill (34x18 track, radius 9, 14px knob with a
+  1px edge, off-track #AEB6C0) - current ones look skinny; BUTTONS to the design size (padding 9px 18px ->
+  taller, font 600 12.5px, radius 2) with the Primary / Secondary / Outline / Destructive / Disabled
+  variants; card variants (accent top bar, grey inset). Do this FIRST - it changes every screen.
+- [ ] B9. Screen Time trend legend (3k): the legend swatches must be solid straight lines (no dashes/gaps).
+- [ ] B10. App / taskbar icon (3n): the 16px title-bar/taskbar icon is still blurry - ship a crisp small icon
+  (tile + padlock option, or the design's mark) - user to confirm which.
+- [ ] B11 (optional, user liked it): Calendar redesign to section 4 (4a/4b): one row per blocked item, Day /
+  3 days / Week range switcher, full-height bars, labels outside bars, "Next change / Busiest stretch /
+  Free window" summary cards.
+- [ ] B12 (last). Strict break must NEVER minimise Lockdown itself: while a strict break minimises other
+  windows, the Lockdown window stays usable so the user can't be soft-locked for the break's duration.
+  (minimize_all / minimize_foreground already skip Lockdown's own pid - verify end to end incl. the popup.)
+Suggested order: B8 first (global), then B1, B2, B3, B4, B5, B6, B7, B9, B10, B11, B12.
+
 ### Round 3 requests (2026-09-19, evening) - polish & locked-state policy
 
 Done:
