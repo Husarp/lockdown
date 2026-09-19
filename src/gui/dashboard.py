@@ -168,8 +168,7 @@ class DashboardPage(ctk.CTkFrame):
         self.limits = Card(left, "Limits today")
         self.limits.pack(fill="x", pady=(0, 12))
         self.limit_rows = Rows(self.limits.body, _limit_row, "No time or opening limits set.")
-        self.today = Card(left, "Today")
-        self.today.pack(fill="x", pady=(0, 12))
+        self.today = Card(self.main, "Today")   # full width, so the timeline bars are wide enough to read / hover
         legend = ctk.CTkFrame(self.today.note.master, fg_color="transparent")
         legend.pack(side="right")
         self.today.note.destroy()
@@ -200,8 +199,8 @@ class DashboardPage(ctk.CTkFrame):
         self.glance_rows = Rows(self.glance.body, _glance_entry, "Not enough data yet.", {"anchor": "w"})
         # (card, how it's packed) per column, in order - the ⚙ Display settings can hide any of them
         self.layout = [[("stats", cards, {"fill": "x", "pady": (0, 12), "before": grid})],
-                       [("limits", self.limits, {"fill": "x", "pady": (0, 12)}),
-                        ("today", self.today, {"fill": "x", "pady": (0, 12)}), ("week", self.week, {"fill": "x"})],
+                       [("today", self.today, {"fill": "x", "pady": (0, 12), "before": grid})],
+                       [("limits", self.limits, {"fill": "x", "pady": (0, 12)}), ("week", self.week, {"fill": "x"})],
                        [("coming", self.coming, {"fill": "x", "pady": (0, 12)}),
                         ("visits", self.visits, {"fill": "x", "pady": (0, 12)}), ("glance", self.glance, {"fill": "x"})]]
         self.apply_layout()

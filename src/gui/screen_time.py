@@ -491,7 +491,9 @@ class ScreenTimePage(ctk.CTkFrame):
         self.refresh()
 
     def on_show(self):
-        self.refresh()
+        from gui.display_settings import ST_TAB_KEY
+        start = self.db.get_setting(ST_TAB_KEY, "Overview")
+        self.show_tab(start if start in TABS else "Overview")   # back to the default tab, not the last one
 
     def _auto_refresh(self):
         if getattr(self.app, "current_page", None) == "Screen Time":

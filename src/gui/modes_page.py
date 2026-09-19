@@ -355,7 +355,8 @@ class ModesPage(ctk.CTkFrame):
     # ---------- showing ----------
 
     def on_show(self):
-        self.refresh()
+        self.tab.set("Modes")   # back to Modes, not the Reminders tab
+        self._switch()          # (this refreshes)
 
     def _switch(self):
         reminders_tab = self.tab.get() == "Reminders"

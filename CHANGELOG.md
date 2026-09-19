@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.32.0 - 2026-09-19 17:35
+- **Pages reopen on their default tab**: leaving a page and coming back no longer remembers the sub-tab - Blocking returns to Overview, Screen Time to its default tab, Network Log to Table, Modes to Modes.
+- **Dashboard "Today" timeline is now full width** (its own row across the page), so the coloured bars are wide enough to read and hover even for short sessions.
+
 ## 0.31.2 - 2026-09-19 17:10
 - **Categories are now easy to find**: a "Categories" section on the Settings page shows Productive / Neutral / Distracting (and your own) with their colours and a "Manage categories..." button (add, rename-by-colour, delete). Before, this was only reachable by clicking a category on an app/site.
 

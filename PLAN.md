@@ -1326,6 +1326,9 @@ sleep / forced-break overlays still show.
 - [x] Categories are discoverable: a "Categories" section on Settings (chips + "Manage categories...") opening the
   existing editor, instead of only via the per-app category menu (2026-09-19)
 
+- [x] Pages reopen on their default tab, not the last one used (Blocking->Overview etc.) (2026-09-19)
+- [x] Dashboard "Today" timeline made full width (wider, easier to hover) (2026-09-19)
+
 ### Word blocking - questions & improvements (raised 2026-09-19)
 - [x] On/off switches for "Your words" and "Exceptions" (disable without deleting); your-words off needs the
   challenge, exceptions off is instant (2026-09-19)

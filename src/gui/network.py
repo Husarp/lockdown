@@ -331,8 +331,8 @@ class NetworkPage(ctk.CTkFrame):
         self.after(LIVE_MS, self._live)
 
     def on_show(self):
-        if time.monotonic() - self.refreshed > 1:   # (just built: already fresh)
-            self.refresh()
+        self.view.set("Table")   # back to the Table view, not the last one
+        self._show_view()        # (this refreshes)
 
     def _row_clicked(self, index: int, x: int, y: int):
         if index < len(self.shown):

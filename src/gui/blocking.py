@@ -659,6 +659,9 @@ class BlockingPage(ctk.CTkFrame):
         self.show_tab("Groups")
         self.tabs["Groups"].edit(group_id)
 
+    def on_show(self):
+        self.show_tab("Overview")   # always come back to Overview, not the last tab you were on
+
     def refresh(self):
         self.locked.update()
         tab = self.tabs[self.tab_bar.get()]
