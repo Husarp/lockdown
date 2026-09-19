@@ -189,6 +189,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.check_entry.pack(side="left")
         self.check_entry.bind("<Return>", lambda e: self._check())
         ctk.CTkButton(line, text="Check", width=80, command=self._check).pack(side="left", padx=8)
+        self.check_action = ctk.CTkButton(line, text="", width=110, **theme.OUTLINE)   # one-click allow / block
         self.check_result = ctk.CTkLabel(check.body, text="", anchor="w")
         self.check_result.pack(anchor="w", pady=(6, 0))
 
@@ -455,13 +456,38 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         cfg = protection.settings(self.db)
         lists = protection.all_lists(cfg)
         found = [lists[k][0] + ("" if k in cfg["enabled"] else " (list is off)") for k in result[0]]
+        found += [f"{m['name']} (your list)" for m in cfg["manual"]
+                  if m["key"] in cfg["enabled"] and self._host_on(host, m["entries"])]
+        self.check_action.pack_forget()
         if host in cfg["allowed"]:
             text, color = f"{host} is allowed anyway by you.", theme.ALLOWED
+            self.check_action.configure(text="Block again", command=lambda: self._block_again(host))
+            self.check_action.pack(side="left")
         elif found:
             text, color = f"{host} is on the {', '.join(found)} list{'s' * (len(found) > 1)}.", theme.BLOCKED
+            self.check_action.configure(text="Allow anyway", command=lambda: self._allow_host(host))
+            self.check_action.pack(side="left")   # one click to unblock it everywhere, no matter which list
         else:
             text, color = f"{host} isn't on any list.", theme.ALLOWED
         self.check_result.configure(text=text, text_color=color)
+
+    @staticmethod
+    def _host_on(host: str, entries: list[dict]) -> bool:
+        return any(host == e["host"] or host.endswith("." + e["host"]) for e in entries if e.get("host"))
+
+    def _allow_host(self, host: str):
+        """One-click "Allow anyway" from Check a site - overrides every list (loosening -> the challenge)."""
+        cfg = protection.settings(self.db)
+        if host not in cfg["allowed"]:
+            cfg["allowed"].append(host)
+            self._store(cfg, f"Allow {host} (and its subdomains) although a list blocks it")
+        self.after(400, self._check)
+
+    def _block_again(self, host: str):
+        cfg = protection.settings(self.db)
+        cfg["allowed"] = [a for a in cfg["allowed"] if a != host]
+        self._store(cfg, f"Stop allowing {host}")   # tightening: applies at once
+        self.after(400, self._check)
 
     def _allow(self):
         try:

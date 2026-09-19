@@ -1418,19 +1418,16 @@ Parked (revisit later):
   whether to warn / add a periodic re-randomise / discourage very short ones.
 
 ### Round 5 requests (2026-09-19, evening)
-- [ ] Verify the round-4 design changes look right with a second agent BEFORE the next feature work
-  (in progress).
-- [ ] Add a **manga / manhwa / anime** sites protection list (built-in community list from a reputable public
-  GitHub source; I pick it). The big long-tail the adult list misses. (User: call it manga/manhwa/anime, not
-  "piracy".) No installer build until the lists are in.
+- [x] Verify the round-4 design changes with a second agent (done: now-line PASS, tab underline fixed).
+- [x] Add a **manga / manhwa / anime** sites protection list (HaGeZi Anti-Piracy, off by default). (0.41.0)
 - [x] Personal blocking lists: create named lists, add sites by name+address, toggle, add/remove, delete;
   enforced via the DNS filter (entries live in settings, Protection reads them). Removing/off/delete needs
   the challenge. (0.41.0)
 - [x] Manga/manhwa/anime built-in list (HaGeZi Anti-Piracy), off by default. (0.41.0)
 - [x] Protection lists: see/add/remove your own list's sites via the ManualListWindow (preview = the entries
   shown inline). (0.41.0)
-- [ ] "No site in two lists" -> rely on "Allowed anyway" (overrides ALL lists). Still TODO: surface a
-  one-click Remove/Allow on Check-a-site so you never hunt per-list. (community lists)
+- [x] "No site in two lists" -> Check-a-site now has one-click "Allow anyway" / "Block again" (overrides all
+  lists, community or your own), and lists your own lists too. (0.41.1)
 - [x] Auto-close transient editors/panels when you leave a page: Modes Start panel + mode editor and the
   reminder editor reset on on_show. (0.37.0) Blocking/Screen Time already reset to their default sub-tab.
 - [x] Promote "Reminders" (breaks / sleep / your reminders) to its own top-level sidebar item (hourglass

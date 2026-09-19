@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.41.1 - 2026-09-19 21:18
+- **One-click Allow / Block on "Check a site"**: checking a site now shows an "Allow anyway" button when it's
+  blocked (by any list - community or your own) and a "Block again" button when it's already allowed, so you
+  can unblock a site in one place instead of hunting through each list. Also reports your own lists.
+
 ## 0.41.0 - 2026-09-19 21:11
 - **Your own blocking lists**: on Blocking → Protection, create named lists and add sites to them by name +
   address, turn each list on/off, and open one to add/remove sites. They block the site and its subdomains via
