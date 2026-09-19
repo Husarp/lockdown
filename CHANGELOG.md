@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.28.2 — 2026-09-19 13:49
+- **Round 2 redesign — phase B**: a small accent bar now sits before every page title and every card / section title; site / app / group **type badges** appear next to blocked items; the sidebar service dot **pulses** while the service runs (green) and is a steady red when it is down.
+
 ## 0.28.1 — 2026-09-19 13:40
 - **Round 2 redesign — phase A (design system)**: the whole app now uses the tightened round-2 palette
   (design/Lockdown Round 2.dc.html) — darker backgrounds, 4px cards / 2px controls, and the round-2 status colours.
