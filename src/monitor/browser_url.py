@@ -24,6 +24,21 @@ def _find_address_bar(hwnd: int) -> auto.Control | None:
     return bar if bar.Exists(0, 0) else None
 
 
+def tab_count(hwnd: int) -> int | None:
+    """How many tabs a Chromium browser window has open, or None when it can't tell (e.g. Firefox). Used to keep
+    the window open: closing its only tab would close the whole window, so a fresh tab is opened first."""
+    window = auto.ControlFromHandle(hwnd)
+    if window is None or window.ClassName == "MozillaWindowClass":
+        return None
+    try:
+        strip = window.TabControl(searchDepth=SEARCH_DEPTH)   # the tab strip
+        if not strip.Exists(0, 0):
+            return None
+        return sum(1 for c in strip.GetChildren() if c.ControlTypeName == "TabItemControl")
+    except Exception:
+        return None
+
+
 def browser_url(hwnd: int) -> str | None:
     """URL/text in the address bar of a browser window, or None."""
     for _attempt in range(2):

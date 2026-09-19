@@ -1337,8 +1337,8 @@ sleep / forced-break overlays still show.
 - [ ] Break reminder ("time for a break"): default = snooze (customizable minutes), OK/dismiss, trust the user;
   optional strict mode = minimize everything / block distracting apps until the break ends, with a snooze - all
   customizable. PROPOSED, waiting for OK (design choices).
-- [ ] Word block last-tab: when closing the only tab would close the whole browser window, open a fresh tab
-  instead so the window stays. PROPOSED (needs last-tab detection), waiting for OK.
+- [x] Word block last-tab: opens a fresh tab (Ctrl+T) before closing the only tab so the browser window stays open
+  (Chromium; UIA tab count; falls back to Ctrl+W). Needs live testing on Brave (2026-09-19)
 - Already works: the URL check decodes `+` (unquote_plus) and `%xx`, lowercases, strips accents (ł->l) and splits
   on every non-letter/digit (`. - _ / +`), so "free+porn+videos", "hot-milf-videos" and "word." all match; whole
   words only (analysis != anal).

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.32.1 - 2026-09-19 17:50
+- **Blocked word on the last tab no longer closes the browser**: when the tab being closed is the only one open (which would close the whole window), Lockdown opens a fresh tab first, then closes the blocked one - so the window stays. (Chromium browsers; falls back to the old behaviour elsewhere.)
+
 ## 0.32.0 - 2026-09-19 17:35
 - **Pages reopen on their default tab**: leaving a page and coming back no longer remembers the sub-tab - Blocking returns to Overview, Screen Time to its default tab, Network Log to Table, Modes to Modes.
 - **Dashboard "Today" timeline is now full width** (its own row across the page), so the coloured bars are wide enough to read and hover even for short sessions.

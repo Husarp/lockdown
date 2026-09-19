@@ -24,10 +24,16 @@ def sense_tab():
 
 
 def act(hwnd: int, action: str) -> bool:
-    from monitor import win
+    from monitor import browser_url, win
     if action == "back":
         return win.press(hwnd, win.VK_MENU, win.VK_LEFT)
-    return win.press(hwnd, win.VK_CONTROL, win.VK_W)
+    if browser_url.tab_count(hwnd) == 1:
+        # closing the only tab would close the whole browser window - open a fresh tab first, then close the bad one
+        win.chord(hwnd, win.VK_CONTROL, win.VK_T)
+        time.sleep(0.08)
+        win.chord(hwnd, win.VK_CONTROL, win.VK_SHIFT, win.VK_TAB)   # back to the blocked tab
+        time.sleep(0.05)
+    return win.chord(hwnd, win.VK_CONTROL, win.VK_W)
 
 
 class WordGuard(threading.Thread):

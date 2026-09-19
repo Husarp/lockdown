@@ -114,15 +114,23 @@ def window_title(hwnd: int) -> str:
 
 
 VK_CONTROL, VK_MENU, VK_LEFT, VK_W = 0x11, 0x12, 0x25, 0x57
+VK_SHIFT, VK_TAB, VK_T = 0x10, 0x09, 0x54
 KEYEVENTF_KEYUP = 0x2
 
 
 def press(hwnd: int, modifier: int, key: int) -> bool:
     """Press modifier+key (e.g. Ctrl+W) - only if `hwnd` is still the window in front."""
+    return chord(hwnd, modifier, key)
+
+
+def chord(hwnd: int, *vks: int) -> bool:
+    """Press a key chord (e.g. Ctrl+Shift+Tab): hold all keys down, release in reverse. Only if `hwnd` is in front."""
     if _user32.GetForegroundWindow() != hwnd:
         return False
-    for vk, flags in ((modifier, 0), (key, 0), (key, KEYEVENTF_KEYUP), (modifier, KEYEVENTF_KEYUP)):
-        _user32.keybd_event(vk, 0, flags, 0)
+    for vk in vks:
+        _user32.keybd_event(vk, 0, 0, 0)
+    for vk in reversed(vks):
+        _user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
     return True
 
 
