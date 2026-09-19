@@ -1346,8 +1346,8 @@ Phased so each part is verified on the hidden desktop before the next.
 - [~] Phase E — Screen Time trend line + Blocking → Calendar tab done (week × 24h bars, category colours, emergency
   markers, now line, week navigation, click a bar to edit) and Network Log graph blocked-minute markers (red) done
 - [~] Phase F — Anti-Bypass locked/unlocked banner done (red locked + "Unlock to edit" / green unlocked + "Lock now").
-  Popup + challenge windows restyled (accent edge, slide-up/fade popup, accent-arrow change list). Still to do:
-  dim view-only controls on other pages; browse / suggestion / display windows restyle
+  Popup + challenge + suggestion dropdown (type badges) restyled; Browse apps / Display settings already round-2
+  via tokens. Still to do: dim view-only controls on other pages (the rest of the locked state)
 - Animation notes to honour (all show/hide or a repainted canvas): service-dot pulse (2.4s, stops when hidden),
   Live-dot blink (1s), Remove "Confirm?" 3s draining bar, bars/progress grow once (250ms) on page open, blocker
   panel body fades in 150ms, challenge target box border breathes (2.4s), popup slides up 14px + fades in 250ms

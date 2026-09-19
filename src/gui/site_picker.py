@@ -7,7 +7,7 @@ import customtkinter as ctk
 
 import search
 from gui import app_browser, icons, theme
-from gui.components import Rows
+from gui.components import Rows, type_badge
 from importer.popular import POPULAR_SITES
 from monitor import win
 
@@ -48,8 +48,19 @@ class SuggestionList:
         self.shown = False
 
     def _make_row(self, parent):
-        return ctk.CTkButton(parent, text="", anchor="w", height=30, fg_color="transparent",
-                             hover_color=theme.SURFACE2, text_color=theme.TEXT)
+        row = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=4, height=32)
+        row.icon = ctk.CTkLabel(row, text="", width=20)
+        row.icon.pack(side="left", padx=(8, 7))
+        row.name = ctk.CTkLabel(row, text="", anchor="w", font=theme.body(13))
+        row.name.pack(side="left")
+        row.sub = ctk.CTkLabel(row, text="", anchor="w", text_color=MUTED, font=theme.body(11))
+        row.sub.pack(side="left", padx=(7, 0))
+        row.badge = ctk.CTkFrame(row, fg_color="transparent")
+        row.badge.pack(side="right", padx=8)
+        for w in (row, row.icon, row.name, row.sub):
+            w.bind("<Enter>", lambda e, r=row: r.configure(fg_color=theme.SURFACE2))
+            w.bind("<Leave>", lambda e, r=row: r.configure(fg_color="transparent"))
+        return row
 
     def show(self, matches: list[dict]):
         if not matches:
@@ -58,13 +69,20 @@ class SuggestionList:
         for row, m in zip(self.rows.take(len(matches)), matches):
             if m["kind"] == "app":
                 app = m["app"]
-                text = f"{app['name']}   {app['exe']} · {'Steam game' if app.get('steam') else 'app'}"
-                image = icons.get_app(app["exe"], app["path"], 18)
+                name, sub = app["name"], f"{app['exe']}" + (" · Steam game" if app.get("steam") else "")
+                image, kind = icons.get_app(app["exe"], app["path"], 18), "app"
             else:
-                text, image = f"{m['name']}   {m['host']}", icons.get(m["host"], 18)
-            if len(text) > MAX_CHARS:
-                text = text[:MAX_CHARS - 1] + "…"
-            row.configure(text=text, image=image, command=lambda m=m: self.on_pick(m))
+                name, sub, image, kind = m["name"], m["host"], icons.get(m["host"], 18), "site"
+            if len(name) > MAX_CHARS - 12:
+                name = name[:MAX_CHARS - 13] + "…"
+            row.icon.configure(image=image)
+            row.name.configure(text=name)
+            row.sub.configure(text=sub)
+            for w in row.badge.winfo_children():
+                w.destroy()
+            type_badge(row.badge, kind).pack()
+            for w in (row, row.icon, row.name, row.sub, row.badge):
+                w.bind("<Button-1>", lambda e, m=m: self.on_pick(m))
         self.clear.pack_forget()
         if any(m.get("mine") for m in matches):
             self.clear.pack(anchor="e", padx=6, pady=(2, 4))

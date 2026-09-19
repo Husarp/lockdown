@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.30.3 - 2026-09-19 16:05
+- **Round 2 redesign - small windows**: the site/app suggestion dropdown now shows a SITE / APP type badge on each row (site = grey, app = blue) and a cleaner name + detail layout. The Browse apps and Display settings windows already follow the round-2 look via the shared tokens.
+
 ## 0.30.2 - 2026-09-19 15:50
 - **Round 2 redesign - phase F**: the in-app pop-up now slides up and fades in at the bottom-right with an accent edge, the Lockdown mark, a "now" label and a close X (stays while the mouse is over it). The Anti-Bypass challenge window lists the changes with accent arrows to match the round-2 look.
 
