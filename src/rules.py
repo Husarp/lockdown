@@ -150,7 +150,10 @@ DEFAULT_CLOCK = LimitClock()
 
 
 def change_reset(config: str | None, new_time: str, now: datetime) -> str:
-    """New RESET_KEY value for a changed reset time. Raises ValueError for a badly written time."""
+    """New RESET_KEY value for a changed reset time. Raises ValueError for a badly written time.
+
+    A change never ends the running day early, but it also never stacks: the running day is capped so it can't
+    run past the end of the next day, no matter how many times the reset time is toggled."""
     clock = LimitClock(config)
     try:
         new = parse_hhmm(new_time)
@@ -160,6 +163,9 @@ def change_reset(config: str | None, new_time: str, now: datetime) -> str:
     switch = datetime.combine(end.date(), new)
     if switch < end:
         switch += timedelta(days=1)
+    natural = LimitClock(json.dumps({"time": f"{clock.time:%H:%M}"}))   # the day as it would run with no carry
+    cap = natural.day(now)[1] + timedelta(days=1)                       # never past the end of the next day
+    switch = min(switch, cap)
     hold = {}
     for kind in ("week", "month"):
         key, until = clock.period(kind, now)

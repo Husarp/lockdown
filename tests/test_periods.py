@@ -55,6 +55,15 @@ def test_repeated_changes_only_make_the_day_longer():
     assert LimitClock(cfg).day(at(1, 12)) == (at(0, 0), at(2, 1))
 
 
+def test_toggling_the_reset_time_cannot_stack_past_the_next_day():
+    now = at(0, 22)   # Monday 22:00
+    cfg = None
+    for t in ("23:00", "00:30", "23:30", "01:00", "23:00", "02:00"):   # griefer toggles it back and forth
+        cfg = change_reset(cfg, t, now)
+    _, end = LimitClock(cfg).day(now)
+    assert end <= now + timedelta(days=2)   # never stretched more than to the end of the next day
+
+
 def test_change_never_starts_the_week_early():
     cfg = json.dumps({"time": "23:00"})                  # weeks start Sunday 23:00
     cfg = change_reset(cfg, "12:00", at(5, 22))          # Saturday 22:00

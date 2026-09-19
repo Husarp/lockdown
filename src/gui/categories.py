@@ -80,8 +80,18 @@ def _ask_color(parent, title: str, initial) -> str | None:
     return colorchooser.askcolor(color=theme.pick(initial), title=title, parent=parent)[1]
 
 
-def open_menu(widget, db, kind: str, name: str, current: str, on_done):
-    """Small menu under `widget`: pick a category for (kind, name), add a new one, or edit colours."""
+def _guarded(guard, changes, proceed):
+    """Run `proceed`, but if a guard is given (Anti-Bypass) it decides whether the challenge is needed first.
+    Category changes feed the modes that block by category, so they're gated like any other loosening change."""
+    if guard:
+        guard(changes, proceed)
+    else:
+        proceed()
+
+
+def open_menu(widget, db, kind: str, name: str, current: str, on_done, guard=None):
+    """Small menu under `widget`: pick a category for (kind, name), add a new one, or edit colours.
+    `guard` (app.guard) gates changing / adding a category behind the Anti-Bypass challenge when it's locked."""
     menu = tk.Menu(widget, tearoff=False)
     images = []
     for c in load(db):
@@ -89,32 +99,37 @@ def open_menu(widget, db, kind: str, name: str, current: str, on_done):
         images.append(img)
         mark = "  ✓" if c["key"] == current else ""
         menu.add_command(label=f"  {c['name']}{mark}", image=img, compound="left",
-                         command=lambda k=c["key"]: (db.set_category(kind, name, k), on_done()))
+                         command=lambda k=c["key"], nm=c["name"]: _guarded(
+                             guard, [f"Move {name} to the {nm} category"],
+                             lambda k=k: (db.set_category(kind, name, k), on_done())))
     menu.add_separator()
-    menu.add_command(label="  New category...", command=lambda: _new(widget, db, kind, name, on_done))
-    menu.add_command(label="  Edit categories...", command=lambda: CategoryEditor(widget, db, on_done))
+    menu.add_command(label="  New category...", command=lambda: _new(widget, db, kind, name, on_done, guard))
+    menu.add_command(label="  Edit categories...", command=lambda: CategoryEditor(widget, db, on_done, guard))
     widget._category_images = images   # Tk shows nothing if the images are garbage-collected
     menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
 
 
-def _new(widget, db, kind, name, on_done):
+def _new(widget, db, kind, name, on_done, guard=None):
     title = ctk.CTkInputDialog(text="Name of the new category:", title="New category").get_input()
     if not title or not title.strip():
         return
     count = len(load(db)) - len(BUILTIN)
     color = _ask_color(widget, f"Colour for {title.strip()}", NEW_COLORS[count % len(NEW_COLORS)]) \
         or NEW_COLORS[count % len(NEW_COLORS)]
-    key = add(db, title.strip(), color)
-    db.set_category(kind, name, key)
-    on_done()
+
+    def do():
+        key = add(db, title.strip(), color)
+        db.set_category(kind, name, key)
+        on_done()
+    _guarded(guard, [f"Add the {title.strip()} category and move {name} into it"], do)
 
 
 class CategoryEditor(ctk.CTkToplevel):
     """Change category colours; delete your own categories."""
 
-    def __init__(self, master, db, on_done):
+    def __init__(self, master, db, on_done, guard=None):
         super().__init__(master)
-        self.db, self.on_done = db, on_done
+        self.db, self.on_done, self.guard = db, on_done, guard
         self.title("Categories")
         self.geometry("420x360")
         self.transient(master.winfo_toplevel())
@@ -155,12 +170,16 @@ class CategoryEditor(ctk.CTkToplevel):
         title = ctk.CTkInputDialog(text="Name of the new category:", title="New category").get_input()
         if title and title.strip():
             count = len(load(self.db)) - len(BUILTIN)
-            add(self.db, title.strip(), NEW_COLORS[count % len(NEW_COLORS)])
-            self._render()
+
+            def do():
+                add(self.db, title.strip(), NEW_COLORS[count % len(NEW_COLORS)])
+                self._render()
+            _guarded(self.guard, [f"Add the {title.strip()} category"], do)
 
     def _remove(self, key: str):
-        remove(self.db, key)
-        self._render()
+        name = next((c["name"] for c in load(self.db) if c["key"] == key), key)
+        _guarded(self.guard, [f"Delete the {name} category (its apps and sites go back to their default)"],
+                 lambda: (remove(self.db, key), self._render()))
 
     def _close(self):
         self.grab_release()

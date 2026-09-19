@@ -1362,13 +1362,13 @@ Done:
 - [x] Switches made chunkier (track was too thin)
 
 Approved, still to do (no open questions):
-- [ ] Lock category changes behind the challenge: changing an app's/site's category AND adding a category need
-  unlock (modes block by category). Editing when unlocked is fine.
-- [ ] Move "Daily screen-time goal" out of Appearance (own spot); keep it NOT locked (doesn't affect blocking).
-- [ ] Import settings must need the challenge (verify/enforce). Export screen-time CSV stays free.
-- [ ] Limit reset time: clearer wording + always start the new limit day on the NEXT day only - never stack
-  multiple days from toggling the hour back and forth (griefable).
-- [ ] Lockdown itself can't be blocked or silenced (can't add lockdown.exe as a blocked app / soft-lock yourself).
+- [x] Lock category changes behind the challenge (change/add/delete a category go through guard when locked;
+  recolour stays free). (0.38.0)
+- [x] Move "Daily screen-time goal" out of Appearance into its own section, still unlocked. (0.38.0)
+- [x] Import settings needs the challenge - already enforced (settings._import -> app.guard). Verified.
+- [x] Limit reset time: clearer wording + cap so toggling the hour can't stack past the end of the next day
+  (test_toggling_the_reset_time_cannot_stack_past_the_next_day). (0.38.0)
+- [x] Lockdown itself can't be blocked (lockdown.exe / lockdownservice.exe added to PROTECTED). (0.38.0)
 - [ ] Screen Time Calendar: click a day to see that day's details (per-app time) - for history / parents.
 
 Proposed, need a decision (I asked "what do you think"):

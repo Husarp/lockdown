@@ -14,7 +14,8 @@ PROTECTED = {"system", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "
              "svchost.exe", "explorer.exe", "dwm.exe", "fontdrvhost.exe", "sihost.exe", "ctfmon.exe",
              "taskhostw.exe", "runtimebroker.exe", "searchhost.exe", "startmenuexperiencehost.exe",
              "python.exe", "pythonw.exe", "conhost.exe", "audiodg.exe", "spoolsv.exe",
-             "rundll32.exe", "dllhost.exe", "msiexec.exe", "consent.exe", "logonui.exe"}
+             "rundll32.exe", "dllhost.exe", "msiexec.exe", "consent.exe", "logonui.exe",
+             "lockdown.exe", "lockdownservice.exe"}   # Lockdown itself, so you can't block / soft-lock it
 
 
 # What happens to a blocked app (blocked_items.block_type): a comma-separated set of flags,

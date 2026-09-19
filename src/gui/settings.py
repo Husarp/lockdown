@@ -32,6 +32,7 @@ class SettingsPage(ctk.CTkFrame):
         self.body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         self.locked = LockedStrip(self, self.app, self.body)
         self._build_appearance()
+        self._build_goal()
         self._build_categories()
         self._build_reset()
         self._build_emergency()
@@ -59,7 +60,7 @@ class SettingsPage(ctk.CTkFrame):
 
     def _manage_categories(self):
         from gui.categories import CategoryEditor
-        CategoryEditor(self, self.db, self._load_categories)
+        CategoryEditor(self, self.db, self._load_categories, self.app.guard)
 
     def _section(self, title: str, help_text: str = "") -> ctk.CTkFrame:
         box = ctk.CTkFrame(self.body)
@@ -99,16 +100,19 @@ class SettingsPage(ctk.CTkFrame):
                      text_color=theme.WARNING).pack(side="left")
         ctk.CTkButton(self.restart_line, text="Restart now", width=110, command=self.app.restart).pack(
             side="left", padx=10)
+        self._show_accent()
+
+    def _build_goal(self):
+        box = self._section("Daily goal")
         line = ctk.CTkFrame(box, fg_color="transparent")
-        line.pack(anchor="w", padx=16, pady=(0, 12))
+        line.pack(anchor="w", padx=16, pady=(4, 12))
         ctk.CTkLabel(line, text="Daily screen-time goal").pack(side="left", padx=(0, 10))
         self.goal = ctk.CTkOptionMenu(line, width=90, values=GOAL_OPTIONS, command=self._goal_changed)
         self.goal.pack(side="left")
         hours = self.db.get_setting(GOAL_KEY, DEFAULT_GOAL_HOURS)
         self.goal.set("Off" if hours == "0" else f"{hours} h")
-        help_icon(line, "Shown as a dashed line on the day charts.").pack(side="left", padx=8)
-        self.restart_anchor = line   # (the restart hint goes above the goal line)
-        self._show_accent()
+        help_icon(line, "Shown as a dashed line on the day charts. Not part of blocking, so it stays editable "
+                        "even while Anti-Bypass is locked.").pack(side="left", padx=8)
 
     def _theme_changed(self, label: str):
         self.app.set_appearance(label)
@@ -133,7 +137,7 @@ class SettingsPage(ctk.CTkFrame):
         amoled_now = theme.THEME == "amoled"
         amoled_saved = self.db.get_setting(theme.THEME_KEY, theme.THEME) == "amoled"
         if saved != theme.ACCENT_HEX.upper() or amoled_now != amoled_saved:
-            self.restart_line.pack(anchor="w", padx=16, pady=(0, 8), before=self.restart_anchor)
+            self.restart_line.pack(anchor="w", padx=16, pady=(0, 8))
         else:
             self.restart_line.pack_forget()
 
@@ -285,9 +289,11 @@ class SettingsPage(ctk.CTkFrame):
         self.reset_entry.delete(0, "end")
         self.reset_entry.insert(0, f"{clock.time:%H:%M}")
         _start, end = clock.day(now)
-        info = f"The current limit day runs until {when_text(end)}."
+        info = (f"Limits reset at {clock.time:%H:%M} every day. This limit day runs until {when_text(end)}, "
+                "then the counters start over.")
         if clock.carry_until and now < clock.carry_until:
-            info += " It's longer than usual because the time was changed - a change never starts a new day early."
+            info += (" It's running a bit longer than usual because you changed the reset time - the change never "
+                     "resets a limit early, and never stretches the day past the end of the next day.")
         self.reset_info.configure(text=info)
         self.reset_error.configure(text="")
 

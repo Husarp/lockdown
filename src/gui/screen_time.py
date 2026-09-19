@@ -284,7 +284,7 @@ class TableView(ctk.CTkScrollableFrame):
             row.count.configure(text=str(counts.get(name, 0)))
             row.chip.configure(text=f"{c.names[cat]}  ▾", border_color=color, text_color=color,
                                command=lambda chip=row.chip, n=name, k=cat: categories.open_menu(
-                                   chip, c.db, self.kind, n, k, c.page.refresh))
+                                   chip, c.db, self.kind, n, k, c.page.refresh, c.page.app.guard))
             row.show(True)
         for row in self.rows[len(ranked):]:
             row.show(False)

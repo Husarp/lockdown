@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.38.0 - 2026-09-19 19:43
+- **Lockdown can't be blocked**: lockdown.exe / lockdownservice.exe are protected, so you can't add them as
+  a blocked app (or have a mode close them) and soft-lock yourself out.
+- **Category changes need the challenge when locked**: changing an app's/site's category, adding one or
+  deleting one goes through Anti-Bypass while it's locked (categories feed the modes that block by
+  category). Recolouring stays free. Editing is still instant when unlocked / off.
+- **Daily goal moved out of Appearance** into its own "Daily goal" section (still not locked - it doesn't
+  affect blocking).
+- **Limit reset**: clearer wording, and toggling the reset time can no longer stack the running limit day
+  past the end of the next day (it still never resets a limit early).
+- Import settings already required the Anti-Bypass challenge - unchanged.
+
 ## 0.37.0 - 2026-09-19 19:35
 - **Reminders in the sidebar**: breaks, sleep and your own reminders are now their own top-level page
   (hourglass icon) instead of a hidden tab under Modes - much easier to find. Modes now just shows modes.
