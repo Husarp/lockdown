@@ -2,6 +2,7 @@
 import math
 from datetime import datetime
 
+from blocker.protection import LISTS
 from rules import DAY_NAMES, TIME_FMT, effective_rules, item_block, next_block
 
 REASONS = {  # reason -> (label in settings, text for {reason})
@@ -11,6 +12,7 @@ REASONS = {  # reason -> (label in settings, text for {reason})
     "switches": ("Opened too often", "opened too many times"),
     "temporary": ("Temporarily blocked", "temporarily blocked"),
     "mode": ("Blocked by a mode", "blocked while a mode is on"),
+    "protection": ("On a protection list (scam, adult...)", "on a blocked list"),
 }
 DEFAULT_MESSAGES = {
     "permanent": "{site} is permanently blocked.",
@@ -19,6 +21,7 @@ DEFAULT_MESSAGES = {
     "switches": "{site}: opened too many times - blocked until {until}.",
     "temporary": "{site} is blocked for now - until {until}.",
     "mode": "{site} is blocked while this mode is on - until {until}.",
+    "protection": "{site} is blocked - it's {reason}.",
 }
 FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "Both"}
 COOLDOWN_OPTIONS = [1, 5, 15, 30, 60]
@@ -46,12 +49,21 @@ def until_text(until: str | None, now: datetime) -> str:
 
 
 def format_message(template: str, event: dict, now: datetime) -> str:
-    values = {"site": event["display_name"], "reason": REASONS.get(event["reason"], ("", event["reason"]))[1],
+    reason = REASONS.get(event["reason"], ("", event["reason"]))[1]
+    if event["reason"].startswith("protection:"):   # which list: "on the scam list"
+        key = event["reason"].split(":", 1)[1]
+        reason = f"on the {LISTS[key][0].lower()} list" if key in LISTS else REASONS["protection"][1]
+    values = {"site": event["display_name"], "reason": reason,
               "until": until_text(event["until"], now)}
     try:
         return template.format(**values)
     except (KeyError, IndexError, ValueError):  # user typed an unknown {placeholder}
         return template
+
+
+def base_reason(reason: str) -> str:
+    """"protection:scam" -> "protection" (the settings are per kind of reason)."""
+    return reason.split(":", 1)[0]
 
 
 def should_notify(event: dict, item_notify: str | None, enabled: bool, last_shown: float | None,

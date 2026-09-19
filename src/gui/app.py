@@ -266,12 +266,13 @@ class LockdownApp(ctk.CTk):
 
     def _alert(self, event: dict, item_notify: str | None):
         now = time.time()
-        enabled = alerts.get(self.db, f"notify.enabled.{event['reason']}") == "1"
+        reason = alerts.base_reason(event["reason"])
+        enabled = alerts.get(self.db, f"notify.enabled.{reason}") == "1"
         cooldown = int(alerts.get(self.db, "notify.cooldown_min"))
         if not alerts.should_notify(event, item_notify, enabled, self.last_alert.get(event["item_id"]), now, cooldown):
             return
         self.last_alert[event["item_id"]] = now
-        self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{event['reason']}"), event, now_from_db(self.db)))
+        self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{reason}"), event, now_from_db(self.db)))
 
     def _poll_watcher(self):
         """Warnings before blocks start, reminders while in use, "block started" notices."""

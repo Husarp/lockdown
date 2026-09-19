@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.0 — 2026-09-19 02:37
+- **Protection lists** (Blocking > Protection): always-on community lists - Scam (Block List Project, ~8.5k), Phishing (phishing.army, ~40k), Malware (abuse.ch URLhaus), Adult (StevenBlack, ~70k) on by default, Gambling (StevenBlack) optional
+  - the service downloads them once a day (retries an hour after a failure; "Update now" button) and blocks them through the hosts file, 8 domains per line; not affected by modes or the emergency unlock
+  - "Check a site" box, "Allowed anyway" exceptions
+  - blocked visits say which list: "fake-shop.com is blocked - it's on the scam list." (new alert reason on the Notifications page)
+- Hosts file: the 2-second check skips rebuilding while neither the blocklist nor the file changed (with ~120k domains: 300 ms -> 2 ms); manual edits are still repaired
+- Fix: the emergency-unlock list no longer shows things a mode blocks that aren't on your list (they can't be unlocked)
+- 137 tests passing
+
 ## 0.15.0 — 2026-09-19 02:28
 - **Reminders** (Phase 6b, Modes page > Reminders tab):
   - Sleep: bedtime + wake-up time, heads-up before bedtime, a full-screen "Time for bed" overlay at bedtime ("Going to bed" / "5 more minutes") that comes back every N min until wake-up; optionally turns on a mode until wake-up

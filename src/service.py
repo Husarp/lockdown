@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from blocker import apps, browser_policy, connections, firewall, hosts, netlog
+from blocker import apps, browser_policy, connections, firewall, hosts, netlog, protection
 from blocker.listener import BlockListener
 from db import Database
 from paths import DATA_DIR, LOG_PATH
@@ -43,6 +43,7 @@ LAUNCH_SLACK_SEC = 1        # started more than this after the block began = lau
 FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
 NETLOG_SEC = 2
 NETLOG_KEEP = timedelta(hours=1)  # the network log only shows the last hour
+PROTECTION_CHECK_SEC = 60         # how often the service looks whether a protection list is due for download
 
 log = logging.getLogger("lockdown.service")
 
@@ -77,6 +78,7 @@ class Enforcer:
         self.helpers: dict[str, set[int]] = {}     # exe -> pids it started ("also close background processes")
         self.path_cache: dict[int, tuple[str, str]] = {}   # pid -> (exe, lowercase path)
         self.firewalled: dict[str, str] = json.loads(db.get_setting(FIREWALL_KEY, "{}"))
+        self.protection = protection.Protection()   # always-on scam / phishing / malware / adult lists
 
     def update_clock(self) -> datetime:
         """Trusted now; publishes the offset to the system clock and logs clock changes."""
@@ -111,9 +113,11 @@ class Enforcer:
             for ip in connections.resolve(hosts.expand(newly_blocked)):
                 self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
 
-        if hosts.apply(sorted(blocks)):
+        self.protection.refresh(protection.settings(self.db))
+        if hosts.apply(sorted(blocks), extra=self.protection.domains):
             hosts.flush_dns()
-            log.info("Hosts file updated: %d hostnames blocked", len(blocks))
+            log.info("Hosts file updated: %d hostnames blocked + %d from protection lists", len(blocks),
+                     len(self.protection.domains))
         self.blocks = blocks
 
         if browser_policy.apply():
@@ -131,6 +135,8 @@ class Enforcer:
         """Called by listener threads when a browser tries to open a blocked hostname."""
         blocks = self.blocks
         block = blocks.get(hostname) or blocks.get(hostname.removeprefix("www."))
+        if not block and (on := self.protection.which(hostname)):
+            block = {"item": {"id": None, "display_name": hostname}, "reason": f"protection:{on}", "until": None}
         if block:
             self.record_event(hostname, block)
 
@@ -276,6 +282,17 @@ class NetworkLogger:
         self.db.prune_network((now - NETLOG_KEEP).strftime("%Y-%m-%d %H:%M"))
 
 
+def protection_loop(enforcer: Enforcer):
+    """Keep the protection lists fresh (downloads take a while, so not in the 2-second loop)."""
+    db = Database()
+    while True:
+        try:
+            protection.update_due_lists(db, enforcer.clock.now(), log=log)
+        except Exception:
+            log.exception("Protection list update failed")
+        time.sleep(PROTECTION_CHECK_SEC)
+
+
 def netlog_loop(enforcer: Enforcer):
     logger = NetworkLogger(Database(), enforcer.clock.now)
     while True:
@@ -320,6 +337,7 @@ def main():
     BlockListener(enforcer.on_visit, log).start()
     threading.Thread(target=app_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=netlog_loop, args=(enforcer,), daemon=True).start()
+    threading.Thread(target=protection_loop, args=(enforcer,), daemon=True).start()
     while True:
         try:
             enforcer.enforce_once()

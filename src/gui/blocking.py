@@ -1,10 +1,11 @@
-"""Blocking page - three tabs:
+"""Blocking page - four tabs:
 
 - Overview: every blocked site/app with all its rules (own + groups) as chips, sortable; Edit opens it in "Add",
   Remove deletes it (two clicks). Emergency unlock.
 - Groups: shared rule sets (see groups.py).
 - Add: pick a site or app, then tick any number of blockers at once (collapsible cards: hours, time limit,
   opening limit, permanent, temporary). Also used to edit an existing item.
+- Protection: always-on scam / phishing / malware / adult lists (see protection_tab.py).
 All edits go into the draft (see draft.py).
 """
 import tkinter as tk
@@ -17,6 +18,7 @@ from blocker.apps import block_flags
 from gui import app_browser, icons, theme
 from gui.components import BlockerCard, Segmented, eyebrow, rule_chip
 from gui.groups import GroupsTab
+from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
@@ -24,7 +26,7 @@ from importer.popular import POPULAR_SITES
 from rules import DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block
 from trusted_time import now_from_db
 
-TABS = ["Overview", "Groups", "Add"]
+TABS = ["Overview", "Groups", "Add", "Protection"]
 SORTS = ["Blocked now first", "Next block", "Date added", "Name"]
 SORT_KEY = "ui.blocking.sort"
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
@@ -131,7 +133,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
         ctk.CTkLabel(panel, text=f"{left} of {allowed} left {per} (resets {DAY_NAMES[reset.weekday()]} {reset:%H:%M}). "
                                  f"Pick what to unblock for {minutes} min - several at once still count as one use.",
                      text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
-        blocked = sorted((b["item"] for b in db.blocks(now)), key=lambda i: i["display_name"].lower())
+        # things on your list (a mode can also block made-up items, without an id, that can't be unlocked)
+        blocked = sorted({b["item"]["id"]: b["item"] for b in db.blocks(now) if b["item"]["id"] is not None}.values(),
+                         key=lambda i: i["display_name"].lower())
         boxes = []
         for item in blocked:
             line = ctk.CTkFrame(panel, fg_color="transparent")
@@ -444,7 +448,7 @@ class BlockingPage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
         self.after(LIVE_MS, self._live_update)
 
-    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab}
+    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab, "Protection": ProtectionTab}
 
     def show_tab(self, tab: str):
         if tab not in self.tabs:

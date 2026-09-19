@@ -1260,10 +1260,13 @@ sleep / forced-break overlays still show.
 - [x] Break reminder (interval, forced break option)
 - [x] Custom reminders
 
-### Protection lists (requested 2026-09-19, waiting for decisions)
-- [ ] Always-on lists of scam / phishing / malware sites (community lists, updated automatically by the service),
-  kept separate from your own blocklist; optional adult / gambling lists; "allow this site anyway" exceptions;
-  not affected by modes or the emergency unlock. Watch: very large hosts files slow Windows' DNS.
+### Protection lists (requested 2026-09-19)
+- [x] Always-on lists of scam / phishing / malware / adult sites (on by default), gambling optional; community lists
+  updated daily by the service; separate from your own blocklist; "allowed anyway" exceptions; "check a site";
+  not affected by modes or the emergency unlock; blocked visits name the list ("on the scam list")
+- [ ] Proposed (waiting for OK): a small DNS filter in the service instead of the hosts file for these lists - lookups
+  in memory (millions of domains, whole subdomains), so the big lists (Block List Project malware ~2M, adult ~700k)
+  become possible; Windows' DNS setting points at the service, restored if it stops
 
 ### Phase 7 — Anti-Bypass
 - [ ] Settings change window (specific hours only)
