@@ -34,6 +34,20 @@ def test_phrase():
     assert p != ab.new_phrase(60)
 
 
+def test_phrase_charset_and_custom():
+    assert ab.new_phrase(40).replace(" ", "").islower()                       # letters only by default
+    assert any(c.isdigit() or c.isupper() for c in ab.new_phrase(200, complex=True))   # complex adds digits/caps
+    assert ab.phrase_for({**ab.DEFAULTS, "custom_phrase": "my secret pass"}) == "my secret pass"
+
+
+def test_custom_and_complex_looser():
+    base = {**ab.DEFAULTS, "phrase": True, "length": 60}
+    assert ab.settings_looser({**base, "complex": True}, base)                # dropping complexity is looser
+    assert not ab.settings_looser(base, {**base, "complex": True})            # adding it is not
+    assert ab.settings_looser(base, {**base, "custom_phrase": "short"})       # 5-char custom < 60 is looser
+    assert not ab.settings_looser(base, {**base, "custom_phrase": "x" * 80})  # a longer custom phrase is not
+
+
 def test_rule_looser():
     tl = {"rule_type": "time_limit", "daily_limit_min": 60, "weekly_limit_min": None}
     assert not ab.rule_looser(tl, {**tl, "daily_limit_min": 30}, NOW)         # stricter

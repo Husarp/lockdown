@@ -30,7 +30,9 @@ def hours_text(cfg: dict) -> str:
 def describe(cfg: dict) -> str:
     parts = []
     if cfg["phrase"]:
-        parts.append(f"typing a {cfg['length']}-character phrase" + (" in a 3×3 grid" if cfg["grid"] else ""))
+        which = "your own phrase" if cfg.get("custom_phrase") else (
+            f"a {cfg['length']}-character phrase" + (" (with numbers & capitals)" if cfg.get("complex") else ""))
+        parts.append(f"typing {which}" + (" in a 3×3 grid" if cfg["grid"] else ""))
     if cfg["hours"]:
         parts.append(f"only {hours_text(cfg)}")
     return "Loosening a block needs: " + " · ".join(parts) if parts else "Off - loosening a block needs nothing."
@@ -75,7 +77,7 @@ class ChallengeWindow(ctk.CTkToplevel):
             buttons.pack(fill="x", pady=(16, 0))
             ctk.CTkButton(buttons, text="OK", width=90, command=self._cancel).pack(side="right")
         else:
-            self.phrase = antibypass.new_phrase(cfg["length"])
+            self.phrase = antibypass.phrase_for(cfg)
             self.grid = None
             if cfg["grid"]:
                 ctk.CTkLabel(box, text=f"Type each word into the orange box (click it first; no pasting). It unlocks "
@@ -180,10 +182,23 @@ class AntiBypassPage(ctk.CTkFrame):
         self.length.pack(side="left")
         self.length_note = ctk.CTkLabel(line, text="", text_color=MUTED)
         self.length_note.pack(side="left", padx=10)
+        self.complex_box = ctk.CTkCheckBox(challenges.body, text="Include numbers and CAPITAL letters (harder to type "
+                                           "quickly)", command=self._apply)
+        self.complex_box.pack(anchor="w", padx=(46, 0), pady=(0, 8))
         self.grid_box = ctk.CTkCheckBox(challenges.body, text="3×3 grid - one word at a time into a box picked at "
                                         "random (you click it; macros can't just type blindly)", command=self._apply)
         self.grid_box.pack(anchor="w", padx=(46, 0), pady=(0, 12))
         line.pack_configure(pady=(4, 6))
+        custom = ctk.CTkFrame(challenges.body, fg_color="transparent")
+        custom.pack(anchor="w", fill="x", padx=(46, 0), pady=(0, 12))
+        ctk.CTkLabel(custom, text="Your own phrase").pack(side="left", padx=(0, 8))
+        self.custom_entry = ctk.CTkEntry(custom, width=320, placeholder_text="leave empty for a random one")
+        self.custom_entry.pack(side="left")
+        ctk.CTkButton(custom, text="Save phrase", width=100, **theme.OUTLINE, command=self._apply).pack(side="left",
+                                                                                                       padx=8)
+        help_icon(custom, "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - "
+                          "no pasting. With the 3×3 grid it's split into words by the spaces. While a custom phrase "
+                          "is set, the length and the numbers/capitals option don't apply.").pack(side="left", padx=4)
         hours_line = ctk.CTkFrame(challenges.body, fg_color="transparent")
         hours_line.pack(anchor="w")
         self.hours_sw = ctk.CTkSwitch(hours_line, text="Only during these hours", font=theme.semi(13),
@@ -242,8 +257,12 @@ class AntiBypassPage(ctk.CTkFrame):
         now = now_from_db(self.db)
         self.phrase_sw.select() if cfg["phrase"] else self.phrase_sw.deselect()
         self.grid_box.select() if cfg["grid"] else self.grid_box.deselect()
+        self.complex_box.select() if cfg.get("complex") else self.complex_box.deselect()
         self.length.set(next((k for k, v in antibypass.LENGTHS.items() if v == cfg["length"]), "Medium"))
         self.length_note.configure(text=f"{cfg['length']} characters")
+        if self.custom_entry.get() != (cfg.get("custom_phrase") or ""):
+            self.custom_entry.delete(0, "end")
+            self.custom_entry.insert(0, cfg.get("custom_phrase") or "")
         self.hours_sw.select() if cfg["hours"] else self.hours_sw.deselect()
         for row in self.rows:
             row.destroy()
@@ -326,7 +345,8 @@ class AntiBypassPage(ctk.CTkFrame):
         if self.hours_sw.get() and not windows:
             raise ValueError("Turn on at least one day.")
         return {**cfg, "phrase": bool(self.phrase_sw.get()), "length": antibypass.LENGTHS[self.length.get()],
-                "grid": bool(self.grid_box.get()),
+                "grid": bool(self.grid_box.get()), "complex": bool(self.complex_box.get()),
+                "custom_phrase": " ".join(self.custom_entry.get().split()),
                 "hours": bool(self.hours_sw.get()),
                 "windows": load_schedule(make_schedule("allow", windows))["windows"] if windows else cfg["windows"]}
 
@@ -354,7 +374,8 @@ class AntiBypassPage(ctk.CTkFrame):
             save()
 
     def _challenge_changed(self, old: dict, new: dict) -> bool:
-        return any(old[k] != new[k] for k in ("phrase", "length", "grid", "hours", "windows"))
+        return any(old.get(k) != new.get(k) for k in ("phrase", "length", "grid", "complex", "custom_phrase",
+                                                       "hours", "windows"))
 
     def _lock(self):
         antibypass.lock(self.db)

@@ -1407,11 +1407,15 @@ section-4 rebuild (Blocking Overview table, Protection tab, Calendar screen).
 ### Round 6 requests (2026-09-19, night)
 - [x] Crisper 16px title-bar/taskbar icon (bold canvas-filling variant, no keyhole). (0.39.1)
 - [x] Locked wording -> just "Locked" (strip + banner); "Add your own blocking list"; trend legend. (0.39.1)
-- [ ] Challenge charset toggle: default OFF = phrase is letters only; ON = add numbers + capital letters.
-- [ ] Custom phrase: let the user set their own phrase (paste to set, must type it exactly to pass; no pasting
-  when answering). With the grid, split it into words by spaces.
-- [ ] Limit turning Anti-Bypass OFF: passing the phrase once and switching it off is too easy. NEEDS A DECISION
-  on the rule (e.g. only once per day / a cooldown / N per day).
+- [x] Challenge charset toggle: default OFF = letters only; ON = numbers + capitals. (0.40.0)
+- [x] Custom phrase: set your own (type exactly, no pasting; grid splits on spaces). (0.40.0)
+
+Parked (revisit later):
+- [ ] Limit turning Anti-Bypass OFF (user: "leave it as is for now"). NOTE the real loophole: during the 5-min
+  unlock, weakening/disabling Anti-Bypass isn't re-challenged (guard sees status "free"). Fix later, e.g. make
+  weakening Anti-Bypass always force a fresh challenge + optional once-a-day cap.
+- [ ] Custom phrase refinement: a fixed phrase is easier to automate than a fresh random one - think about
+  whether to warn / add a periodic re-randomise / discourage very short ones.
 
 ### Round 5 requests (2026-09-19, evening)
 - [ ] Verify the round-4 design changes look right with a second agent BEFORE the next feature work

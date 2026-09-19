@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.40.0 - 2026-09-19 20:59
+- **Challenge phrase options** (Anti-Bypass): the random phrase is now **letters only by default**; a new
+  "Include numbers and CAPITAL letters" toggle makes it harder. Dropping it counts as loosening (needs the
+  challenge).
+- **Your own phrase**: set a phrase only you know - you still type it exactly each time (no pasting), and with
+  the 3×3 grid it's split into words by the spaces. A shorter custom phrase counts as loosening.
+
 ## 0.39.1 - 2026-09-19 20:51
 - **Crisper title-bar / taskbar icon**: the 16px icon is now drawn as a bolder, canvas-filling shield (no tiny
   keyhole) so it stays sharp instead of looking muddy; larger sizes unchanged.

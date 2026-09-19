@@ -18,9 +18,8 @@ SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": 
 UNLOCK_MIN = 5
 EXITED_KEY = "agent.exited"   # "1" after tray Exit: the watchdog doesn't bring the tray app back until next login
 LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
-DEFAULTS = {"phrase": False, "length": 60, "grid": False, "hours": False,
+DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "unlocked_until": None}
-_PHRASE_CHARS = string.ascii_lowercase + string.digits
 
 
 def settings(db) -> dict:
@@ -76,10 +75,23 @@ def lock(db):
     save(db, cfg)
 
 
-def new_phrase(length: int, rng=random) -> str:
-    """Random lowercase letters and digits in groups of 5 ("k7qzp 2mxa9 ...")."""
-    chars = "".join(rng.choice(_PHRASE_CHARS) for _ in range(length))
+def new_phrase(length: int, complex: bool = False, rng=random) -> str:
+    """Random phrase in groups of 5 ("kqzph mxacd ..."). Lowercase letters by default; complex also adds capital
+    letters and digits (harder to read and type)."""
+    charset = string.ascii_lowercase + (string.ascii_uppercase + string.digits if complex else "")
+    chars = "".join(rng.choice(charset) for _ in range(length))
     return " ".join(chars[i:i + 5] for i in range(0, length, 5))
+
+
+def phrase_for(cfg: dict, rng=random) -> str:
+    """The phrase to type for a challenge: the user's own if set, else a fresh random one."""
+    return cfg.get("custom_phrase") or new_phrase(cfg["length"], cfg.get("complex", False), rng)
+
+
+def _phrase_strength(cfg: dict) -> int:
+    """How long the phrase is in characters (a custom phrase counts its non-space characters)."""
+    custom = cfg.get("custom_phrase") or ""
+    return len(custom.replace(" ", "")) if custom else cfg["length"]
 
 
 # ---------- what loosens a block ----------
@@ -169,7 +181,8 @@ def protection_looser(old: dict, new: dict) -> bool:
 
 
 def settings_looser(old: dict, new: dict) -> bool:
-    """Anti-Bypass itself: a challenge switched off, a shorter phrase, other allowed hours."""
-    return ((old["phrase"] and (not new["phrase"] or new["length"] < old["length"]
-                                or (old["grid"] and not new["grid"])))
+    """Anti-Bypass itself: a challenge switched off, a shorter / simpler phrase, the grid dropped, other hours."""
+    return ((old["phrase"] and (not new["phrase"] or _phrase_strength(new) < _phrase_strength(old)
+                                or (old["grid"] and not new["grid"])
+                                or (old.get("complex") and not new.get("complex"))))
             or (old["hours"] and (not new["hours"] or new["windows"] != old["windows"])))
