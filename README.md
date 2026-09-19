@@ -30,7 +30,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   categories (productive / neutral / distracting + your own, with your colours - click a category to change it).
   Hover a chart for details. Dark and light theme (Settings > Appearance).
 - **Protection lists** (Blocking > Protection): always-on community lists of scam, phishing, malware and adult sites
-  (gambling optional), updated daily, with exceptions and a "check a site" box.
+  (gambling optional; ~4.3M sites from HaGeZi, Block List Project, Phishing Army, URLhaus), updated daily with a
+  download progress, with exceptions and a "check a site" box. Blocked by the service's own DNS filter.
 - **Modes** (Phase 6a): Work / Study / Focus (Pomodoro) / Do Not Disturb / Relax + your own - each blocks a
   category plus picked sites/apps while it's on; start for a while, until a time or until stopped (optionally locked),
   or on a schedule; also from the tray menu.
@@ -69,6 +70,11 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   (a letter icon is shown when offline).
 - The service also listens on `127.0.0.1:80/443`: when a browser tries to open a blocked site, it records which
   site and why; the tray agent turns that into a notification (configurable on the Notifications page).
+- **DNS filter** (protection lists - millions of sites, far too many for the hosts file, which makes Windows' DNS hang):
+  the service runs a small DNS server on `127.0.0.1` / `::1` port 53. Connected network adapters are set to DNS
+  "127.0.0.1, <their own DNS servers>" (+ `::1` for IPv6): listed sites get 127.0.0.1, everything else is passed to
+  the network's DNS. If the service stops, Windows falls back to the network's DNS (internet keeps working, lists
+  not enforced). Original settings are saved and restored on uninstall or with `service.py restore-dns`.
 - Service log: `C:\ProgramData\Lockdown\lockdown.log`.
 
 ## Setup
@@ -87,7 +93,11 @@ re-run after changing service code):
 Set-ExecutionPolicy -Scope Process Bypass -Force; & "<project folder>\scripts\install_service.ps1"
 ```
 
-Remove it with `scripts\uninstall_service.ps1` (also removes the browser policies; clear the blocklist first so the hosts entries are removed).
+Remove it with `scripts\uninstall_service.ps1` (also removes the browser policies and restores DNS settings; clear the blocklist first so the hosts entries are removed).
+
+If pages ever stop loading because of Lockdown, run `scripts\repair_dns.ps1` the same way: it stops the service,
+restores the network adapters' DNS settings and removes Lockdown's hosts-file section (run `install_service.ps1`
+again to turn Lockdown back on).
 
 ## Usage
 
@@ -123,4 +133,6 @@ sidebar icons (rendered from the design) in `assets/icons`.
   unless they are listed (the quick-list, and typing a known site's domain, include the common ones).
 - Closing open connections works for IPv4 TCP only, and uses the site's IPs as resolved at block time
   (big sites on CDNs may use other IPs too).
+- The DNS filter can be bypassed by changing the network adapter's DNS by hand (Lockdown switches it back within
+  10 s) or by stopping the service; Windows may also briefly use the fallback DNS if the filter answers slowly.
 - Anything is still easy to undo until the anti-bypass phase (7).

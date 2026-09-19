@@ -27,8 +27,11 @@ BANNER_BG = ("#FBEEE8", "#2A1E19")
 
 
 def start_service():
-    """Start the enforcement service (Windows asks for admin rights)."""
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", "schtasks.exe", f'/Run /TN "{TASK_NAME}"', None, 0)
+    """(Re)start the enforcement service (Windows asks for admin rights). A copy that's still running but stuck
+    is ended first - otherwise Windows ignores the start, as only one copy may run."""
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe",
+                                        f'/c schtasks /End /TN "{TASK_NAME}" & schtasks /Run /TN "{TASK_NAME}"',
+                                        None, 0)
 
 
 def goal_seconds(db) -> float | None:

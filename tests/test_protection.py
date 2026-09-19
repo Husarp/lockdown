@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 import alerts
-from blocker import hosts, protection
+from blocker import protection
 from db import Database
 
 NOW = datetime(2026, 9, 19, 12, 0)
@@ -17,13 +17,16 @@ plain-list.example.org
 not a domain!
 BAD.EXAMPLE.COM
 """
-    assert protection.parse(text) == ["bad.example.com", "a.test", "b.test", "plain-list.example.org"]
+    assert protection.parse(text.splitlines()) == ["bad.example.com", "a.test", "b.test", "plain-list.example.org",
+                                                   "bad.example.com"]
 
 
 def test_due_daily_retry_and_update_now():
     cfg = {"info": {}}
     assert protection.due(cfg, "scam", NOW)
     cfg["info"]["scam"] = {"updated": (NOW - timedelta(hours=5)).isoformat()}
+    assert protection.due(cfg, "scam", NOW)                                  # downloaded from other sources
+    cfg["info"]["scam"]["sources"] = protection.sources("scam")
     assert not protection.due(cfg, "scam", NOW)
     assert protection.due(cfg, "scam", NOW + timedelta(hours=20))
     cfg["update_now"] = NOW.isoformat()
@@ -35,35 +38,41 @@ def test_due_daily_retry_and_update_now():
 
 def test_update_lists_exceptions_and_which(tmp_path, monkeypatch):
     db = Database(tmp_path / "t.db")
-    lists = {"scam": "0.0.0.0 fake-shop.com\n0.0.0.0 www.fake-shop.com\n", "adult": "adult.example\nok.example\n"}
+    lists = {"scam": "fake-shop.com\nwww.fake-shop.com\n", "adult": "*.adult.example\nok.example\n"}
+    seen_progress = []
 
-    def fake_download(key, folder):
+    def fake_download(key, folder, progress=None):
         if key not in lists:
             raise OSError("offline")
         folder.mkdir(parents=True, exist_ok=True)
-        domains = protection.parse(lists[key])
-        protection.list_path(key, folder).write_text("\n".join(domains))
-        return len(domains)
+        protection.list_path(key, folder).write_text(lists[key])
+        progress(1, 1, 50, 100)
+        seen_progress.append(protection.download_progress(db))
+        return lists[key].count("\n")
     monkeypatch.setattr(protection, "download", fake_download)
     assert protection.update_due_lists(db, NOW, tmp_path)
+    assert seen_progress[0] == {"key": "scam", "part": 1, "parts": 1, "done": 50, "total": 100}
+    assert protection.download_progress(db) is None                                  # cleared when done
     info = protection.settings(db)["info"]
     assert info["scam"]["count"] == 2 and "failed" in info["phishing"]
     assert not protection.update_due_lists(db, NOW + timedelta(minutes=5), tmp_path)   # nothing due
     cfg = protection.settings(db)
     cfg["allowed"] = ["ok.example"]
-    protection.save_settings(db, cfg)
     p = protection.Protection(tmp_path)
-    assert p.refresh(protection.settings(db))
-    assert p.domains == ["adult.example", "fake-shop.com", "www.fake-shop.com"]
-    assert p.which("www.fake-shop.com") == "scam" and p.which("ok.example") is None
-    assert not p.refresh(protection.settings(db))                                    # nothing changed
-
-
-def test_hosts_writes_list_domains_compactly():
-    lines = hosts.build_lines([], ["youtube.com"], [f"d{i}.com" for i in range(10)])
-    assert "127.0.0.1 youtube.com" in lines and "127.0.0.1 www.youtube.com" in lines
-    assert "127.0.0.1 d0.com d1.com d2.com d3.com d4.com d5.com d6.com d7.com" in lines
-    assert "127.0.0.1 d8.com d9.com" in lines
+    assert p.refresh(cfg) and p.count() == 4
+    assert p.which("www.fake-shop.com") == "scam" and p.which("FAKE-SHOP.COM.") == "scam"
+    assert p.which("sub.fake-shop.com") is None                                    # exact entry: not subdomains
+    assert p.which("adult.example") == p.which("a.b.adult.example") == "adult"     # "*." entry: subdomains too
+    assert p.which("ok.example") is None and p.which("example") is None
+    assert not p.refresh(cfg)                                                        # nothing changed
+    cfg["allowed"] = ["adult.example"]                                               # allowed: applies at once
+    assert not p.refresh(cfg)
+    assert p.which("a.b.adult.example") is None
+    cfg["enabled"] = ["scam"]
+    assert p.refresh(cfg) and p.count() == 2
+    assert protection.lists_with("x.adult.example", ["scam", "adult"], tmp_path) == ["adult"]
+    assert protection.lists_with("fake-shop.com", ["scam", "adult"], tmp_path) == ["scam"]
+    assert protection.lists_with("nothing.example", ["scam", "adult"], tmp_path) == []
 
 
 def test_message_names_the_list():

@@ -5,6 +5,7 @@ clock (changing the Windows clock has no effect), make the hosts file match
 (repairing manual edits), keep browser DoH/QUIC locked off, and close open connections to newly blocked
 sites. A listener on 127.0.0.1:80/443 records attempts to open blocked sites for the tray agent to notify.
 Network log (every 2 s, own thread): new connections per app and site, kept for an hour.
+Protection lists (scam / phishing / malware / adult ...): downloaded daily, blocked by the DNS filter (own threads).
 Blocked apps (checked 4x per second): started while blocked -> killed at once; already open when the block
 began -> the tray agent asks them to close, force-killed after 10 s. Block type firewall/both adds a Windows
 Firewall rule ("Block internet"). "Minimize" is handled by the tray agent (it can see the desktop).
@@ -13,7 +14,8 @@ Needs admin/SYSTEM rights.
 Usage:
     python src/service.py run              # enforcement loop (what the scheduled task runs)
     python src/service.py once             # single pass, for testing
-    python src/service.py remove-policies  # undo browser policies + firewall rules (used on uninstall)
+    python src/service.py remove-policies  # undo browser policies, firewall rules, DNS filter (used on uninstall)
+    python src/service.py restore-dns      # give network adapters their own DNS settings back (repair)
 """
 import ctypes
 import json
@@ -25,7 +27,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from blocker import apps, browser_policy, connections, firewall, hosts, netlog, protection
+from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection
 from blocker.listener import BlockListener
 from db import Database
 from paths import DATA_DIR, LOG_PATH
@@ -43,7 +45,8 @@ LAUNCH_SLACK_SEC = 1        # started more than this after the block began = lau
 FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
 NETLOG_SEC = 2
 NETLOG_KEEP = timedelta(hours=1)  # the network log only shows the last hour
-PROTECTION_CHECK_SEC = 60         # how often the service looks whether a protection list is due for download
+PROTECTION_CHECK_SEC = 10         # how often the service looks whether a protection list is due for download
+DNS_ADAPTER_CHECK_SEC = 10        # how often network adapters are (re)pointed at the DNS filter (new networks)
 
 log = logging.getLogger("lockdown.service")
 
@@ -113,11 +116,11 @@ class Enforcer:
             for ip in connections.resolve(hosts.expand(newly_blocked)):
                 self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
 
-        self.protection.refresh(protection.settings(self.db))
-        if hosts.apply(sorted(blocks), extra=self.protection.domains):
+        # (the protection lists are not in the hosts file: Windows' DNS client hangs on huge hosts files - they're
+        # blocked by the DNS filter, see dns_loop)
+        if hosts.apply(sorted(blocks)):
             hosts.flush_dns()
-            log.info("Hosts file updated: %d hostnames blocked + %d from protection lists", len(blocks),
-                     len(self.protection.domains))
+            log.info("Hosts file updated: %d hostnames blocked", len(blocks))
         self.blocks = blocks
 
         if browser_policy.apply():
@@ -293,6 +296,34 @@ def protection_loop(enforcer: Enforcer):
         time.sleep(PROTECTION_CHECK_SEC)
 
 
+def dns_loop(enforcer: Enforcer):
+    """DNS filter for the protection lists: keep the lists loaded (a big list takes a few seconds, so not in the
+    2-second loop) and the network adapters pointed at the filter; restore them if every list is off."""
+    db = Database()
+    server = dnsfilter.Server(enforcer.protection.which, log)
+    try:
+        server.start()
+    except OSError as e:   # port 53 taken by another program: never point Windows at a filter that isn't there
+        log.error("DNS filter couldn't start (%s) - protection lists are not enforced", e)
+        dnsfilter.restore(db, log)
+        return
+    last_adapters = 0.0
+    while True:
+        try:
+            cfg = protection.settings(db)
+            if enforcer.protection.refresh(cfg):
+                log.info("Protection lists loaded: %d domains", enforcer.protection.count())
+            if time.monotonic() - last_adapters >= DNS_ADAPTER_CHECK_SEC:
+                last_adapters = time.monotonic()
+                if enforcer.protection.count():
+                    server.upstreams = dnsfilter.point_to_filter(db, log)
+                elif db.get_setting(dnsfilter.SAVED_KEY, "{}") != "{}":
+                    dnsfilter.restore(db, log)
+        except Exception:
+            log.exception("DNS filter upkeep failed")
+        time.sleep(INTERVAL_SEC)
+
+
 def netlog_loop(enforcer: Enforcer):
     logger = NetworkLogger(Database(), enforcer.clock.now)
     while True:
@@ -314,20 +345,24 @@ def app_loop(enforcer: Enforcer):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd not in ("run", "once", "remove-policies"):
+    if cmd not in ("run", "once", "remove-policies", "restore-dns"):
         print(__doc__)
         return 2
     setup_logging()
     if not ctypes.windll.shell32.IsUserAnAdmin():
         log.error("Not running as administrator - cannot write the hosts file")
         return 1
+    if cmd == "restore-dns":
+        dnsfilter.restore(Database(), log)
+        return 0
     if cmd == "remove-policies":
         browser_policy.remove()
         db = Database()
+        dnsfilter.restore(db, log)
         for exe in json.loads(db.get_setting(FIREWALL_KEY, "{}")):
             firewall.remove(exe)
         db.set_setting(FIREWALL_KEY, "{}")
-        log.info("Browser policies and firewall rules removed")
+        log.info("Browser policies, firewall rules and DNS filter removed")
         return 0
     enforcer = Enforcer(Database())
     if cmd == "once":
@@ -338,6 +373,7 @@ def main():
     threading.Thread(target=app_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=netlog_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=protection_loop, args=(enforcer,), daemon=True).start()
+    threading.Thread(target=dns_loop, args=(enforcer,), daemon=True).start()
     while True:
         try:
             enforcer.enforce_once()

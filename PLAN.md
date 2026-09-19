@@ -1264,9 +1264,12 @@ sleep / forced-break overlays still show.
 - [x] Always-on lists of scam / phishing / malware / adult sites (on by default), gambling optional; community lists
   updated daily by the service; separate from your own blocklist; "allowed anyway" exceptions; "check a site";
   not affected by modes or the emergency unlock; blocked visits name the list ("on the scam list")
-- [ ] Proposed (waiting for OK): a small DNS filter in the service instead of the hosts file for these lists - lookups
-  in memory (millions of domains, whole subdomains), so the big lists (Block List Project malware ~2M, adult ~700k)
-  become possible; Windows' DNS setting points at the service, restored if it stops
+- [x] DNS filter in the service instead of the hosts file for these lists (approved 2026-09-19; the hosts file with
+  ~237k domains broke Windows DNS) - lookups in memory (millions of domains, whole subdomains); adapters' DNS =
+  "127.0.0.1, <own DNS>" so the internet keeps working if the service stops; originals restored on uninstall
+- [x] Bigger lists if not laggy (requested 2026-09-19): ~4.3M sites (HaGeZi + Block List Project), 34 MB, ~15 µs/lookup
+- [x] Download progress on the Protection tab (requested 2026-09-19)
+- [x] Fix: "Start service" did nothing while a stuck copy was running (now ends it first) (reported 2026-09-19)
 
 ### Phase 7 — Anti-Bypass
 - [ ] Settings change window (specific hours only)

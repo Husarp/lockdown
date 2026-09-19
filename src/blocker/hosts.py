@@ -13,7 +13,6 @@ from paths import HOSTS_BACKUP_PATH, HOSTS_PATH
 START_MARKER = "# >>> Lockdown START (managed automatically - do not edit)"
 END_MARKER = "# <<< Lockdown END"
 REDIRECT_IP = "127.0.0.1"
-PER_LINE = 8   # protection-list domains are written several per line (Windows reads up to 9) - a smaller file
 _last: tuple | None = None   # what apply() last saw (inputs + file size/time), to skip needless rebuilds
 
 _HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
@@ -40,9 +39,8 @@ def expand(hostnames: list[str]) -> list[str]:
     return sorted(out)
 
 
-def build_lines(current_lines: list[str], hostnames: list[str], extra: list[str] = ()) -> list[str]:
-    """Return the hosts file lines with the Lockdown section replaced (or removed if empty).
-    `extra`: protection-list domains - written as they are (the lists already have their www. variants)."""
+def build_lines(current_lines: list[str], hostnames: list[str]) -> list[str]:
+    """Return the hosts file lines with the Lockdown section replaced (or removed if empty)."""
     kept, inside, found = [], False, False
     for line in current_lines:
         if line.strip() == START_MARKER:
@@ -51,31 +49,28 @@ def build_lines(current_lines: list[str], hostnames: list[str], extra: list[str]
             inside = False
         elif not inside:
             kept.append(line)
-    if found or hostnames or extra:
+    if found or hostnames:
         # drop the blank separator line we add in front of the section
         while kept and not kept[-1].strip():
             kept.pop()
-    if not hostnames and not extra:
+    if not hostnames:
         return kept
-    section = [START_MARKER] + [f"{REDIRECT_IP} {h}" for h in expand(hostnames)]
-    section += [f"{REDIRECT_IP} " + " ".join(extra[i:i + PER_LINE]) for i in range(0, len(extra), PER_LINE)]
-    section += [END_MARKER]
+    section = [START_MARKER] + [f"{REDIRECT_IP} {h}" for h in expand(hostnames)] + [END_MARKER]
     return kept + [""] + section
 
 
-def apply(hostnames: list[str], hosts_path: Path = HOSTS_PATH, backup_path: Path = HOSTS_BACKUP_PATH,
-          extra: list[str] = ()) -> bool:
-    """Make the hosts file's Lockdown section match `hostnames` (+ `extra`). Returns True if it was rewritten.
-    With big protection lists, rebuilding every 2 s is costly: skipped while neither the inputs nor the file
-    (size + modification time) changed since the last check - so manual edits are still repaired."""
+def apply(hostnames: list[str], hosts_path: Path = HOSTS_PATH, backup_path: Path = HOSTS_BACKUP_PATH) -> bool:
+    """Make the hosts file's Lockdown section match `hostnames`. Returns True if it was rewritten.
+    Skipped while neither the input nor the file (size + modification time) changed since the last check -
+    so manual edits are still repaired."""
     global _last
     stat = hosts_path.stat()
-    key = (str(hosts_path), hash(tuple(hostnames)), hash(tuple(extra)), stat.st_mtime_ns, stat.st_size)
+    key = (str(hosts_path), hash(tuple(hostnames)), stat.st_mtime_ns, stat.st_size)
     if key == _last:
         return False
     text = hosts_path.read_text(encoding="utf-8", errors="surrogateescape")
     lines = text.splitlines()
-    new_lines = build_lines(lines, hostnames, extra)
+    new_lines = build_lines(lines, hostnames)
     changed = new_lines != lines
     if changed:
         if not backup_path.exists():
@@ -85,7 +80,7 @@ def apply(hostnames: list[str], hosts_path: Path = HOSTS_PATH, backup_path: Path
         with open(hosts_path, "w", encoding="utf-8", errors="surrogateescape", newline="\r\n") as f:
             f.write("\n".join(new_lines) + "\n")
         stat = hosts_path.stat()
-    _last = key[:3] + (stat.st_mtime_ns, stat.st_size)
+    _last = key[:2] + (stat.st_mtime_ns, stat.st_size)
     return changed
 
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.17.0 — 2026-09-19 03:10
+- **Fix (urgent): the internet stopped working** after 0.16.0 - ~237k protection-list domains in the hosts file made
+  Windows' DNS lookups hang (and froze the service at startup, so it showed as off). The lists are no longer written
+  to the hosts file; `scripts/repair_dns.ps1` (admin) stops Lockdown, restores DNS settings and cleans the hosts file
+- **DNS filter** in the service for the protection lists: a small DNS server on 127.0.0.1 / ::1 port 53 answers
+  listed sites with 127.0.0.1 (the "blocked - it's on the scam list" notice still works) and passes everything else
+  to the network's own DNS servers. Connected network adapters get DNS "127.0.0.1, <their own DNS>" (+ ::1 for IPv6),
+  so if the service ever stops Windows falls back to the normal DNS and the internet keeps working; new networks are
+  picked up within 10 s; original settings are saved and restored on uninstall / `service.py restore-dns` / all lists off
+- **Bigger lists** (~4.3M sites; lists by HaGeZi also block every subdomain): Scam (Block List Project + HaGeZi Fake),
+  Phishing (Block List Project + Phishing Army), Malware (HaGeZi Threat Intelligence ~2.6M + URLhaus), Adult (Block
+  List Project + HaGeZi NSFW, ~1M), Gambling (HaGeZi); re-downloaded automatically when a list's sources change
+  - in memory as sorted hash tables: 34 MB for all of them, ~15 µs per lookup, loaded in ~8 s in the background;
+    downloads are streamed (the 2.6M-site list: ~18 s)
+- Protection tab: **download progress** ("Downloading... 12.3 of 42.7 MB (part 1 of 2)", live); lists are checked every
+  10 s instead of every minute (so "Update now" starts at once); "Check a site" searches in the background (no freeze)
+  and knows subdomains; "Allowed anyway" also allows the site's subdomains
+- "Start service" button: ends a stuck copy of the service first (before, Windows ignored the start while it hung)
+- 140 tests passing
+
 ## 0.16.0 — 2026-09-19 02:37
 - **Protection lists** (Blocking > Protection): always-on community lists - Scam (Block List Project, ~8.5k), Phishing (phishing.army, ~40k), Malware (abuse.ch URLhaus), Adult (StevenBlack, ~70k) on by default, Gambling (StevenBlack) optional
   - the service downloads them once a day (retries an hour after a failure; "Update now" button) and blocks them through the hosts file, 8 domains per line; not affected by modes or the emergency unlock
