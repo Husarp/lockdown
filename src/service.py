@@ -31,7 +31,7 @@ from blocker import apps, browser_policy, connections, dnsfilter, firewall, host
 from blocker.listener import BlockListener
 from db import Database
 from paths import DATA_DIR, LOG_PATH
-from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, TrustedClock
+from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, ZONE_KEY, TrustedClock, utc_offset, zone_name, zone_step
 
 INTERVAL_SEC = 2
 CLOCK_JUMP_SEC = 60
@@ -87,6 +87,7 @@ class Enforcer:
         """Trusted now; publishes the offset to the system clock and logs clock changes."""
         if self.clock.maybe_sync():
             log.info("Trusted time synced with internet time")
+        self.update_zone()
         offset = self.clock.offset()
         if self.last_offset is not None and abs(offset - self.last_offset) > CLOCK_JUMP_SEC:
             log.warning("System clock changed by %+.0f s - ignored, Lockdown keeps its own time",
@@ -95,6 +96,16 @@ class Enforcer:
         self.db.set_setting(OFFSET_KEY, f"{offset:.3f}")
         self.db.set_setting(LAST_TRUSTED_KEY, f"{self.clock.now_ts():.0f}")
         return self.clock.now()
+
+    def update_zone(self):
+        """A new Windows time zone counts only after 24 hours (it would shift blocked hours)."""
+        ts = self.clock.now_ts()
+        state = json.loads(self.db.get_setting(ZONE_KEY, "") or "null")
+        new, self.clock.zone_shift, message = zone_step(state, zone_name(), utc_offset(ts), ts)
+        if new != state:
+            self.db.set_setting(ZONE_KEY, json.dumps(new))
+        if message:
+            log.warning(message)
 
     def enforce_once(self):
         now = self.update_clock()

@@ -6,6 +6,19 @@ import threading
 PORT = 47391  # localhost only
 
 
+def running() -> bool:
+    """Is Lockdown's GUI running? (Without asking it to show its window.)"""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    try:
+        probe.bind(("127.0.0.1", PORT))
+        return False
+    except OSError:
+        return True
+    finally:
+        probe.close()
+
+
 def acquire(events: queue.Queue) -> bool:
     """True if this is the first instance (it then puts "open" into `events` whenever another launch happens).
     False if another instance is running (it has been told to show itself)."""

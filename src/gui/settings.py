@@ -3,6 +3,7 @@ import customtkinter as ctk
 
 from gui import theme
 
+import antibypass
 import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
@@ -125,13 +126,21 @@ class SettingsPage(ctk.CTkFrame):
         self.em_info.pack(anchor="w", padx=16, pady=(4, 12))
 
     def _save_emergency(self):
-        self.db.set_setting("emergency.enabled", "1" if self.em_enabled.get() else "0")
-        self.db.set_setting("emergency.minutes", self.em_minutes.get().split()[0])
-        self.db.set_setting("emergency.uses", self.em_uses.get())
-        self.db.set_setting("emergency.per", PER_LABELS[self.em_per.get()])
-        self.load()
-        if "Blocking" in self.app.pages:
-            self.app.pages["Blocking"].refresh()   # shows / hides the button
+        new = {"emergency.enabled": "1" if self.em_enabled.get() else "0",
+               "emergency.minutes": self.em_minutes.get().split()[0], "emergency.uses": self.em_uses.get(),
+               "emergency.per": PER_LABELS[self.em_per.get()]}
+        old = {k: emergency.get(self.db, k) for k in new}
+
+        def save():
+            for key, value in new.items():
+                self.db.set_setting(key, value)
+            self.load()
+            if "Blocking" in self.app.pages:
+                self.app.pages["Blocking"].refresh()   # shows / hides the button
+        if antibypass.emergency_looser(old, new):   # more / longer emergency unlocks: Anti-Bypass first
+            self.app.guard(["Allow more or longer emergency unlocks"], save, self.load)
+        else:
+            save()
 
     # ---------- load ----------
 

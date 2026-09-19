@@ -10,11 +10,13 @@ import uiautomation  # noqa: F401
 import customtkinter as ctk
 
 import alerts
+import antibypass
 import modes
 import reminders
 from blocker.apps import minimizes
 from db import Database
 from gui import theme
+from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
 from gui.dashboard import DashboardPage
 from gui.draft import Draft
@@ -35,7 +37,7 @@ from trusted_time import now_from_db
 PAGES = [
     ("Dashboard", DashboardPage, "layout-dashboard"),
     ("Blocking", BlockingPage, "ban"),
-    ("Anti-Bypass", 7, "shield-check"),
+    ("Anti-Bypass", AntiBypassPage, "shield-check"),
     ("Screen Time", ScreenTimePage, "bar-chart-3"),
     ("Network Log", NetworkPage, "activity"),
     ("Modes", ModesPage, "sliders-horizontal"),
@@ -69,6 +71,10 @@ class LockdownApp(ctk.CTk):
 
         self.draft = Draft(self.db)
         self.draft.listeners.append(self._on_draft_change)
+        self.draft.guard = self.guard
+        self.challenge: ChallengeWindow | None = None
+        self.exited = False
+        self.db.set_setting(antibypass.EXITED_KEY, "0")
         self.service_running = False
         self.pages: dict[str, ctk.CTkFrame] = {}
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
@@ -214,9 +220,10 @@ class LockdownApp(ctk.CTk):
                 self.lift()
                 self.focus_force()
             elif event == "exit":
-                self.tray.stop()
-                self.destroy()
-                return
+                self.guard(["Quit Lockdown (blocked-visit notices, time limits and reminders stop until you "
+                            "start it again)"], self._exit)
+                if self.exited:
+                    return
             elif isinstance(event, tuple) and event[0] == "mode":   # from the tray menu
                 try:
                     if event[1]:
@@ -226,6 +233,26 @@ class LockdownApp(ctk.CTk):
                 except (ValueError, StopIteration) as e:
                     self._show(str(e) or "That mode doesn't exist any more.", force=True)
         self.after(200, self._poll_events)
+
+    def _exit(self):
+        self.exited = True
+        self.db.set_setting(antibypass.EXITED_KEY, "1")
+        self.tray.stop()
+        self.destroy()
+
+    def guard(self, changes: list[str], proceed, cancel=lambda: None):
+        """Anti-Bypass: run `proceed` if loosening is allowed now, else show the challenge first."""
+        if antibypass.status(antibypass.settings(self.db), now_from_db(self.db)) == "free":
+            proceed()
+            return
+        if self.challenge and self.challenge.winfo_exists():
+            self.challenge.destroy()
+        self.deiconify()   # (tray Exit while the window is hidden)
+        self.challenge = ChallengeWindow(self, changes, proceed, cancel)
+
+    def refresh_antibypass(self):
+        if "Anti-Bypass" in self.pages:
+            self.pages["Anti-Bypass"].refresh()
 
     def _poll_status(self):
         heartbeat = float(self.db.get_setting(HEARTBEAT_KEY, "0"))

@@ -8,6 +8,9 @@ $TaskName = "Lockdown Enforcer"
 $Root = Split-Path -Parent $PSScriptRoot
 $Hosts = "$env:SystemRoot\System32\drivers\etc\hosts"
 
+if (Get-ScheduledTask -TaskName "Lockdown Watchdog" -ErrorAction SilentlyContinue) {
+    Disable-ScheduledTask -TaskName "Lockdown Watchdog" | Out-Null   # (it would start the service again)
+}
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $TaskName }
 Get-CimInstance Win32_Process -Filter "name = 'pythonw.exe'" |
     Where-Object { $_.CommandLine -like "*service.py*" } |

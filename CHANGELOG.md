@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.18.0 — 2026-09-19 03:23
+- **Anti-Bypass** (Phase 7, new Anti-Bypass page): anything that loosens a block needs the challenges you turn on;
+  making blocks stricter is always instant. Off until you turn a challenge on.
+  - **Type a random phrase** (30 / 60 / 120 / 250 characters of letters and digits, pasting blocked, shows where a
+    typo is); passing it allows loosening changes for 5 minutes ("Lock now" ends that early)
+  - **Only during these hours** (days + times, several windows): outside them nothing can be loosened; the window
+    says when the next chance is
+  - needs the challenge: removing a site / app / group / member or a site from an item, higher or no limits, other
+    blocked hours, more allowance, a shorter temporary block, a gentler app block type (checked on every save, with
+    auto-save the edit is undone if cancelled), switching a protection list off or allowing a site, more / longer
+    emergency unlocks, tray Exit, weakening Anti-Bypass itself. Not: the emergency unlock itself, limit reset time
+- **Keeping Lockdown running**: the tray app is started again within a minute if it's closed any other way than
+  Exit (per-user task "Lockdown Agent Watchdog", logged); the "Lockdown Watchdog" task starts the service every
+  minute if it was stopped; uninstalling asks for the challenge; `repair_dns.ps1` pauses the watchdog
+- Clock: a new Windows time zone only counts after 24 hours (it would shift blocked hours); summer / winter time
+  changes count at once
+- 147 tests passing
+
 ## 0.17.0 — 2026-09-19 03:10
 - **Fix (urgent): the internet stopped working** after 0.16.0 - ~237k protection-list domains in the hosts file made
   Windows' DNS lookups hang (and froze the service at startup, so it showed as off). The lists are no longer written

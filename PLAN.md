@@ -1272,28 +1272,27 @@ sleep / forced-break overlays still show.
 - [x] Fix: "Start service" did nothing while a stuck copy was running (now ends it first) (reported 2026-09-19)
 
 ### Phase 7 — Anti-Bypass
-Proposed 2026-09-19 (waiting for OK): 7a "unlock rules" in the app - anything that loosens a block (remove / edit
-down a rule, allow a protected-list site, switch a list off, change reset time / emergency settings, stop a locked
-mode, tray Exit, loosen Anti-Bypass itself) goes through the chosen challenge; tightening is always instant.
-Challenges (combinable): wait N min then a 5-min window to make changes, type a random phrase (no paste), math
-problems; optional "only during these hours" window. 7b hardening - the service owns the settings (GUI asks it
-over a local pipe, `C:\ProgramData\Lockdown` read-only for Users), watchdog task restarts service + tray, uninstall
-needs the challenge, time-zone / offline clock tricks. Real Windows Service moves to packaging (Phase 8).
-- [ ] Settings change window (specific hours only)
-- [ ] Delay unlock mechanism
-- [ ] Type-a-phrase challenge
-- [ ] Math problem challenge
-- [ ] Service permission lockdown
-- [ ] Service relaunches the tray agent if it's closed/killed (and logs the attempt)
-- [ ] Tray "Exit" requires the anti-bypass challenge (closing the window still just hides to tray)
-- [ ] Clock protection hardening: time-zone changes, clock rolled back while offline across a reboot
-- [ ] Convert enforcement scheduled task into a real Windows Service (pywin32, easier once packaged with PyInstaller)
-- [ ] Lock down `C:\ProgramData\Lockdown\` ACLs (currently Users: modify)
-- [ ] Lock the limit reset time and the emergency-unlock settings (uses, duration) behind the anti-bypass
-  (requested 2026-09-18)
-- [ ] Watchdog service
-- [ ] Scheduled task backup
-- [ ] Uninstall protection
+Approved 2026-09-19 with changes: challenges are only "type a random phrase" and "only during these hours" (no
+waiting, no math). Anything that loosens a block goes through them; tightening is always instant. Emergency unlock
+stays outside (own limit). Built: 7a + the hardening that doesn't change how settings are stored.
+- [x] Settings change window (specific hours only) - "Only during these hours" (several windows, days + times)
+- [x] Type-a-phrase challenge (random letters/digits, no pasting; passing unlocks loosening for 5 min; "Lock now")
+- Dropped (2026-09-19): delay unlock mechanism, math problem challenge
+- [x] What needs the challenge: removing items / groups / members / sites, weaker rules (higher or no limits, other
+  hours, more allowance, shorter temporary block, gentler app block type), protection list off / site allowed,
+  emergency unlock more / longer / on, tray Exit, weakening Anti-Bypass itself; "Anti-Bypass" page
+- [x] Tray agent brought back within a minute if it's closed/killed (per-user watchdog task, logged); not after Exit
+- [x] Tray "Exit" requires the anti-bypass challenge (closing the window still just hides to tray)
+- [x] Clock protection hardening: a new time zone counts only after 24 h (summer/winter time at once); clock rolled
+  back while offline across a reboot was already covered (never earlier than the last trusted time)
+- [x] Lock the emergency-unlock settings behind the anti-bypass (requested 2026-09-18); the limit reset time stays
+  free (the user said changes are always the longer period, so it can't shorten a limit)
+- [x] Watchdog: "Lockdown Watchdog" SYSTEM task starts the service every minute if it's stopped (= scheduled task backup)
+- [x] Uninstall protection: uninstall_service.ps1 asks for the challenge (`main.py --challenge`)
+- [ ] Waiting for OK (asked 2026-09-19): service owns the settings - the GUI asks it over a local pipe and
+  `C:\ProgramData\Lockdown\` becomes read-only for Users (so editing config.db by hand can't loosen anything);
+  covers "Service permission lockdown" + "Lock down ProgramData ACLs"
+- Moved to Phase 8: convert the enforcement scheduled task into a real Windows Service (with PyInstaller packaging)
 
 ### Phase 8 — Import & Polish
 - [ ] GitHub blocklist import (StevenBlack, oisd, Energized)

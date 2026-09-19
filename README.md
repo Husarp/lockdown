@@ -37,6 +37,10 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   or on a schedule; also from the tray menu.
 - **Reminders** (Phase 6b): bedtime overlay, break reminders (optionally forced), your own reminders (interval / set
   times / random) with snooze, "did you really do it?" check and quotes; they wait while you're in a full-screen game.
+- **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
+  emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
+  pasting) and/or only during chosen hours; tightening is always instant. The tray app and the service come back
+  within a minute if they're closed; a new time zone counts only after 24 hours; uninstalling asks for the challenge.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
   cache); table or graph, filters, export; click a row to block the site/app or copy it.
 
@@ -112,7 +116,8 @@ Or from a terminal in the project folder:
 
 - The app registers itself to start hidden in the tray at login (`HKCU\...\Run\Lockdown`).
 - Only one copy runs; launching it again just shows the window.
-- Closing the window minimizes it to the tray; use the tray icon's **Exit** to quit.
+- Closing the window minimizes it to the tray; use the tray icon's **Exit** to quit (needs the Anti-Bypass challenge
+  when it's on). Closed any other way (e.g. Task Manager), it's started again within a minute.
 - Tray icon: green = service enforcing, red = service not running.
 
 ## Development
@@ -135,4 +140,5 @@ sidebar icons (rendered from the design) in `assets/icons`.
   (big sites on CDNs may use other IPs too).
 - The DNS filter can be bypassed by changing the network adapter's DNS by hand (Lockdown switches it back within
   10 s) or by stopping the service; Windows may also briefly use the fallback DNS if the filter answers slowly.
-- Anything is still easy to undo until the anti-bypass phase (7).
+- Anti-Bypass works in the app: someone with admin rights can still stop the scheduled tasks, or edit
+  `config.db` directly (making settings service-only is planned).

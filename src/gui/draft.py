@@ -3,12 +3,14 @@
 Pages edit this draft (blocked items + their rules, groups, notification settings). Nothing is enforced
 until save() writes it to the database - or immediately, when auto-save is on. `dirty` is a real comparison
 with the saved state, so opening an editor and cancelling doesn't count as a change.
+Saving edits that loosen a block goes through Anti-Bypass first (`guard`, set by the app).
 """
 import copy
 import json
 from datetime import timedelta
 
 import alerts
+import antibypass
 from db import Database
 from rules import TIME_FMT
 from trusted_time import now_from_db
@@ -50,6 +52,8 @@ class Draft:
     def __init__(self, db: Database):
         self.db = db
         self.listeners = []       # fn(kind) after every change; kind: "changed" / "saved" / "discarded"
+        # guard(changes, proceed, cancel): Anti-Bypass check for loosening edits (None: save freely)
+        self.guard = None
         self._next_new_id = -1
         self.reload()
 
@@ -206,7 +210,20 @@ class Draft:
 
     # ---------- save / discard ----------
 
+    def loosening(self) -> list[str]:
+        """The unsaved edits that loosen a block (removed items, higher limits, ...)."""
+        return antibypass.draft_changes(self.saved_items, self.items, self.saved_groups, self.groups,
+                                        now_from_db(self.db))
+
     def save(self):
+        changes = self.loosening()
+        if changes and self.guard:
+            # not allowed: with auto-save the edit is undone; otherwise it stays pending (Save / Discard)
+            self.guard(changes, self._save, self.discard if self.autosave else lambda: self._notify("changed"))
+            return
+        self._save()
+
+    def _save(self):
         now = now_from_db(self.db)
         existing = self.db.item_ids()   # the service may have removed expired items meanwhile
         new_ids = {}

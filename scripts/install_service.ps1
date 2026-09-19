@@ -29,4 +29,16 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 }
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 Start-ScheduledTask -TaskName $TaskName
-Write-Output "Installed and started '$TaskName'. Log: $DataDir\lockdown.log"
+
+# Watchdog: every minute, start the service again if it was stopped (does nothing while it runs)
+$WatchdogName = "Lockdown Watchdog"
+$wAction = New-ScheduledTaskAction -Execute "schtasks.exe" -Argument "/Run /TN `"$TaskName`""
+$wTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
+$wSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+if (Get-ScheduledTask -TaskName $WatchdogName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $WatchdogName -Confirm:$false
+}
+Register-ScheduledTask -TaskName $WatchdogName -Action $wAction -Trigger $wTrigger -Principal $principal `
+    -Settings $wSettings | Out-Null
+Write-Output "Installed and started '$TaskName' (+ '$WatchdogName'). Log: $DataDir\lockdown.log"

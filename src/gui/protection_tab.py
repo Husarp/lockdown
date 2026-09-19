@@ -5,6 +5,7 @@ from datetime import datetime
 
 import customtkinter as ctk
 
+import antibypass
 from blocker import protection
 from blocker.hosts import normalize_host
 from gui import icons, theme
@@ -128,11 +129,22 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         if self.winfo_ismapped():
             self.refresh()
 
+    def _store(self, cfg: dict, what: str):
+        """Save; switching a list off / allowing a site loosens blocks, so that goes through Anti-Bypass."""
+        def save():   # (the service may have updated the lists' info meanwhile: keep that)
+            protection.save_settings(self.db, {**protection.settings(self.db), "enabled": cfg["enabled"],
+                                               "allowed": cfg["allowed"]})
+            self.refresh()
+        if antibypass.protection_looser(protection.settings(self.db), cfg):
+            self.page.app.guard([what], save, self.refresh)
+        else:
+            save()
+
     def _save(self):
         cfg = protection.settings(self.db)
+        off = [protection.LISTS[k][0] for k in cfg["enabled"] if k in self.switches and not self.switches[k].get()]
         cfg["enabled"] = [k for k, sw in self.switches.items() if sw.get()]
-        protection.save_settings(self.db, cfg)
-        self.refresh()
+        self._store(cfg, f"Switch the {', '.join(off)} protection list off")
 
     def _update_now(self):
         cfg = protection.settings(self.db)
@@ -176,12 +188,11 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             self.allow_error.configure(text=str(e))
             return
         cfg = protection.settings(self.db)
-        if host not in cfg["allowed"]:
-            cfg["allowed"].append(host)
-            protection.save_settings(self.db, cfg)
         self.allow_entry.delete(0, "end")
         self.allow_error.configure(text="")
-        self.refresh()
+        if host not in cfg["allowed"]:
+            cfg["allowed"].append(host)
+            self._store(cfg, f"Allow {host} (and its subdomains) although a protection list blocks it")
 
     def _unallow(self, host: str):
         cfg = protection.settings(self.db)
