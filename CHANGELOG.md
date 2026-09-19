@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.30.0 — 2026-09-19 15:00
+- **Round 2 redesign - phase E: Blocking > Calendar (new tab)**. A week view (Mon-Sun x 24 h) showing when each site/app is blocked: one bar per item, coloured by category, lane-packed so overlaps stack; permanent = all day, by-time schedules shown at their real hours (spilling past midnight), with the previous/next week arrows, a "this week" button, an emergency-unlock marker and a "now" line. Click a bar to edit that item. (Time/opening limits and temporary blocks aren't clock-time-based, so they aren't shown here.)
+
 ## 0.29.1 — 2026-09-19 15:20
 - **Round 2 redesign — phase F (part 1)**: the Anti-Bypass page now shows a coloured **locked / unlocked banner** - red "Locked - you can look at everything, but loosening a block needs the challenge" with an "Unlock to edit" button, or a green "Unlocked until HH:MM" with "Lock now" during the 5-minute window.
 

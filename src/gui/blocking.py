@@ -9,13 +9,16 @@
 All edits go into the draft (see draft.py).
 """
 import tkinter as tk
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import customtkinter as ctk
 
+import blockcal
 import emergency
+import stats
 from blocker.apps import block_flags
-from gui import app_browser, icons, theme
+from gui import app_browser, categories, icons, theme
+from gui.charts import WeekCalendar
 from gui.components import Curtain, Card, BlockerCard, Segmented, eyebrow, rule_chip, help_icon, page_head, type_badge
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
@@ -26,7 +29,7 @@ from importer.popular import POPULAR_SITES
 from rules import DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block
 from trusted_time import now_from_db
 
-TABS = ["Overview", "Groups", "Add", "Protection"]
+TABS = ["Overview", "Groups", "Add", "Protection", "Calendar"]
 SORTS = ["Blocked now first", "Next block", "Date added", "Name"]
 SORT_KEY = "ui.blocking.sort"
 ALERTS = {"Default": None, "On": "on", "Off": "off"}
@@ -505,6 +508,76 @@ class AddTab(ctk.CTkScrollableFrame):
         self.page.confirm(f"{name} saved")
 
 
+# ---------------------------------------------------------------- calendar
+
+class CalendarTab(ctk.CTkScrollableFrame):
+    """A week (Mon..Sun) x 24 h showing when each site/app is blocked. Only permanent and by-time rules appear
+    (limits / temporary blocks aren't tied to a clock time). Click a bar to edit that item."""
+
+    def __init__(self, master, page):
+        super().__init__(master, fg_color="transparent")
+        self.page, self.draft, self.db = page, page.draft, page.app.db
+        self.week_start: date | None = None   # Monday of the shown week (None = this week)
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 10))
+        ctk.CTkButton(header, text="‹", width=30, **theme.OUTLINE, command=lambda: self._shift(-1)).pack(side="left")
+        ctk.CTkButton(header, text="›", width=30, **theme.OUTLINE, command=lambda: self._shift(1)).pack(
+            side="left", padx=(6, 12))
+        self.range_label = ctk.CTkLabel(header, text="", font=theme.semi(13))
+        self.range_label.pack(side="left")
+        ctk.CTkButton(header, text="This week", width=100, **theme.OUTLINE, command=self._this_week).pack(side="right")
+        card = Card(self, "When each block applies")
+        card.pack(fill="x")
+        self.cal = WeekCalendar(card.body, on_click=self._open, height=340)
+        self.cal.pack(fill="x")
+        ctk.CTkLabel(card.body, text="Only permanent and by-time blocks show here - time / opening limits and "
+                     "temporary blocks aren't tied to a clock time. Click a bar to edit that item; Ⓔ marks an "
+                     "emergency unlock; the accent line is now.", text_color=MUTED, wraplength=900,
+                     justify="left").pack(anchor="w", pady=(8, 0))
+
+    @staticmethod
+    def _monday(d: date) -> date:
+        return d - timedelta(days=d.weekday())
+
+    def _shift(self, weeks: int):
+        base = self.week_start or self._monday(now_from_db(self.db).date())
+        self.week_start = base + timedelta(weeks=weeks)
+        self.refresh()
+
+    def _this_week(self):
+        self.week_start = None
+        self.refresh()
+
+    def on_show(self):
+        self.refresh()
+
+    def refresh(self, *_):
+        now = now_from_db(self.db)
+        today = now.date()
+        start = self.week_start or self._monday(today)
+        end = start + timedelta(days=6)
+        self.range_label.configure(text=f"{start:%d %b} - {end:%d %b %Y}")
+        items = list(self.draft.items.values())
+        groups = list(self.draft.groups.values())
+        cats = categories.load(self.db)
+        colors, saved = categories.colors_of(cats), self.db.categories()
+
+        def color_of(item):
+            name = item["target"].split()[0]
+            return theme.pick(colors.get(stats.category_of(item["item_type"], name, saved, items)) or theme.MUTED)
+
+        unlocks: list[list[int]] = [[] for _ in range(7)]
+        for u in self.db.unlocks_since(datetime.combine(start, datetime.min.time())):
+            d = u["started"].date()
+            if start <= d <= end:
+                unlocks[(d - start).days].append(u["started"].hour * 60 + u["started"].minute)
+        today_wd = (today - start).days if start <= today <= end else -1
+        self.cal.set(blockcal.week(items, groups), color_of, today_wd, now.hour * 60 + now.minute, unlocks)
+
+    def _open(self, item):
+        self.page.edit_item(item["id"])
+
+
 # ---------------------------------------------------------------- page
 
 class BlockingPage(ctk.CTkFrame):
@@ -534,7 +607,8 @@ class BlockingPage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
         self.after(LIVE_MS, self._live_update)
 
-    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab, "Protection": ProtectionTab}
+    TAB_CLASSES = {"Overview": OverviewTab, "Groups": GroupsTab, "Add": AddTab, "Protection": ProtectionTab,
+                   "Calendar": CalendarTab}
 
     def show_tab(self, tab: str):
         if tab not in self.tabs:
