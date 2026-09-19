@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.52.0 - 2026-09-20 01:46
+## 0.52.0 - 2026-09-20 01:50
 - **Blocking > Calendar rebuilt to design 4a / 4b**: one row per blocked item (icon, name, SITE / APP badge), a
   24 h track with the blocked stretches as bars (no text inside), "Blocked today" in its own column, a legend
   footer and three summary cards (Next change · Busiest stretch · Free window). A Day / 3 days / Week switcher

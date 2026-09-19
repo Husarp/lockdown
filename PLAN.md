@@ -1390,8 +1390,10 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
   pinned by tests/test_strict_break.py.
 - [ ] Follow-up from the B9 review: the trend chart's first / last x-axis date labels are clipped at the plot
   edges ("22" -> "?2"). Small chart fix in gui/charts.py TrendLine.
-  (minimize_all / minimize_foreground already skip Lockdown's own pid - verify end to end incl. the popup.)
-Suggested order: B8 first (global), then B1, B2, B3, B4, B5, B6, B7, B9, B10, B11, B12.
+- [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed
+  challenge's hours emphasised (600 weight) and the next chance with a "— in N h M m" countdown.
+All batches done in 0.43.0 - 0.52.0 (2026-09-20 01:50); installer built as build\LockdownSetup.exe.
+Suggested order was: B8 first (global), then B1, B2, B3, B4, B5, B6, B7, B9, B10, B11, B12.
 
 ### Round 3 requests (2026-09-19, evening) - polish & locked-state policy
 
