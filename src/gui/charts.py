@@ -198,6 +198,59 @@ class DayBars(Chart):
                 x += dash + gap
 
 
+class TrendLine(Chart):
+    """Daily active time as a line over a filled area, with a dashed 7-day average, a dashed goal line and a hollow
+    marker on days with an emergency unlock. days: list of (label, seconds, tip, avg_seconds|None, unlocks)."""
+
+    def __init__(self, master, height: int = 180):
+        super().__init__(master, height=height)
+        self.days: list[tuple] = []
+        self.goal: float | None = None
+
+    def set(self, days, goal: float | None):
+        self.days, self.goal = days, goal
+        self._schedule()
+
+    def draw(self, w, h):
+        if len(self.days) < 2:
+            return
+        top, bottom = self.px(12), h - self.fh - self.px(6)
+        left, right = self.px(3), w - self.px(3)
+        peak = max([d[1] for d in self.days] + [self.goal or 0, 3600])
+        n = len(self.days)
+        xs = [left + (right - left) * i / (n - 1) for i in range(n)]
+
+        def y_of(sec):
+            return bottom - (bottom - top) * sec / peak
+
+        pts = [(xs[i], y_of(self.days[i][1])) for i in range(n)]
+        area = [(pts[0][0], bottom)] + pts + [(pts[-1][0], bottom)]
+        self.pen.polygon([(x * SS, y * SS) for x, y in area],
+                         fill=theme._mix(theme.pick(theme.ACCENT), self.bg, 0.86))
+        if self.goal:   # dashed goal line
+            y, dash, gap, x = y_of(self.goal), self.px(4), self.px(3), 0.0
+            while x < w:
+                self.pen.line([x * SS, y * SS, min(w, x + dash) * SS, y * SS], fill=theme.pick(theme.NEUTRAL),
+                              width=max(1, int(self.s * SS)))
+                x += dash + gap
+        avg_pts = [(xs[i], y_of(self.days[i][3])) for i in range(n) if self.days[i][3] is not None]
+        if len(avg_pts) >= 2:   # dashed 7-day average
+            for (x0, y0), (x1, y1) in zip(avg_pts, avg_pts[1:]):
+                self.pen.line([x0 * SS, y0 * SS, x1 * SS, y1 * SS], fill=theme.pick(theme.MUTED),
+                              width=max(1, int(1.4 * self.s * SS)))
+        self.pen.line([(x * SS, y * SS) for x, y in pts], fill=theme.pick(theme.ACCENT),
+                      width=max(1, int(2 * self.s * SS)), joint="curve")
+        for i, (label, sec, tip, _avg, unlocks) in enumerate(self.days):
+            x, y = pts[i]
+            if unlocks:
+                r = self.px(4)
+                self.pen.ellipse([(x - r) * SS, (y - r) * SS, (x + r) * SS, (y + r) * SS], fill=self.bg,
+                                 outline=theme.pick(theme.INFO), width=max(1, int(self.s * SS)))
+            if i == 0 or i == n - 1 or i % 7 == 0:
+                self.text(x, bottom + self.px(4), label)
+            self.hit(xs[i] - (right - left) / (2 * n), 0, xs[i] + (right - left) / (2 * n), h, tip)
+
+
 class Heatmap(Chart):
     """Days x hours grid of activity (rounded cells, 5 levels), hour labels, a less/more legend at the bottom right.
     rows: (label, date, [active minutes per hour])."""

@@ -9,7 +9,7 @@ import customtkinter as ctk
 
 import stats
 from gui import app_browser, appinfo, categories, theme
-from gui.charts import DayBars, Donut, Heatmap, HourBars, MonthCalendar, TimelineBar
+from gui.charts import DayBars, Donut, Heatmap, HourBars, MonthCalendar, TimelineBar, TrendLine
 from gui.components import Curtain, Card, Chip, Rows, Segmented, StatCard, help_icon, page_head
 from gui.dashboard import goal_seconds
 from rules import DAY_NAMES
@@ -100,6 +100,10 @@ class OverviewView(ctk.CTkScrollableFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
         self.cards = _stat_row(self, ["Active", "Idle", "Longest focus", "Sessions"])
+        self.trend_card = Card(self, "Trend - last 30 days")
+        self.trend_card.pack(fill="x", pady=(0, 12))
+        self.trend = TrendLine(self.trend_card.body, height=180)
+        self.trend.pack(fill="x")
         left, right = _columns(self)
         self.timeline_card = Card(left, "Day timeline")
         self.timeline_card.pack(fill="x", pady=(0, 12))
@@ -174,6 +178,30 @@ class OverviewView(ctk.CTkScrollableFrame):
             row.square.configure(fg_color=cat["color"])
             row.name.configure(text=cat["name"])
             row.time.configure(text=stats.hm(split[cat["key"]]))
+        self._update_trend(c)
+
+    def _update_trend(self, c: Context):
+        """The 30-day line, its 7-day average and a "vs last week" figure (down = green = improving)."""
+        first = c.today - timedelta(days=29)
+        per_day = stats.per_day(stats.activity(c.db, first, c.today + timedelta(days=1)))
+        days = [first + timedelta(days=i) for i in range(30)]
+        vals = [per_day.get(d.isoformat(), 0) for d in days]
+        unlocks = unlocks_per_day(c.db, first)
+        avg7 = [sum(vals[max(0, i - 6):i + 1]) / len(vals[max(0, i - 6):i + 1]) for i in range(30)]
+        self.trend.set([(str(d.day), vals[i], day_tip(d, vals[i]), avg7[i], unlocks.get(d, 0))
+                        for i, d in enumerate(days)], goal_seconds(c.db))
+        last7, prev7 = sum(vals[-7:]) / 7, sum(vals[-14:-7]) / 7
+        avg_txt = f"avg {stats.hm(last7)} a day"
+        if prev7:
+            pct = round((last7 - prev7) / prev7 * 100)
+            if pct == 0:
+                self.trend_card.note.configure(text=f"about the same as last week · {avg_txt}", text_color=theme.MUTED)
+            else:
+                down = pct < 0
+                self.trend_card.note.configure(text=f"{'▼' if down else '▲'} {abs(pct)}% vs last week · {avg_txt}",
+                                               text_color=theme.SUCCESS if down else theme.DANGER)
+        else:
+            self.trend_card.note.configure(text=avg_txt, text_color=theme.MUTED)
 
 
 # ---------------------------------------------------------------- Apps / Websites

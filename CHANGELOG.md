@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.28.5 — 2026-09-19 14:30
+- **Round 2 redesign — phase E (part 1): Screen Time trend line**. A new "Trend - last 30 days" card shows daily screen time as a line over a filled area, with a dashed 7-day average, the daily-goal line, hollow markers on days you used an emergency unlock, and a "vs last week" figure (down = green = improving).
+
 ## 0.28.4 — 2026-09-19 14:12
 - **Round 2 redesign — phase D**: the Modes "Now" card and every mode card now use the accent top-bar card style; Settings sections get the same accent bar as the rest of the app.
 
