@@ -211,12 +211,12 @@ class TabBar(ctk.CTkFrame):
         self.tabs = {}
         row = ctk.CTkFrame(self, fg_color="transparent")   # grid: each column sizes to its label (no fixed width)
         row.pack(side="top", anchor="e")
-        ctk.CTkFrame(self, height=1, fg_color=theme.BORDER, corner_radius=0).pack(fill="x", side="top")  # baseline
+        ctk.CTkFrame(self, height=2, fg_color=theme.BORDER, corner_radius=0).pack(fill="x", side="top")  # baseline
         for i, v in enumerate(values):
             pad = (0, self.GAP if i < len(values) - 1 else 0)
             lbl = ctk.CTkLabel(row, text=v, text_color=theme.MUTED, font=theme.body(13), height=22, cursor="hand2")
-            lbl.grid(row=0, column=i, padx=pad, pady=(6, 3))
-            underline = ctk.CTkFrame(row, height=2, width=1, fg_color="transparent", corner_radius=0)
+            lbl.grid(row=0, column=i, padx=pad, pady=(6, 2))
+            underline = ctk.CTkFrame(row, height=3, width=1, fg_color="transparent", corner_radius=0)
             underline.grid(row=1, column=i, padx=pad, sticky="ew")
             for w in (lbl, underline):
                 w.bind("<Button-1>", lambda _e, v=v: self._clicked(v))
