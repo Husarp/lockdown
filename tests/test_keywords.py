@@ -63,6 +63,23 @@ def test_what_weakens_the_check():
     assert kw.looser({**old, "off": ["milf*"]}, old) == []                                   # turned back on
 
 
+def test_your_words_and_exceptions_switches():
+    # "your words" off: your custom words stop matching, ready lists still do
+    on = {**CFG, "words": ["gambling"]}
+    assert "gambling" in kw.active_words(on) and kw.find("https://a.com/x", "gambling site", on) == "gambling"
+    off = {**on, "words_on": False}
+    assert "gambling" not in kw.active_words(off) and kw.find("https://a.com/x", "gambling site", off) is None
+    assert "porn*" in kw.active_words(off)                                   # ready list unaffected
+    # exceptions off: the exception stops applying (stricter)
+    exc = {**CFG, "exceptions": ["xxx"]}
+    assert kw.find("https://a.com/", "XXX movie", exc) is None               # exception allows it
+    assert kw.find("https://a.com/", "XXX movie", {**exc, "exceptions_on": False}) == "xxx"
+    # turning your words off is loosening (challenge); turning exceptions off is stricter (instant)
+    assert kw.looser(on, off) == ["Turn your blocked words off"]
+    assert kw.looser(exc, {**exc, "exceptions_on": False}) == []
+    assert kw.looser({**exc, "exceptions_on": False}, exc) == ["Turn exceptions back on"]
+
+
 def test_safe_targets():
     assert kw.safe_target("www.google.com") == kw.safe_target("google.pl") == "forcesafesearch.google.com"
     assert kw.safe_target("www.google.co.uk") == "forcesafesearch.google.com"

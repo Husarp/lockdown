@@ -146,15 +146,18 @@ class WordsCards:
         self.list_rows = {}
         for key, (name, _words) in keywords.READY.items():
             self.list_rows[key] = self._list_row(words.body, name, lambda k=key: self._open_ready(k), switch=key)
-        self.list_rows["words"] = self._list_row(words.body, "Your words", self._open_words)
-        self.list_rows["exceptions"] = self._list_row(words.body, "Exceptions", self._open_exceptions)
+        self.list_rows["words"] = self._list_row(words.body, "Your words", self._open_words, switch="words_on",
+                                                 top_level=True)
+        self.list_rows["exceptions"] = self._list_row(words.body, "Exceptions", self._open_exceptions,
+                                                      switch="exceptions_on", top_level=True)
         self.refresh()
 
-    def _list_row(self, parent, name: str, open_, switch: str | None = None):
+    def _list_row(self, parent, name: str, open_, switch: str | None = None, top_level: bool = False):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", pady=2)
         if switch:
-            row.switch = ctk.CTkSwitch(row, text=name, width=240, command=lambda: self._save_list(switch))
+            row.switch = ctk.CTkSwitch(row, text=name, width=240,
+                                       command=lambda: self._toggle_list(switch, top_level, row))
             row.switch.pack(side="left")
         else:
             ctk.CTkLabel(row, text=name, width=194, anchor="w").pack(side="left", padx=(46, 0))
@@ -175,10 +178,14 @@ class WordsCards:
             row.switch.select() if cfg["lists"].get(key) else row.switch.deselect()
             turned_off = len([w for w in words if w in off])
             row.info.configure(text=f"{len(words)} words" + (f" ({turned_off} off)" if turned_off else ""))
+        wrow = self.list_rows["words"]
+        wrow.switch.select() if cfg["words_on"] else wrow.switch.deselect()
         n = len(cfg["words"])
-        self.list_rows["words"].info.configure(text=f"{n} word{'s' * (n != 1)}" if n else "none yet")
+        wrow.info.configure(text=f"{n} word{'s' * (n != 1)}" if n else "none yet")
+        erow = self.list_rows["exceptions"]
+        erow.switch.select() if cfg["exceptions_on"] else erow.switch.deselect()
         n = len(cfg["exceptions"])
-        self.list_rows["exceptions"].info.configure(text=f"{n} entr{'ies' if n != 1 else 'y'}" if n else "none")
+        erow.info.configure(text=f"{n} entr{'ies' if n != 1 else 'y'}" if n else "none")
 
     # ---------- changes ----------
 
@@ -208,8 +215,12 @@ class WordsCards:
     def _save_action(self):
         self._changed(action=next(k for k, v in keywords.ACTIONS.items() if v == self.action.get()))
 
-    def _save_list(self, key: str):
-        self._changed(lists={**keywords.settings(self.db)["lists"], key: bool(self.list_rows[key].switch.get())})
+    def _toggle_list(self, key: str, top_level: bool, row):
+        val = bool(row.switch.get())
+        if top_level:   # "words_on" / "exceptions_on" are top-level flags, not entries in the ready-list dict
+            self._changed(**{key: val})
+        else:
+            self._changed(lists={**keywords.settings(self.db)["lists"], key: val})
 
     def _open_ready(self, key: str):
         name, words = keywords.READY[key]

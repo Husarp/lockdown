@@ -304,8 +304,8 @@ class LockdownApp(ctk.CTk):
         if self.word_batch is not None:
             self.word_batch.append(word)
             return
-        done = "Tab closed" if action == "close" else "Went back"
-        self._show(f'{done} - "{word.rstrip("*")}" is a blocked word.')
+        done = "closing the tab" if action == "close" else "going back"
+        self._show(f'"{word.rstrip("*")}" is a blocked word - {done}.')
         self.word_batch = []
         self.after(WORDS_BATCH_MS, self._word_summary)
 

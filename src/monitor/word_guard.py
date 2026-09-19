@@ -56,10 +56,12 @@ class WordGuard(threading.Thread):
             self.last = None
             return
         action = cfg["action"]
-        if self.last and self.last[0] == tab:
+        first = not (self.last and self.last[0] == tab)
+        if not first:
             if now - self.last[1] < RETRY_SEC:
                 return          # just acted - give the browser a moment
             action = "close"    # going back didn't leave the page
         if do(tab[0], action):
             self.last = (tab, now)
-            self.on_block(word, action)
+            if first:           # only one notice per detection (no second one when back escalates to close)
+                self.on_block(word, action)

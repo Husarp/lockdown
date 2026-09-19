@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.31.1 - 2026-09-19 16:55
+- **Blocked words: on/off switches for "Your words" and "Exceptions"** - quickly disable your own words (e.g. when they catch something you're writing) or your exceptions without deleting them. Turning your words off needs the Anti-Bypass challenge (it loosens blocking); turning exceptions off is stricter, so it's instant.
+- **No more double word notice**: when a blocked word closes a tab or sends it back you now get a single message ("<word> is a blocked word - closing the tab / going back") instead of two.
+
 ## 0.31.0 - 2026-09-19 16:35
 - **Round 2 redesign - locked state, app-wide**: when Anti-Bypass is locked, the Blocking and Settings pages now show a red "Locked - changes that loosen a block need the challenge" strip with an "Unlock to edit" button (and "Locked - outside the allowed hours" when in that state). Controls stay usable - trying to loosen one still opens the challenge as before - so nothing is greyed into looking broken.
 - **Round 2 redesign is now feature-complete**: all planned pages, the Calendar, trend line, network markers, type badges, accent bars, the locked/unlocked states and the calm animations (sidebar pulse, pop-up slide/fade, confirm countdown, challenge-box breathing) are in.

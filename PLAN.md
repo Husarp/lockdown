@@ -1324,6 +1324,15 @@ sleep / forced-break overlays still show.
 - [x] Distracting by default: every Steam game + a list of pure-fun games / launchers / streaming / short-video
   sites (not work-too ones like YouTube, Reddit, Discord); only once, your own choices win (requested 2026-09-19)
 ### Word blocking - questions & improvements (raised 2026-09-19)
+- [x] On/off switches for "Your words" and "Exceptions" (disable without deleting); your-words off needs the
+  challenge, exceptions off is instant (2026-09-19)
+- [x] Single word notification instead of two ("<word> is a blocked word - closing the tab / going back");
+  no second notice when "go back" escalates to closing (2026-09-19)
+- [ ] Break reminder ("time for a break"): default = snooze (customizable minutes), OK/dismiss, trust the user;
+  optional strict mode = minimize everything / block distracting apps until the break ends, with a snooze - all
+  customizable. PROPOSED, waiting for OK (design choices).
+- [ ] Word block last-tab: when closing the only tab would close the whole browser window, open a fresh tab
+  instead so the window stays. PROPOSED (needs last-tab detection), waiting for OK.
 - Already works: the URL check decodes `+` (unquote_plus) and `%xx`, lowercases, strips accents (ł->l) and splits
   on every non-letter/digit (`. - _ / +`), so "free+porn+videos", "hot-milf-videos" and "word." all match; whole
   words only (analysis != anal).

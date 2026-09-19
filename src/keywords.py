@@ -16,7 +16,7 @@ from urllib.parse import unquote_plus, urlsplit
 SETTINGS_KEY = "words"   # JSON {"enabled", "safesearch", "action": "close" / "back", "lists": {ready list: on},
 #                                "off": [ready-list words turned off], "words": [yours], "exceptions": [...]}
 DEFAULTS = {"enabled": True, "safesearch": True, "action": "close", "lists": {"adult_en": True, "adult_pl": True},
-            "youtube": True, "off": [], "words": [], "exceptions": []}
+            "youtube": True, "off": [], "words": [], "exceptions": [], "words_on": True, "exceptions_on": True}
 ACTIONS = {"close": "Close the tab", "back": "Go back"}
 
 # Ready-made lists you can switch on (both on by default) and open to turn single words off.
@@ -65,10 +65,11 @@ def save(db, cfg: dict):
 
 
 def active_words(cfg: dict) -> list[str]:
-    """Words of the ready lists that are on (minus the ones you turned off) + yours."""
+    """Words of the ready lists that are on (minus the ones you turned off) + yours (when "your words" is on)."""
     off = set(cfg["off"])
     ready = [w for key, (_name, words) in READY.items() if cfg["lists"].get(key) for w in words if w not in off]
-    return ready + [w for w in cfg["words"] if w not in ready]
+    yours = [w for w in cfg["words"] if w not in ready] if cfg.get("words_on", True) else []
+    return ready + yours
 
 
 def looser(old: dict, new: dict) -> list[str]:
@@ -83,6 +84,10 @@ def looser(old: dict, new: dict) -> list[str]:
     for key, (name, _words) in READY.items():
         if old["lists"].get(key) and not new["lists"].get(key):
             out.append(f"Turn the {name} list off")
+    if old.get("words_on", True) and not new.get("words_on", True):
+        out.append("Turn your blocked words off")
+    if not old.get("exceptions_on", True) and new.get("exceptions_on", True):
+        out.append("Turn exceptions back on")
     removed = (set(new["off"]) - set(old["off"])) | (set(old["words"]) - set(new["words"]))
     if removed:
         out.append(f"Stop blocking {len(removed)} word{'s' * (len(removed) > 1)}: " + ", ".join(sorted(removed)[:8]))
@@ -117,7 +122,7 @@ def find(address: str | None, title: str | None, cfg: dict) -> str | None:
     """The first blocked word in the tab's address / title, else None."""
     address = address if address and looks_like_address(address) else ""
     host = _host(address) if address else ""
-    exceptions = [normalize(e) for e in cfg["exceptions"]]
+    exceptions = [normalize(e) for e in cfg["exceptions"]] if cfg.get("exceptions_on", True) else []
     if host and any(host == e or host.endswith("." + e) for e in exceptions if "." in e):
         return None
     ignored = {e for e in exceptions if "." not in e}
