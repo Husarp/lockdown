@@ -1382,7 +1382,7 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [x] B10 (0.51.0). App / taskbar icon (3n): the .ico lacked the 20/40 px sizes Windows uses at 125% scaling
   (it scaled the nearest one = blur); added them, and ≤20 px draws the design's mark with a pixel-snapped
   padlock block. User to eyeball the real title bar / taskbar after installing.
-- [ ] B11 (optional, user liked it): Calendar redesign to section 4 (4a/4b): one row per blocked item, Day /
+- [x] B11 (0.52.0, agent-reviewed; green outcome / all-day sub-line / TODAY tag fixed): Calendar redesign to section 4 (4a/4b): one row per blocked item, Day /
   3 days / Week range switcher, full-height bars, labels outside bars, "Next change / Busiest stretch /
   Free window" summary cards.
 - [x] B12 (0.51.0, verified). Strict break must NEVER minimise Lockdown itself: `win.minimize_all` /

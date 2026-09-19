@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.52.0 - 2026-09-20 01:46
+- **Blocking > Calendar rebuilt to design 4a / 4b**: one row per blocked item (icon, name, SITE / APP badge), a
+  24 h track with the blocked stretches as bars (no text inside), "Blocked today" in its own column, a legend
+  footer and three summary cards (Next change · Busiest stretch · Free window). A Day / 3 days / Week switcher
+  and an Everything / Sites / Apps filter; in 3 days / Week each day is a mini strip - click one to open that day.
+  Emergency unlocks show as Ⓔ on the item they unlocked. The old week grid (WeekCalendar) is gone.
+
 ## 0.51.0 - 2026-09-20 01:40
 - **App icon (design 3n)**: crisp title-bar / taskbar icon. The .ico now carries 20 px and 40 px images (what
   Windows shows at 125% scaling - it used to scale the nearest size, which blurred it), and the 16-20 px

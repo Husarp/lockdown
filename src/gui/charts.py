@@ -8,7 +8,6 @@ from datetime import date
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
-import blockcal
 from gui import theme
 
 SS = 3                                  # supersampling factor
@@ -501,92 +500,3 @@ class MinuteBars(Chart):
                 self.text(x + bar / 2, bottom + self.px(4), label)
             self.hit(slot * i, 0, slot * (i + 1), h, f"{label}  {n} connection{'s' * (n != 1)}"
                      + ("  ·  blocked attempt" if blocked else ""))
-
-
-class WeekCalendar(Chart):
-    """A week (Mon..Sun rows) x 24 h. Each blocked item is a bar at the times it's blocked, lane-packed so
-    overlapping items stack; hollow markers show emergency unlocks and a line shows 'now'. Hover a bar for the
-    item + times; click it to open that item.
-    set(week, color_of, today_weekday, now_minute, unlocks); on_click(item)."""
-    GUTTER = 40
-    TOPAX = 16
-    LANE_H = 15
-    LANE_GAP = 3
-    ROW_GAP = 7
-    LABEL_FONT = (theme.BODY_SEMI, 8)
-
-    def __init__(self, master, on_click=None, height: int = 360):
-        super().__init__(master, height=height)
-        self.rows: list[list[dict]] = [[] for _ in range(7)]
-        self.color_of = lambda item: theme.pick(theme.ACCENT)
-        self.today, self.now_min = 0, 0
-        self.unlocks: list[list[int]] = [[] for _ in range(7)]
-        self.maxlanes = 1
-        self.click_hits: list[tuple] = []
-        self.on_click = on_click
-        self.bind("<Button-1>", self._click)
-
-    def set(self, week, color_of, today_weekday: int, now_minute: int, unlocks):
-        self.color_of, self.today, self.now_min, self.unlocks = color_of, today_weekday, now_minute, unlocks
-        self.rows, self.maxlanes = [], 1
-        for day in week:
-            bars = [{"start": a, "end": b, "item": e["item"]} for e in day for a, b in e["intervals"]]
-            self.maxlanes = max(self.maxlanes, blockcal.lanes(bars))
-            self.rows.append(bars)
-        rowh = self.maxlanes * self.LANE_H + (self.maxlanes - 1) * self.LANE_GAP
-        total = self.TOPAX + 7 * (rowh + self.ROW_GAP) + self.fh / self.s + 6
-        self.configure(height=int(total * self.s))
-        self._schedule()
-
-    def _click(self, event):
-        item = next((it for x0, y0, x1, y1, it in self.click_hits if x0 <= event.x <= x1 and y0 <= event.y <= y1),
-                    None)
-        if item and self.on_click:
-            self.on_click(item)
-
-    def draw(self, w, h):
-        left, right = self.px(self.GUTTER), w - self.px(6)
-        track = right - left
-        rowh = self.maxlanes * self.px(self.LANE_H) + (self.maxlanes - 1) * self.px(self.LANE_GAP)
-        names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-        def X(minute):
-            return left + track * minute / 1440
-
-        for hr in range(0, 25, 3):
-            self.text(X(hr * 60), self.px(1), f"{hr:02d}", anchor="n")
-        self.click_hits = []
-        line_w = max(1, int(self.s * SS))
-        y = self.px(self.TOPAX)
-        for wd in range(7):
-            self.rect(left, y, right, y + rowh, theme.BG, self.px(2))
-            for hr in range(3, 24, 3):
-                x = X(hr * 60)
-                self.pen.line([x * SS, y * SS, x * SS, (y + rowh) * SS], fill=theme.pick(theme.BORDER), width=line_w)
-            self.text(left - self.px(7), y + rowh / 2, names[wd], anchor="e",
-                      color=theme.ACCENT if wd == self.today else theme.MUTED)
-            for bar in self.rows[wd]:
-                by = y + bar["lane"] * self.px(self.LANE_H + self.LANE_GAP)
-                x0, x1 = X(bar["start"]), X(bar["end"])
-                col = self.color_of(bar["item"])
-                self.rect(x0, by, x1, by + self.px(self.LANE_H), theme._mix(col, self.bg, 0.72), self.px(2))
-                self.pen.rectangle([x0 * SS, by * SS, (x0 + self.px(2)) * SS, (by + self.px(self.LANE_H)) * SS],
-                                   fill=col)
-                if x1 - x0 > self.px(46):
-                    self.text(x0 + self.px(6), by + self.px(self.LANE_H) / 2 - self.px(1),
-                              bar["item"]["display_name"], anchor="w", color=col, font=self.LABEL_FONT)
-                self.click_hits.append((x0, by, x1, by + self.px(self.LANE_H), bar["item"]))
-                self.hit(x0, by, x1, by + self.px(self.LANE_H),
-                         f'{bar["item"]["display_name"]}   {bar["start"] // 60:02d}:{bar["start"] % 60:02d}'
-                         f'-{bar["end"] // 60:02d}:{bar["end"] % 60:02d}')
-            for m in self.unlocks[wd]:
-                cx, cy, r = X(m), y - self.px(1), self.px(4)
-                self.pen.ellipse([(cx - r) * SS, (cy - r) * SS, (cx + r) * SS, (cy + r) * SS], fill=self.bg,
-                                 outline=theme.pick(theme.INFO), width=line_w)
-            y += rowh + self.px(self.ROW_GAP)
-        # one continuous "now" line across the whole grid (top of the first row to the bottom of the last),
-        # instead of a short segment inside today's row - marks the current time-of-day for every day
-        top, bottom = self.px(self.TOPAX), y - self.px(self.ROW_GAP)
-        x = X(self.now_min)
-        self.pen.line([x * SS, top * SS, x * SS, bottom * SS], fill=theme.pick(theme.ACCENT),
-                      width=max(1, int(1.6 * self.s * SS)))

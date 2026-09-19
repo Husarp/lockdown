@@ -19,8 +19,10 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 - **Phase 3 done:** app blocking (close politely then force after 10 s / block internet via firewall / both),
   app browser with icons, daily limits for apps, groups with shared rules + per-member customization,
   "N minutes allowed during blocked hours", warnings before blocks + reminders while in use + "block started".
-- **Blocking UI:** three tabs — **Overview** (everything with rules as chips, sortable, Edit/Remove), **Groups** (list + editor), **Add** (pick a site or app,
-  tick any number of blockers: hours, time limit, opening limit, permanent, temporary). Site suggestions while typing,
+- **Blocking UI:** five tabs — **Overview** (everything with rules as chips, sortable, Edit/Remove), **Groups** (list + editor), **Add** (pick a site or app,
+  tick any number of blockers: hours, time limit, opening limit, permanent, temporary), **Site protection** (always-on
+  lists, your own lists, blocked words, allowed-anyway) and **Calendar** (one row per blocked item with its blocked
+  stretches as bars; Day / 3 days / Week; emergency unlocks marked; summary cards for the day). Site suggestions while typing,
   popular sites suggested while typing (small typos are fine). **Auto-save** is on by default; turn it off to stage changes until you
   press **Save changes** (unsaved items then show "Not applied").
 - **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week), a configurable **limit reset
