@@ -1323,6 +1323,22 @@ sleep / forced-break overlays still show.
 - [x] Dashboard blocked-visits card small while hidden (was an older running copy; checked 2026-09-19)
 - [x] Distracting by default: every Steam game + a list of pure-fun games / launchers / streaming / short-video
   sites (not work-too ones like YouTube, Reddit, Discord); only once, your own choices win (requested 2026-09-19)
+### Word blocking - questions & improvements (raised 2026-09-19)
+- Already works: the URL check decodes `+` (unquote_plus) and `%xx`, lowercases, strips accents (ł->l) and splits
+  on every non-letter/digit (`. - _ / +`), so "free+porn+videos", "hot-milf-videos" and "word." all match; whole
+  words only (analysis != anal).
+- Already works: "Go back" already falls back to closing the tab when going back wouldn't leave the page (a fresh
+  tab with no history) - so a new tab with a bad word is closed, an existing tab goes back (word_guard.tick).
+- Already works: blocked sites and protection-list sites are blocked at the network level (DNS/hosts) in EVERY tab,
+  foreground or background - opening 50 search links to blocked/adult sites blocks them without focusing each.
+- [ ] Proposed: scan background/newly-opened tab TITLES via UIA tab enumeration (URLs of background tabs aren't
+  exposed by browsers, so this is title-only and browser-specific) - waiting for OK (caveats).
+- [ ] Proposed: an explicit "Auto" action option (new tab -> close, existing tab -> go back) surfaced in the UI,
+  even though the current "Go back" already does this via the fallback - waiting for OK.
+- [ ] Proposed: stop the one-time block notifications from piling up as unread in the Windows Action Center (bell) -
+  either auto-clear Lockdown's Action Center entries a few seconds after showing, or show the in-app popup only.
+  Waiting for OK on which.
+
 ### Round 2 redesign — implementing (design/Lockdown Round 2.dc.html, provided 2026-09-19)
 Phased so each part is verified on the hidden desktop before the next.
 - [x] Phase A — design system: round-2 tokens (dark + light), 4px cards / 2px controls, light-mode 7b fixes
