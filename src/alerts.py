@@ -12,7 +12,7 @@ REASONS = {  # reason -> (label in settings, text for {reason})
     "switches": ("Opened too often", "opened too many times"),
     "temporary": ("Temporarily blocked", "temporarily blocked"),
     "mode": ("Blocked by a mode", "blocked while a mode is on"),
-    "protection": ("On a protection list (scam, adult...)", "on a blocked list"),
+    "protection": ("On a protection list", "on a blocked list"),
 }
 DEFAULT_MESSAGES = {
     "permanent": "{site} is permanently blocked.",

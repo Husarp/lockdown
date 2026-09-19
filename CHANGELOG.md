@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.48.1 - 2026-09-20 01:23
+- Site protection: the thin separators between list rows (and above "Your blocking lists") now actually draw -
+  a 1px CTkFrame renders nothing, so hairlines are plain Tk frames (`components.hairline`).
+- Notifications: the "On a protection list" alert cell no longer clips its label.
+
+## 0.48.0 - 2026-09-20 01:17
+- **Notifications (design 3i)**: the blocked-visit alerts are a grid of bordered cells (accent edge when on),
+  each message has a Reset button, and Upcoming blocks / Weekly summary sit side by side.
+
+## 0.47.0 - 2026-09-20 01:17
+- **Network Log (design 3f)**: a **Rule** column (which rule blocked a visit), blocked rows tinted red, and the
+  table's footer inside the card - hint on the left, "Show more (N older)" on the right.
+
+## 0.46.0 - 2026-09-20 01:09
+- **Anti-Bypass in two columns (design 3d)**: Challenges + "Keeping Lockdown running" on the left, "What needs
+  the challenge" (with its tinted note) on the right, under the full-width lock banner - no more long stack.
+
+## 0.45.0 - 2026-09-20 01:09
+- **Site protection in two columns (design 3c)**: community lists, Connect a blocking list, your own lists,
+  Safe search and Check a site on the left; Blocked words and Allowed anyway on the right. Descriptions wrap to
+  the column; the URL field stretches to fit.
+
 ## 0.44.0 - 2026-09-20 01:01
 - **Group editor: blockers side by side (design 3b)** - the group's blockers are now a left rail + one open
   panel on the right (shared with Blocking → Add) instead of stacked cards that expand downwards.

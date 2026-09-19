@@ -9,7 +9,7 @@ import antibypass
 from blocker import protection
 from blocker.hosts import normalize_host
 from gui import icons, theme
-from gui.components import Card, Rows, help_icon
+from gui.components import Card, Rows, hairline, help_icon
 from gui.widgets import clear_entry
 from gui.words_cards import WordsCards
 from trusted_time import now_from_db
@@ -129,8 +129,18 @@ class ProtectionTab(ctk.CTkScrollableFrame):
                                 "automatically (daily by default). They work next to your own blocklist; modes and the emergency unlock "
                                 "don't switch them off.", text_color=MUTED, wraplength=820, justify="left").pack(
             anchor="w", pady=(0, 10))
-        lists = Card(self, "Lists")
-        lists.pack(fill="x", pady=(0, 12))
+        # two columns (design 3c): lists / connect / your lists / safe search / check a site on the left,
+        # blocked words / allowed anyway on the right - instead of one long stack
+        cols = ctk.CTkFrame(self, fg_color="transparent")
+        cols.pack(fill="both", expand=True)
+        cols.grid_columnconfigure(0, weight=4, uniform="p")
+        cols.grid_columnconfigure(1, weight=3, uniform="p")
+        left = ctk.CTkFrame(cols, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="new", padx=(0, 7))
+        right = ctk.CTkFrame(cols, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="new", padx=(7, 0))
+        lists = Card(left, "Always-on lists")
+        lists.pack(fill="x", pady=(0, 8))
         ctk.CTkButton(lists.title.master, text="Update now", width=110, **theme.OUTLINE,
                       command=self._update_now).pack(side="right")
         self.every = ctk.CTkOptionMenu(lists.title.master, width=130, values=list(protection.UPDATE_CHOICES),
@@ -153,20 +163,19 @@ class ProtectionTab(ctk.CTkScrollableFrame):
                         "it updated daily, like the community lists. Preview it first to see what's in it.").pack(
             side="left", padx=6)
         line = ctk.CTkFrame(own, fg_color="transparent")
-        line.pack(anchor="w", pady=(4, 0))
-        self.own_name = ctk.CTkEntry(line, width=150, placeholder_text="Name (e.g. Crypto)")
+        line.pack(fill="x", pady=(4, 0))
+        self.own_name = ctk.CTkEntry(line, width=140, placeholder_text="Name (e.g. Crypto)")
         self.own_name.pack(side="left")
-        self.own_url = ctk.CTkEntry(line, width=380, placeholder_text="https://... list address")
-        self.own_url.pack(side="left", padx=8)
+        self.own_url = ctk.CTkEntry(line, width=160, placeholder_text="https://... list address")
+        self.own_url.pack(side="left", padx=8, fill="x", expand=True)   # takes what's left of the column
         ctk.CTkButton(line, text="Preview", width=90, **theme.OUTLINE, command=self._preview).pack(side="left")
         self.own_add = ctk.CTkButton(line, text="Connect", width=90, command=self._add_own)
-        self.own_result = ctk.CTkLabel(own, text="", anchor="w", justify="left", wraplength=820)
-        self.own_result.pack(anchor="w", pady=(4, 0))
+        self.own_result = ctk.CTkLabel(own, text="", anchor="w", justify="left", wraplength=480)   # shown when it says something
         self.previewed: tuple[str, int] | None = None   # (url, count) of the last good preview
 
         # your own hand-made lists sit under the online lists, set off by a divider
-        ctk.CTkFrame(self, height=1, fg_color=theme.BORDER, corner_radius=0).pack(fill="x", padx=6, pady=(2, 12))
-        mine = Card(self, "Your blocking lists")
+        hairline(left).pack(fill="x", padx=6, pady=(0, 8))
+        mine = Card(left, "Your blocking lists")
         mine.pack(fill="x", pady=(0, 12))
         help_icon(mine.title.master, "Your own lists of sites to block. Type a site into a list; turn the list on to "
                                      "block everything in it (and its subdomains). Adding sites is instant; removing "
@@ -182,9 +191,9 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         ctk.CTkButton(line, text="Create list", width=110, **theme.OUTLINE, command=self._create_manual).pack(
             side="left", padx=8)
 
-        self.words = WordsCards(self, page.app)
+        self.words = WordsCards(left, page.app, words_parent=right)
 
-        check = Card(self, "Check a site")
+        check = Card(left, "Check a site")
         check.pack(fill="x", pady=(0, 12))
         line = ctk.CTkFrame(check.body, fg_color="transparent")
         line.pack(anchor="w")
@@ -196,17 +205,17 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.check_result = ctk.CTkLabel(check.body, text="", anchor="w")
         self.check_result.pack(anchor="w", pady=(6, 0))
 
-        allowed = Card(self, "Allowed anyway")
+        allowed = Card(right, "Allowed anyway")
         allowed.pack(fill="x", pady=(0, 12))
         help_icon(allowed.title.master, "Sites a list blocks by mistake (their subdomains too). They open again "
                                         "within a minute.").pack(side="left", padx=8)
         self.chips = Rows(allowed.body, _allowed_chip, "None.", {"side": "left", "padx": (0, 6), "pady": 4})
         line = ctk.CTkFrame(allowed.body, fg_color="transparent")
-        line.pack(anchor="w", pady=(4, 0))
-        self.allow_entry = ctk.CTkEntry(line, width=260, placeholder_text="site to allow")
-        self.allow_entry.pack(side="left")
+        line.pack(fill="x", pady=(4, 0))
+        self.allow_entry = ctk.CTkEntry(line, width=200, placeholder_text="site to allow")
+        self.allow_entry.pack(side="left", fill="x", expand=True)
         self.allow_entry.bind("<Return>", lambda e: self._allow())
-        ctk.CTkButton(line, text="Allow", width=80, **theme.OUTLINE, command=self._allow).pack(side="left", padx=8)
+        ctk.CTkButton(line, text="Allow", width=80, command=self._allow).pack(side="right", padx=(8, 0))   # primary, flush right (3c)
         self.allow_error = ctk.CTkLabel(allowed.body, text="", text_color=theme.DANGER, height=16)
         self.allow_error.pack(anchor="w")
         self._poll = None
@@ -216,34 +225,48 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         for w in self.list_rows.winfo_children():
             w.destroy()
         self.switches, self.infos = {}, {}
+        self.counts = {}
         for key, (name, what, _sources, _default) in lists.items():
+            # design 3c row: switch | description | (right) big count + "updated ..." - with a thin separator
             row = ctk.CTkFrame(self.list_rows, fg_color="transparent")
-            row.pack(fill="x", pady=4)
+            row.pack(fill="x", pady=(6, 0))
             sw = ctk.CTkSwitch(row, text=name, font=theme.semi(13), width=150, command=self._save)
-            sw.pack(side="left")
+            sw.pack(side="left", anchor="n", pady=2)
+            if key not in protection.LISTS:
+                ctk.CTkButton(row, text="Remove", width=80, height=28, **theme.OUTLINE,
+                              command=lambda k=key, n=name: self._remove_own(k, n)).pack(side="right", padx=(10, 0))
+            right = ctk.CTkFrame(row, fg_color="transparent")
+            right.pack(side="right", padx=(10, 0))
+            count = ctk.CTkLabel(right, text="", font=theme.numeral(15), anchor="e", height=18)
+            count.pack(anchor="e")
+            info = ctk.CTkLabel(right, text="", text_color=MUTED, font=theme.body(10), anchor="e", height=14)
+            info.pack(anchor="e")
             texts = ctk.CTkFrame(row, fg_color="transparent")
             texts.pack(side="left", fill="x", expand=True)
             ctk.CTkLabel(texts, text=what if key in protection.LISTS else f"your list · {what}", anchor="w",
-                         height=18).pack(anchor="w")
-            info = ctk.CTkLabel(texts, text="", text_color=MUTED, font=theme.body(11), anchor="w", height=14)
-            info.pack(anchor="w")
-            if key not in protection.LISTS:
-                ctk.CTkButton(row, text="Remove", width=80, **theme.OUTLINE,
-                              command=lambda k=key, n=name: self._remove_own(k, n)).pack(side="right")
-            self.switches[key], self.infos[key] = sw, info
+                         justify="left", wraplength=290).pack(anchor="w")
+            hairline(self.list_rows).pack(fill="x", pady=(6, 0))
+            self.switches[key], self.infos[key], self.counts[key] = sw, info, count
         self.row_keys = list(lists)
 
     # ---------- your own lists ----------
 
+    def _own_msg(self, text: str, color):
+        """The Connect row's result line - only takes up space while it has something to say."""
+        self.own_result.configure(text=text, text_color=color)
+        if text:
+            self.own_result.pack(anchor="w", pady=(4, 0))
+        else:
+            self.own_result.pack_forget()
+
     def _preview(self):
         url = self.own_url.get().strip()
         if not url.lower().startswith(("http://", "https://")):
-            self.own_result.configure(text="Paste the list's full address (starting with https://).",
-                                      text_color=theme.DANGER)
+            self._own_msg("Paste the list's full address (starting with https://).", theme.DANGER)
             return
         self.own_add.pack_forget()
         self.previewed = None
-        self.own_result.configure(text="Downloading the list to have a look...", text_color=MUTED)
+        self._own_msg("Downloading the list to have a look...", MUTED)
         result = []
 
         def work():
@@ -261,11 +284,11 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             return
         if isinstance(result[0], Exception):
             text = str(result[0]) if isinstance(result[0], ValueError) else f"Couldn't download it: {result[0]}"
-            self.own_result.configure(text=text, text_color=theme.DANGER)
+            self._own_msg(text, theme.DANGER)
             return
         count, sample = result[0]
         self.previewed = (url, count)
-        self.own_result.configure(text=f"{count:,} sites, e.g. {', '.join(sample)}", text_color=theme.TEXT)
+        self._own_msg(f"{count:,} sites, e.g. {', '.join(sample)}", theme.TEXT)
         self.own_add.pack(side="left", padx=8)
 
     def _add_own(self):
@@ -282,8 +305,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.previewed = None
         for entry in (self.own_name, self.own_url):
             clear_entry(entry)
-        self.own_result.configure(text=f"Connected {name} ({count:,} sites) - it's downloaded in a few seconds.",
-                                  text_color=theme.ALLOWED)
+        self._own_msg(f"Connected {name} ({count:,} sites) - it's downloaded in a few seconds.", theme.ALLOWED)
         self.refresh()
 
     def _remove_own(self, key: str, name: str):
@@ -368,17 +390,18 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             sw.select() if key in cfg["enabled"] else sw.deselect()
             info = cfg["info"].get(key, {})
             if progress and progress["key"] == key:
-                text = "Downloading... " + download_text(progress)
+                count, text = "…", "downloading " + download_text(progress)
             elif info.get("count"):
-                text = f"{info['count']:,} sites · updated {ago(info.get('updated'), now)}"
+                count, text = f"{info['count']:,}", f"updated {ago(info.get('updated'), now)}"
                 if info.get("failed") and info["failed"] > info.get("updated", ""):
-                    text += " · last update failed (offline?) - trying again in an hour"
+                    text = "update failed · retrying in 1 h"
             elif info.get("failed"):
-                text = "Couldn't download it yet (offline?) - trying again in an hour."
+                count, text = "–", "download failed · retrying in 1 h"
             elif key in cfg["enabled"]:
-                text = "Waiting to download (the service does it within a few seconds; it needs to be running)"
+                count, text = "–", "waiting for the service"
             else:
-                text = "Off"
+                count, text = "", "off"
+            self.counts[key].configure(text=count)
             self.infos[key].configure(text=text)
         asked = cfg.get("update_now") or ""
         waiting = progress or any(not cfg["info"].get(k, {}).get("count") or cfg["info"][k].get("updated", "") < asked

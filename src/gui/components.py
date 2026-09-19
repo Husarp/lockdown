@@ -277,6 +277,11 @@ class Rows:
         return self.items[:n]
 
 
+def hairline(parent) -> tk.Frame:
+    """A 1px border-coloured rule (a 1px CTkFrame draws nothing - its rounded-rect body collapses)."""
+    return tk.Frame(parent, height=1, bg=theme.pick(theme.BORDER), bd=0, highlightthickness=0)
+
+
 def help_icon(parent, text: str) -> ctk.CTkLabel:
     """A small "?" that shows `text` while the mouse is over it (instead of a grey hint line under things).
     Returns it unpacked - pack / grid it next to what it explains."""

@@ -163,15 +163,28 @@ class AntiBypassPage(ctk.CTkFrame):
         self.summary = ctk.CTkLabel(texts, text="", text_color=MUTED, anchor="w", justify="left", wraplength=740)
         self.summary.pack(anchor="w", pady=(3, 0))
         self.lock_btn = ctk.CTkButton(strip, text="Lock now", width=100, **theme.OUTLINE, command=self._lock)
-        self.unlock_btn = ctk.CTkButton(strip, text="Unlock to edit", width=130, command=self._unlock)
+        self.unlock_btn = ctk.CTkButton(strip, text="Unlock to edit", width=130, command=self._unlock,
+                                        fg_color="transparent", border_width=1, border_color=theme.DANGER,
+                                        text_color=theme.DANGER, hover_color=("#FBE5E3", "#2A1A19"))   # red outline (3d)
         self.unlock_bar = ctk.CTkProgressBar(self.banner, height=3, corner_radius=0, progress_color=theme.SUCCESS)
         self._unlock_job = None
 
-        challenges = Card(body, "Challenges")
+        # two columns (design 3d): challenges + "keeping Lockdown running" on the left, "what needs the
+        # challenge" on the right - instead of one long stack
+        cols = ctk.CTkFrame(body, fg_color="transparent")
+        cols.pack(fill="both", expand=True)
+        cols.grid_columnconfigure(0, weight=5, uniform="ab")
+        cols.grid_columnconfigure(1, weight=4, uniform="ab")
+        cols.grid_rowconfigure(0, weight=1)
+        left = ctk.CTkFrame(cols, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="new", padx=(0, 7))
+        right = ctk.CTkFrame(cols, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="nsew", padx=(7, 0))   # stretches to the left column's height
+        challenges = Card(left, "Challenges")
         challenges.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(challenges.body, text="Making blocks stricter is always instant. Anything that loosens them "
                                            "(including these settings) needs the challenges you turn on here.",
-                     text_color=MUTED, wraplength=820, justify="left").pack(anchor="w", pady=(0, 8))
+                     text_color=MUTED, wraplength=520, justify="left").pack(anchor="w", pady=(0, 8))
         self.phrase_sw = ctk.CTkSwitch(challenges.body, text="Type a random phrase (no pasting)", font=theme.semi(13),
                                        command=self._apply)
         self.phrase_sw.pack(anchor="w")
@@ -185,15 +198,15 @@ class AntiBypassPage(ctk.CTkFrame):
         self.complex_box = ctk.CTkCheckBox(challenges.body, text="Include numbers and CAPITAL letters (harder to type "
                                            "quickly)", command=self._apply)
         self.complex_box.pack(anchor="w", padx=(46, 0), pady=(0, 8))
-        self.grid_box = ctk.CTkCheckBox(challenges.body, text="3×3 grid - one word at a time into a box picked at "
-                                        "random (you click it; macros can't just type blindly)", command=self._apply)
+        self.grid_box = ctk.CTkCheckBox(challenges.body, text="3×3 grid - one word at a time into a random box",
+                                        command=self._apply)
         self.grid_box.pack(anchor="w", padx=(46, 0), pady=(0, 12))
         line.pack_configure(pady=(4, 6))
         custom = ctk.CTkFrame(challenges.body, fg_color="transparent")
         custom.pack(anchor="w", fill="x", padx=(46, 0), pady=(0, 12))
         ctk.CTkLabel(custom, text="Your own phrase").pack(side="left", padx=(0, 8))
-        self.custom_entry = ctk.CTkEntry(custom, width=320, placeholder_text="leave empty for a random one")
-        self.custom_entry.pack(side="left")
+        self.custom_entry = ctk.CTkEntry(custom, width=160, placeholder_text="leave empty for a random one")
+        self.custom_entry.pack(side="left", fill="x", expand=True)   # takes what the column leaves over
         ctk.CTkButton(custom, text="Save phrase", width=100, **theme.OUTLINE, command=self._apply).pack(side="left",
                                                                                                        padx=8)
         help_icon(custom, "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - "
@@ -217,23 +230,26 @@ class AntiBypassPage(ctk.CTkFrame):
         self.error.pack(anchor="w", padx=(46, 0))
         self.rows: list[WindowRow] = []
 
-        protects = Card(body, "What needs the challenge")
-        protects.pack(fill="x", pady=(0, 12))
+        protects = Card(right, "What needs the challenge")
+        protects.pack(fill="both", expand=True, pady=(0, 12))   # fills the column; the note sits at its foot
         ctk.CTkLabel(protects.body, text="\n".join(f"•  {p}" for p in PROTECTS), justify="left", anchor="w",
-                     wraplength=820).pack(anchor="w")
-        ctk.CTkLabel(protects.body, text="Not included: the emergency unlock (it has its own limit) and changing when "
-                                         "limits reset (it never shortens a limit day). Stopping a locked mode always "
-                                         "needs the phrase, even with no challenge turned on here.", text_color=MUTED, wraplength=820,
-                     justify="left").pack(anchor="w", pady=(6, 0))
+                     wraplength=400).pack(anchor="w")
+        note = ctk.CTkFrame(protects.body, fg_color=theme.BG, border_width=1, border_color=theme.BORDER,
+                            corner_radius=3)   # the plate's tinted note at the bottom of the card
+        note.pack(side="bottom", fill="x", pady=(10, 0))
+        ctk.CTkLabel(note, text="Making blocks stricter is always instant. Not included: the emergency unlock (it has "
+                                "its own limit) and changing when limits reset (it never shortens a limit day). "
+                                "Stopping a locked mode always needs the phrase, even with no challenge turned on here.",
+                     text_color=MUTED, wraplength=380, justify="left", anchor="w").pack(anchor="w", padx=12, pady=9)
 
-        itself = Card(body, "Keeping Lockdown running")
+        itself = Card(left, "Keeping Lockdown running")
         itself.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(itself.body, text="\n".join([
             "•  The tray app comes back within a minute if it's closed any other way than Exit (e.g. Task Manager).",
             "•  The service comes back within a minute if it's stopped.",
             "•  Changing the Windows clock does nothing; a new time zone counts only after 24 hours.",
             "•  Uninstalling Lockdown asks for the challenge too."]), justify="left", anchor="w",
-            wraplength=820).pack(anchor="w")
+            wraplength=520).pack(anchor="w")
         self._banner_sig = None
         self.refresh()
         self.after(LIVE_MS, self._live)

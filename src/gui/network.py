@@ -42,17 +42,24 @@ def site_to_block(host: str) -> str:
 class LogTable(ctk.CTkFrame):
     """The log as one ttk.Treeview in a card: App (icon + name) | Time | Site | Port | Status. Blocked visits in red.
     on_click(row index, x, y) when a row is clicked."""
-    COLUMNS = (("time", "Time", 70, "w"), ("site", "Site", 380, "w"), ("port", "Port", 70, "center"),
-               ("status", "Status", 110, "w"))
+    COLUMNS = (("time", "Time", 70, "w"), ("site", "Site", 320, "w"), ("rule", "Rule", 130, "w"),
+               ("port", "Port", 60, "center"), ("status", "Status", 100, "w"))
     STYLE = "Log.Treeview"
+    HINT = "Keeps the last hour · click a row to block it or copy it"
 
     def __init__(self, master, on_click):
-        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=6)
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=4)
         self.on_click = on_click
         self.scale = ctk.ScalingTracker.get_widget_scaling(self)
         self.images: dict[str, ImageTk.PhotoImage] = {}   # (Tk needs the references kept)
         self.mode = None
         self.hover = None
+        # in-card footer (design 3f): the hint on the left, "Show more (N older)" on the right
+        self.footer = ctk.CTkFrame(self, fg_color=theme.SURFACE2, corner_radius=0)
+        self.footer.pack(side="bottom", fill="x", padx=1, pady=(0, 1))
+        self.hint = ctk.CTkLabel(self.footer, text=self.HINT, text_color=theme.MUTED, font=theme.body(11))
+        self.hint.pack(side="left", padx=14, pady=8)
+        self.more = ctk.CTkButton(self.footer, text="", width=170, height=28, **theme.OUTLINE)
         self.tree = ttk.Treeview(self, columns=[c[0] for c in self.COLUMNS], style=self.STYLE, selectmode="none",
                                  show="tree headings")
         self.tree.heading("#0", text="APP", anchor="w")
@@ -84,7 +91,8 @@ class LogTable(ctk.CTkFrame):
         style.configure(f"{self.STYLE}.Heading", background=pick(theme.SURFACE), foreground=pick(theme.MUTED),
                         font=(theme.BODY_SEMI, px(10)), relief="flat", borderwidth=0, padding=(0, 4))
         style.map(f"{self.STYLE}.Heading", background=[("active", pick(theme.SURFACE))])
-        self.tree.tag_configure("blocked", foreground=pick(theme.BLOCKED))
+        # blocked rows: red text on a faint red tint (design 3f)
+        self.tree.tag_configure("blocked", foreground=pick(theme.BLOCKED), background=pick(("#FBE5E3", "#2A1A19")))
         self.tree.tag_configure("hover", background=pick(theme.SURFACE2))
 
     def image(self, key: str, ctk_image) -> ImageTk.PhotoImage:
@@ -94,12 +102,21 @@ class LogTable(ctk.CTkFrame):
         return self.images[key]
 
     def fill(self, rows: list[tuple]):
-        """rows: (app text, image key, CTkImage, time, site, port, status, blocked)."""
+        """rows: (app text, image key, CTkImage, time, site, rule, port, status, blocked)."""
         self.hover = None
         self.tree.delete(*self.tree.get_children())
-        for i, (app, key, img, when, site, port, status, blocked) in enumerate(rows):
+        for i, (app, key, img, when, site, rule, port, status, blocked) in enumerate(rows):
             self.tree.insert("", "end", iid=str(i), text=f"  {app}", image=self.image(key, img),
-                             values=(when, site, port, status), tags=("blocked",) if blocked else ())
+                             values=(when, site, rule, port, status), tags=("blocked",) if blocked else ())
+
+    def set_more(self, older: int, empty: bool):
+        """The footer: how many older rows "Show more" would add (0 = hide the button); the empty-state hint."""
+        self.hint.configure(text="No connections in the last hour yet." if empty else self.HINT)
+        if older:
+            self.more.configure(text=f"Show more ({older} older)")
+            self.more.pack(side="right", padx=12, pady=5)
+        else:
+            self.more.pack_forget()
 
     def _set_hover(self, iid):
         if iid == self.hover:
@@ -155,7 +172,7 @@ class NetworkPage(ctk.CTkFrame):
         self.search.pack(side="left")
         self.search.bind("<KeyRelease>", lambda e: self._filtered())
         ctk.CTkButton(bar, text="Export CSV", width=100, **theme.OUTLINE, command=self._export).pack(side="right")
-        self.live = ctk.CTkSwitch(bar, text="Live", width=60)
+        self.live = ctk.CTkSwitch(bar, text="Live", width=80)
         self.live.select()
         self.live.pack(side="right", padx=10)
 
@@ -167,16 +184,11 @@ class NetworkPage(ctk.CTkFrame):
         self.windows.pack(side="left", padx=16)
         self.local = ctk.CTkSwitch(bar2, text="Local network", command=self._filtered)
         self.local.pack(side="left")
-        ctk.CTkLabel(bar2, text="Keeps the last hour. Click a row to block or copy it.", text_color=theme.MUTED,
-                     font=theme.body(11)).pack(side="right")
 
         self.table_view = ctk.CTkFrame(self, fg_color="transparent")
         self.table = LogTable(self.table_view, self._row_clicked)
         self.table.pack(fill="both", expand=True)
-        self.table_foot = ctk.CTkFrame(self.table_view, fg_color="transparent")
-        self.table_foot.pack(fill="x", pady=(6, 0))
-        self.empty = ctk.CTkLabel(self.table_foot, text="No connections in the last hour yet.", text_color=theme.MUTED)
-        self.more = ctk.CTkButton(self.table_foot, text="", width=160, **theme.OUTLINE, command=self._show_more)
+        self.table.more.configure(command=self._show_more)
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")   # the graph view
         self.graph = ctk.CTkFrame(self.body, fg_color="transparent")
         self.graph.pack(fill="both", expand=True)
@@ -205,7 +217,8 @@ class NetworkPage(ctk.CTkFrame):
         since = now - timedelta(hours=1)
         rows = [{**r, "blocked": False} for r in self.db.network_since(since.strftime("%Y-%m-%d %H:%M"))]
         rows += [{"minute": e["timestamp"][:16], "exe": "", "ip": "", "port": "", "domain": e["hostname"],
-                  "count": 1, "windows": 0, "local": 0, "blocked": True, "name": e["display_name"]}
+                  "count": 1, "windows": 0, "local": 0, "blocked": True, "name": e["display_name"],
+                  "reason": e["reason"]}
                  for e in self.db.block_events_since(since) if not e["hostname"].endswith(".exe")]
         rows.sort(key=lambda r: r["minute"], reverse=True)
         self.all_rows = rows
@@ -269,16 +282,20 @@ class NetworkPage(ctk.CTkFrame):
             else:
                 app, key, img = "Blocked visit", f"site:{r['domain']}", icons.get(r["domain"], 16)
             site = (r["domain"] or r["ip"]) + (f"  ×{r['count']}" if r["count"] > 1 else "")
-            rows.append((app, key, img, r["minute"][11:], site, r["port"],
+            rows.append((app, key, img, r["minute"][11:], site, self._rule_text(r), r["port"],
                          "✗ Blocked" if r["blocked"] else "✓ Allowed", r["blocked"]))
         self.table.fill(rows)
-        self.more.pack_forget()
-        self.empty.pack_forget()
-        if not shown:
-            self.empty.pack(anchor="w")
-        if len(self.shown) > len(shown):
-            self.more.configure(text=f"Show more ({len(self.shown) - len(shown)} older)")
-            self.more.pack()
+        self.table.set_more(len(self.shown) - len(shown), empty=not shown)
+
+    @staticmethod
+    def _rule_text(r: dict) -> str:
+        """The "Rule" column: which rule blocked the visit (design 3f); allowed rows show a dash."""
+        if not r["blocked"]:
+            return "–"
+        import alerts
+        reason = r.get("reason") or ""
+        base = alerts.base_reason(reason)
+        return alerts.REASONS[base][0] if base in alerts.REASONS else (base or reason).replace("_", " ").capitalize()
 
     def _fill_graph(self, per_app: Counter):
         now = now_from_db(self.db)

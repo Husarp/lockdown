@@ -106,7 +106,9 @@ class WordListWindow(ctk.CTkToplevel):
 
 
 class WordsCards:
-    def __init__(self, parent, app):
+    def __init__(self, parent, app, words_parent=None):
+        """Safe search goes into `parent`; the Blocked words card into `words_parent` (design 3c puts it in the
+        right column) or `parent` when not given."""
         self.app, self.db = app, app.db
         safe = Card(parent, "Safe search")
         safe.pack(fill="x", pady=(0, 12))
@@ -124,7 +126,7 @@ class WordsCards:
                            "this off if you want to read comments - SafeSearch above stays on either way.").pack(
             side="left", padx=4)
 
-        words = Card(parent, "Blocked words")
+        words = Card(words_parent or parent, "Blocked words")
         words.pack(fill="x", pady=(0, 12))
         line = ctk.CTkFrame(words.body, fg_color="transparent")
         line.pack(anchor="w", pady=(0, 8))
@@ -156,14 +158,14 @@ class WordsCards:
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", pady=2)
         if switch:
-            row.switch = ctk.CTkSwitch(row, text=name, width=240,
+            row.switch = ctk.CTkSwitch(row, text=name, width=180,
                                        command=lambda: self._toggle_list(switch, top_level, row))
             row.switch.pack(side="left")
         else:
-            ctk.CTkLabel(row, text=name, width=194, anchor="w").pack(side="left", padx=(46, 0))
-        row.info = ctk.CTkLabel(row, text="", text_color=MUTED, width=170, anchor="w")
-        row.info.pack(side="left", padx=10)
-        ctk.CTkButton(row, text="Open", width=70, **theme.OUTLINE, command=open_).pack(side="left")
+            ctk.CTkLabel(row, text=name, width=134, anchor="w").pack(side="left", padx=(46, 0))
+        row.info = ctk.CTkLabel(row, text="", text_color=MUTED, width=100, anchor="w")
+        row.info.pack(side="left", padx=10, fill="x", expand=True)
+        ctk.CTkButton(row, text="Open", width=70, height=28, **theme.OUTLINE, command=open_).pack(side="right")  # flush right (3c)
         return row
 
     def refresh(self):

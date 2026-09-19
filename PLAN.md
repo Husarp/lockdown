@@ -1359,14 +1359,14 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [x] B1 (0.44.0, agent-reviewed vs 3b: PASS after fixes). Blocking -> Add already had the rail + panel; the stacked one was the
   GROUP EDITOR - now both use a shared BlockerRail (rail + one open panel, header strip, tinted note, footer
   hint). Dead BlockerCard removed.
-- [ ] B2. Site protection (3c, ~391-499): TWO columns - left (Always-on lists, Connect a list, Safe search,
+- [x] B2 (0.45.0, agent-reviewed; row hairlines fixed 0.48.1). Site protection (3c, ~391-499): TWO columns - left (Always-on lists, Connect a list, Safe search,
   Check a site), right (Blocked words, Allowed anyway). Currently everything is stacked.
-- [ ] B3. Anti-Bypass (3d, ~501-603): two-column layout (challenges left; "what needs the challenge" +
+- [x] B3 (0.46.0, agent-reviewed PASS). Anti-Bypass (3d, ~501-603): two-column layout (challenges left; "what needs the challenge" +
   "keeping Lockdown running" right), locked view-only styling per the plate.
-- [ ] B4. Network Log (3f ~648-682, 3g ~683-724): table columns App · Time · Site · Rule · Port · Status (add
+- [x] B4 (0.47.0, agent-reviewed PASS). Network Log (3f ~648-682, 3g ~683-724): table columns App · Time · Site · Rule · Port · Status (add
   Rule), blocked rows tinted red, in-card footer with "Show more (N older)" on the RIGHT. Keep the working
   Live switch and the new underline tabs (user-approved).
-- [ ] B5. Notifications (3i, ~773-826): alerts as a BORDERED BOXED GRID (each alert in its own padded cell, 4
+- [x] B5 (0.48.0, agent-reviewed; clipped label fixed 0.48.1). Notifications (3i, ~773-826): alerts as a BORDERED BOXED GRID (each alert in its own padded cell, 4
   columns), message templates open/edit in place. Currently bare checkboxes stacked.
 - [ ] B6. Settings (3j, ~827-871): TWO-column grouped layout - left: Appearance (theme + accents + daily goal in
   one card) then "When limits reset"; right (~400px): Emergency unlock (YELLOW accent bar + a small usage

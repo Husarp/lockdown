@@ -36,15 +36,21 @@ class NotificationsPage(ctk.CTkFrame):
         ctk.CTkLabel(box, text="Notify me when I try to open a site (or start an app) that is:", text_color=MUTED).grid(
             row=1, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
 
+        # each alert as a bordered, padded cell in a 4-column grid (design 3i); a ticked cell gets an accent edge
         self.enabled_vars: dict[str, ctk.BooleanVar] = {}
+        self.cells: dict[str, ctk.CTkFrame] = {}
         checks = ctk.CTkFrame(box, fg_color="transparent")
-        checks.grid(row=2, column=0, columnspan=2, padx=16, sticky="w")
+        checks.grid(row=2, column=0, columnspan=2, padx=16, sticky="ew")
+        for col in range(4):
+            checks.grid_columnconfigure(col, weight=1, uniform="a")
         for i, (reason, (label, _)) in enumerate(alerts.REASONS.items()):
             var = ctk.BooleanVar()
             self.enabled_vars[reason] = var
-            ctk.CTkCheckBox(checks, text=label, variable=var, width=230,
-                            command=lambda r=reason, v=var: self.draft.set_setting(f"notify.enabled.{r}", "1" if v.get() else "0")
-                            ).grid(row=i // 3, column=i % 3, pady=4, sticky="w")
+            cell = ctk.CTkFrame(checks, fg_color=theme.BG, border_width=1, border_color=theme.BORDER, corner_radius=3)
+            cell.grid(row=i // 4, column=i % 4, padx=4, pady=4, sticky="ew")
+            ctk.CTkCheckBox(cell, text=label, variable=var, checkbox_width=18, checkbox_height=18,
+                            command=lambda r=reason: self._alert_toggled(r)).pack(anchor="w", padx=10, pady=9)
+            self.cells[reason] = cell
         messages = Collapsible(box, "Messages", self._build_messages, note="change what each alert says")
         messages.grid(row=3, column=0, columnspan=2, padx=16, pady=(8, 0), sticky="ew")
         row = 3
@@ -65,10 +71,30 @@ class NotificationsPage(ctk.CTkFrame):
         help_icon(fmt_row, "Windows notifications clear themselves from the notification centre (the bell) a few "
                            "seconds later, so these one-time alerts don't pile up as unread. Only Lockdown's own "
                            "notifications are cleared.").pack(side="left", padx=4)
-        ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > All.", text_color=MUTED).grid(
+        ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > Overview.", text_color=MUTED).grid(
             row=row + 3, column=0, columnspan=2, padx=16, pady=(4, 12), sticky="w")
-        self._build_warnings(parent)
-        self._build_digest(parent)
+        # the two lower cards side by side (design 3i): Upcoming blocks (wider) | Weekly summary
+        cols = ctk.CTkFrame(parent, fg_color="transparent")
+        cols.pack(fill="x")
+        cols.grid_columnconfigure(0, weight=4, uniform="n")
+        cols.grid_columnconfigure(1, weight=3, uniform="n")
+        left = ctk.CTkFrame(cols, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="new", padx=(0, 7))
+        right = ctk.CTkFrame(cols, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="new", padx=(7, 0))
+        self._build_warnings(left)
+        self._build_digest(right)
+
+    def _alert_toggled(self, reason: str):
+        on = self.enabled_vars[reason].get()
+        self.draft.set_setting(f"notify.enabled.{reason}", "1" if on else "0")
+        self._paint_cells()
+
+    def _paint_cells(self):
+        for reason, cell in self.cells.items():
+            on = self.enabled_vars[reason].get()
+            cell.configure(border_color=(theme._mix(theme.ACCENT[0], theme.BG[0], 0.45),
+                                         theme._mix(theme.ACCENT[1], theme.BG[1], 0.45)) if on else theme.BORDER)
 
     def _build_messages(self, parent):
         parent.grid_columnconfigure(1, weight=1)
@@ -80,8 +106,16 @@ class NotificationsPage(ctk.CTkFrame):
                 f"notify.msg.{r}", m.get().strip() or alerts.DEFAULT_MESSAGES[r]))
             msg.insert(0, self.draft.settings[f"notify.msg.{reason}"])
             self.msg_entries[reason] = msg
+            ctk.CTkButton(parent, text="Reset", width=70, height=28, **theme.OUTLINE,
+                          command=lambda r=reason: self._reset_message(r)).grid(row=row, column=2, padx=(8, 0), pady=3)
         ctk.CTkLabel(parent, text="Placeholders: {site}  {reason}  {until}", text_color=MUTED).grid(
             row=len(alerts.REASONS), column=1, sticky="w")
+
+    def _reset_message(self, reason: str):
+        entry = self.msg_entries[reason]
+        entry.delete(0, "end")
+        entry.insert(0, alerts.DEFAULT_MESSAGES[reason])
+        self.draft.set_setting(f"notify.msg.{reason}", alerts.DEFAULT_MESSAGES[reason])
 
     def _build_digest(self, parent):
         box = ctk.CTkFrame(parent)
@@ -92,7 +126,7 @@ class NotificationsPage(ctk.CTkFrame):
         ctk.CTkLabel(head, text="Weekly Summary", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         line = ctk.CTkFrame(box, fg_color="transparent")
         line.pack(anchor="w", padx=16, pady=(0, 12))
-        self.digest_switch = ctk.CTkSwitch(line, text="Once a week, show how it went on", command=self._save_digest)
+        self.digest_switch = ctk.CTkSwitch(line, text="Every", command=self._save_digest)   # "Every Sunday at 19:00"
         self.digest_switch.pack(side="left")
         self.digest_day = ctk.CTkOptionMenu(line, width=120, values=DAY_NAMES, command=lambda v: self._save_digest())
         self.digest_day.pack(side="left", padx=8)
@@ -127,7 +161,7 @@ class NotificationsPage(ctk.CTkFrame):
         self.warn_minutes = ctk.CTkOptionMenu(warn, width=90, values=[f"{m} min" for m in alerts.WARN_MINUTE_OPTIONS],
                                               command=lambda v: self.draft.set_setting("notify.warn.minutes", v.split()[0]))
         self.warn_minutes.pack(side="left", padx=8)
-        ctk.CTkLabel(warn, text="before a site/app gets blocked (hours, daily limit, allowance)").pack(side="left")
+        ctk.CTkLabel(warn, text="before something gets blocked").pack(side="left")
         repeat = ctk.CTkFrame(box, fg_color="transparent")
         repeat.pack(anchor="w", padx=16, pady=4)
         ctk.CTkLabel(repeat, text="While I'm using it, remind me again every").pack(side="left")
@@ -151,6 +185,7 @@ class NotificationsPage(ctk.CTkFrame):
         s = self.draft.settings
         for reason, var in self.enabled_vars.items():
             var.set(s[f"notify.enabled.{reason}"] == "1")
+        self._paint_cells()
         for reason, entry in self.msg_entries.items():
             entry.delete(0, "end")
             entry.insert(0, s[f"notify.msg.{reason}"])
