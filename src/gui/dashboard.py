@@ -30,6 +30,12 @@ BANNER_BG = ("#FBEEE8", "#2A1E19")
 def start_service():
     """(Re)start the enforcement service (Windows asks for admin rights). A copy that's still running but stuck
     is ended first - otherwise Windows ignores the start, as only one copy may run."""
+    from paths import FROZEN, SERVICE_NAME
+    if FROZEN:   # installed: a real Windows service
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe",
+                                            f"-NoProfile -Command Restart-Service -Name {SERVICE_NAME} -Force",
+                                            None, 0)
+        return
     ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe",
                                         f'/c schtasks /End /TN "{TASK_NAME}" & schtasks /Run /TN "{TASK_NAME}"',
                                         None, 0)

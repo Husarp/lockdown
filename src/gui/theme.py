@@ -1,11 +1,11 @@
 """Design tokens from design/Lockdown Dashboard & Screen Time.dc.html: colours as (light, dark) pairs, fonts,
 and the customtkinter defaults built from them. Status colours: blocked now = red, allowed now = green."""
 import ctypes
-from pathlib import Path
 
 import customtkinter as ctk
 
-ASSETS = Path(__file__).resolve().parents[2] / "assets"
+from paths import ASSETS
+
 APP_ICON = ASSETS / "lockdown.ico"   # the Lockdown logo (windows, notifications)
 
 BG = ("#F2F2F2", "#14181D")

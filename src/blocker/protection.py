@@ -34,7 +34,8 @@ LIST_DIR = DATA_DIR / "protection"
 SETTINGS_KEY = "protection"   # JSON {"enabled": [keys], "allowed": [domains], "info": {key: {count, updated}},
 #                                     "update_now": timestamp, "custom": [{key, name, url}] (your own lists)}
 PROGRESS_KEY = "protection.progress"   # JSON {key, part, parts, done, total} while the service downloads, else ""
-UPDATE_EVERY = timedelta(days=1)
+UPDATE_EVERY = timedelta(days=1)   # default for "update automatically"
+UPDATE_CHOICES = {"every 6 hours": 6, "every 12 hours": 12, "daily": 24, "weekly": 168}   # label -> hours
 RETRY_AFTER = timedelta(hours=1)
 MAX_DOWNLOAD = 150 * 1024 * 1024
 _DOMAIN = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
@@ -51,6 +52,8 @@ def settings(db) -> dict:
     cfg.setdefault("allowed", [])
     cfg.setdefault("info", {})
     cfg.setdefault("custom", [])
+    cfg.setdefault("auto", True)                                   # update automatically (on by default)
+    cfg.setdefault("every_hours", UPDATE_EVERY // timedelta(hours=1))
     return cfg
 
 
@@ -169,8 +172,8 @@ def preview(url: str, limit: int = MAX_DOWNLOAD) -> tuple[int, list[str]]:
 
 
 def due(cfg: dict, key: str, now: datetime) -> bool:
-    """Needs downloading: never downloaded, a day old, its sources changed (a Lockdown update) or "Update now"
-    pressed since - but after a failed try, wait an hour."""
+    """Needs downloading: never downloaded, older than the update interval (while automatic updates are on), its
+    sources changed (a Lockdown update) or "Update now" pressed since - but after a failed try, wait an hour."""
     info = cfg["info"].get(key, {})
     lists = all_lists(cfg)
     updated, failed, asked = _time(info, "updated"), _time(info, "failed"), _time(cfg, "update_now")
@@ -178,7 +181,9 @@ def due(cfg: dict, key: str, now: datetime) -> bool:
         return False
     if asked and (not updated or asked > updated) or updated and info.get("sources") != sources(key, lists):
         return True
-    return not updated or now - updated >= UPDATE_EVERY
+    if not updated:
+        return True
+    return cfg.get("auto", True) and now - updated >= timedelta(hours=cfg.get("every_hours", 24))
 
 
 def _table(values: list[int]) -> array:

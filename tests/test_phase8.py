@@ -96,3 +96,31 @@ def test_weekly_summary(tmp_path):
     assert not digest.due(db, sunday_evening + timedelta(hours=1))                  # once a week
     db.set_setting("digest.enabled", "0")
     assert not digest.due(db, sunday_evening + timedelta(days=7))
+
+
+def test_update_keeps_an_older_database(tmp_path):
+    """An update (new program, same C:\ProgramData\Lockdown) opens an older database: new columns are added,
+    nothing is lost."""
+    import sqlite3
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE blocked_items (id INTEGER PRIMARY KEY, display_name TEXT NOT NULL, target TEXT NOT NULL,
+            item_type TEXT NOT NULL, block_type TEXT, note TEXT, source TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE block_rules (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, rule_type TEXT NOT NULL,
+            schedule TEXT, temp_until TEXT, daily_limit_min INTEGER, duration_min INTEGER, daily_switch_limit INTEGER);
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO blocked_items (display_name, target, item_type, source) VALUES ('Reddit', 'reddit.com', 'site', 'x');
+        INSERT INTO block_rules (item_id, rule_type, daily_limit_min) VALUES (1, 'time_limit', 45);
+        INSERT INTO settings VALUES ('ui.accent', '#2F6FEB');
+    """)
+    con.commit()
+    con.close()
+    db = Database(path)
+    item = db.list_items()[0]
+    assert item["display_name"] == "Reddit" and item["notify"] is None and item["app_path"] is None
+    assert item["rules"][0]["daily_limit_min"] == 45 and item["rules"][0]["weekly_limit_min"] is None
+    assert db.get_setting("ui.accent") == "#2F6FEB"
+    db.add_item("New", ["new.example"], "site", "manual", [{"rule_type": "time_limit", "weekly_limit_min": 300}])
+    assert len(db.list_items()) == 2

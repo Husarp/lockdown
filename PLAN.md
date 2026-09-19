@@ -1357,9 +1357,20 @@ summary Sunday 19:00). 8a built; 8b (packaging) waits for OK to install PyInstal
 - [x] SVG sidebar/UI icons (Lucide, pre-rendered to PNG) - done in the design batch
 - [x] Per-page display settings (⚙ on Dashboard / Screen Time: show / hide Dashboard cards, Screen Time's opening
   tab and range) - no reordering (asked about 2026-09-19)
-- [ ] PyInstaller packaging (.exe)
-- [ ] Real Windows Service (moved from Phase 7)
-- [ ] Installer with service registration
+- [x] PyInstaller packaging (.exe): Lockdown.exe + LockdownService.exe (installer/lockdown.spec, scripts/build.ps1,
+  `--selftest` build check)
+- [x] Real Windows Service (moved from Phase 7): "Lockdown Enforcer" (LockdownEnforcer), auto start, restarted on
+  failure, "Lockdown Watchdog" task starts it if stopped
+- [x] Installer with service registration: LockdownSetup.exe (install / update / uninstall, Program Files, shortcuts,
+  Apps & features entry; uninstall needs the Anti-Bypass challenge)
+- [x] Updates keep everything (requested 2026-09-19): data stays in C:\ProgramData\Lockdown; the installer only
+  replaces the program; older databases get new columns on open (tested)
+- [x] Protection lists: "Update automatically" option (on by default; every 6 h / 12 h / daily / weekly - daily
+  default) (requested 2026-09-19)
+
+### Later (not planned soon)
+- [ ] macOS and Linux support (requested 2026-09-19) - blocking (hosts / DNS), apps and the service differ per OS
+- [ ] Automatic app updates (download a new version and install it)
 
 ---
 

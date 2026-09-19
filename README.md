@@ -88,7 +88,20 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   not enforced). Original settings are saved and restored on uninstall or with `service.py restore-dns`.
 - Service log: `C:\ProgramData\Lockdown\lockdown.log`.
 
-## Setup
+## Install
+
+Run **`LockdownSetup.exe`** (build it with `scripts\build.ps1`, see below). It installs Lockdown into Program Files,
+registers the "Lockdown Enforcer" Windows service and starts everything. Run a newer `LockdownSetup.exe` to update -
+your settings, blocks and history (in `C:\ProgramData\Lockdown`) are kept. Uninstall from Settings > Apps
+(needs the Anti-Bypass challenge if it's on).
+
+## Build
+
+```powershell
+& "<project folder>\scripts\build.ps1"     # -> build\LockdownSetup.exe (and build\dist\Lockdown)
+```
+
+## Setup from source (development)
 
 Requires Windows and Python 3.13.
 

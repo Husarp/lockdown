@@ -4,20 +4,26 @@
 --watchdog: run every minute by a scheduled task - starts the tray agent hidden if it was closed any other way than
             tray Exit (e.g. killed in Task Manager); does nothing (quickly) when it's running.
 --challenge TEXT: only show the Anti-Bypass challenge for TEXT; exit code 0 = passed (used by the uninstaller).
+--selftest REPORT: build check - every page built with a temporary data folder, result written to REPORT.
 """
+import os
 import queue
 import subprocess
 import sys
+import tempfile
 import time
 import winreg
-from pathlib import Path
 
-from gui import single_instance
+if "--selftest" in sys.argv:   # (before paths is imported: it reads the data folder once)
+    os.environ["LOCKDOWN_DATA_DIR"] = tempfile.mkdtemp(prefix="lockdown-selftest-")
+
+from gui import single_instance  # noqa: E402
+from paths import ASSETS, command_line, gui_command  # noqa: E402
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WATCHDOG_TASK = "Lockdown Agent Watchdog"
 APP_ID = "Lockdown.App"   # Windows app identity: notifications / taskbar show "Lockdown" + its icon, not "Python"
-ICON = Path(__file__).resolve().parents[1] / "assets" / "lockdown.ico"
+ICON = ASSETS / "lockdown.ico"
 
 
 def set_identity():
@@ -32,12 +38,11 @@ def set_identity():
 def register_autostart():
     """Start the tray agent hidden at login (per-user, no admin), and a per-user task that brings it back within a
     minute if it's killed. Re-written each launch so the path stays current."""
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    command = f'"{pythonw}" "{Path(__file__).resolve()}"'
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-        winreg.SetValueEx(key, "Lockdown", 0, winreg.REG_SZ, f"{command} --tray")
+        winreg.SetValueEx(key, "Lockdown", 0, winreg.REG_SZ, command_line(gui_command("--tray")))
     subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", "1", "/TN", WATCHDOG_TASK,
-                    "/TR", f"{command} --watchdog"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    "/TR", command_line(gui_command("--watchdog"))], capture_output=True,
+                   creationflags=subprocess.CREATE_NO_WINDOW)
 
 
 def watchdog_should_start() -> bool:
@@ -85,7 +90,36 @@ def challenge(text: str) -> int:
     return 0 if passed else 1
 
 
+def selftest(report: str) -> int:
+    """Build check (scripts/build.ps1): start the app hidden with a temporary data folder, build every page, write
+    "OK" or the error to `report`, quit. Doesn't touch the running Lockdown, autostart or tasks."""
+    import traceback
+    try:
+        from gui.app import PAGES, LockdownApp
+        from gui import theme
+        missing = [p.name for p in [theme.APP_ICON] + [theme.ASSETS / "fonts" / f for f in theme.FONT_FILES]
+                   if not p.exists()]
+        if missing:
+            raise FileNotFoundError(f"missing from the build: {missing}")
+        import uiautomation as auto   # reading the browser's address bar needs Windows UI Automation
+        auto.GetRootControl().Name
+        app = LockdownApp(queue.Queue(), start_hidden=True)
+        for name, _spec, _icon in PAGES:
+            app.show_page(name)
+            app.update()
+        app.tray.stop()
+        app.destroy()
+        result = f"OK - {len(PAGES)} pages"
+    except Exception:
+        result = traceback.format_exc()
+    with open(report, "w", encoding="utf-8") as f:
+        f.write(result)
+    return 0 if result.startswith("OK") else 1
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest(sys.argv[sys.argv.index("--selftest") + 1]))
     if "--watchdog" in sys.argv and not watchdog_should_start():
         sys.exit(0)
     set_identity()

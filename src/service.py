@@ -14,7 +14,7 @@ Needs admin/SYSTEM rights.
 Usage:
     python src/service.py run              # enforcement loop (what the scheduled task runs)
     python src/service.py once             # single pass, for testing
-    python src/service.py remove-policies  # undo browser policies, firewall rules, DNS filter (used on uninstall)
+    python src/service.py remove-policies  # undo browser policies, firewall rules, DNS filter, hosts entries (uninstall)
     python src/service.py restore-dns      # give network adapters their own DNS settings back (repair)
 """
 import ctypes
@@ -357,8 +357,10 @@ def app_loop(enforcer: Enforcer):
         time.sleep(APP_CHECK_SEC)
 
 
-def main():
-    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+def main(argv: list[str] | None = None, stop: threading.Event | None = None):
+    """Command line entry (also used by the Windows service, service_win.py, which passes `stop`)."""
+    argv = sys.argv[1:] if argv is None else argv
+    cmd = argv[0] if argv else ""
     if cmd not in ("run", "once", "remove-policies", "restore-dns"):
         print(__doc__)
         return 2
@@ -376,7 +378,9 @@ def main():
         for exe in json.loads(db.get_setting(FIREWALL_KEY, "{}")):
             firewall.remove(exe)
         db.set_setting(FIREWALL_KEY, "{}")
-        log.info("Browser policies, firewall rules and DNS filter removed")
+        hosts.apply([])   # (the Lockdown section of the hosts file goes too)
+        hosts.flush_dns()
+        log.info("Browser policies, firewall rules, DNS filter and hosts-file entries removed")
         return 0
     enforcer = Enforcer(Database())
     if cmd == "once":
@@ -388,12 +392,15 @@ def main():
     threading.Thread(target=netlog_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=protection_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=dns_loop, args=(enforcer,), daemon=True).start()
-    while True:
+    stop = stop or threading.Event()
+    while not stop.is_set():
         try:
             enforcer.enforce_once()
         except Exception:
             log.exception("Enforcement pass failed")
-        time.sleep(INTERVAL_SEC)
+        stop.wait(INTERVAL_SEC)
+    log.info("Service stopped")
+    return 0
 
 
 if __name__ == "__main__":

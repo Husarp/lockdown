@@ -308,14 +308,9 @@ class LockdownApp(ctk.CTk):
     def restart(self):
         """Start Lockdown again (new theme / accent colour): a helper process waits until this one is gone."""
         import subprocess
-        import sys
-        from pathlib import Path
-        root = Path(__file__).resolve().parents[2]
-        pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
-        pythonw = pythonw if pythonw.exists() else Path(sys.executable).with_name("pythonw.exe")
-        main = root / "src" / "main.py"
-        subprocess.Popen([str(pythonw), "-c", f"import subprocess, time; time.sleep(2); "
-                                              f"subprocess.Popen([r'{pythonw}', r'{main}'])"],
+        from paths import command_line, gui_command
+        # (a new copy would find this one still running and just show it: start it once this one has quit)
+        subprocess.Popen(f'cmd /c timeout /t 2 /nobreak >nul & start "" {command_line(gui_command())}',
                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
         self.tray.stop()
         self.destroy()

@@ -48,13 +48,18 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         super().__init__(master, fg_color="transparent")
         self.page, self.db = page, page.app.db
         ctk.CTkLabel(self, text="Always-on lists of harmful sites, kept up to date by the community and downloaded "
-                                "once a day. They work next to your own blocklist; modes and the emergency unlock "
+                                "automatically (daily by default). They work next to your own blocklist; modes and the emergency unlock "
                                 "don't switch them off.", text_color=MUTED, wraplength=820, justify="left").pack(
             anchor="w", pady=(0, 10))
         lists = Card(self, "Lists")
         lists.pack(fill="x", pady=(0, 12))
         ctk.CTkButton(lists.title.master, text="Update now", width=110, **theme.OUTLINE,
                       command=self._update_now).pack(side="right")
+        self.every = ctk.CTkOptionMenu(lists.title.master, width=130, values=list(protection.UPDATE_CHOICES),
+                                       command=lambda v: self._save_updates())
+        self.every.pack(side="right", padx=(0, 12))
+        self.auto = ctk.CTkSwitch(lists.title.master, text="Update automatically", command=self._save_updates)
+        self.auto.pack(side="right", padx=(0, 8))
         self.switches, self.infos = {}, {}
         self.list_rows = ctk.CTkFrame(lists.body, fg_color="transparent")
         self.list_rows.pack(fill="x")
@@ -221,6 +226,9 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         if waiting and self._poll is None:   # follow the download
             self._poll = self.after(1000, self._tick)
         self.words.refresh()
+        self.auto.select() if cfg["auto"] else self.auto.deselect()
+        self.every.set(next((k for k, v in protection.UPDATE_CHOICES.items() if v == cfg["every_hours"]), "daily"))
+        self.every.configure(state="normal" if cfg["auto"] else "disabled")
         allowed = sorted(cfg["allowed"])
         for chip, site in zip(self.chips.take(len(allowed)), allowed):
             chip.name.configure(text=f" {site}", image=icons.get(site, 16))
@@ -248,6 +256,13 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         off = [lists[k][0] for k in cfg["enabled"] if k in self.switches and not self.switches[k].get()]
         cfg["enabled"] = [k for k, sw in self.switches.items() if sw.get()]
         self._store(cfg, f"Switch the {', '.join(off)} protection list off")
+
+    def _save_updates(self):
+        cfg = protection.settings(self.db)
+        cfg["auto"] = bool(self.auto.get())
+        cfg["every_hours"] = protection.UPDATE_CHOICES[self.every.get()]
+        protection.save_settings(self.db, cfg)
+        self.refresh()
 
     def _update_now(self):
         cfg = protection.settings(self.db)

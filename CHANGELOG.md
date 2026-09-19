@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.26.0 — 2026-09-19 05:52
+- **Phase 8b - Lockdown as a real Windows program**:
+  - `Lockdown.exe` (app + tray) and `LockdownService.exe` - no Python needed (PyInstaller; `scripts\build.ps1`
+    builds everything and runs a self-test of the built app: every page, fonts / icons / logo, browser reading)
+  - **Windows service** "Lockdown Enforcer": starts at boot, Windows restarts it if it crashes, the "Lockdown
+    Watchdog" task starts it again within a minute if it's stopped; "Start service" restarts it (admin prompt)
+  - **`LockdownSetup.exe`** (34 MB): installs into Program Files, registers the service and watchdog, Start menu +
+    desktop shortcuts, an "Apps & features" entry, then starts everything. Run it again to **update** - it stops
+    Lockdown, replaces only the program and starts it again; your settings, blocks and history (in
+    C:\ProgramData\Lockdown) are kept, older databases get new columns on their own. It also takes over from the
+    scripts-based setup (removes the old scheduled task). **Uninstall** (Apps & features) asks for the Anti-Bypass
+    challenge, then undoes network settings, browser policies, firewall rules and hosts entries; your data is kept
+    unless you tick "also delete"
+  - the service's "remove" step also removes Lockdown's hosts-file lines now
+- **Protection lists: "Update automatically"** (on by default) with every 6 h / 12 h / daily (default) / weekly;
+  off = only "Update now"
+- 171 tests passing
+
 ## 0.25.0 — 2026-09-19 05:33
 - **Phase 8a (Import & Polish)**:
   - **Your own block lists** (Blocking > Protection > "Add your own list"): any list on the internet by its address -

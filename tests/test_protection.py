@@ -101,3 +101,14 @@ def test_adblock_format_and_your_own_lists(tmp_path):
     p = protection.Protection(tmp_path)
     p.refresh(cfg)
     assert p.which("a.coin.example") == "custom1"
+
+
+def test_update_interval_and_automatic_updates_off():
+    info = {"scam": {"updated": NOW.isoformat(), "sources": protection.sources("scam")}}
+    cfg = {"info": info, "auto": True, "every_hours": 6}
+    assert not protection.due(cfg, "scam", NOW + timedelta(hours=5))
+    assert protection.due(cfg, "scam", NOW + timedelta(hours=6))
+    cfg["auto"] = False                                                   # only "Update now" (or never downloaded)
+    assert not protection.due(cfg, "scam", NOW + timedelta(days=30))
+    cfg["update_now"] = (NOW + timedelta(days=30)).isoformat()
+    assert protection.due(cfg, "scam", NOW + timedelta(days=30, minutes=1))
