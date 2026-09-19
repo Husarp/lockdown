@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.43.0 - 2026-09-20 00:52
+- **Switches redrawn to the design (plate 3m)**: a proper 34x18 pill with the knob sitting inside the track (2px
+  inset) and a 1px edge - no more thin track, and the white knob no longer melts into a white card in light mode.
+- **Buttons at the design size**: ~34px tall with semibold labels (design padding 9x18); small icon buttons keep
+  their own size.
+
 ## 0.42.3 - 2026-09-19 22:20
 - **Notifications default to Lockdown's own popup** (the nice in-app one that slides up bottom-right) instead of
   the Windows notification - so "YouTube is blocked" shows as a Lockdown popup by default. You can still choose

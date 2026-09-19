@@ -76,7 +76,9 @@ CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": DANGE
 
 # Secondary buttons: a light-grey fill in light mode (so they don't vanish on white cards - fix 7b), a plain
 # outline in dark. Border is darker than the card edge in light mode for contrast.
-OUTLINE = {"fg_color": "transparent", "border_width": 1, "border_color": ("#B9C0C9", BORDER[1]),
+# Light mode: the design's Secondary button (grey #F1F3F6 fill + #B9C0C9 border) so it never becomes a white box
+# on a white card. Dark mode: the card colour as fill = visually border-only on cards (the design's dark look).
+OUTLINE = {"fg_color": ("#F1F3F6", SURFACE[1]), "border_width": 1, "border_color": ("#B9C0C9", BORDER[1]),
            "text_color": TEXT, "hover_color": ("#E4E7EB", SURFACE2[1])}
 SECONDARY = {"fg_color": ("#F1F3F6", SURFACE2[1]), "text_color": TEXT, "hover_color": ("#E4E7EB", BORDER[1])}
 
@@ -129,18 +131,36 @@ def eyebrow():
     return ctk.CTkFont(BODY_SEMI, 10)
 
 
+_BUTTON_FONT = None
+
+
+def _button_font():
+    """One shared semibold font for every button (design 3m: 600 12.5px); made lazily once a Tk root exists."""
+    global _BUTTON_FONT
+    if _BUTTON_FONT is None:
+        _BUTTON_FONT = ctk.CTkFont(BODY_SEMI, 13)
+    return _BUTTON_FONT
+
+
 def apply():
     """customtkinter defaults from the tokens. Call before any widget is created."""
     load_fonts()
-    if not getattr(ctk.CTkSwitch, "_lockdown_sized", False):   # a bit chunkier so the track doesn't look thin
-        _orig_switch_init = ctk.CTkSwitch.__init__
+    # Design plate 3m switches: a 34x18 pill with the 14px knob INSIDE it (customtkinter draws the knob at the full
+    # track height, which made ours look thin). gui/switch.py draws it the design's way, as a drop-in.
+    from gui.switch import Switch
+    ctk.CTkSwitch = Switch
+    if not getattr(ctk.CTkButton, "_lockdown_sized", False):
+        # Design plate 3m: buttons are padding 9px 18px, 600 12.5px -> about 34px tall with a semibold label.
+        # Buttons that pass their own height / font (small x buttons, segmented pills) keep them.
+        _orig_button_init = ctk.CTkButton.__init__
 
-        def _switch_init(self, *a, **kw):
-            kw.setdefault("switch_width", 42)
-            kw.setdefault("switch_height", 22)
-            _orig_switch_init(self, *a, **kw)
-        ctk.CTkSwitch.__init__ = _switch_init
-        ctk.CTkSwitch._lockdown_sized = True
+        def _button_init(self, *a, **kw):
+            kw.setdefault("height", 34)
+            if "font" not in kw:
+                kw["font"] = _button_font()
+            _orig_button_init(self, *a, **kw)
+        ctk.CTkButton.__init__ = _button_init
+        ctk.CTkButton._lockdown_sized = True
     # every pop-up window gets the Lockdown logo (customtkinter would put its own icon there after 200 ms)
     ctk.CTkToplevel._windows_set_titlebar_icon = lambda self: self.iconbitmap(str(APP_ICON))
     ctk.set_default_color_theme("dark-blue")
@@ -157,8 +177,11 @@ def apply():
     t["CTkCheckBox"].update(fg_color=list(ACCENT), border_color=list(NEUTRAL), hover_color=list(ACCENT_PRESS),
                             checkmark_color=list(WHITE), text_color=list(TEXT), text_color_disabled=list(MUTED),
                             corner_radius=2, border_width=2)
+    # The 2px pill ring is a visible grey so the white knob never melts into a white card (design 3m: the knob
+    # needs an edge in light mode - CTk can't edge the knob itself, so the ring around it does that job).
     t["CTkSwitch"].update(fg_color=list(TRACK), progress_color=list(ACCENT), button_color=list(WHITE),
-                          button_hover_color=list(WHITE), text_color=list(TEXT))
+                          button_hover_color=list(WHITE), text_color=list(TEXT),
+                          border_color=["#9AA3AE", TRACK[1]])
     t["CTkRadioButton"].update(fg_color=list(ACCENT), border_color=list(NEUTRAL), hover_color=list(ACCENT_PRESS),
                                text_color=list(TEXT))
     t["CTkSegmentedButton"].update(fg_color=list(SURFACE2), selected_color=list(ACCENT),

@@ -1373,7 +1373,7 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [ ] B7. Small windows (3l, ~937-1050): Browse apps window (sort: all / running / games; list styling), the
   Suggestions dropdown, the grid challenge, and the alert popup (accent left edge + "Open Lockdown" /
   "Mute 1 h" buttons). Verify each against the plate.
-- [ ] B8. Global controls (3m, ~1060-1116): SWITCHES to the design pill (34x18 track, radius 9, 14px knob with a
+- [x] B8 (0.43.0, agent-reviewed: switches PASS; light secondary buttons fixed). Global controls (3m): SWITCHES to the design pill (34x18 track, radius 9, 14px knob with a
   1px edge, off-track #AEB6C0) - current ones look skinny; BUTTONS to the design size (padding 9px 18px ->
   taller, font 600 12.5px, radius 2) with the Primary / Secondary / Outline / Destructive / Disabled
   variants; card variants (accent top bar, grey inset). Do this FIRST - it changes every screen.
