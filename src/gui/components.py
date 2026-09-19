@@ -103,8 +103,7 @@ class LockedStrip(ctk.CTkFrame):
             self.pack_forget()
             return
         closed = status == "closed"
-        self.label.configure(text="Locked - outside the allowed hours" if closed
-                             else "Locked - changes that loosen a block need the challenge")
+        self.label.configure(text="Locked - only during the allowed hours" if closed else "Locked")
         self.btn.configure(state="disabled" if closed else "normal")
         # CTkScrollableFrame is packed through an internal wrapper - pack before that, not the object itself
         before = getattr(self.anchor, "_parent_frame", self.anchor)

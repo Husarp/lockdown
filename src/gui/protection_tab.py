@@ -69,7 +69,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         own.pack(fill="x", pady=(10, 0))
         head = ctk.CTkFrame(own, fg_color="transparent")
         head.pack(anchor="w")
-        ctk.CTkLabel(head, text="Add your own list", font=theme.semi(13)).pack(side="left")
+        ctk.CTkLabel(head, text="Add your own blocking list", font=theme.semi(13)).pack(side="left")
         help_icon(head, "Any block list on the internet: a hosts file, a plain list of domains or an adblock-style "
                         "list (||site.com^ - blocks its subdomains too). It's downloaded and updated once a day like "
                         "the others. Preview it first to see what's in it.").pack(side="left", padx=6)

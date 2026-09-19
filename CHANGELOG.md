@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.39.1 - 2026-09-19 20:51
+- **Crisper title-bar / taskbar icon**: the 16px icon is now drawn as a bolder, canvas-filling shield (no tiny
+  keyhole) so it stays sharp instead of looking muddy; larger sizes unchanged.
+- **Clearer locked wording**: the locked strip and Anti-Bypass banner just say "Locked" (the "Unlock to edit"
+  button explains the rest) instead of "changes that loosen a block need the challenge".
+- **"Add your own blocking list"** (was "Add your own list") in Protection.
+- **Trend legend**: a small legend under the Screen Time trend explains the lines (each day / 7-day average /
+  your goal - the grey line is the 7-day average).
+
 ## 0.39.0 - 2026-09-19 19:55
 - **Calendar: click a day** on Screen Time > Calendar to see that day's details (what you spent time on) -
   handy for looking back / for parents. The picked day is ringed.

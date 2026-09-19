@@ -275,11 +275,10 @@ class AntiBypassPage(ctk.CTkFrame):
             self.lock_btn.pack(side="right")
             self._tick_unlock()   # live mm:ss countdown + a draining bar
         elif status == "phrase":
-            self._banner(theme.DANGER, "Locked - you can look at everything, but loosening a block needs the challenge",
-                         describe(cfg))
+            self._banner(theme.DANGER, "Locked", describe(cfg))
             self.unlock_btn.pack(side="right")
         else:   # only allowed hours, and they're now
-            self._banner(theme.SUCCESS, "Inside the allowed hours - loosening changes are allowed", describe(cfg))
+            self._banner(theme.SUCCESS, "Unlocked - you're in the allowed hours", describe(cfg))
 
     def _live(self):
         """Re-paint the banner when the lock state changes with the clock (e.g. an allowed-hours window opens or

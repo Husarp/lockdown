@@ -116,6 +116,11 @@ class OverviewView(ctk.CTkScrollableFrame):
         self.trend_card.pack(fill="x", pady=(0, 12))
         self.trend = TrendLine(self.trend_card.body, height=180)
         self.trend.pack(fill="x")
+        legend = ctk.CTkFrame(self.trend_card.body, fg_color="transparent")
+        legend.pack(anchor="w", pady=(4, 0))
+        for text, color in (("each day", theme.ACCENT), ("7-day average", theme.MUTED), ("your goal", theme.NEUTRAL)):
+            ctk.CTkFrame(legend, width=12, height=3, corner_radius=0, fg_color=color).pack(side="left", padx=(10, 5))
+            ctk.CTkLabel(legend, text=text, text_color=theme.MUTED, font=theme.body(11), height=14).pack(side="left")
         left, right = _columns(self)
         self.timeline_card = Card(left, "Day timeline")
         self.timeline_card.pack(fill="x", pady=(0, 12))

@@ -1404,6 +1404,15 @@ Decided (2026-09-19): custom lists = a NEW "personal blocklists" concept (create
 lists, add sites by name + address, toggle on/off, add a site to any list). Redesign scope = FULL
 section-4 rebuild (Blocking Overview table, Protection tab, Calendar screen).
 
+### Round 6 requests (2026-09-19, night)
+- [x] Crisper 16px title-bar/taskbar icon (bold canvas-filling variant, no keyhole). (0.39.1)
+- [x] Locked wording -> just "Locked" (strip + banner); "Add your own blocking list"; trend legend. (0.39.1)
+- [ ] Challenge charset toggle: default OFF = phrase is letters only; ON = add numbers + capital letters.
+- [ ] Custom phrase: let the user set their own phrase (paste to set, must type it exactly to pass; no pasting
+  when answering). With the grid, split it into words by spaces.
+- [ ] Limit turning Anti-Bypass OFF: passing the phrase once and switching it off is too easy. NEEDS A DECISION
+  on the rule (e.g. only once per day / a cooldown / N per day).
+
 ### Round 5 requests (2026-09-19, evening)
 - [ ] Verify the round-4 design changes look right with a second agent BEFORE the next feature work
   (in progress).
