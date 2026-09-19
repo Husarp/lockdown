@@ -9,7 +9,7 @@ import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton
-from gui.components import Segmented, help_icon, page_head
+from gui.components import Segmented, help_icon, page_head, LockedStrip
 from trusted_time import now_from_db
 
 MUTED = theme.MUTED
@@ -30,6 +30,7 @@ class SettingsPage(ctk.CTkFrame):
             anchor="w", padx=30, pady=(16, 8))
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")   # (tkraise needs a plain frame on top)
         self.body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.locked = LockedStrip(self, self.app, self.body)
         self._build_appearance()
         self._build_reset()
         self._build_emergency()
@@ -249,7 +250,11 @@ class SettingsPage(ctk.CTkFrame):
 
     # ---------- load ----------
 
+    def on_show(self):
+        self.locked.update()
+
     def load(self):
+        self.locked.update()
         now = now_from_db(self.db)
         clock = self.db.limit_clock()
         self.reset_entry.delete(0, "end")

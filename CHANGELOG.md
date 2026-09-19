@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.31.0 - 2026-09-19 16:35
+- **Round 2 redesign - locked state, app-wide**: when Anti-Bypass is locked, the Blocking and Settings pages now show a red "Locked - changes that loosen a block need the challenge" strip with an "Unlock to edit" button (and "Locked - outside the allowed hours" when in that state). Controls stay usable - trying to loosen one still opens the challenge as before - so nothing is greyed into looking broken.
+- **Round 2 redesign is now feature-complete**: all planned pages, the Calendar, trend line, network markers, type badges, accent bars, the locked/unlocked states and the calm animations (sidebar pulse, pop-up slide/fade, confirm countdown, challenge-box breathing) are in.
+
 ## 0.30.4 - 2026-09-19 16:20
 - **Round 2 redesign - animations**: the Remove "Confirm?" button now shows a thin bar that drains over its 3-second window, and the 3x3 challenge grid's active box gently pulses its border so the eye finds it. (With the sidebar pulse and the pop-up slide/fade, these are all the calm, buildable animations from the design; the deliberately-skipped ones would have felt busy or clashed with an existing control.)
 

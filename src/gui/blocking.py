@@ -19,7 +19,8 @@ import stats
 from blocker.apps import block_flags
 from gui import app_browser, categories, icons, theme
 from gui.charts import WeekCalendar
-from gui.components import Curtain, Card, BlockerCard, Segmented, eyebrow, rule_chip, help_icon, page_head, type_badge
+from gui.components import (Curtain, Card, BlockerCard, LockedStrip, Segmented, eyebrow, rule_chip, help_icon,
+                            page_head, type_badge)
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, summary
@@ -599,6 +600,7 @@ class BlockingPage(ctk.CTkFrame):
         holder.grid_columnconfigure(0, weight=1)
         holder.grid_rowconfigure(0, weight=1)
         self.holder = holder
+        self.locked = LockedStrip(self, self.app, holder)   # shown between the tabs and the content when locked
         self.tabs: dict[str, ctk.CTkFrame] = {}   # built the first time each tab is shown
         icons.prefetch([hosts[0] for sites in POPULAR_SITES.values() for hosts in sites.values()]
                        + [i["target"].split()[0] for i in self.draft.items.values() if i["item_type"] == "site"])
@@ -658,6 +660,7 @@ class BlockingPage(ctk.CTkFrame):
         self.tabs["Groups"].edit(group_id)
 
     def refresh(self):
+        self.locked.update()
         tab = self.tabs[self.tab_bar.get()]
         if hasattr(tab, "refresh"):
             now = now_from_db(self.app.db)

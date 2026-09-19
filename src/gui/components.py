@@ -71,6 +71,46 @@ def type_badge(parent, kind: str) -> ctk.CTkFrame:
     return f
 
 
+class LockedStrip(ctk.CTkFrame):
+    """A slim bar on edit-heavy pages while Anti-Bypass is locked: "Locked - changes need the challenge" and an
+    "Unlock to edit" button. It hides itself when Anti-Bypass is off or already unlocked. The page calls update()
+    on show / refresh; the caller passes the widget to sit above (`anchor`)."""
+
+    def __init__(self, master, app, anchor):
+        super().__init__(master, corner_radius=4, border_width=1)
+        self.app, self.anchor = app, anchor
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=9)
+        self.icon = ctk.CTkLabel(row, text="", image=theme.icon("shield-check", theme.DANGER, 15), width=15)
+        self.icon.pack(side="left", padx=(0, 9))
+        self.label = ctk.CTkLabel(row, text="", font=theme.semi(12), anchor="w")
+        self.label.pack(side="left")
+        self.btn = ctk.CTkButton(row, text="Unlock to edit", width=120, command=self._unlock)
+        self.btn.pack(side="right")
+        c = theme.DANGER
+        self.configure(fg_color=(theme._mix(c[0], theme.BG[0], 0.9), theme._mix(c[1], theme.BG[1], 0.88)),
+                       border_color=c)
+
+    def _unlock(self):
+        import antibypass
+        self.app.guard([f"Allow loosening changes for {antibypass.UNLOCK_MIN} minutes"], self.update, self.update)
+
+    def update(self, *_):
+        import antibypass
+        from trusted_time import now_from_db
+        status = antibypass.status(antibypass.settings(self.app.db), now_from_db(self.app.db))
+        if status == "free":
+            self.pack_forget()
+            return
+        closed = status == "closed"
+        self.label.configure(text="Locked - outside the allowed hours" if closed
+                             else "Locked - changes that loosen a block need the challenge")
+        self.btn.configure(state="disabled" if closed else "normal")
+        # CTkScrollableFrame is packed through an internal wrapper - pack before that, not the object itself
+        before = getattr(self.anchor, "_parent_frame", self.anchor)
+        self.pack(fill="x", padx=30, pady=(0, 8), before=before)
+
+
 class Card(ctk.CTkFrame):
     """Surface card with an optional title and a muted note on the right. Content goes in `self.body`.
     `accent_top`: a 3px accent bar along the top edge (squared top corners so it never looks clipped)."""
