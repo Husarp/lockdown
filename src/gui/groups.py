@@ -7,8 +7,8 @@ shared total for all members.
 import customtkinter as ctk
 
 from gui import icons, theme
-from gui.components import BlockerCard, eyebrow
-from gui.rule_editors import EDITORS, RULE_NAMES, LimitEditor, SwitchEditor, summary
+from gui.components import BlockerRail, eyebrow
+from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, LimitEditor, SwitchEditor, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton, clear_entry
 from rules import describe_rule, effective_rules, item_block
@@ -104,13 +104,9 @@ class GroupEditor(ctk.CTkFrame):
         self.name = ctk.CTkEntry(name_row, placeholder_text="e.g. Night schedule, Games")
         self.name.pack(side="left", fill="x", expand=True)
 
-        eyebrow(self, "Blockers - tick any number").pack(anchor="w", padx=16, pady=(14, 4))
-        self.cards: dict[str, BlockerCard] = {}
-        for t in EDITORS:
-            card = BlockerCard(self, RULE_NAMES[t], lambda m, t=t: _make_editor(m, t),
-                               lambda t=t: summary(t, self.cards[t].editor), off_text="not used")
-            card.pack(fill="x", padx=16, pady=3)
-            self.cards[t] = card
+        # blockers as a rail + one open panel (design 3b), like Blocking -> Add - not cards that grow downwards
+        self.blockers = BlockerRail(self, _make_editor, RULE_NAMES, RULE_SUBTITLES, summary, rail_width=220)
+        self.blockers.pack(fill="x", padx=16, pady=(14, 4))
 
         eyebrow(self, "Members").pack(anchor="w", padx=16, pady=(14, 4))
         self.members_box = ctk.CTkFrame(self, fg_color="transparent")
@@ -135,9 +131,7 @@ class GroupEditor(ctk.CTkFrame):
         clear_entry(self.name)
         if group:
             self.name.insert(0, group["name"])
-        rules = {r["rule_type"]: r for r in (group or {}).get("rules", [])}
-        for t, card in self.cards.items():
-            card.load(rules.get(t))
+        self.blockers.load((group or {}).get("rules", []))
         self.members = []
         for item_id, overrides in (group or {}).get("members", {}).items():
             item = self.draft.items.get(item_id)
@@ -150,7 +144,7 @@ class GroupEditor(ctk.CTkFrame):
         self._render_members()
 
     def _current_rules(self) -> list[dict]:
-        return [card.editor.value() for card in self.cards.values() if card.check.get()]
+        return self.blockers.rules()
 
     def _add_member(self):
         self.picker.entry.hide()
@@ -264,7 +258,7 @@ class GroupsTab(ctk.CTkFrame):
         cols = ctk.CTkFrame(self, fg_color="transparent")
         cols.pack(fill="both", expand=True)
         cols.grid_columnconfigure(0, weight=1, uniform="g")
-        cols.grid_columnconfigure(1, weight=2, uniform="g")
+        cols.grid_columnconfigure(1, weight=3, uniform="g")   # the editor's rail + panel needs the room
         cols.grid_rowconfigure(0, weight=1)
         self.list_box = ctk.CTkScrollableFrame(cols, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
         self.list_box.grid(row=0, column=0, sticky="nsew", padx=(0, 6))

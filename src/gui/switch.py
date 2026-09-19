@@ -33,7 +33,8 @@ class Switch(ctk.CTkFrame):
         if text:
             self.label.grid(row=0, column=1, sticky="w", padx=(8, 0))
         if width:   # a fixed total width, like CTkSwitch's width=, so rows of switches line up
-            self.configure(width=int(width * s))
+            # (logical px - CTkFrame scales them; and an explicit height, else propagate-off keeps CTk's 200px)
+            self.configure(width=width, height=26)
             self.grid_propagate(False)
             self.grid_columnconfigure(1, weight=1)
             self.grid_rowconfigure(0, weight=1)

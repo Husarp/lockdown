@@ -1356,8 +1356,9 @@ sleep / forced-break overlays still show.
 Process for EVERY batch: implement -> a review agent compares screenshots to the plate -> the user reviews ->
 adjust -> only then the next batch. Reference lines are in the Round 3 file.
 
-- [ ] B1. Blocking -> Add (3b, ~271-388): blockers as a LEFT RAIL + ONE OPEN PANEL on the right (side by side),
-  not stacked cards that expand downwards. Verify current AddTab and rebuild to the rail + panel.
+- [x] B1 (0.44.0, agent-reviewed vs 3b: PASS after fixes). Blocking -> Add already had the rail + panel; the stacked one was the
+  GROUP EDITOR - now both use a shared BlockerRail (rail + one open panel, header strip, tinted note, footer
+  hint). Dead BlockerCard removed.
 - [ ] B2. Site protection (3c, ~391-499): TWO columns - left (Always-on lists, Connect a list, Safe search,
   Check a site), right (Blocked words, Allowed anyway). Currently everything is stacked.
 - [ ] B3. Anti-Bypass (3d, ~501-603): two-column layout (challenges left; "what needs the challenge" +

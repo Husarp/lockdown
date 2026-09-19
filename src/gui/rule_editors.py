@@ -195,11 +195,15 @@ class LimitEditor(ctk.CTkFrame):
 
     def __init__(self, master, shared: bool = False):
         super().__init__(master, fg_color="transparent")
-        self.entries = _period_entries(self, "Shared limit" if shared else "At most", 64)
+        self.entries = _period_entries(self, "Shared limit" if shared else "At most", 58 if shared else 64)
         note = ("For all members together. " if shared else "") + \
             "E.g. 45m, 2h, 1h30; leave empty for no limit. Counted while the app is in front / the site is the " \
             "active browser tab; resets at the limit reset time (Settings)."
-        ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
+        label = ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=480, justify="left", anchor="w")
+        label.pack(anchor="w", fill="x", pady=(4, 0))
+        # wrap to whatever width the panel gives us (the group editor's panel is narrower than Add's)
+        label.bind("<Configure>", lambda e: label.configure(
+            wraplength=max(200, int(e.width / ctk.ScalingTracker.get_widget_scaling(label)) - 8)))
         self.load(None)
 
     def load(self, rule: dict | None):
@@ -355,6 +359,9 @@ EDITORS = {"scheduled": HoursEditor, "time_limit": LimitEditor, "switch_limit": 
            "permanent": PermanentEditor, "temporary": TemporaryEditor}
 RULE_NAMES = {"scheduled": "By time", "time_limit": "Time limit", "switch_limit": "Opening limit",
               "permanent": "Permanent", "temporary": "Temporary"}
+RULE_SUBTITLES = {"scheduled": "allowed only inside these windows - or blocked inside them",
+                  "time_limit": "a cap on how long per day / week", "switch_limit": "a cap on how often it's opened",
+                  "permanent": "blocked all the time, until removed", "temporary": "blocked for a while from now"}
 
 
 def summary(rule_type: str, editor) -> str:

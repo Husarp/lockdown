@@ -377,70 +377,168 @@ def rule_chip(parent, text: str, kind: str = "neutral", wraplength: int = 200) -
                         wraplength=wraplength, justify="left", anchor="w", height=22)
 
 
-class BlockerCard(ctk.CTkFrame):
-    """A blocker as a collapsible card: tick box + name and a one-line summary; its settings open underneath.
-    `summary()` gives the text shown on the right (called when anything changes). The editor is only built when
-    it's first needed (building all of them up front made the Add tab slow to open)."""
+SUMMARY_MS = 1000   # how often the rail's one-line summaries follow what's typed in the open editor
 
-    def __init__(self, master, name: str, make_editor, summary, off_text: str = "off", on_change=None):
-        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=6)
-        self.summary_fn, self.off_text, self.on_change = summary, off_text, on_change
-        self.bar = ctk.CTkFrame(self, width=3, height=1, corner_radius=0, fg_color="transparent")
-        self.bar.pack(side="left", fill="y", pady=1)
-        inner = ctk.CTkFrame(self, fg_color="transparent")
-        inner.pack(side="left", fill="both", expand=True)
-        head = ctk.CTkFrame(inner, fg_color="transparent")
-        head.pack(fill="x", padx=(10, 8), pady=6)
-        self.check = ctk.CTkCheckBox(head, text=name, font=theme.semi(13), command=self._ticked)
-        self.check.pack(side="left")
-        self.chevron = ctk.CTkButton(head, text="▾", width=24, height=24, fg_color="transparent",
-                                     text_color=theme.MUTED, hover_color=theme.SURFACE2, command=self.toggle)
-        self.chevron.pack(side="right")
-        self.summary = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
-        self.summary.pack(side="right", padx=6)
-        self.body = ctk.CTkFrame(inner, fg_color="transparent")
-        self.make_editor, self._editor = make_editor, None
-        self.open = False
 
-    @property
-    def editor(self):
-        if self._editor is None:
-            self._editor = self.make_editor(self.body)
-            self._editor.pack(anchor="w")
-        return self._editor
+class BlockerRail(ctk.CTkFrame):
+    """Blockers as a LEFT RAIL (tick + name + one-line summary + chevron) and ONE OPEN PANEL on the right, so the
+    form never grows downwards (design plate 3b). Used by Blocking -> Add and by the group editor.
+    make_editor(parent, t) builds a blocker's editor lazily into the panel; editors have load(rule | None) and
+    value(). names / subtitles: per blocker type; summarize(t, editor) -> the rail's one-liner.
+    on_change() fires when a tick or the open blocker changes."""
 
-    def load(self, rule: dict | None):
-        """Show a rule (None: off). An editor that was never opened stays unbuilt."""
-        if rule is not None or self._editor is not None:
-            self.editor.load(rule)
-        self.set(rule is not None)
+    def __init__(self, master, make_editor, names: dict, subtitles: dict, summarize, on_change=None,
+                 rail_width: int = 318, off_text: str = "off"):
+        super().__init__(master, fg_color="transparent")
+        self.make_editor, self.names, self.subtitles, self.summarize = make_editor, names, subtitles, summarize
+        self.on_change, self.off_text = on_change, off_text
+        self.editors: dict = {}
+        self.ticked: set[str] = set()
+        self.open_t: str | None = None
+        self.grid_columnconfigure(0, minsize=rail_width)
+        self.grid_columnconfigure(1, weight=1)
+        rail = ctk.CTkFrame(self, fg_color="transparent")
+        rail.grid(row=0, column=0, sticky="new")
+        head = ctk.CTkFrame(rail, fg_color="transparent")
+        head.pack(fill="x", pady=(0, 6))
+        eyebrow(head, "Blockers · tick any number" if rail_width >= 300 else "Blockers").pack(side="left")
+        self.count = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
+        self.count.pack(side="right")
+        self.rows = {t: self._row(rail, t) for t in names}
+        tint = CHIP_STYLES["group"][1]
+        edge = (theme._mix(theme.ACCENT[0], theme.BG[0], 0.55), theme._mix(theme.ACCENT[1], theme.BG[1], 0.55))
+        note_box = ctk.CTkFrame(rail, fg_color=tint, border_width=1, border_color=edge, corner_radius=3)
+        note_box.pack(fill="x", pady=(6, 0))
+        self.note = ctk.CTkLabel(note_box, text="Blocked when any ticked blocker applies.", text_color=theme.MUTED,
+                                 font=theme.body(11), anchor="w", justify="left", wraplength=rail_width - 40)
+        self.note.pack(anchor="w", padx=12, pady=9)
+        # the one open panel: a header strip (accent bar + name + what it does), the editor, a footer hint
+        panel = ctk.CTkFrame(self, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=4)
+        panel.grid(row=0, column=1, sticky="nsew", padx=(14, 0))
+        strip = ctk.CTkFrame(panel, fg_color=theme.SURFACE2, corner_radius=0)
+        strip.pack(fill="x", padx=1, pady=(1, 0))
+        accent_bar(strip).pack(side="left", padx=(15, 9), pady=12)
+        self.title = ctk.CTkLabel(strip, text="", font=theme.card_title())
+        self.title.pack(side="left")
+        self.subtitle = ctk.CTkLabel(strip, text="", text_color=theme.MUTED, font=theme.body(12))
+        self.subtitle.pack(side="left", padx=(10, 12))
+        footer = ctk.CTkFrame(panel, fg_color=theme.SURFACE2, corner_radius=0)
+        footer.pack(fill="x", side="bottom", padx=1, pady=(0, 1))
+        self.hint = ctk.CTkLabel(footer, text="", text_color=theme.MUTED, font=theme.body(11), anchor="w")
+        self.hint.pack(anchor="w", padx=15, pady=9)
+        self.body = ctk.CTkFrame(panel, fg_color="transparent")
+        self.body.pack(fill="both", expand=True, padx=16, pady=14)
+        self.placeholder = ctk.CTkLabel(self.body, text="Tick a blocker on the left to set it up.",
+                                        text_color=theme.MUTED)
+        self._show(None)
+        self.refresh()
+        self.after(SUMMARY_MS, self._follow)
 
-    def _ticked(self):
-        self.open = bool(self.check.get())
-        self.update_state()
+    def _row(self, rail, t: str):
+        row = ctk.CTkFrame(rail, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=3)
+        row.pack(fill="x", pady=3)
+        row.bar = ctk.CTkFrame(row, width=3, height=1, fg_color="transparent", corner_radius=0)
+        row.bar.pack(side="left", fill="y")
+        inner = ctk.CTkFrame(row, fg_color="transparent")
+        inner.pack(side="left", fill="both", expand=True, padx=(9, 10), pady=6)
+        top = ctk.CTkFrame(inner, fg_color="transparent")
+        top.pack(fill="x")
+        row.check = ctk.CTkCheckBox(top, text=self.names[t], font=theme.semi(13), checkbox_width=18,
+                                    checkbox_height=18, command=lambda: self._tick(t))
+        row.check.pack(side="left")
+        row.chev = ctk.CTkLabel(top, text="▸", text_color=theme.MUTED, font=theme.body(11), width=14)
+        row.chev.pack(side="right")
+        # the summary sits under the NAME (not under the tick box), like the plate
+        row.summary = ctk.CTkLabel(inner, text=self.off_text, text_color=theme.MUTED, font=theme.body(11),
+                                   anchor="w", justify="left")
+        row.summary.pack(anchor="w", padx=(26, 0), pady=(1, 0))
+        for w in (inner, top, row.summary):
+            w.bind("<Button-1>", lambda e, t=t: self.open(t, tick=True))
+        return row
+
+    def editor_of(self, t: str):
+        if t not in self.editors:
+            self.editors[t] = self.make_editor(self.body, t)
+        return self.editors[t]
+
+    def _tick(self, t: str):
+        if self.rows[t].check.get():
+            self.ticked.add(t)
+            self._show(t)
+        else:
+            self.ticked.discard(t)
+            if self.open_t == t:
+                self._show(next((x for x in self.names if x in self.ticked), None))
+        self._changed()
+
+    def open(self, t: str | None, tick: bool = False):
+        """Open a blocker's panel; tick=True also ticks it on (clicking its rail row)."""
+        if t is not None and tick and t not in self.ticked:
+            self.ticked.add(t)
+            self.rows[t].check.select()
+        self._show(t)
+        self._changed()
+
+    def _show(self, t: str | None):
+        self.placeholder.pack_forget()
+        for ed in self.editors.values():
+            ed.pack_forget()
+        self.open_t = t
+        if t is None:
+            self.title.configure(text="Blocker settings")
+            self.subtitle.configure(text="")
+            self.placeholder.pack(anchor="w", pady=6)
+        else:
+            self.title.configure(text=self.names[t])
+            self.subtitle.configure(text=self.subtitles.get(t, ""))
+            self.editor_of(t).pack(anchor="w", fill="x")
+
+    def _changed(self):
+        self.refresh()
         if self.on_change:
             self.on_change()
 
-    def toggle(self):
-        if self.check.get():
-            self.open = not self.open
-            self.update_state()
-
-    def set(self, on: bool):
-        self.check.select() if on else self.check.deselect()
-        self.open = on
-        self.update_state()
-
-    def update_state(self):
-        on = bool(self.check.get())
-        self.bar.configure(fg_color=theme.ACCENT if on else "transparent")
-        self.check.configure(text_color=theme.TEXT if on else theme.MUTED)
-        if on and self.open:
-            self.body.pack(fill="x", padx=(40, 12), pady=(0, 10))
+    def refresh(self):
+        """Repaint the rail (ticks, the open marker, the one-line summaries), the count and the footer hint."""
+        self.count.configure(text=f"{len(self.ticked)} of {len(self.rows)} on")
+        for t, row in self.rows.items():
+            on = t in self.ticked
+            row.bar.configure(fg_color=theme.ACCENT if self.open_t == t else "transparent")
+            row.check.configure(text_color=theme.TEXT if on else theme.MUTED)
+            row.chev.configure(text="▾" if self.open_t == t else "▸")
+            row.summary.configure(text=self.summarize(t, self.editors[t]) if on and t in self.editors
+                                  else self.off_text)
+        nxt = next((t for t in self.names if t not in self.ticked), None)
+        if self.open_t is None:
+            hint = "Blockers combine - it's blocked whenever any ticked one applies."
+        elif nxt:
+            hint = f"Next: tick {self.names[nxt]} in the rail to combine it with this one."
         else:
-            self.body.pack_forget()
-        self.chevron.configure(text="▴" if on and self.open else "▾")
-        self.refresh_summary()
+            hint = "Every blocker is ticked - blocked when any of them applies."
+        self.hint.configure(text=hint)
 
-    def refresh_summary(self):
-        self.summary.configure(text=self.summary_fn() if self.check.get() else self.off_text)
+    def _follow(self):
+        if self.winfo_ismapped():
+            self.refresh()
+        self.after(SUMMARY_MS, self._follow)
+
+    def set_note(self, text: str):
+        self.note.configure(text=text)
+
+    def load(self, rules: list[dict]):
+        """Show these rules (by rule_type): tick + load them, untick the rest, open the first ticked one."""
+        by_type = {r["rule_type"]: r for r in rules}
+        self.ticked = set(by_type)
+        for t in self.names:
+            if t in by_type:
+                self.editor_of(t).load(by_type[t])
+                self.rows[t].check.select()
+            else:
+                if t in self.editors:
+                    self.editors[t].load(None)
+                self.rows[t].check.deselect()
+        self.open(next((t for t in self.names if t in self.ticked), None))
+
+    def rules(self) -> list[dict]:
+        """The ticked blockers' values (an editor may raise ValueError for bad input)."""
+        return [self.editor_of(t).value() for t in self.names if t in self.ticked]

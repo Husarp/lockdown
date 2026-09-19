@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.44.0 - 2026-09-20 01:01
+- **Group editor: blockers side by side (design 3b)** - the group's blockers are now a left rail + one open
+  panel on the right (shared with Blocking → Add) instead of stacked cards that expand downwards.
+- **Add tab polish (3b)**: the panel has a header strip with the blocker's name + what it does and a footer hint
+  ("Next: tick ... to combine it"); a tinted note under the rail spells out what will be blocked; rail rows are
+  the design's height with the summary under the name.
+- Fix: a fixed-width switch (list rows) no longer reserves 200px of height.
+
 ## 0.43.0 - 2026-09-20 00:52
 - **Switches redrawn to the design (plate 3m)**: a proper 34x18 pill with the knob sitting inside the track (2px
   inset) and a 1px edge - no more thin track, and the white knob no longer melts into a white card in light mode.
