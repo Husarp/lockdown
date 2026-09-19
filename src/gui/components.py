@@ -58,7 +58,7 @@ class Segmented(ctk.CTkFrame):
     Same use as CTkSegmentedButton: values, command(value), set(), get()."""
 
     def __init__(self, master, values: list[str], command=None, height: int = 30, **_ignored):
-        super().__init__(master, fg_color=theme.SURFACE2, corner_radius=6)
+        super().__init__(master, fg_color=theme.SURFACE2, corner_radius=3)
         self.command, self.value = command, None
         self.buttons = {}
         font = theme.body(13)
@@ -66,7 +66,7 @@ class Segmented(ctk.CTkFrame):
         for i, v in enumerate(values):
             # text width + padding on both sides (measure() is in screen px, widths are in design px)
             b = ctk.CTkButton(self, text=v, width=int(font.measure(v) / scale) + 28, height=height - 6,
-                              corner_radius=4, font=font, command=lambda v=v: self._clicked(v))
+                              corner_radius=2, font=font, command=lambda v=v: self._clicked(v))
             b.pack(side="left", padx=(3 if i == 0 else 0, 3), pady=3)
             self.buttons[v] = b
         self._paint()

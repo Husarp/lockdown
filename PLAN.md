@@ -1323,6 +1323,29 @@ sleep / forced-break overlays still show.
 - [x] Dashboard blocked-visits card small while hidden (was an older running copy; checked 2026-09-19)
 - [x] Distracting by default: every Steam game + a list of pure-fun games / launchers / streaming / short-video
   sites (not work-too ones like YouTube, Reddit, Discord); only once, your own choices win (requested 2026-09-19)
+### Round 2 redesign — implementing (design/Lockdown Round 2.dc.html, provided 2026-09-19)
+Phased so each part is verified on the hidden desktop before the next.
+- [x] Phase A — design system: round-2 tokens (dark + light), 4px cards / 2px controls, light-mode 7b fixes
+  (switch off-track #AEB6C0, secondary/outlined buttons get a visible border)
+- [ ] Phase B — section/page title accent bars, uppercase eyebrow labels, site/app/group type badges, sidebar
+  service-dot pulse animation
+- [ ] Phase C — Blocking → Add: blockers become a rail + one open panel (form never grows past the window)
+- [ ] Phase D — Protection / Notifications / Settings layouts (cards with the accent top-bar, denser rows)
+- [ ] Phase E — Blocking → Calendar (week × 24h bars + emergency markers), Screen Time trend line
+  ("am I improving?" + goal line + unlock markers), Network Log graph markers
+- [ ] Phase F — Anti-Bypass locked view-only state (dim + lock + "Unlock to edit"), the "unlocked for 5 min"
+  banner, and the challenge / browse / suggestion / display / popup windows restyled
+- Animation notes to honour (all show/hide or a repainted canvas): service-dot pulse (2.4s, stops when hidden),
+  Live-dot blink (1s), Remove "Confirm?" 3s draining bar, bars/progress grow once (250ms) on page open, blocker
+  panel body fades in 150ms, challenge target box border breathes (2.4s), popup slides up 14px + fades in 250ms
+  (auto-hide 8s), unlocked banner bar drains then re-locks with a 150ms dim. Nothing eases > 250ms; only the two
+  status blinks loop.
+
+### Strict protection (see above) — the doable fallback (approved 2026-09-19)
+- [x] Admin required to uninstall: LockdownSetup.exe / the uninstaller are built --uac-admin, so on a standard
+  (non-admin) Windows account uninstalling asks for the admin password (and stopping the service / editing Program
+  Files already need admin too). Recommend a standard daily account for real robustness. (No code change needed.)
+
 - [x] Design round 2: 32 screenshots each dark + light (design/screenshots/round2) and the prompt in
   design/DESIGN.md section 9 - all remaining pages, locked state, badges, trend lines, weekly calendar, icons
   (requested 2026-09-19)

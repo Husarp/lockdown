@@ -8,21 +8,22 @@ from paths import ASSETS
 
 APP_ICON = ASSETS / "lockdown.ico"   # the Lockdown logo (windows, notifications)
 
-BG = ("#F2F2F2", "#14181D")
-SIDEBAR = ("#EBEBEB", "#0F1319")
-SURFACE = ("#FFFFFF", "#1B2027")
-SURFACE2 = ("#EBEBEB", "#232A33")
-NAV_ACTIVE = ("#FFFFFF", "#232A33")   # selected sidebar item
-BORDER = ("#E2E2E2", "#2E3742")
-TRACK = ("#E6E6E6", "#262E38")
-TEXT = ("#1A1A1A", "#E8ECF1")
-MUTED = ("#6B6B6B", "#93A0AE")
+# Round 2 tokens (design/Lockdown Round 2.dc.html): (light, dark) pairs.
+BG = ("#EFF1F4", "#101418")
+SIDEBAR = ("#E3E6EA", "#0B0E12")
+SURFACE = ("#FFFFFF", "#181D23")
+SURFACE2 = ("#F1F3F6", "#202730")
+NAV_ACTIVE = ("#FFFFFF", "#202730")   # selected sidebar item
+BORDER = ("#D2D7DE", "#2B333D")
+TRACK = ("#AEB6C0", "#2B333D")       # switch "off" track (light fix 7b) / control track
+TEXT = ("#14181D", "#E9EDF2")
+MUTED = ("#5E6874", "#8D9AA8")
 ACCENT = ("#DB5126", "#DB5126")
 ACCENT_PRESS = ("#B33D18", "#B33D18")
-SUCCESS = ("#1E8449", "#27AE60")
-WARNING = ("#B37514", "#E0A02A")
-DANGER = ("#B32E22", "#C0392B")
-INFO = ("#1F6FEB", "#58A6FF")        # emergency unlock
+SUCCESS = ("#1E7A46", "#27AE60")
+WARNING = ("#B37514", "#E2A32B")
+DANGER = ("#C0392B", "#E05A44")
+INFO = ("#2F6FEB", "#4E8FD1")        # emergency unlock
 NEUTRAL = ("#A8AFB7", "#5C6875")     # neutral category in charts
 BAR = ("#C9CED4", "#3C4753")         # chart bars
 BAR_OVER = ("#EBB49E", "#8C4A31")    # a day over the daily goal
@@ -73,10 +74,11 @@ if ACCENT_HEX != ACCENTS["Orange"] and len(ACCENT_HEX) == 7:   # (orange keeps t
 BLOCKED, ALLOWED, PENDING = DANGER, SUCCESS, WARNING
 CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": ACCENT}
 
-# Secondary buttons: outlined, text in the normal text colour (works in light and dark)
-OUTLINE = {"fg_color": "transparent", "border_width": 1, "border_color": BORDER, "text_color": TEXT,
-           "hover_color": SURFACE2}
-SECONDARY = {"fg_color": SURFACE2, "text_color": TEXT, "hover_color": BORDER}
+# Secondary buttons: a light-grey fill in light mode (so they don't vanish on white cards - fix 7b), a plain
+# outline in dark. Border is darker than the card edge in light mode for contrast.
+OUTLINE = {"fg_color": "transparent", "border_width": 1, "border_color": ("#B9C0C9", BORDER[1]),
+           "text_color": TEXT, "hover_color": ("#E4E7EB", SURFACE2[1])}
+SECONDARY = {"fg_color": ("#F1F3F6", SURFACE2[1]), "text_color": TEXT, "hover_color": ("#E4E7EB", BORDER[1])}
 
 FONT_FILES = ["Inter-Regular.otf", "Inter-Medium.otf", "Inter-SemiBold.otf", "Inter-Bold.otf",
               "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-Bold.ttf", "BarlowCondensed-ExtraBold.ttf"]
@@ -137,25 +139,25 @@ def apply():
     t["CTk"]["fg_color"] = list(BG)
     t["CTkToplevel"]["fg_color"] = list(BG)
     t["CTkFrame"].update(fg_color=list(SURFACE), top_fg_color=list(SURFACE2), border_color=list(BORDER),
-                         corner_radius=6)
+                         corner_radius=4)
     t["CTkButton"].update(fg_color=list(ACCENT), hover_color=list(ACCENT_PRESS), border_color=list(BORDER),
-                          text_color=list(WHITE), text_color_disabled=list(MUTED), corner_radius=4)
+                          text_color=list(WHITE), text_color_disabled=list(MUTED), corner_radius=2)
     t["CTkLabel"]["text_color"] = list(TEXT)
     t["CTkEntry"].update(fg_color=list(BG), border_color=list(BORDER), text_color=list(TEXT),
-                         placeholder_text_color=list(MUTED), corner_radius=4, border_width=1)
+                         placeholder_text_color=list(MUTED), corner_radius=2, border_width=1)
     t["CTkCheckBox"].update(fg_color=list(ACCENT), border_color=list(NEUTRAL), hover_color=list(ACCENT_PRESS),
                             checkmark_color=list(WHITE), text_color=list(TEXT), text_color_disabled=list(MUTED),
-                            corner_radius=3, border_width=2)
-    t["CTkSwitch"].update(fg_color=list(BAR), progress_color=list(ACCENT), button_color=list(WHITE),
+                            corner_radius=2, border_width=2)
+    t["CTkSwitch"].update(fg_color=list(TRACK), progress_color=list(ACCENT), button_color=list(WHITE),
                           button_hover_color=list(WHITE), text_color=list(TEXT))
     t["CTkRadioButton"].update(fg_color=list(ACCENT), border_color=list(NEUTRAL), hover_color=list(ACCENT_PRESS),
                                text_color=list(TEXT))
     t["CTkSegmentedButton"].update(fg_color=list(SURFACE2), selected_color=list(ACCENT),
                                    selected_hover_color=list(ACCENT_PRESS), unselected_color=list(SURFACE2),
                                    unselected_hover_color=list(BORDER), text_color=list(TEXT),
-                                   text_color_disabled=list(MUTED), corner_radius=4)
+                                   text_color_disabled=list(MUTED), corner_radius=2)
     t["CTkOptionMenu"].update(fg_color=list(SURFACE2), button_color=list(SURFACE2), button_hover_color=list(BORDER),
-                              text_color=list(TEXT), corner_radius=4)
+                              text_color=list(TEXT), corner_radius=2)
     t["CTkComboBox"].update(fg_color=list(BG), border_color=list(BORDER), button_color=list(SURFACE2),
                             button_hover_color=list(BORDER), text_color=list(TEXT))
     t["CTkScrollbar"].update(button_color=list(BORDER), button_hover_color=list(NEUTRAL))

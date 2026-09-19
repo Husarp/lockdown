@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.1 — 2026-09-19 13:40
+- **Round 2 redesign — phase A (design system)**: the whole app now uses the tightened round-2 palette
+  (design/Lockdown Round 2.dc.html) — darker backgrounds, 4px cards / 2px controls, and the round-2 status colours.
+- **Light mode fixes (7b)**: switch "off" tracks are a visible grey (#AEB6C0) instead of near-white, and outlined /
+  secondary buttons now have a clear border (#B9C0C9) so they no longer vanish on white cards.
+- Remaining redesign phases (title accent bars, type badges, sidebar pulse, the Add rail, Calendar, trend lines,
+  locked view-only state, popups) are tracked in PLAN and coming next.
+
 ## 0.28.0 — 2026-09-19 13:04
 - **YouTube Restricted Mode is now its own switch** (Blocking > Protection > Safe search), separate from Force
   SafeSearch. Restricted Mode also hides *all* YouTube comments, so turn it off if you want to read comments -
