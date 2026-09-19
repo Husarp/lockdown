@@ -52,6 +52,7 @@ EVENT_POLL_MS = 1000
 WATCH_MS = 5000
 MINIMIZE_MS = 250
 GC_MS = 2000
+PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
 
 class LockdownApp(ctk.CTk):
@@ -120,6 +121,7 @@ class LockdownApp(ctk.CTk):
         self.reminder_ui = ReminderUI(self)
         self.reminders = self.reminder_ui.engine = reminders.Engine(self.db, self.reminder_ui)
         self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
+        self.after(PREBUILD_MS[0], self._prebuild)
 
     def _collect_garbage(self):
         gc.collect()
@@ -194,17 +196,28 @@ class LockdownApp(ctk.CTk):
             if hasattr(page, "refresh"):
                 page.refresh()
 
+    def _build_page(self, name: str):
+        spec = next(p[1] for p in PAGES if p[0] == name)
+        if isinstance(spec, int):
+            page = ctk.CTkFrame(self.content, fg_color="transparent")
+            ctk.CTkLabel(page, text=name, font=theme.page_title()).pack(anchor="w", padx=30, pady=(16, 8))
+            ctk.CTkLabel(page, text=f"Coming in Phase {spec}.", text_color=theme.MUTED).pack(anchor="w", padx=30)
+        else:
+            page = spec(self.content, self)
+        page.grid(row=0, column=0, sticky="nsew")
+        page.lower()   # (built in the background: stays behind the page you're on)
+        self.pages[name] = page
+
+    def _prebuild(self):
+        """Build pages you haven't opened yet, one at a time, so switching to them later is instant."""
+        todo = [name for name, _spec, _icon in PAGES if name not in self.pages]
+        if todo and not self.exited:
+            self._build_page(todo[0])
+            self.after(PREBUILD_MS[1], self._prebuild)
+
     def show_page(self, name: str):
         if name not in self.pages:
-            spec = next(p[1] for p in PAGES if p[0] == name)
-            if isinstance(spec, int):
-                page = ctk.CTkFrame(self.content, fg_color="transparent")
-                ctk.CTkLabel(page, text=name, font=theme.page_title()).pack(anchor="w", padx=30, pady=(16, 8))
-                ctk.CTkLabel(page, text=f"Coming in Phase {spec}.", text_color=theme.MUTED).pack(anchor="w", padx=30)
-            else:
-                page = spec(self.content, self)
-            page.grid(row=0, column=0, sticky="nsew")
-            self.pages[name] = page
+            self._build_page(name)
         self.pages[name].tkraise()
         self.current_page = name
         if hasattr(self.pages[name], "on_show"):

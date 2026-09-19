@@ -2,8 +2,10 @@
 
 Table or graph, search, app filter, All / Allowed / Blocked, Windows' own and local-network traffic hidden by
 default, live updates, CSV export. Click a row: block the site or the app (opens Add, filled in), copy the site
-or app name, or show only that app."""
+or app name, or show only that app. The table shows the newest PAGE rows first ("Show more" for the rest) and is
+only redrawn when something changed - each row is a handful of widgets, so drawing hundreds made the page lag."""
 import csv
+import time
 import tkinter as tk
 from collections import Counter
 from datetime import timedelta
@@ -18,7 +20,7 @@ from gui.target_picker import guess_name, popular_hosts
 from trusted_time import now_from_db
 
 LIVE_MS = 3000
-MAX_ROWS = 150
+PAGE = 25          # rows shown at first / added by "Show more"
 ALL_APPS = "All apps"
 SECOND_LEVEL = {"co", "com", "org", "net", "ac", "gov", "edu"}   # example.co.uk -> three labels
 
@@ -65,6 +67,9 @@ class NetworkPage(ctk.CTkFrame):
         self.app, self.db = app, app.db
         self.app_filter: str | None = None   # exe
         self.shown: list[dict] = []
+        self.limit = PAGE                    # rows in the table ("Show more" adds PAGE)
+        self.drawn = None                    # what the table / graph shows now (skip redrawing the same)
+        self.refreshed = 0.0
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
         ctk.CTkLabel(head, text="Network Log", font=theme.page_title()).pack(side="left")
@@ -76,12 +81,12 @@ class NetworkPage(ctk.CTkFrame):
         self.view = Segmented(bar, ["Table", "Graph"], command=lambda v: self._show_view())
         self.view.set("Table")
         self.view.pack(side="left")
-        self.status_filter = Segmented(bar, ["All", "Allowed", "Blocked"], command=lambda v: self.refresh())
+        self.status_filter = Segmented(bar, ["All", "Allowed", "Blocked"], command=lambda v: self._filtered())
         self.status_filter.set("All")
         self.status_filter.pack(side="left", padx=10)
         self.search = ctk.CTkEntry(bar, width=180, placeholder_text="Search site or app")
         self.search.pack(side="left")
-        self.search.bind("<KeyRelease>", lambda e: self.refresh())
+        self.search.bind("<KeyRelease>", lambda e: self._filtered())
         ctk.CTkButton(bar, text="Export CSV", width=100, **theme.OUTLINE, command=self._export).pack(side="right")
         self.live = ctk.CTkSwitch(bar, text="Live", width=60)
         self.live.select()
@@ -91,9 +96,9 @@ class NetworkPage(ctk.CTkFrame):
         bar2.pack(fill="x", padx=30, pady=(0, 8))
         self.apps = ctk.CTkOptionMenu(bar2, values=[ALL_APPS], width=200, command=self._app_chosen)
         self.apps.pack(side="left")
-        self.windows = ctk.CTkSwitch(bar2, text="Windows' own connections", command=self.refresh)
+        self.windows = ctk.CTkSwitch(bar2, text="Windows' own connections", command=self._filtered)
         self.windows.pack(side="left", padx=16)
-        self.local = ctk.CTkSwitch(bar2, text="Local network", command=self.refresh)
+        self.local = ctk.CTkSwitch(bar2, text="Local network", command=self._filtered)
         self.local.pack(side="left")
         ctk.CTkLabel(bar2, text="Keeps the last hour. Click a row to block or copy it.", text_color=theme.MUTED,
                      font=theme.body(11)).pack(side="right")
@@ -108,6 +113,7 @@ class NetworkPage(ctk.CTkFrame):
             widget.configure(text=text.upper(), font=theme.eyebrow(), text_color=theme.MUTED)
         self.rows = Rows(self.table.body, self._make_row, "No connections in the last hour yet.",
                          {"fill": "x", "pady": 1})
+        self.more = ctk.CTkButton(self.table.body, text="", width=160, **theme.OUTLINE, command=self._show_more)
         self.graph = ctk.CTkFrame(self.body, fg_color="transparent")
         card = Card(self.graph, "Connections per minute", note="last hour")
         card.pack(fill="x", pady=(0, 12))
@@ -163,6 +169,7 @@ class NetworkPage(ctk.CTkFrame):
         return appinfo.name_of("app", exe, self.items) if exe else "Browser"
 
     def refresh(self):
+        self.refreshed = time.monotonic()
         self.items = self.db.list_items()
         self.shown = self._load()
         exes = sorted({r["exe"] for r in self.all_rows if r["exe"] and (self.windows.get() or not r["windows"])},
@@ -180,13 +187,22 @@ class NetworkPage(ctk.CTkFrame):
         top = f" · top: {self._app_name(per_app.most_common(1)[0][0])}" if per_app else ""
         self.summary.configure(text=f"Last hour: {total} connections · {blocked} blocked · {len(sites)} sites · "
                                     f"{len(per_app)} apps{top}")
-        if self.view.get() == "Table":
+        table = self.view.get() == "Table"
+        drawn = (table, self.limit, [tuple(r.values()) for r in (self.shown[:self.limit] if table else self.shown)])
+        if drawn == self.drawn:   # nothing new (live updates every 3 s): don't redraw
+            return
+        self.drawn = drawn
+        if table:
             self._fill_table()
         else:
             self._fill_graph(per_app)
 
     def _fill_table(self):
-        shown = self.shown[:MAX_ROWS]
+        shown = self.shown[:self.limit]
+        self.more.pack_forget()
+        if len(self.shown) > len(shown):
+            self.more.configure(text=f"Show more ({len(self.shown) - len(shown)} older)")
+            self.more.pack(pady=(6, 4))
         for row, r in zip(self.rows.take(len(shown)), shown):
             row.data = r
             row.time.configure(text=r["minute"][11:])
@@ -231,6 +247,15 @@ class NetworkPage(ctk.CTkFrame):
 
     def _app_chosen(self, label: str):
         self.app_filter = None if label == ALL_APPS else self.exe_by_label.get(label)
+        self._filtered()
+
+    def _filtered(self):
+        """A filter changed: start again from the newest rows."""
+        self.limit = PAGE
+        self.refresh()
+
+    def _show_more(self):
+        self.limit += PAGE
         self.refresh()
 
     def _live(self):
@@ -239,7 +264,8 @@ class NetworkPage(ctk.CTkFrame):
         self.after(LIVE_MS, self._live)
 
     def on_show(self):
-        self.refresh()
+        if time.monotonic() - self.refreshed > 1:   # (just built: already fresh)
+            self.refresh()
 
     def _menu(self, row):
         r = getattr(row, "data", None)

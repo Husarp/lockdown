@@ -1,8 +1,9 @@
-"""Notifications page (blocked-visit alert settings + recent visits) and the in-app popup."""
+"""Notifications page (blocked-visit alert settings + recent visits) and the in-app popup.
+The alert messages and the recent visits are in sections you open (built the first time) - fewer widgets = no lag."""
 import customtkinter as ctk
 
 from gui import theme
-from gui.components import Segmented
+from gui.components import Collapsible, Rows, Segmented
 
 import alerts
 
@@ -18,15 +19,12 @@ class NotificationsPage(ctk.CTkFrame):
             anchor="w", padx=30, pady=(16, 12))
         body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.msg_entries: dict[str, ctk.CTkEntry] = {}
         self._build_settings(body)
-        ctk.CTkLabel(body, text="Recent Blocked Visits", font=ctk.CTkFont(size=16, weight="bold")).pack(
-            anchor="w", padx=10, pady=(4, 6))
-        self.visits_box = ctk.CTkFrame(body)
-        self.visits_box.pack(fill="x")
-        ctk.CTkLabel(body, text="Limit warnings, reports and reminders come in later phases.", text_color=MUTED).pack(
-            anchor="w", padx=10, pady=12)
+        self.visits = Collapsible(body, "Recent blocked visits", self._build_visits, note="last 20",
+                                  on_open=self.refresh)
+        self.visits.pack(fill="x", pady=(0, 12))
         self.load()
-        self.refresh()
 
     def _build_settings(self, parent):
         box = ctk.CTkFrame(parent)
@@ -38,22 +36,17 @@ class NotificationsPage(ctk.CTkFrame):
             row=1, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
 
         self.enabled_vars: dict[str, ctk.BooleanVar] = {}
-        self.msg_entries: dict[str, ctk.CTkEntry] = {}
-        row = 2
-        for reason, (label, _) in alerts.REASONS.items():
+        checks = ctk.CTkFrame(box, fg_color="transparent")
+        checks.grid(row=2, column=0, columnspan=2, padx=16, sticky="w")
+        for i, (reason, (label, _)) in enumerate(alerts.REASONS.items()):
             var = ctk.BooleanVar()
             self.enabled_vars[reason] = var
-            ctk.CTkCheckBox(box, text=label, variable=var, width=230,
+            ctk.CTkCheckBox(checks, text=label, variable=var, width=230,
                             command=lambda r=reason, v=var: self.draft.set_setting(f"notify.enabled.{r}", "1" if v.get() else "0")
-                            ).grid(row=row, column=0, padx=16, pady=4, sticky="w")
-            msg = ctk.CTkEntry(box)
-            msg.grid(row=row, column=1, padx=(0, 16), pady=4, sticky="ew")
-            msg.bind("<KeyRelease>", lambda _e, r=reason, m=msg: self.draft.set_setting(
-                f"notify.msg.{r}", m.get().strip() or alerts.DEFAULT_MESSAGES[r]))
-            self.msg_entries[reason] = msg
-            row += 1
-        ctk.CTkLabel(box, text="Message placeholders: {site}  {reason}  {until}", text_color=MUTED).grid(
-            row=row, column=1, padx=(0, 16), sticky="w")
+                            ).grid(row=i // 3, column=i % 3, pady=4, sticky="w")
+        messages = Collapsible(box, "Messages", self._build_messages, note="change what each alert says")
+        messages.grid(row=3, column=0, columnspan=2, padx=16, pady=(8, 0), sticky="ew")
+        row = 3
 
         opts = ctk.CTkFrame(box, fg_color="transparent")
         opts.grid(row=row + 1, column=0, columnspan=2, padx=16, pady=(10, 4), sticky="w")
@@ -71,6 +64,34 @@ class NotificationsPage(ctk.CTkFrame):
         ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > All.", text_color=MUTED).grid(
             row=row + 3, column=0, columnspan=2, padx=16, pady=(4, 12), sticky="w")
         self._build_warnings(parent)
+
+    def _build_messages(self, parent):
+        parent.grid_columnconfigure(1, weight=1)
+        for row, (reason, (label, _)) in enumerate(alerts.REASONS.items()):
+            ctk.CTkLabel(parent, text=label, anchor="w", width=230).grid(row=row, column=0, pady=3, sticky="w")
+            msg = ctk.CTkEntry(parent)
+            msg.grid(row=row, column=1, pady=3, sticky="ew")
+            msg.bind("<KeyRelease>", lambda _e, r=reason, m=msg: self.draft.set_setting(
+                f"notify.msg.{r}", m.get().strip() or alerts.DEFAULT_MESSAGES[r]))
+            msg.insert(0, self.draft.settings[f"notify.msg.{reason}"])
+            self.msg_entries[reason] = msg
+        ctk.CTkLabel(parent, text="Placeholders: {site}  {reason}  {until}", text_color=MUTED).grid(
+            row=len(alerts.REASONS), column=1, sticky="w")
+
+    def _build_visits(self, parent):
+        def make(frame):
+            f = ctk.CTkFrame(frame, fg_color="transparent")
+            for col, width in enumerate((150, 180, 260, 0)):
+                f.grid_columnconfigure(col, minsize=width, weight=1 if col == 3 else 0)
+            f.cells = [ctk.CTkLabel(f, text="", anchor="w", height=22) for _ in range(4)]
+            for col, cell in enumerate(f.cells):
+                cell.grid(row=0, column=col, sticky="w", padx=(0, 8))
+            return f
+        head = make(parent)
+        head.pack(fill="x")
+        for cell, text in zip(head.cells, ["Time", "Site", "Hostname", "Reason"]):
+            cell.configure(text=text, text_color=MUTED)
+        self.visit_rows = Rows(parent, make, "No blocked visits yet.")
 
     def _build_warnings(self, parent):
         box = ctk.CTkFrame(parent)
@@ -120,18 +141,14 @@ class NotificationsPage(ctk.CTkFrame):
         self.started_switch.select() if s["notify.started.enabled"] == "1" else self.started_switch.deselect()
 
     def refresh(self):
-        for w in self.visits_box.winfo_children():
-            w.destroy()
-        events = self.db.block_events_after(self.db.last_block_event_id() - 20)[::-1]
-        if not events:
-            ctk.CTkLabel(self.visits_box, text="No blocked visits yet.", text_color=MUTED).pack(anchor="w", padx=16, pady=12)
+        """Recent blocked visits (only while that section is open)."""
+        if not self.visits.opened:
             return
-        for col, head in enumerate(["Time", "Site", "Hostname", "Reason"]):
-            ctk.CTkLabel(self.visits_box, text=head, text_color=MUTED).grid(row=0, column=col, padx=12, pady=(8, 2), sticky="w")
-        for r, e in enumerate(events, start=1):
-            for col, text in enumerate([e["timestamp"], e["display_name"], e["hostname"],
-                                        alerts.REASONS.get(e["reason"], (e["reason"],))[0]]):
-                ctk.CTkLabel(self.visits_box, text=text).grid(row=r, column=col, padx=12, pady=2, sticky="w")
+        events = self.db.block_events_after(self.db.last_block_event_id() - 20)[::-1]
+        for row, e in zip(self.visit_rows.take(len(events)), events):
+            reason = alerts.REASONS.get(alerts.base_reason(e["reason"]), (e["reason"],))[0]
+            for cell, text in zip(row.cells, [e["timestamp"], e["display_name"], e["hostname"], reason]):
+                cell.configure(text=text)
 
 
 class Popup(ctk.CTkToplevel):

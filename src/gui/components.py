@@ -101,20 +101,55 @@ class Rows:
         self.make, self.items = make, []
         self.item_pack = item_pack or {"fill": "x"}
         self.empty = ctk.CTkLabel(self.frame, text=empty_text, text_color=theme.MUTED) if empty_text else None
+        self.packed = 0   # the first `packed` items are on screen (only the difference is (un)packed)
 
     def take(self, n: int) -> list:
         while len(self.items) < n:
             self.items.append(self.make(self.frame))
-        for item in self.items:
+        for item in self.items[n:self.packed]:
             item.pack_forget()
-        for item in self.items[:n]:
+        for item in self.items[self.packed:n]:
             item.pack(**self.item_pack)
+        self.packed = n
         if self.empty:
             if n:
                 self.empty.pack_forget()
             else:
                 self.empty.pack(anchor="w")
         return self.items[:n]
+
+
+class Collapsible(ctk.CTkFrame):
+    """A section you open by clicking its title. build(body) runs the first time it's opened (so a closed section
+    costs nothing); on_open() runs every time it's opened."""
+
+    def __init__(self, master, title: str, build, note: str = "", on_open=None, **kw):
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=6,
+                         **kw)
+        self.title, self.build, self.on_open = title, build, on_open
+        self.head = ctk.CTkButton(self, text="", anchor="w", height=40, fg_color="transparent", text_color=theme.TEXT,
+                                  hover_color=theme.SURFACE2, font=theme.card_title(), command=self.toggle)
+        self.head.pack(fill="x", padx=4, pady=4)
+        self.body = ctk.CTkFrame(self, fg_color="transparent")
+        self.opened = self.built = False
+        self.set_note(note)
+
+    def set_note(self, note: str):
+        self.head.configure(text=f"{'▾' if self.opened else '▸'}  {self.title}" + (f"   ·   {note}" if note else ""))
+        self.note = note
+
+    def toggle(self):
+        self.opened = not self.opened
+        if self.opened:
+            if not self.built:
+                self.build(self.body)
+                self.built = True
+            self.body.pack(fill="x", padx=15, pady=(0, 12))
+            if self.on_open:
+                self.on_open()
+        else:
+            self.body.pack_forget()
+        self.set_note(self.note)
 
 
 class ProgressLine(ctk.CTkFrame):

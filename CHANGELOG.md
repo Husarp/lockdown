@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.20.0 — 2026-09-19 03:57
+- **Word lists**: blocked words are now lists, one line each - ready-made **Adult words - English** (102 words) and
+  **Adult words - Polish** (45 words) that you switch on / off, **Your words** and **Exceptions**. "Open" shows a list:
+  tick single words off (or back on, "All on"), search, remove / add your own; changes apply on Save. Turning a list or
+  word off, removing your words or adding exceptions needs the Anti-Bypass challenge (it lists what you're weakening)
+- **Faster pages**:
+  - pages you haven't opened yet are built in the background after start (one every 0.5 s), so opening them later
+    takes 0.05-0.4 s instead of 1-7 s
+  - Network Log: shows the newest 25 rows ("Show more" for older ones) and only redraws when something changed
+    (before: 150 rows redrawn every 3 s); switching back to it 2.4 s -> 0.2 s
+  - Notifications: the alert messages and the recent blocked visits are sections you open (built the first time;
+    the visits list no longer rebuilds itself on every blocked visit)
+  - lists everywhere: only rows that appear / disappear are moved (not all of them on each refresh)
+- 156 tests passing
+
 ## 0.19.0 — 2026-09-19 03:39
 - **Forced SafeSearch** (Blocking > Protection, on by default): Google, Bing and DuckDuckGo always search with
   SafeSearch, YouTube runs in Restricted Mode (moderate) - the DNS filter answers their names with the engines' own

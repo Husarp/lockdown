@@ -1274,6 +1274,11 @@ sleep / forced-break overlays still show.
   (1) forced SafeSearch on Google / Bing / DuckDuckGo + YouTube Restricted Mode (DNS filter + browser policies);
   (2) check of the active tab's address and title every second (whole words / word* / phrases, built-in adult list
   + your own words, exceptions) -> close the tab or go back + notice; loosening goes through Anti-Bypass
+- [x] Word lists instead of words shown one by one: ready-made "Adult words - English" (102) and "Adult words -
+  Polish" (45) lists you switch on/off, "Your words" and "Exceptions" - each opens a window to tick off / remove /
+  add words (requested 2026-09-19)
+- [x] Pages with a lot of info lagged when switching to them (Network Log, Notifications) - rows in pages, sections
+  you open, no needless redraws, pages built in the background after start (requested 2026-09-19)
 - [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
   designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
 

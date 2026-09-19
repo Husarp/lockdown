@@ -44,6 +44,25 @@ def test_own_words_and_exceptions():
     assert kw.find("https://a.com/", "gambling at night", cfg) is None               # phrase = those words in order
 
 
+def test_ready_lists_and_words_turned_off():
+    assert kw.find("https://a.com/", "Darmowy seks", {**CFG, "lists": {"adult_en": True, "adult_pl": False}}) is None
+    assert kw.find("https://a.com/", "Hot MILFs", {**CFG, "off": ["milf*"]}) is None
+    assert "milf*" not in kw.active_words({**CFG, "off": ["milf*"]})
+    assert kw.active_words({**CFG, "lists": {}, "words": ["abc"]}) == ["abc"]
+
+
+def test_what_weakens_the_check():
+    old = {**CFG, "words": ["abc", "def"]}
+    assert kw.looser(old, {**old, "words": ["abc", "def", "ghi"], "action": "back"}) == []   # more words: fine
+    assert kw.looser(old, {**old, "lists": {**CFG["lists"], "adult_pl": False}}) == \
+        ["Turn the Adult words - Polish list off"]
+    assert kw.looser(old, {**old, "off": ["milf*"], "words": ["abc"]}) == ["Stop blocking 2 words: def, milf*"]
+    assert kw.looser(old, {**old, "exceptions": ["reddit.com"]}) == ["New exceptions: reddit.com"]
+    assert kw.looser(old, {**old, "enabled": False, "safesearch": False}) == \
+        ["Turn the blocked-words check off", "Turn forced SafeSearch off"]
+    assert kw.looser({**old, "off": ["milf*"]}, old) == []                                   # turned back on
+
+
 def test_safe_targets():
     assert kw.safe_target("www.google.com") == kw.safe_target("google.pl") == "forcesafesearch.google.com"
     assert kw.safe_target("www.google.co.uk") == "forcesafesearch.google.com"

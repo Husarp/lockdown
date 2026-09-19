@@ -1,8 +1,9 @@
 """Bad-word check and forced SafeSearch (Blocking > Protection).
 
-- Words: the address and title of the browser tab in front are checked for blocked words (built-in English + Polish
-  adult words, plus your own). Whole words only ("analysis" doesn't match "anal"); a word ending in "*" also matches
-  longer words ("porn*" -> "pornhub"); several words = that phrase. Accents are ignored ("ruchać" = "ruchac").
+- Words: the address and title of the browser tab in front are checked for blocked words (ready-made English and
+  Polish adult word lists - each can be switched off, single words turned off - plus your own). Whole words only
+  ("analysis" doesn't match "anal"); a word ending in "*" also matches longer words ("porn*" -> "pornhub");
+  several words = that phrase. Accents are ignored ("ruchać" = "ruchac").
   Exceptions: a site (has a dot: that site and its subdomains aren't checked) or a word (never counts).
 - SafeSearch: the DNS filter sends Google / Bing / DuckDuckGo / YouTube to their "safe" addresses (the search
   engines' own documented way to force SafeSearch / Restricted Mode); browser policies force it as well.
@@ -12,22 +13,34 @@ import re
 import unicodedata
 from urllib.parse import unquote_plus, urlsplit
 
-SETTINGS_KEY = "words"   # JSON {"enabled", "safesearch", "action": "close" / "back", "words": [...], "exceptions": [...]}
-DEFAULTS = {"enabled": True, "safesearch": True, "action": "close", "words": [], "exceptions": []}
+SETTINGS_KEY = "words"   # JSON {"enabled", "safesearch", "action": "close" / "back", "lists": {ready list: on},
+#                                "off": [ready-list words turned off], "words": [yours], "exceptions": [...]}
+DEFAULTS = {"enabled": True, "safesearch": True, "action": "close", "lists": {"adult_en": True, "adult_pl": True},
+            "off": [], "words": [], "exceptions": []}
 ACTIONS = {"close": "Close the tab", "back": "Go back"}
 
-BUILT_IN = {
-    "English": ["porn*", "xxx", "xvideos", "xnxx", "xhamster", "redtube", "youporn", "spankbang", "brazzers",
-                "bangbros", "eporner", "tnaflix", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin",
-                "camsoda", "bongacams", "rule34", "rule 34", "r34", "e621", "hentai*", "ecchi", "futanari", "nsfw",
-                "lewd", "nudes", "boobs", "tits", "titties", "pussy", "blowjob*",
-                "handjob*", "deepthroat*", "cumshot*", "creampie*", "milf*", "bdsm", "gangbang*", "threesome*",
-                "orgy", "orgies", "orgasm*", "masturba*", "erot*", "camgirl*", "sexcam*", "sexting",
-                "sex video*", "sex tape*", "sex chat", "free sex", "hot sex", "bukkake", "strip club*", "stripper*"],
-    "Polish": ["porno*", "seks", "seksi", "darmowy seks", "seks kamerki", "sex kamerki", "ruchanie", "ruchac",
-               "bzykanie", "cipka", "cipki", "cycki", "cycuszki", "nago", "nagie", "rozbierane*", "lodzik*",
-               "obciaganie", "dziwka", "dziwki", "prostytutk*", "roksa", "anonse towarzyskie",
-               "laski nago", "golasy", "golaski"],
+# Ready-made lists you can switch on (both on by default) and open to turn single words off.
+READY = {
+    "adult_en": ("Adult words - English", [
+        "porn*", "xxx", "xvideos", "xnxx", "xhamster", "redtube", "youporn", "youjizz", "spankbang", "spankwire",
+        "brazzers", "bangbros", "realitykings", "naughtyamerica", "eporner", "tnaflix", "tube8", "motherless",
+        "hqporner", "beeg", "txxx", "hclips", "fapello", "onlyfans", "fansly", "manyvids", "clips4sale", "chaturbate",
+        "stripchat", "livejasmin", "camsoda", "bongacams", "myfreecams", "cam4", "rule34", "rule 34", "r34", "e621",
+        "nhentai", "hentai*", "hanime", "ecchi", "futanari", "jav", "nsfw", "lewd", "nudes", "nude pics",
+        "nude photos", "naked girls", "naked women", "boobs", "tits", "titties", "pussy", "blowjob*", "handjob*",
+        "footjob*", "deepthroat*", "cumshot*", "creampie*", "milf*", "gilf", "bdsm", "bondage", "fetish*",
+        "gangbang*", "threesome*", "orgy", "orgies", "orgasm*", "masturba*", "erot*", "camgirl*", "camboy*",
+        "sexcam*", "sexting", "sexchat", "sex video*", "sex tape*", "sex chat", "sex cam*", "free sex", "hot sex",
+        "sex dating", "anal sex", "oral sex", "bukkake", "cuckold", "upskirt", "strip club*", "stripper*",
+        "striptease", "dildo*", "vibrator*", "sex toy*", "fleshlight", "adult video*", "adult movie*", "adult chat",
+        "adult dating", "escort service*"]),
+    "adult_pl": ("Adult words - Polish", [
+        "porno*", "seks", "seksi", "sexi", "darmowy seks", "seks kamerki", "sex kamerki", "sekstelefon",
+        "seks telefon", "sex telefon", "sex anonse", "erotyk*", "erotycz*", "ruchanie", "ruchac", "rucha",
+        "wyruchal*", "wyruchan*", "bzykanie", "bzykac", "cipka", "cipki", "cipa", "cycki", "cycuszki", "cycate",
+        "nago", "nagie", "golasy", "golaski", "rozbierane*", "rozbieranki", "lodzik*", "obciaganie", "dziwka",
+        "dziwki", "prostytutk*", "roksa", "anonse towarzyskie", "masturbac*", "walenie konia", "orgia", "orgie",
+        "striptiz", "filmy dla doroslych"]),
 }
 SAFE_TARGETS = {   # DNS names -> the search engines' "always safe" address
     "forcesafesearch.google.com": re.compile(r"^(www\.)?google\.(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$"),
@@ -51,8 +64,30 @@ def save(db, cfg: dict):
     db.set_setting(SETTINGS_KEY, json.dumps(cfg))
 
 
-def built_in_count() -> int:
-    return sum(map(len, BUILT_IN.values()))
+def active_words(cfg: dict) -> list[str]:
+    """Words of the ready lists that are on (minus the ones you turned off) + yours."""
+    off = set(cfg["off"])
+    ready = [w for key, (_name, words) in READY.items() if cfg["lists"].get(key) for w in words if w not in off]
+    return ready + [w for w in cfg["words"] if w not in ready]
+
+
+def looser(old: dict, new: dict) -> list[str]:
+    """What in `new` weakens the check (for Anti-Bypass): off, lists / words turned off, exceptions added."""
+    out = []
+    if old["enabled"] and not new["enabled"]:
+        out.append("Turn the blocked-words check off")
+    if old["safesearch"] and not new["safesearch"]:
+        out.append("Turn forced SafeSearch off")
+    for key, (name, _words) in READY.items():
+        if old["lists"].get(key) and not new["lists"].get(key):
+            out.append(f"Turn the {name} list off")
+    removed = (set(new["off"]) - set(old["off"])) | (set(old["words"]) - set(new["words"]))
+    if removed:
+        out.append(f"Stop blocking {len(removed)} word{'s' * (len(removed) > 1)}: " + ", ".join(sorted(removed)[:8]))
+    added = set(new["exceptions"]) - set(old["exceptions"])
+    if added:
+        out.append("New exceptions: " + ", ".join(sorted(added)))
+    return out
 
 
 def normalize(text: str) -> str:
@@ -87,7 +122,7 @@ def find(address: str | None, title: str | None, cfg: dict) -> str | None:
     from_address, from_title = _words(unquote_plus(address)), _words(title or "")
     tokens = from_address + from_title
     joined = f" {' '.join(from_address)} | {' '.join(from_title)} "   # (a phrase can't span address and title)
-    for entry in [w for ws in BUILT_IN.values() for w in ws] + list(cfg["words"]):
+    for entry in active_words(cfg):
         word = normalize(entry).strip()
         if not word or word in ignored:
             continue
