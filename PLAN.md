@@ -1352,7 +1352,38 @@ sleep / forced-break overlays still show.
 - [x] Notifications don't pile up as unread: auto-clear ONLY Lockdown's Action Center entries a few seconds after a
   toast (never other apps'); both "Show as" options kept (2026-09-19)
 
-### Round 2 redesign — implementing (design/Lockdown Round 2.dc.html, provided 2026-09-19)
+### Round 3 requests (2026-09-19, evening) - polish & locked-state policy
+
+Done:
+- [x] Installer finish flow: run-tick hidden until done, then green check + "Run Lockdown now" + Finish
+- [x] Anti-Bypass hours: can't remove the only time window (x appears from the 2nd window)
+- [x] Emergency unlock excludes permanently-blocked items (can't be turned against you)
+- [x] Anti-Bypass unlocked banner: live mm:ss countdown + draining bar
+- [x] Switches made chunkier (track was too thin)
+
+Approved, still to do (no open questions):
+- [ ] Lock category changes behind the challenge: changing an app's/site's category AND adding a category need
+  unlock (modes block by category). Editing when unlocked is fine.
+- [ ] Move "Daily screen-time goal" out of Appearance (own spot); keep it NOT locked (doesn't affect blocking).
+- [ ] Import settings must need the challenge (verify/enforce). Export screen-time CSV stays free.
+- [ ] Limit reset time: clearer wording + always start the new limit day on the NEXT day only - never stack
+  multiple days from toggling the hour back and forth (griefable).
+- [ ] Lockdown itself can't be blocked or silenced (can't add lockdown.exe as a blocked app / soft-lock yourself).
+- [ ] Screen Time Calendar: click a day to see that day's details (per-app time) - for history / parents.
+
+Proposed, need a decision (I asked "what do you think"):
+- [ ] Grace undo: after turning something stricter (e.g. SafeSearch on) you can turn it back off within ~10 s
+  without unlocking (accidental clicks); after that it needs the challenge.
+- [ ] Confirm dialog when changing Anti-Bypass challenge settings (so you don't accidentally set a 250-char phrase
+  and lock yourself out) - maybe with the same short grace.
+- [ ] Import settings: show a review of what would change vs current settings before applying (confirm/cancel).
+- [ ] Settings > Appearance: a live preview of a theme/accent without restarting.
+- [ ] Trend chart: hover marker (dot/line) on the day; and make it follow the Today/7/30 range selector.
+- [ ] Day timeline: only works for today (yesterday from 06:00); decide behaviour for 7 / 30-day ranges.
+- [ ] Anti-Bypass unlocked: a ring that drains (currently a bar) - optional nicety.
+- [ ] Pass over the round-2 design again for subtle polish (edges/rounding) not yet copied.
+
+## Round 2 redesign — implementing (design/Lockdown Round 2.dc.html, provided 2026-09-19)
 Phased so each part is verified on the hidden desktop before the next.
 - [x] Phase A — design system: round-2 tokens (dark + light), 4px cards / 2px controls, light-mode 7b fixes
   (switch off-track #AEB6C0, secondary/outlined buttons get a visible border)
