@@ -147,10 +147,11 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         own.pack(fill="x", pady=(10, 0))
         head = ctk.CTkFrame(own, fg_color="transparent")
         head.pack(anchor="w")
-        ctk.CTkLabel(head, text="Add your own blocking list", font=theme.semi(13)).pack(side="left")
-        help_icon(head, "Any block list on the internet: a hosts file, a plain list of domains or an adblock-style "
-                        "list (||site.com^ - blocks its subdomains too). It's downloaded and updated once a day like "
-                        "the others. Preview it first to see what's in it.").pack(side="left", padx=6)
+        ctk.CTkLabel(head, text="Connect a blocking list", font=theme.semi(13)).pack(side="left")
+        help_icon(head, "Subscribe to a block list published online (a hosts file, a plain list of domains or an "
+                        "adblock-style list - ||site.com^ blocks its subdomains too). Lockdown downloads it and keeps "
+                        "it updated daily, like the community lists. Preview it first to see what's in it.").pack(
+            side="left", padx=6)
         line = ctk.CTkFrame(own, fg_color="transparent")
         line.pack(anchor="w", pady=(4, 0))
         self.own_name = ctk.CTkEntry(line, width=150, placeholder_text="Name (e.g. Crypto)")
@@ -158,11 +159,13 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.own_url = ctk.CTkEntry(line, width=380, placeholder_text="https://... list address")
         self.own_url.pack(side="left", padx=8)
         ctk.CTkButton(line, text="Preview", width=90, **theme.OUTLINE, command=self._preview).pack(side="left")
-        self.own_add = ctk.CTkButton(line, text="Add list", width=90, command=self._add_own)
+        self.own_add = ctk.CTkButton(line, text="Connect", width=90, command=self._add_own)
         self.own_result = ctk.CTkLabel(own, text="", anchor="w", justify="left", wraplength=820)
         self.own_result.pack(anchor="w", pady=(4, 0))
         self.previewed: tuple[str, int] | None = None   # (url, count) of the last good preview
 
+        # your own hand-made lists sit under the online lists, set off by a divider
+        ctk.CTkFrame(self, height=1, fg_color=theme.BORDER, corner_radius=0).pack(fill="x", padx=6, pady=(2, 12))
         mine = Card(self, "Your blocking lists")
         mine.pack(fill="x", pady=(0, 12))
         help_icon(mine.title.master, "Your own lists of sites to block. Type a site into a list; turn the list on to "
@@ -279,7 +282,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.previewed = None
         for entry in (self.own_name, self.own_url):
             clear_entry(entry)
-        self.own_result.configure(text=f"Added {name} ({count:,} sites) - it's downloaded in a few seconds.",
+        self.own_result.configure(text=f"Connected {name} ({count:,} sites) - it's downloaded in a few seconds.",
                                   text_color=theme.ALLOWED)
         self.refresh()
 

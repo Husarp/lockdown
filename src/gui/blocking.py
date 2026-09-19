@@ -539,10 +539,16 @@ class CalendarTab(ctk.CTkScrollableFrame):
         card.pack(fill="x")
         self.cal = WeekCalendar(card.body, on_click=self._open, height=340)
         self.cal.pack(fill="x")
+        legend = ctk.CTkFrame(card.body, fg_color="transparent")
+        legend.pack(anchor="w", pady=(8, 0))
+        ctk.CTkFrame(legend, width=3, height=13, fg_color=theme.ACCENT, corner_radius=0).pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(legend, text="now", text_color=MUTED, font=theme.body(11), height=14).pack(side="left")
+        ctk.CTkFrame(legend, width=11, height=11, fg_color=theme.INFO, corner_radius=6).pack(side="left", padx=(16, 5))
+        ctk.CTkLabel(legend, text="emergency unlock used", text_color=MUTED, font=theme.body(11), height=14).pack(
+            side="left")
         ctk.CTkLabel(card.body, text="Only permanent and by-time blocks show here - time / opening limits and "
-                     "temporary blocks aren't tied to a clock time. Click a bar to edit that item; Ⓔ marks an "
-                     "emergency unlock; the accent line is now.", text_color=MUTED, wraplength=900,
-                     justify="left").pack(anchor="w", pady=(8, 0))
+                     "temporary blocks aren't tied to a clock time. Click a bar to edit that item.",
+                     text_color=MUTED, wraplength=900, justify="left").pack(anchor="w", pady=(4, 0))
 
     @staticmethod
     def _monday(d: date) -> date:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.42.2 - 2026-09-19 21:40
+- **Site protection tidy-up**: the URL feature is now **"Connect a blocking list"** (it subscribes to an online
+  list), set off from your own lists; **"Your blocking lists"** sits below the community lists with a divider.
+- **Calendar legend**: the block calendar now has a small legend — the accent line is **now**, a blue dot marks
+  an **emergency unlock used** — instead of a cryptic symbol in the footer text.
+
 ## 0.42.1 - 2026-09-19 21:35
 - Renamed the Blocking sub-tab "Protection" to "Site protection".
 
