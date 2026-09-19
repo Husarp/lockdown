@@ -19,7 +19,7 @@ import stats
 from blocker.apps import block_flags
 from gui import app_browser, categories, icons, theme
 from gui.charts import WeekCalendar
-from gui.components import (Curtain, Card, BlockerCard, LockedStrip, Segmented, eyebrow, rule_chip, help_icon,
+from gui.components import (Curtain, Card, BlockerCard, LockedStrip, Segmented, TabBar, eyebrow, rule_chip, help_icon,
                             page_head, type_badge)
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
@@ -593,14 +593,13 @@ class BlockingPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app, self.draft = app, app.draft
-        page_head(self, "Blocking").pack(anchor="w", padx=30, pady=(12, 6))
-        bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.pack(fill="x", padx=30, pady=(0, 10))
-        self.tab_bar = Segmented(bar, values=TABS, command=self.show_tab, width=240, height=30,
-                                              dynamic_resizing=False)
-        self.tab_bar.pack(side="left")
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=30, pady=(12, 8))
+        page_head(head, "Blocking").pack(side="left")
+        self.tab_bar = TabBar(head, values=TABS, command=self.show_tab)
+        self.tab_bar.pack(side="right", anchor="s")
         # short confirmation after adding / saving ("✓ YouTube blocker added"), hidden after a few seconds
-        self.notice = ctk.CTkLabel(bar, text="", text_color=GREEN, font=theme.semi(13))
+        self.notice = ctk.CTkLabel(head, text="", text_color=GREEN, font=theme.semi(13))
         self.notice.pack(side="left", padx=16)
         self._notice_job = None
         holder = ctk.CTkFrame(self, fg_color="transparent")

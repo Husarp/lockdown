@@ -545,8 +545,10 @@ class WeekCalendar(Chart):
                 cx, cy, r = X(m), y - self.px(1), self.px(4)
                 self.pen.ellipse([(cx - r) * SS, (cy - r) * SS, (cx + r) * SS, (cy + r) * SS], fill=self.bg,
                                  outline=theme.pick(theme.INFO), width=line_w)
-            if wd == self.today:
-                x = X(self.now_min)
-                self.pen.line([x * SS, y * SS, x * SS, (y + rowh) * SS], fill=theme.pick(theme.ACCENT),
-                              width=max(1, int(1.6 * self.s * SS)))
             y += rowh + self.px(self.ROW_GAP)
+        # one continuous "now" line across the whole grid (top of the first row to the bottom of the last),
+        # instead of a short segment inside today's row - marks the current time-of-day for every day
+        top, bottom = self.px(self.TOPAX), y - self.px(self.ROW_GAP)
+        x = X(self.now_min)
+        self.pen.line([x * SS, top * SS, x * SS, bottom * SS], fill=theme.pick(theme.ACCENT),
+                      width=max(1, int(1.6 * self.s * SS)))

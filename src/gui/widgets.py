@@ -54,6 +54,60 @@ class ConfirmButton(ctk.CTkButton):
             self.configure(**self._normal)
 
 
+class ConfirmDialog(ctk.CTkToplevel):
+    """A small modal yes/no. `lines` are shown as → bullets; on_no runs on Cancel / closing the window."""
+
+    def __init__(self, app, title: str, message: str, on_yes, yes_text: str = "Continue", danger: bool = False,
+                 lines: list[str] | None = None, on_no=lambda: None):
+        super().__init__(app)
+        self.on_yes, self.on_no, self._answered = on_yes, on_no, False
+        self.title(title)
+        self.resizable(False, False)
+        self.configure(fg_color=theme.BG)
+        self.protocol("WM_DELETE_WINDOW", self._no)
+        box = ctk.CTkFrame(self, fg_color="transparent")
+        box.pack(fill="both", expand=True, padx=24, pady=20)
+        ctk.CTkLabel(box, text=title, font=theme.card_title()).pack(anchor="w")
+        ctk.CTkLabel(box, text=message, text_color=theme.MUTED, justify="left", wraplength=460, anchor="w").pack(
+            anchor="w", pady=(6, 0))
+        if lines:
+            items = ctk.CTkFrame(box, fg_color="transparent")
+            items.pack(anchor="w", fill="x", pady=(8, 0))
+            for line in lines:
+                row = ctk.CTkFrame(items, fg_color="transparent")
+                row.pack(anchor="w", fill="x")
+                ctk.CTkLabel(row, text="→", text_color=theme.ACCENT, font=theme.semi(13), width=16, anchor="w").pack(
+                    side="left", anchor="n")
+                ctk.CTkLabel(row, text=line, text_color=theme.TEXT, justify="left", wraplength=440, anchor="w").pack(
+                    side="left")
+        buttons = ctk.CTkFrame(box, fg_color="transparent")
+        buttons.pack(fill="x", pady=(16, 0))
+        extra = {"fg_color": theme.DANGER, "hover_color": theme.DANGER} if danger else {}
+        ctk.CTkButton(buttons, text=yes_text, width=120, command=self._yes, **extra).pack(side="right")
+        ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self._no).pack(side="right", padx=8)
+        if app.winfo_viewable():
+            self.transient(app)
+        self.after(50, self._modal)
+
+    def _modal(self):
+        try:
+            self.grab_set()
+        except Exception:
+            self.after(50, self._modal)
+
+    def _yes(self):
+        self._answered = True
+        self.destroy()
+        self.on_yes()
+
+    def _no(self):
+        if self._answered:
+            return
+        self._answered = True
+        self.destroy()
+        self.on_no()
+
+
 def clear_entry(entry: ctk.CTkEntry):
     """Empty an entry and keep its placeholder visible. CTkEntry.delete() alone hides the placeholder until
     the entry is clicked (it treats every new entry as focused until its first focus-out)."""

@@ -1374,14 +1374,37 @@ Approved, still to do (no open questions):
 Proposed, need a decision (I asked "what do you think"):
 - [ ] Grace undo: after turning something stricter (e.g. SafeSearch on) you can turn it back off within ~10 s
   without unlocking (accidental clicks); after that it needs the challenge.
-- [ ] Confirm dialog when changing Anti-Bypass challenge settings (so you don't accidentally set a 250-char phrase
-  and lock yourself out) - maybe with the same short grace.
+- [x] Confirm dialog when changing Anti-Bypass challenge settings (so you don't accidentally set a 250-char phrase
+  and lock yourself out). Done in 0.36.0 (ConfirmDialog before tightening the challenge).
 - [ ] Import settings: show a review of what would change vs current settings before applying (confirm/cancel).
 - [ ] Settings > Appearance: a live preview of a theme/accent without restarting.
 - [ ] Trend chart: hover marker (dot/line) on the day; and make it follow the Today/7/30 range selector.
 - [ ] Day timeline: only works for today (yesterday from 06:00); decide behaviour for 7 / 30-day ranges.
 - [ ] Anti-Bypass unlocked: a ring that drains (currently a bar) - optional nicety.
 - [ ] Pass over the round-2 design again for subtle polish (edges/rounding) not yet copied.
+
+User decided (2026-09-19): implement the 6 "Approved, still to do" above PLUS grace-undo, the
+challenge-settings confirm dialog, trend hover marker, and the day-timeline 7/30 behaviour. The
+remaining proposed items (import diff, live theme preview, drain ring, design polish pass) stay parked.
+
+### Round 4 requests (2026-09-19, from Lockdown Round 3.dc.html section 4)
+Approved to implement:
+- [x] New top-right sub-tabs from the design: underline / ink-bar TabBar component (gui/components.py),
+  wired into Blocking, Screen Time, Modes and Network Log headers (on the title row, right-aligned).
+  Small in-form option switches keep the Segmented pill look. (0.36.0)
+- [x] Daily "now" line: WeekCalendar now draws ONE continuous full-height line across the whole grid
+  instead of a per-row segment (no gaps). (0.36.0)
+- [x] Live refresh: Anti-Bypass banner re-checks the lock state on a 5 s timer (_live) and repaints only
+  on a real change, so its colour follows the clock without a tab switch. (Blocking already live-ticks
+  every 2 s.) (0.36.0)
+- [x] Confirm before tightening the Anti-Bypass challenge (reusable ConfirmDialog) - avoids lockout. (0.36.0)
+
+Open questions (need a decision before building):
+- [ ] "Add your own" custom lists: today it adds a hosted blocklist by URL (Protection tab). User wants
+  to type a site name + address, add it, choose which list, and create their own list. Need to define
+  what a "list" is (Group? Category? a new personal blocklist concept?).
+- [ ] How far to take the Round-3 blocking/calendar re-look: tabs + now-line only, or also rebuild the
+  Blocking Overview table / Protection / Calendar screen layouts to match section 4.
 
 ## Round 2 redesign — implementing (design/Lockdown Round 2.dc.html, provided 2026-09-19)
 Phased so each part is verified on the hidden desktop before the next.

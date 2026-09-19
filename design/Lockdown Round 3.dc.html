@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/colors.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/typography.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/tokens/effects.css">
+<link rel="stylesheet" href="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/styles.css">
+<script src="_ds/13devs-design-system-46729e75-d852-4f10-a6fd-7ccedc6b6ec4/_ds_bundle.js"></script>
+<style>
+body { margin:0; background:#0A0D10; }
+a { color:#DB5126; text-decoration:none; }
+a:hover { color:#B33D18; }
+@keyframes ldPulse { 0%{transform:scale(1);opacity:.55} 70%{transform:scale(2.6);opacity:0} 100%{transform:scale(2.6);opacity:0} }
+@keyframes ldBlink { 0%,45%{opacity:1} 55%,100%{opacity:.18} }
+@keyframes ldTick { from{width:100%} to{width:0%} }
+@keyframes ldFill { from{width:4%} }
+@keyframes ldRise { from{transform:translateY(14px);opacity:0} }
+@keyframes ldCaret { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes ldTray { 0%,32%{opacity:1} 38%,100%{opacity:0} }
+</style>
+</helmet>
+
+<section style="display:flex;flex-direction:column;gap:30px;padding:44px 44px 60px 44px;font-family:Inter,sans-serif">
+  <div style="display:flex;flex-direction:column;gap:6px;max-width:980px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#fff">
+      <div style="font:700 40px 'Barlow Condensed',sans-serif;letter-spacing:-0.02em">BLOCK CALENDAR — REDONE</div>
+      <div style="font:600 11px Inter,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#DB5126">replaces <a href="#3e">3e</a></div>
+    </div>
+    <div style="font:400 14px/1.6 Inter,sans-serif;color:#93A0AE">The day-per-row grid ran out of room: bars were 15px tall, labels got cut and two rules on the same day had to share one lane. Both options turn it inside out — <strong style="color:#E9EDF2">one row per blocked item</strong>, so a day can hold as many rules as it likes, bars are full-height and every label lives outside the bar. <a href="#4a">4a</a> is a single day at full hour resolution, <a href="#4b">4b</a> is the whole week at a glance; the range switcher (Day · 3 days · Week) moves between them, so they are two states of one view rather than two designs.</div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
+
+    <div id="4a" style="display:flex;flex-direction:column;gap:11px;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">4a</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Day view — items as rows, 24 h across, rule text in its own column</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--red:#E05A44;--blu:#4E8FD1;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:13px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Blocking</span></div>
+          <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+            <sc-for list="{{ tabsCal }}" as="t" hint-placeholder-count="5"><div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div></sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="display:flex;gap:6px"><div style="width:26px;height:26px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;font:500 12px Inter,sans-serif;color:var(--mut)">‹</div><div style="width:26px;height:26px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;font:500 12px Inter,sans-serif;color:var(--mut)">›</div></div>
+          <span style="font:600 15px Inter,sans-serif">Saturday 19 September</span>
+          <span style="font:500 11px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:var(--ac)">today</span>
+          <div style="flex:1"></div>
+          <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 14px;border-radius:2px;background:var(--ac);color:#fff;font:600 12px Inter,sans-serif">Day</div><div style="padding:6px 14px;font:500 12px Inter,sans-serif;color:var(--mut)">3 days</div><div style="padding:6px 14px;font:500 12px Inter,sans-serif;color:var(--mut)">Week</div></div>
+          <div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 10px;font:500 12px Inter,sans-serif">Everything <span style="color:var(--mut)">▾</span></div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;overflow:hidden">
+          <div style="display:flex;align-items:center;padding:8px 14px 6px 14px;background:var(--s2);border-bottom:1px solid var(--bd)">
+            <div style="width:196px;font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Item</div>
+            <div style="flex:1;display:flex">
+              <sc-for list="{{ calHours }}" as="h" hint-placeholder-count="12"><div style="flex:1;font:500 10px Inter,sans-serif;color:var(--mut)">{{ h }}</div></sc-for>
+            </div>
+            <div style="width:196px;font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);text-align:right">Blocked today</div>
+          </div>
+          <sc-for list="{{ calDayRows }}" as="r" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:0;padding:0 14px;border-bottom:1px solid #1B2229;background:{{ r.rowbg }}">
+              <div style="width:196px;display:flex;align-items:center;gap:9px;min-width:0;padding:9px 12px 9px 0">
+                <span style="width:20px;height:20px;border-radius:4px;background:{{ r.ic }};flex-shrink:0;display:grid;place-items:center;font:700 10px Inter,sans-serif;color:#fff">{{ r.letter }}</span>
+                <span style="font:600 12.5px Inter,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.name }}</span>
+                <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:{{ r.bfg }};border:1px solid {{ r.bbd }};border-radius:2px;padding:1px 4px;flex-shrink:0">{{ r.badge }}</span>
+              </div>
+              <div style="flex:1;position:relative;height:28px;background:var(--bg);border-radius:2px;overflow:hidden">
+                <sc-for list="{{ r.ticks }}" as="t" hint-placeholder-count="11"><div style="position:absolute;top:0;bottom:0;width:1px;background:#1B2229;left:{{ t }}"></div></sc-for>
+                <sc-for list="{{ r.bars }}" as="b" hint-placeholder-count="2">
+                  <div style="position:absolute;top:5px;height:18px;left:{{ b.left }};width:{{ b.w }};background:{{ b.bg }};box-shadow:inset 3px 0 0 {{ b.c }};border-radius:2px"></div>
+                </sc-for>
+                <sc-for list="{{ r.marks }}" as="m" hint-placeholder-count="1">
+                  <div style="position:absolute;top:6px;left:{{ m }};width:16px;height:16px;border-radius:50%;background:#101418;border:1.5px solid var(--blu);display:grid;place-items:center;font:800 9px 'Barlow Condensed',sans-serif;color:var(--blu)">E</div>
+                </sc-for>
+                <div style="position:absolute;top:0;bottom:0;width:2px;background:var(--ac);left:26.2%"></div>
+              </div>
+              <div style="width:196px;padding-left:12px;text-align:right">
+                <div style="font:500 11.5px Inter,sans-serif;color:{{ r.sumc }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.sum }}</div>
+                <div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ r.sub }}</div>
+              </div>
+            </div>
+          </sc-for>
+          <div style="display:flex;align-items:center;gap:16px;padding:10px 14px;background:var(--s2);font:400 11.5px Inter,sans-serif;color:var(--mut)">
+            <sc-for list="{{ calLegend }}" as="g" hint-placeholder-count="4"><span style="display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:2px;background:{{ g.c }}"></span>{{ g.n }}</span></sc-for>
+            <span><span style="color:var(--ac)">▌</span> now 06:18</span><span><span style="color:var(--blu)">Ⓔ</span> emergency unlock</span>
+            <div style="flex:1"></div><span>Click a bar to edit that rule</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-left:3px solid var(--ac);border-radius:0 3px 3px 0;padding:11px 13px"><div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Next change</div><div style="font:500 12.5px Inter,sans-serif;margin-top:3px">09:16 — <span style="color:var(--grn)">Netflix allowed again</span></div></div>
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-left:3px solid var(--yel);border-radius:0 3px 3px 0;padding:11px 13px"><div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Busiest stretch</div><div style="font:500 12.5px Inter,sans-serif;margin-top:3px">22:30–07:00 — 5 items blocked together</div></div>
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-left:3px solid var(--grn);border-radius:0 3px 3px 0;padding:11px 13px"><div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Free window</div><div style="font:500 12.5px Inter,sans-serif;margin-top:3px">17:00–22:30 — nothing but the lists</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="4b" style="display:flex;flex-direction:column;gap:11px;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">4b</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Week view — same rows, each day a mini 24 h strip; no text inside any bar</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--blu:#4E8FD1;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:13px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Blocking</span></div>
+          <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+            <sc-for list="{{ tabsCal }}" as="t" hint-placeholder-count="5"><div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div></sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="display:flex;gap:6px"><div style="width:26px;height:26px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;font:500 12px Inter,sans-serif;color:var(--mut)">‹</div><div style="width:26px;height:26px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;font:500 12px Inter,sans-serif;color:var(--mut)">›</div></div>
+          <span style="font:600 15px Inter,sans-serif">14 – 20 September</span>
+          <div style="flex:1"></div>
+          <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 14px;font:500 12px Inter,sans-serif;color:var(--mut)">Day</div><div style="padding:6px 14px;font:500 12px Inter,sans-serif;color:var(--mut)">3 days</div><div style="padding:6px 14px;border-radius:2px;background:var(--ac);color:#fff;font:600 12px Inter,sans-serif">Week</div></div>
+          <div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 10px;font:500 12px Inter,sans-serif">Everything <span style="color:var(--mut)">▾</span></div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;overflow:hidden">
+          <div style="display:flex;align-items:center;padding:8px 14px;background:var(--s2);border-bottom:1px solid var(--bd)">
+            <div style="width:196px;font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Item</div>
+            <div style="flex:1;display:flex;gap:6px">
+              <sc-for list="{{ weekHead }}" as="d" hint-placeholder-count="7"><div style="flex:1;font:600 11px Inter,sans-serif;color:{{ d.c }};text-align:center">{{ d.n }}</div></sc-for>
+            </div>
+            <div style="width:104px;font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);text-align:right">Week total</div>
+          </div>
+          <sc-for list="{{ calWeekRows }}" as="r" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #1B2229">
+              <div style="width:196px;display:flex;align-items:center;gap:9px;min-width:0;padding:9px 12px 9px 0">
+                <span style="width:20px;height:20px;border-radius:4px;background:{{ r.ic }};flex-shrink:0;display:grid;place-items:center;font:700 10px Inter,sans-serif;color:#fff">{{ r.letter }}</span>
+                <span style="font:600 12.5px Inter,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.name }}</span>
+                <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:{{ r.bfg }};border:1px solid {{ r.bbd }};border-radius:2px;padding:1px 4px;flex-shrink:0">{{ r.badge }}</span>
+              </div>
+              <div style="flex:1;display:flex;gap:6px">
+                <sc-for list="{{ r.days }}" as="d" hint-placeholder-count="7">
+                  <div style="flex:1;position:relative;height:22px;background:var(--bg);border-radius:2px;overflow:hidden;box-shadow:{{ d.ring }}">
+                    <sc-for list="{{ d.bars }}" as="b" hint-placeholder-count="1"><div style="position:absolute;top:3px;height:16px;left:{{ b.left }};width:{{ b.w }};background:{{ b.bg }};box-shadow:inset 2px 0 0 {{ b.c }};border-radius:1px"></div></sc-for>
+                    <sc-for list="{{ d.marks }}" as="m" hint-placeholder-count="1"><div style="position:absolute;top:4px;left:{{ m }};width:14px;height:14px;border-radius:50%;background:#101418;border:1.5px solid var(--blu);display:grid;place-items:center;font:800 8px 'Barlow Condensed',sans-serif;color:var(--blu)">E</div></sc-for>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="width:104px;text-align:right;padding-left:12px"><span style="font:800 15px 'Barlow Condensed',sans-serif">{{ r.total }}</span><span style="font:400 10.5px Inter,sans-serif;color:var(--mut)"> blocked</span></div>
+            </div>
+          </sc-for>
+          <div style="display:flex;align-items:center;gap:16px;padding:10px 14px;background:var(--s2);font:400 11.5px Inter,sans-serif;color:var(--mut)">
+            <sc-for list="{{ calLegend }}" as="g" hint-placeholder-count="4"><span style="display:flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:2px;background:{{ g.c }}"></span>{{ g.n }}</span></sc-for>
+            <span><span style="color:var(--blu)">Ⓔ</span> emergency unlock</span>
+            <div style="flex:1"></div><span>Each cell is one day, midnight → midnight · click a day to open it in Day view</span>
+          </div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:12px 14px;display:flex;align-items:center;gap:14px">
+          <span style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Hovering Thu · YouTube</span>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            <span style="font:500 11.5px Inter,sans-serif;padding:4px 9px;border-radius:2px;color:var(--yel);background:rgba(226,163,43,.13);box-shadow:inset 2px 0 0 var(--yel)">Limit 1 h reached at 12:40</span>
+            <span style="font:500 11.5px Inter,sans-serif;padding:4px 9px;border-radius:2px;color:var(--ac);background:rgba(219,81,38,.14);box-shadow:inset 2px 0 0 var(--ac)">→ School nights 22:30–07:00</span>
+          </div>
+          <div style="flex:1"></div><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">12 h 50 m blocked · 1 emergency unlock</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:30px;padding:44px 44px 80px 44px;font-family:Inter,sans-serif">
+  <div style="display:flex;flex-direction:column;gap:6px;max-width:980px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#fff">
+      <div style="font:700 40px 'Barlow Condensed',sans-serif;letter-spacing:-0.02em">ROUND 2 — THE WHOLE APP</div>
+      <div style="font:600 11px Inter,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#DB5126">1280 × 800 · dark + light</div>
+    </div>
+    <div style="font:400 14px/1.6 Inter,sans-serif;color:#93A0AE">Same system as round 1, tightened: 4px cards / 2px controls, a 4px accent bar on section titles, uppercase eyebrow labels, denser tables, site/app type badges, a locked view-only state, trend lines, the weekly block calendar and emergency-unlock markers. Animation notes are on the last plate — all of them are show/hide or a repainted canvas, so customtkinter can build them.</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
+
+    <!-- 3a -->
+    <div id="3a" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3a</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Overview — type badges, next change column, emergency-unlock row, two-click Remove</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--hl:#222932;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--red:#E05A44;--blu:#4E8FD1;--sb:#0B0E12;width:1280px;height:800px;display:flex;flex-direction:column;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:6px;border:1px solid #05070A">
+        <div style="height:34px;flex-shrink:0;background:var(--sb);display:flex;align-items:center;gap:8px;padding:0 0 0 10px;border-bottom:1px solid var(--bd)">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path><path d="M8.6 12.1l2.4 2.4 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Lockdown</span>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;color:var(--mut)"><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">—</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 10px Inter,sans-serif">▢</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">✕</div></div>
+        </div>
+        <div style="flex:1;display:flex;min-height:0">
+          <div style="width:200px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:3px;flex-shrink:0;border-right:1px solid var(--bd)">
+            <div style="font:800 23px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 18px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+            <sc-for list="{{ nav.dBlocking }}" as="p" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:4px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+                <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+              </div>
+            </sc-for>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="position:relative;width:8px;height:8px;border-radius:50%;background:var(--grn)"><span style="position:absolute;inset:0;border-radius:50%;background:var(--grn);animation:ldPulse 2.4s ease-out infinite"></span></span>Service running</div>
+          </div>
+
+          <div style="flex:1;display:flex;flex-direction:column;padding:14px 24px 20px 24px;min-width:0">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:24px">
+              <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+              <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+            </div>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;margin:2px 0 12px 0">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif;letter-spacing:-.01em">Blocking</span></div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+                  <sc-for list="{{ tabsBlocking }}" as="t" hint-placeholder-count="5">
+                    <div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div>
+                  </sc-for>
+                </div>
+                <div style="width:30px;height:30px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;color:var(--mut)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="width:15px;height:15px"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"></path></svg></div>
+              </div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="font:600 15px Inter,sans-serif;white-space:nowrap">Everything blocked <span style="color:var(--mut);font-weight:500">7</span></span>
+                <div style="display:flex;align-items:center;gap:7px;border:1.5px solid var(--yel);color:var(--yel);border-radius:2px;padding:6px 12px;font:600 12px Inter,sans-serif;white-space:nowrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:14px;height:14px"><path d="M12 3v7"></path><path d="M5.5 8.5a9 9 0 1 0 13 0"></path></svg>Emergency unlock<span style="font-weight:500;opacity:.8">2 of 3 left</span></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font:400 12px Inter,sans-serif;color:var(--mut)">Sort by</span>
+                <div style="display:flex;align-items:center;gap:10px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 10px;font:500 12px Inter,sans-serif">Blocked now first <span style="color:var(--mut)">▾</span></div>
+                <div style="font:600 12.5px Inter,sans-serif;color:#fff;background:var(--ac);border-radius:2px;padding:8px 16px">+ Add</div>
+              </div>
+            </div>
+
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--s2);font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">
+                <div style="width:236px">Item</div><div style="flex:1">Rules</div><div style="width:118px">Next change</div><div style="width:150px">Status</div><div style="width:84px">Alerts</div><div style="width:150px"></div>
+              </div>
+              <sc-for list="{{ blockRows }}" as="r" hint-placeholder-count="7">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid {{ r.sep }};background:{{ r.rowbg }}">
+                  <div style="width:236px;display:flex;gap:10px;align-items:center;min-width:0">
+                    <div style="width:24px;height:24px;border-radius:4px;background:{{ r.icon }};flex-shrink:0;display:grid;place-items:center;font:700 12px Inter,sans-serif;color:#fff">{{ r.letter }}</div>
+                    <div style="min-width:0">
+                      <div style="display:flex;align-items:center;gap:7px"><span style="font:600 13.5px Inter,sans-serif">{{ r.name }}</span><span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:{{ r.badgeFg }};border:1px solid {{ r.badgeBd }};border-radius:2px;padding:1px 4px">{{ r.badge }}</span></div>
+                      <div style="font:400 11px Inter,sans-serif;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.sub }}</div>
+                    </div>
+                  </div>
+                  <div style="flex:1;display:flex;flex-wrap:wrap;gap:6px;min-width:0">
+                    <sc-for list="{{ r.chips }}" as="c" hint-placeholder-count="2">
+                      <div style="display:flex;align-items:center;gap:6px;font:500 11.5px Inter,sans-serif;padding:4px 9px;border-radius:2px;white-space:nowrap;color:{{ c.c }};background:{{ c.bg }};box-shadow:inset 2px 0 0 {{ c.c }}">{{ c.t }}</div>
+                    </sc-for>
+                  </div>
+                  <div style="width:118px;font:500 12px Inter,sans-serif;color:{{ r.nextc }}">{{ r.next }}</div>
+                  <div style="width:150px;display:flex;align-items:center;gap:7px;font:500 12px Inter,sans-serif;color:{{ r.sc }}">
+                    <span style="width:8px;height:8px;border-radius:50%;background:{{ r.dot }};flex-shrink:0"></span>{{ r.status }}
+                  </div>
+                  <div style="width:84px"><div style="display:flex;align-items:center;justify-content:space-between;border:1.5px solid var(--bd);border-radius:2px;padding:5px 8px;font:500 11.5px Inter,sans-serif">{{ r.alert }}<span style="color:var(--mut)">▾</span></div></div>
+                  <div style="width:150px;display:flex;gap:8px;justify-content:flex-end;align-items:center">
+                    <div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:6px 14px">Edit</div>
+                    <div style="position:relative;overflow:hidden;font:600 12px Inter,sans-serif;border:1.5px solid {{ r.rmc }};background:{{ r.rmbg }};color:{{ r.rmf }};border-radius:2px;padding:6px 14px">{{ r.rm }}<div style="position:absolute;left:0;bottom:0;height:2px;background:{{ r.rmf }};opacity:{{ r.rmtick }};animation:ldTick 3s linear infinite"></div></div>
+                  </div>
+                </div>
+              </sc-for>
+              <div style="flex:1;border-top:1px solid #1E252D"></div>
+              <div style="display:flex;gap:18px;align-items:center;font:400 11.5px Inter,sans-serif;color:var(--mut);padding:11px 16px;border-top:1px solid var(--bd);background:var(--s2)">
+                <span><span style="color:var(--ac)">→</span> rules come from a group and are changed in Groups</span>
+                <span><span style="color:var(--blu)">●</span> emergency unlock running</span>
+                <span>Remove asks twice · 3 s to confirm</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3b -->
+    <div id="3b" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3b</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Add — blockers become a rail + one open panel, so the form never grows past the window</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--sb:#0B0E12;width:1280px;height:800px;display:flex;flex-direction:column;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:6px;border:1px solid #05070A">
+        <div style="height:34px;flex-shrink:0;background:var(--sb);display:flex;align-items:center;gap:8px;padding-left:10px;border-bottom:1px solid var(--bd)">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path><path d="M8.6 12.1l2.4 2.4 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Lockdown</span><div style="flex:1"></div>
+          <div style="display:flex;align-items:center;color:var(--mut)"><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">—</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 10px Inter,sans-serif">▢</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">✕</div></div>
+        </div>
+        <div style="flex:1;display:flex;min-height:0">
+          <div style="width:200px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:3px;flex-shrink:0;border-right:1px solid var(--bd)">
+            <div style="font:800 23px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 18px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+            <sc-for list="{{ nav.dBlocking }}" as="p" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:4px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+                <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+              </div>
+            </sc-for>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="position:relative;width:8px;height:8px;border-radius:50%;background:var(--grn)"><span style="position:absolute;inset:0;border-radius:50%;background:var(--grn);animation:ldPulse 2.4s ease-out infinite"></span></span>Service running</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:14px 24px 0 24px;min-width:0">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:24px">
+              <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+              <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+            </div>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;margin:2px 0 12px 0">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Blocking</span></div>
+              <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+                <sc-for list="{{ tabsAdd }}" as="t" hint-placeholder-count="5">
+                  <div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="background:var(--s);border:1px solid var(--bd);border-top:3px solid var(--ac);border-radius:0 0 4px 4px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:14px">
+              <div style="display:flex;align-items:center;gap:10px;flex:1;background:var(--bg);border:1.5px solid var(--bd);border-radius:2px;padding:9px 11px">
+                <div style="width:20px;height:20px;border-radius:4px;background:#5865F2;display:grid;place-items:center;font:700 11px Inter,sans-serif;color:#fff">D</div>
+                <span style="font:500 13px Inter,sans-serif">discord.exe</span>
+                <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#4E8FD1;border:1px solid rgba(78,143,209,.5);border-radius:2px;padding:1px 4px">app</span>
+                <div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut)">picked from Browse apps</span>
+              </div>
+              <div style="width:220px;background:var(--bg);border:1.5px solid var(--bd);border-radius:2px;padding:9px 11px;font:500 13px Inter,sans-serif">Discord</div>
+              <div style="font:600 12.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:9px 15px">Browse apps</div>
+            </div>
+
+            <div style="display:flex;gap:14px;flex:1;min-height:0">
+              <div style="width:318px;display:flex;flex-direction:column;gap:8px;flex-shrink:0">
+                <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Blockers · tick any number</span><span style="font:400 11px Inter,sans-serif;color:var(--mut)">2 of 5 on</span></div>
+                <sc-for list="{{ blockerCards }}" as="b" hint-placeholder-count="5">
+                  <div style="background:{{ b.bg }};border:1px solid {{ b.bd }};border-left:3px solid {{ b.bar }};border-radius:3px;padding:11px 12px;display:flex;gap:11px;align-items:flex-start">
+                    <div style="width:17px;height:17px;border-radius:2px;background:{{ b.tickBg }};border:1.5px solid {{ b.tickBd }};flex-shrink:0;display:grid;place-items:center;margin-top:1px"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;opacity:{{ b.tickOn }}"><path d="M4 12.5l5 5L20 6.5"></path></svg></div>
+                    <div style="flex:1;min-width:0">
+                      <div style="font:600 13px Inter,sans-serif;color:{{ b.fg }}">{{ b.name }}</div>
+                      <div style="font:400 11.5px Inter,sans-serif;color:{{ b.subc }};margin-top:2px">{{ b.sub }}</div>
+                    </div>
+                    <span style="font:400 11px Inter,sans-serif;color:var(--mut);margin-top:2px">{{ b.chev }}</span>
+                  </div>
+                </sc-for>
+                <div style="background:rgba(219,81,38,.08);border:1px solid rgba(219,81,38,.3);border-radius:3px;padding:10px 12px;font:400 11.5px/1.5 Inter,sans-serif;color:var(--mut)">Blocked when <span style="color:var(--ac);font-weight:600">any</span> ticked blocker applies. <span style="color:var(--tx)">Discord</span> will be blocked outside 09:00–17:00 and after 30m a day.</div>
+                <div style="flex:1"></div>
+              </div>
+
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--bd);background:var(--s2)">
+                  <span style="width:3px;height:16px;background:var(--ac)"></span>
+                  <span style="font:600 14px Inter,sans-serif">By time</span>
+                  <span style="font:400 12px Inter,sans-serif;color:var(--mut)">allowed only inside these windows</span>
+                  <div style="flex:1"></div>
+                  <div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px"><div style="padding:5px 12px;border-radius:2px;background:var(--ac);color:#fff;font:600 11.5px Inter,sans-serif">Allow only during</div><div style="padding:5px 12px;font:500 11.5px Inter,sans-serif;color:var(--mut)">Block during</div></div>
+                </div>
+                <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+                  <sc-for list="{{ timeWindows }}" as="w" hint-placeholder-count="2">
+                    <div style="background:var(--bg);border:1px solid var(--bd);border-radius:3px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                      <div style="display:flex;gap:4px">
+                        <sc-for list="{{ w.days }}" as="d" hint-placeholder-count="7">
+                          <div style="width:34px;height:28px;display:grid;place-items:center;border-radius:2px;font:600 11.5px Inter,sans-serif;background:{{ d.bg }};color:{{ d.fg }};border:1px solid {{ d.bd }}">{{ d.n }}</div>
+                        </sc-for>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;font:500 12.5px Inter,sans-serif"><div style="border:1.5px solid var(--bd);border-radius:2px;padding:6px 12px">{{ w.from }}</div><span style="color:var(--mut)">to</span><div style="border:1.5px solid var(--bd);border-radius:2px;padding:6px 12px">{{ w.to }}</div></div>
+                      <div style="flex:1"></div>
+                      <div style="width:26px;height:26px;display:grid;place-items:center;border-radius:2px;color:var(--mut);border:1px solid var(--bd)">✕</div>
+                    </div>
+                  </sc-for>
+                  <div style="display:flex;align-items:center;gap:12px">
+                    <div style="font:600 12px Inter,sans-serif;border:1.5px dashed var(--bd);color:var(--mut);border-radius:2px;padding:8px 14px">+ Add time window</div>
+                    <div style="flex:1"></div>
+                    <span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">During blocked times, still allow</span>
+                    <div style="border:1.5px solid var(--bd);border-radius:2px;padding:6px 12px;font:600 12.5px Inter,sans-serif">10</div>
+                    <span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">minutes</span>
+                    <div style="width:17px;height:17px;border-radius:50%;background:var(--s2);color:var(--mut);display:grid;place-items:center;font:600 10px Inter,sans-serif">?</div>
+                  </div>
+                  <div style="height:1px;background:var(--bd);margin:2px 0"></div>
+                  <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">When blocked, the app is</div>
+                  <div style="display:flex;gap:10px">
+                    <sc-for list="{{ whenBlocked }}" as="o" hint-placeholder-count="3">
+                      <div style="display:flex;align-items:center;gap:9px;background:var(--bg);border:1px solid {{ o.bd }};border-radius:3px;padding:10px 13px;font:500 12.5px Inter,sans-serif;color:{{ o.fg }}">
+                        <div style="width:15px;height:15px;border-radius:2px;background:{{ o.bg }};border:1.5px solid {{ o.bd2 }};display:grid;place-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" style="width:10px;height:10px;opacity:{{ o.on }}"><path d="M4 12.5l5 5L20 6.5"></path></svg></div>{{ o.n }}
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="font:400 11.5px/1.55 Inter,sans-serif;color:var(--mut)">Close and Minimize exclude each other. Blocking the internet leaves the app open but offline — good for games with an offline mode.</div>
+                </div>
+                <div style="flex:1"></div>
+                <div style="padding:12px 16px;border-top:1px solid var(--bd);background:var(--s2);display:flex;align-items:center;gap:10px">
+                  <span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">Next: tick <span style="color:var(--tx)">Time limit</span> in the rail to set a daily cap.</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:14px;padding:14px 0 16px 0">
+              <div style="font:400 12px Inter,sans-serif;color:var(--mut)">It will be blocked: <span style="color:var(--tx)">by time</span> (allowed only 09:00–17:00, Mon–Fri) · <span style="color:var(--tx)">time limit</span> (30m per day).</div>
+              <div style="flex:1"></div>
+              <div style="font:600 12.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:9px 20px">Cancel</div>
+              <div style="font:600 12.5px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:9px 24px">+ Add</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3c -->
+    <div id="3c" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3c</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Protection — lists as rows with counts, own list with preview, blocked words</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--sb:#0B0E12;width:1280px;height:800px;display:flex;flex-direction:column;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:6px;border:1px solid #05070A">
+        <div style="height:34px;flex-shrink:0;background:var(--sb);display:flex;align-items:center;gap:8px;padding-left:10px;border-bottom:1px solid var(--bd)">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path><path d="M8.6 12.1l2.4 2.4 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Lockdown</span><div style="flex:1"></div>
+          <div style="display:flex;align-items:center;color:var(--mut)"><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">—</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 10px Inter,sans-serif">▢</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">✕</div></div>
+        </div>
+        <div style="flex:1;display:flex;min-height:0">
+          <div style="width:200px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:3px;flex-shrink:0;border-right:1px solid var(--bd)">
+            <div style="font:800 23px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 18px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+            <sc-for list="{{ nav.dBlocking }}" as="p" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:4px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+                <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+              </div>
+            </sc-for>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="position:relative;width:8px;height:8px;border-radius:50%;background:var(--grn)"><span style="position:absolute;inset:0;border-radius:50%;background:var(--grn);animation:ldPulse 2.4s ease-out infinite"></span></span>Service running</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:14px 24px 18px 24px;min-width:0">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:24px">
+              <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+              <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+            </div>
+            <div style="display:flex;align-items:flex-end;justify-content:space-between;margin:2px 0 12px 0">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Blocking</span></div>
+              <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+                <sc-for list="{{ tabsProt }}" as="t" hint-placeholder-count="5">
+                  <div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display:flex;gap:14px;flex:1;min-height:0">
+              <div style="flex:1.35;display:flex;flex-direction:column;gap:14px;min-width:0">
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;display:flex;flex-direction:column;overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:11px;padding:12px 16px;border-bottom:1px solid var(--bd)">
+                    <span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Always-on lists</span>
+                    <div style="flex:1"></div>
+                    <div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div>
+                    <span style="font:500 12px Inter,sans-serif;color:var(--mut)">Update</span>
+                    <div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:5px 9px;font:500 11.5px Inter,sans-serif">daily <span style="color:var(--mut)">▾</span></div>
+                    <div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:6px 12px">Update now</div>
+                  </div>
+                  <sc-for list="{{ protLists }}" as="l" hint-placeholder-count="5">
+                    <div style="display:flex;align-items:center;gap:13px;padding:11px 16px;border-bottom:1px solid #1E252D">
+                      <div style="width:32px;height:17px;border-radius:9px;background:{{ l.track }};position:relative;flex-shrink:0;border:1px solid {{ l.kbd }}"><div style="position:absolute;{{ l.side }}:2px;top:1px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div>
+                      <div style="width:92px;font:600 13px Inter,sans-serif;color:{{ l.fg }}">{{ l.name }}</div>
+                      <div style="flex:1;min-width:0"><div style="font:400 12px Inter,sans-serif;color:{{ l.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ l.desc }}</div><div style="font:400 11px Inter,sans-serif;color:var(--mut);margin-top:2px">{{ l.src }}</div></div>
+                      <div style="text-align:right"><div style="font:800 15px 'Barlow Condensed',sans-serif;color:{{ l.fg }}">{{ l.count }}</div><div style="font:400 10.5px Inter,sans-serif;color:var(--mut)">{{ l.upd }}</div></div>
+                    </div>
+                  </sc-for>
+                  <div style="padding:13px 16px;display:flex;align-items:center;gap:10px">
+                    <span style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);white-space:nowrap">Add your own</span>
+                    <div style="width:150px;border:1.5px solid var(--bd);border-radius:2px;padding:8px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">Name (e.g. Crypto)</div>
+                    <div style="flex:1;border:1.5px solid var(--bd);border-radius:2px;padding:8px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">https://… list address</div>
+                    <div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 14px">Preview</div>
+                  </div>
+                </div>
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:14px 16px;display:flex;align-items:center;gap:13px">
+                  <span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Safe search</span>
+                  <div style="flex:1"></div>
+                  <div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div>
+                  <span style="font:500 12.5px Inter,sans-serif">Force SafeSearch on Google, Bing, DuckDuckGo &amp; YouTube</span>
+                  <div style="width:17px;height:17px;border-radius:50%;background:var(--s2);color:var(--mut);display:grid;place-items:center;font:600 10px Inter,sans-serif">?</div>
+                </div>
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:14px 16px;display:flex;align-items:center;gap:12px">
+                  <span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif;white-space:nowrap">Check a site</span>
+                  <div style="flex:1;border:1.5px solid var(--bd);border-radius:2px;padding:8px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">e.g. suspicious-shop.com</div>
+                  <div style="font:600 12px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:9px 18px">Check</div>
+                </div>
+              </div>
+
+              <div style="flex:1;display:flex;flex-direction:column;gap:14px;min-width:0">
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;display:flex;flex-direction:column;flex:1;overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:11px;padding:12px 16px;border-bottom:1px solid var(--bd)">
+                    <span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Blocked words</span>
+                    <div style="flex:1"></div>
+                    <div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div>
+                  </div>
+                  <div style="padding:13px 16px;display:flex;flex-direction:column;gap:11px">
+                    <div style="font:400 12px/1.5 Inter,sans-serif;color:var(--mut)">Lockdown reads the browser tab title. When a page matches:</div>
+                    <div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px;align-self:flex-start"><div style="padding:6px 14px;border-radius:2px;background:var(--ac);color:#fff;font:600 12px Inter,sans-serif">Close the tab</div><div style="padding:6px 14px;font:500 12px Inter,sans-serif;color:var(--mut)">Go back</div></div>
+                    <div style="height:1px;background:var(--bd)"></div>
+                    <sc-for list="{{ wordLists }}" as="w" hint-placeholder-count="4">
+                      <div style="display:flex;align-items:center;gap:11px">
+                        <div style="width:32px;height:17px;border-radius:9px;background:{{ w.track }};position:relative;flex-shrink:0;border:1px solid {{ w.kbd }};opacity:{{ w.sw }}"><div style="position:absolute;{{ w.side }}:2px;top:1px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div>
+                        <span style="flex:1;font:500 12.5px Inter,sans-serif;color:{{ w.fg }}">{{ w.name }}</span>
+                        <span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ w.count }}</span>
+                        <div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:5px 13px">Open</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="flex:1"></div>
+                  <div style="padding:12px 16px;border-top:1px solid var(--bd);background:var(--s2);font:400 11.5px/1.5 Inter,sans-serif;color:var(--mut)">Modes and the emergency unlock never switch these lists off.</div>
+                </div>
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:14px 16px;display:flex;flex-direction:column;gap:11px">
+                  <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Allowed anyway</span><div style="width:17px;height:17px;border-radius:50%;background:var(--s2);color:var(--mut);display:grid;place-items:center;font:600 10px Inter,sans-serif">?</div></div>
+                  <div style="display:flex;gap:7px;flex-wrap:wrap">
+                    <div style="display:flex;align-items:center;gap:7px;background:var(--bg);border:1px solid var(--bd);border-radius:2px;padding:5px 9px;font:500 12px Inter,sans-serif"><span style="width:14px;height:14px;border-radius:2px;background:#E2A32B;display:grid;place-items:center;font:700 9px Inter,sans-serif;color:#101418">E</span>example.org<span style="color:var(--mut)">✕</span></div>
+                  </div>
+                  <div style="display:flex;gap:10px"><div style="flex:1;border:1.5px solid var(--bd);border-radius:2px;padding:8px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">site to allow</div><div style="font:600 12px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:9px 18px">Allow</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3d -->
+    <div id="3d" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3d</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Anti-Bypass — locked / view-only: everything stays readable, editing needs the challenge</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--red:#E05A44;--sb:#0B0E12;width:1280px;height:800px;display:flex;flex-direction:column;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;overflow:hidden;border-radius:6px;border:1px solid #05070A">
+        <div style="height:34px;flex-shrink:0;background:var(--sb);display:flex;align-items:center;gap:8px;padding-left:10px;border-bottom:1px solid var(--bd)">
+          <svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path><path d="M8.6 12.1l2.4 2.4 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Lockdown</span><div style="flex:1"></div>
+          <div style="display:flex;align-items:center;color:var(--mut)"><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">—</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 10px Inter,sans-serif">▢</div><div style="width:44px;height:34px;display:grid;place-items:center;font:400 13px Inter,sans-serif">✕</div></div>
+        </div>
+        <div style="flex:1;display:flex;min-height:0">
+          <div style="width:200px;background:var(--sb);display:flex;flex-direction:column;padding:18px 12px 14px 12px;gap:3px;flex-shrink:0;border-right:1px solid var(--bd)">
+            <div style="font:800 23px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 18px 8px">LOCK<span style="color:var(--ac)">DOWN</span></div>
+            <sc-for list="{{ nav.dAntiBypass }}" as="p" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:4px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+                <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+              </div>
+            </sc-for>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;font:500 12px Inter,sans-serif;color:var(--grn)"><span style="position:relative;width:8px;height:8px;border-radius:50%;background:var(--grn)"><span style="position:absolute;inset:0;border-radius:50%;background:var(--grn);animation:ldPulse 2.4s ease-out infinite"></span></span>Service running</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:14px 24px 18px 24px;min-width:0">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:9px;height:24px">
+              <div style="width:34px;height:18px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff"></div></div>
+              <span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">Auto-save</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:11px;margin:2px 0 12px 0"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Anti-Bypass</span></div>
+
+            <div style="display:flex;align-items:center;gap:14px;background:rgba(224,90,68,.09);border:1px solid rgba(224,90,68,.4);border-left:3px solid var(--red);border-radius:3px;padding:13px 16px;margin-bottom:14px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#E05A44" stroke-width="1.8" stroke-linecap="round" style="width:20px;height:20px;flex-shrink:0"><rect x="4.5" y="10.5" width="15" height="10" rx="2"></rect><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"></path></svg>
+              <div style="flex:1">
+                <div style="font:600 13.5px Inter,sans-serif">Locked — you can look at everything, but loosening a block needs the challenge</div>
+                <div style="font:400 12px Inter,sans-serif;color:var(--mut);margin-top:3px">Typing a 60-character phrase in a 3×3 grid · only Sunday 18:00–20:00 · next chance Sun 20 Sep 18:00</div>
+              </div>
+              <div style="font:600 12.5px Inter,sans-serif;border:1.5px solid var(--red);color:var(--red);border-radius:2px;padding:9px 16px">Unlock to edit</div>
+            </div>
+
+            <div style="display:flex;gap:14px;flex:1;min-height:0">
+              <div style="flex:1.25;display:flex;flex-direction:column;gap:14px;min-width:0">
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:13px;opacity:.72">
+                  <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--mut)"></span><span style="font:600 14px Inter,sans-serif">Challenges</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#8D9AA8" stroke-width="1.9" style="width:13px;height:13px"><rect x="5" y="11" width="14" height="9" rx="1.6"></rect><path d="M8.2 11V8.4a3.8 3.8 0 0 1 7.6 0V11"></path></svg>
+                    <div style="flex:1"></div><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">view only</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:17px;border-radius:9px;background:#5E4238;position:relative;border:1px solid #6E4C3F"><div style="position:absolute;right:2px;top:1px;width:13px;height:13px;border-radius:50%;background:#C9CFD7"></div></div><span style="font:500 12.5px Inter,sans-serif">Type a random phrase (no pasting)</span></div>
+                  <div style="display:flex;align-items:center;gap:10px;padding-left:43px"><span style="font:400 12px Inter,sans-serif;color:var(--mut)">Length</span>
+                    <div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px">
+                      <sc-for list="{{ phraseLen }}" as="o" hint-placeholder-count="4"><div style="padding:5px 13px;border-radius:2px;font:500 11.5px Inter,sans-serif;background:{{ o.bg }};color:{{ o.fg }}">{{ o.n }}</div></sc-for>
+                    </div>
+                    <span style="font:600 12px Inter,sans-serif;color:var(--mut)">60 characters</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px;padding-left:43px"><div style="width:16px;height:16px;border-radius:2px;background:#8A4E33;display:grid;place-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" style="width:10px;height:10px"><path d="M4 12.5l5 5L20 6.5"></path></svg></div><span style="font:400 12px Inter,sans-serif">3×3 grid — one word at a time into a box picked at random</span></div>
+                  <div style="height:1px;background:var(--bd)"></div>
+                  <div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:17px;border-radius:9px;background:#5E4238;position:relative;border:1px solid #6E4C3F"><div style="position:absolute;right:2px;top:1px;width:13px;height:13px;border-radius:50%;background:#C9CFD7"></div></div><span style="font:500 12.5px Inter,sans-serif">Only during these hours</span></div>
+                  <div style="display:flex;align-items:center;gap:12px;padding-left:43px;flex-wrap:wrap">
+                    <div style="display:flex;gap:4px">
+                      <sc-for list="{{ abDays }}" as="d" hint-placeholder-count="7"><div style="width:32px;height:26px;display:grid;place-items:center;border-radius:2px;font:600 11px Inter,sans-serif;background:{{ d.bg }};color:{{ d.fg }};border:1px solid {{ d.bd }}">{{ d.n }}</div></sc-for>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;font:500 12px Inter,sans-serif"><div style="border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px">18:00</div><span style="color:var(--mut)">to</span><div style="border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px">20:00</div></div>
+                  </div>
+                </div>
+
+                <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;flex:1;min-height:0">
+                  <div style="display:flex;align-items:center;gap:11px;margin-bottom:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Keeping Lockdown running</span></div>
+                  <sc-for list="{{ abKeep }}" as="k" hint-placeholder-count="4">
+                    <div style="display:flex;gap:10px;font:400 12.5px/1.6 Inter,sans-serif;color:var(--mut)"><span style="color:var(--ac)">→</span><span>{{ k }}</span></div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:11px;min-width:0">
+                <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">What needs the challenge</span></div>
+                <sc-for list="{{ abNeeds }}" as="n" hint-placeholder-count="7">
+                  <div style="display:flex;gap:10px;align-items:flex-start;font:400 12.5px/1.5 Inter,sans-serif"><svg viewBox="0 0 24 24" fill="none" stroke="#8D9AA8" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;margin-top:3px"><rect x="5" y="11" width="14" height="9" rx="1.6"></rect><path d="M8.2 11V8.4a3.8 3.8 0 0 1 7.6 0V11"></path></svg><span>{{ n }}</span></div>
+                </sc-for>
+                <div style="flex:1"></div>
+                <div style="background:var(--bg);border:1px solid var(--bd);border-radius:3px;padding:11px 12px;font:400 11.5px/1.55 Inter,sans-serif;color:var(--mut)">Making blocks <span style="color:var(--grn);font-weight:600">stricter</span> is always instant. Not included: the emergency unlock (own limit) and the limit reset time (it never shortens a limit day).</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px">
+        <div style="width:632px;background:#181D23;border:1px solid #2B333D;border-radius:4px;padding:14px 16px;color:#E9EDF2;font-family:Inter,sans-serif">
+          <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#8D9AA8;margin-bottom:11px">After passing the challenge — 5-minute window</div>
+          <div style="display:flex;align-items:center;gap:13px;background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.42);border-left:3px solid #27AE60;border-radius:3px;padding:12px 14px;position:relative;overflow:hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#27AE60" stroke-width="1.8" stroke-linecap="round" style="width:19px;height:19px"><rect x="4.5" y="10.5" width="15" height="10" rx="2"></rect><path d="M8 10.5V7.5a4 4 0 0 1 7.5-2"></path></svg>
+            <div style="flex:1"><div style="font:600 13px Inter,sans-serif">Unlocked for <span style="font:800 14px 'Barlow Condensed',sans-serif;color:#27AE60">4:38</span></div><div style="font:400 11.5px Inter,sans-serif;color:#8D9AA8;margin-top:2px">Changes that loosen your blocks are allowed until the timer runs out.</div></div>
+            <div style="font:600 12px Inter,sans-serif;border:1.5px solid #2B333D;border-radius:2px;padding:7px 13px">Lock now</div>
+            <div style="position:absolute;left:0;bottom:0;height:2px;background:#27AE60;animation:ldTick 6s linear infinite"></div>
+          </div>
+        </div>
+        <div style="width:592px;background:#181D23;border:1px solid #2B333D;border-radius:4px;padding:14px 16px;color:#E9EDF2;font-family:Inter,sans-serif">
+          <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#8D9AA8;margin-bottom:11px">Locked control — anywhere in the app</div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:9px;opacity:.6"><div style="width:32px;height:17px;border-radius:9px;background:#3A434F;position:relative;border:1px solid #4A5563"><div style="position:absolute;left:2px;top:1px;width:13px;height:13px;border-radius:50%;background:#C9CFD7"></div></div><span style="font:500 12.5px Inter,sans-serif">Allow emergency unlocks</span></div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="#8D9AA8" stroke-width="2" style="width:13px;height:13px"><rect x="5" y="11" width="14" height="9" rx="1.6"></rect><path d="M8.2 11V8.4a3.8 3.8 0 0 1 7.6 0V11"></path></svg>
+            <div style="font:600 11.5px Inter,sans-serif;border:1.5px solid #E05A44;color:#E05A44;border-radius:2px;padding:6px 12px">Unlock to edit</div>
+            <span style="font:400 11.5px Inter,sans-serif;color:#8D9AA8">· dimmed to 60 %, lock icon after the label, one unlock button per card</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3e -->
+    <div id="3e" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3e</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Blocking → Calendar (new) — Mon–Sun × 24 h, one bar per item, emergency unlocks marked · content area only, shell as <a href="#3a">3a</a></span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--red:#E05A44;--blu:#4E8FD1;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Blocking</span></div>
+          <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+            <sc-for list="{{ tabsCal }}" as="t" hint-placeholder-count="5"><div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div></sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font:600 15px Inter,sans-serif">This week</span>
+          <div style="display:flex;gap:6px"><div style="width:26px;height:26px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;font:500 12px Inter,sans-serif;color:var(--mut)">‹</div><div style="width:26px;height:26px;border:1.5px solid var(--bd);border-radius:2px;display:grid;place-items:center;font:500 12px Inter,sans-serif;color:var(--mut)">›</div></div>
+          <span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">14 – 20 September 2026</span>
+          <div style="flex:1"></div>
+          <sc-for list="{{ calLegend }}" as="g" hint-placeholder-count="4"><div style="display:flex;align-items:center;gap:7px;font:500 11.5px Inter,sans-serif;color:var(--mut)"><span style="width:10px;height:10px;border-radius:2px;background:{{ g.c }}"></span>{{ g.n }}</div></sc-for>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:14px 16px 16px 16px">
+          <div style="display:flex;gap:8px;padding-left:44px;margin-bottom:6px">
+            <sc-for list="{{ calHours }}" as="h" hint-placeholder-count="12"><div style="flex:1;font:500 10px Inter,sans-serif;color:var(--mut);text-align:left">{{ h }}</div></sc-for>
+          </div>
+          <sc-for list="{{ calWeek }}" as="d" hint-placeholder-count="7">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+              <div style="width:36px;font:600 12px Inter,sans-serif;color:{{ d.fg }};text-align:right">{{ d.day }}</div>
+              <div style="flex:1;position:relative;height:38px;background:var(--bg);border:1px solid #1E252D;border-radius:2px;overflow:hidden">
+                <sc-for list="{{ d.ticks }}" as="t" hint-placeholder-count="11"><div style="position:absolute;top:0;bottom:0;width:1px;background:#1B2229;left:{{ t }}"></div></sc-for>
+                <sc-for list="{{ d.bars }}" as="b" hint-placeholder-count="2">
+                  <div style="position:absolute;top:{{ b.top }};height:15px;left:{{ b.left }};width:{{ b.w }};background:{{ b.bg }};box-shadow:inset 2px 0 0 {{ b.c }};border-radius:2px;display:flex;align-items:center;padding-left:6px;overflow:hidden"><span style="font:600 10px Inter,sans-serif;color:{{ b.c }};white-space:nowrap">{{ b.label }}</span></div>
+                </sc-for>
+                <sc-for list="{{ d.marks }}" as="m" hint-placeholder-count="1">
+                  <div style="position:absolute;top:3px;left:{{ m }};width:14px;height:14px;border-radius:50%;background:rgba(78,143,209,.18);border:1px solid var(--blu);display:grid;place-items:center;font:800 9px 'Barlow Condensed',sans-serif;color:var(--blu)">E</div>
+                </sc-for>
+                <div style="position:absolute;top:0;bottom:0;width:2px;background:{{ d.nowc }};left:{{ d.now }}"></div>
+              </div>
+            </div>
+          </sc-for>
+          <div style="display:flex;align-items:center;gap:16px;padding-top:10px;margin-top:6px;border-top:1px solid var(--bd);font:400 11.5px Inter,sans-serif;color:var(--mut)">
+            <span>Click a bar to open that item</span><span><span style="color:var(--blu)">Ⓔ</span> emergency unlock used</span><span><span style="color:var(--ac)">▌</span> now</span><span>Overlapping rules stack — the strictest one wins</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3f -->
+    <div id="3f" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3f</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Network Log → Table — dense rows, blocked rows tinted, live badge · content area only</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--red:#E05A44;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Network Log</span></div>
+          <div style="text-align:right;font:400 11.5px Inter,sans-serif;color:var(--mut)">Last hour · <span style="font:800 13px 'Barlow Condensed',sans-serif;color:var(--tx)">893</span> connections · <span style="color:var(--red);font-weight:600">2 blocked</span> · 8 sites · 5 apps</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 15px;border-radius:2px;background:var(--ac);color:#fff;font:600 12.5px Inter,sans-serif">Table</div><div style="padding:6px 15px;font:500 12.5px Inter,sans-serif;color:var(--mut)">Graph</div></div>
+          <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 13px;border-radius:2px;background:var(--s);color:var(--tx);font:600 12px Inter,sans-serif">All</div><div style="padding:6px 13px;font:500 12px Inter,sans-serif;color:var(--mut)">Allowed</div><div style="padding:6px 13px;font:500 12px Inter,sans-serif;color:var(--mut)">Blocked</div></div>
+          <div style="flex:1;border:1.5px solid var(--bd);border-radius:2px;padding:7px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">Search site or app</div>
+          <div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 10px;font:500 12px Inter,sans-serif">All apps <span style="color:var(--mut)">▾</span></div>
+          <div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--grn);border-radius:2px;padding:6px 11px;font:600 12px Inter,sans-serif;color:var(--grn)"><span style="width:7px;height:7px;border-radius:50%;background:var(--grn);animation:ldBlink 1.6s steps(1,end) infinite"></span>Live</div>
+          <div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:7px 13px">Export CSV</div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;overflow:hidden">
+          <div style="display:flex;gap:12px;padding:9px 14px;background:var(--s2);font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">
+            <div style="width:190px">App</div><div style="width:56px">Time</div><div style="flex:1">Site</div><div style="width:120px">Rule</div><div style="width:50px">Port</div><div style="width:100px">Status</div>
+          </div>
+          <sc-for list="{{ netRows }}" as="r" hint-placeholder-count="14">
+            <div style="display:flex;gap:12px;padding:7px 14px;border-top:1px solid #1B2229;background:{{ r.rowbg }};font:400 12px Inter,sans-serif">
+              <div style="width:190px;display:flex;align-items:center;gap:8px;min-width:0"><span style="width:16px;height:16px;border-radius:3px;background:{{ r.c }};flex-shrink:0;display:grid;place-items:center;font:700 9px Inter,sans-serif;color:#fff">{{ r.l }}</span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.app }}</span></div>
+              <div style="width:56px;color:var(--mut);font-variant-numeric:tabular-nums">{{ r.time }}</div>
+              <div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.site }}<span style="color:var(--mut)">{{ r.x }}</span></div>
+              <div style="width:120px;font-size:11.5px;color:{{ r.rulec }}">{{ r.rule }}</div>
+              <div style="width:50px;color:var(--mut);font-variant-numeric:tabular-nums">443</div>
+              <div style="width:100px;font-weight:500;color:{{ r.sc }}">{{ r.status }}</div>
+            </div>
+          </sc-for>
+          <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;border-top:1px solid var(--bd);background:var(--s2);font:400 11.5px Inter,sans-serif;color:var(--mut)">
+            <span>Keeps the last hour · click a row to block it or copy it</span><div style="flex:1"></div><div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:6px 14px;color:var(--tx)">Show more (261 older)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3g -->
+    <div id="3g" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3g</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Network Log → Graph — blocked minutes marked in red · content area only</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--red:#E05A44;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Network Log</span></div>
+          <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 15px;font:500 12.5px Inter,sans-serif;color:var(--mut)">Table</div><div style="padding:6px 15px;border-radius:2px;background:var(--ac);color:#fff;font:600 12.5px Inter,sans-serif">Graph</div></div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px">
+          <div style="display:flex;align-items:baseline;gap:11px;margin-bottom:14px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Connections per minute</span><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">last hour · peak 24 at 06:11</span><div style="flex:1"></div><span style="font:400 11.5px Inter,sans-serif;color:var(--red)">▮ minute with a blocked attempt</span></div>
+          <div style="display:flex;align-items:flex-end;gap:3px;height:190px">
+            <sc-for list="{{ netBars }}" as="b" hint-placeholder-count="60"><div style="flex:1;height:{{ b.h }};background:{{ b.c }};border-radius:1px"></div></sc-for>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding-top:8px;font:500 10.5px Inter,sans-serif;color:var(--mut)"><span>05:20</span><span>05:30</span><span>05:40</span><span>05:50</span><span>06:00</span><span>06:10</span><span>06:20</span></div>
+        </div>
+        <div style="display:flex;gap:14px">
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px">
+            <div style="display:flex;align-items:center;gap:11px;margin-bottom:12px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Top apps</span></div>
+            <sc-for list="{{ topApps }}" as="a" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+                <span style="width:18px;height:18px;border-radius:3px;background:{{ a.c }};display:grid;place-items:center;font:700 10px Inter,sans-serif;color:#fff">{{ a.l }}</span>
+                <span style="width:150px;font:500 12.5px Inter,sans-serif">{{ a.n }}</span>
+                <div style="flex:1;height:6px;background:var(--s2);border-radius:1px;overflow:hidden"><div style="height:6px;width:{{ a.w }};background:{{ a.bar }};animation:ldFill 1.1s cubic-bezier(.25,0,0,1)"></div></div>
+                <span style="width:40px;text-align:right;font:800 14px 'Barlow Condensed',sans-serif">{{ a.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px">
+            <div style="display:flex;align-items:center;gap:11px;margin-bottom:12px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Top sites</span></div>
+            <sc-for list="{{ topSites }}" as="a" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+                <span style="width:18px;height:18px;border-radius:3px;background:{{ a.c }};display:grid;place-items:center;font:700 10px Inter,sans-serif;color:#fff">{{ a.l }}</span>
+                <span style="flex:1;font:500 12.5px Inter,sans-serif;color:{{ a.fg }}">{{ a.n }}</span>
+                <span style="font:400 11px Inter,sans-serif;color:{{ a.tagc }}">{{ a.tag }}</span>
+                <span style="width:40px;text-align:right;font:800 14px 'Barlow Condensed',sans-serif">{{ a.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3h -->
+    <div id="3h" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3h</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Modes — the “Now” card runs a locked Pomodoro; mode cards get an icon and a rule line · content area only</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Modes</span></div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 15px;border-radius:2px;background:var(--ac);color:#fff;font:600 12.5px Inter,sans-serif">Modes</div><div style="padding:6px 15px;font:500 12.5px Inter,sans-serif;color:var(--mut)">Reminders</div></div>
+            <div style="font:600 12.5px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:9px 18px">+ New mode</div>
+          </div>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-top:3px solid var(--ac);border-radius:0 0 4px 4px;padding:16px 18px;display:flex;align-items:center;gap:20px">
+          <div>
+            <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Now</div>
+            <div style="font:700 30px 'Barlow Condensed',sans-serif;margin-top:2px">Focus</div>
+            <div style="font:400 12px Inter,sans-serif;color:var(--mut)">blocks everything marked Distracting</div>
+          </div>
+          <div style="width:1px;align-self:stretch;background:var(--bd)"></div>
+          <div style="flex:1">
+            <div style="display:flex;align-items:baseline;gap:9px"><span style="font:800 26px 'Barlow Condensed',sans-serif;color:var(--ac)">11:18</span><span style="font:500 12.5px Inter,sans-serif;color:var(--mut)">left in this focus round · round 1 of 4 · then a 5 min break</span></div>
+            <div style="height:6px;background:var(--s2);border-radius:1px;margin-top:9px;overflow:hidden"><div style="height:6px;width:55%;background:var(--ac);animation:ldFill 1.2s cubic-bezier(.25,0,0,1)"></div></div>
+            <div style="display:flex;gap:6px;margin-top:9px">
+              <sc-for list="{{ pomodoro }}" as="p" hint-placeholder-count="4"><div style="flex:1;height:4px;border-radius:1px;background:{{ p }}"></div></sc-for>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:7px">
+            <div style="display:flex;align-items:center;gap:8px;font:600 12.5px Inter,sans-serif;border:1.5px solid var(--bd);color:var(--mut);border-radius:2px;padding:9px 15px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><rect x="5" y="11" width="14" height="9" rx="1.6"></rect><path d="M8.2 11V8.4a3.8 3.8 0 0 1 7.6 0V11"></path></svg>Stop · locked until 07:46
+            </div>
+            <span style="font:400 11px Inter,sans-serif;color:var(--mut)">stopping early needs the challenge</span>
+          </div>
+        </div>
+        <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Your modes</div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+          <sc-for list="{{ modeCards }}" as="m" hint-placeholder-count="6">
+            <div style="background:var(--s);border:1px solid var(--bd);border-top:3px solid {{ m.bar }};border-radius:0 0 4px 4px;padding:15px 16px;display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="{{ m.ic }}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px" dangerouslySetInnerHTML="{{ m.svg }}"></svg>
+                <span style="font:600 15px Inter,sans-serif">{{ m.n }}</span><div style="flex:1"></div>
+                <span style="font:500 10px Inter,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:{{ m.tagc }}">{{ m.tag }}</span>
+              </div>
+              <div style="font:400 12px/1.5 Inter,sans-serif;color:var(--mut);min-height:36px">{{ m.desc }}</div>
+              <div style="display:flex;gap:8px"><div style="flex:1;text-align:center;font:600 12.5px Inter,sans-serif;background:{{ m.btnbg }};color:{{ m.btnfg }};border:1.5px solid {{ m.btnbd }};border-radius:2px;padding:8px 0">{{ m.btn }}</div><div style="font:600 12.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 16px">Edit</div></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    <!-- 3i -->
+    <div id="3i" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3i</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Notifications — alerts as a tick grid, message templates open in place · content area only</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Notifications</span></div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:13px">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Blocked visit alerts</span><span style="font:400 12px Inter,sans-serif;color:var(--mut)">tell me when I try to open something that is…</span></div>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px">
+            <sc-for list="{{ alertTicks }}" as="a" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid {{ a.bd }};border-radius:3px;padding:10px 12px">
+                <div style="width:16px;height:16px;border-radius:2px;background:{{ a.bg }};border:1.5px solid {{ a.bd2 }};display:grid;place-items:center;flex-shrink:0"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" style="width:10px;height:10px;opacity:{{ a.on }}"><path d="M4 12.5l5 5L20 6.5"></path></svg></div>
+                <span style="font:500 12.5px Inter,sans-serif;color:{{ a.fg }}">{{ a.n }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:var(--bg);border:1px solid var(--bd);border-radius:3px">
+            <div style="display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--bd)"><span style="font:400 11px Inter,sans-serif;color:var(--mut)">▾</span><span style="font:600 12.5px Inter,sans-serif">Messages</span><span style="font:400 12px Inter,sans-serif;color:var(--mut)">change what each alert says · <span style="color:var(--ac)">{name}</span> <span style="color:var(--ac)">{reset}</span> are filled in</span></div>
+            <sc-for list="{{ msgRows }}" as="m" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:12px;padding:9px 13px;border-bottom:1px solid #1B2229">
+                <span style="width:150px;font:500 12px Inter,sans-serif;color:var(--mut)">{{ m.k }}</span>
+                <div style="flex:1;border:1.5px solid var(--bd);border-radius:2px;padding:7px 10px;font:400 12px Inter,sans-serif">{{ m.v }}</div>
+                <div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:6px 12px">Reset</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">Don’t repeat for the same site within</span>
+            <div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">5 min <span style="color:var(--mut)">▾</span></div>
+            <span style="font:400 12.5px Inter,sans-serif;color:var(--mut);margin-left:8px">Show as</span>
+            <div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 13px;border-radius:2px;background:var(--ac);color:#fff;font:600 12px Inter,sans-serif">Windows notification</div><div style="padding:6px 13px;font:500 12px Inter,sans-serif;color:var(--mut)">Lockdown popup</div><div style="padding:6px 13px;font:500 12px Inter,sans-serif;color:var(--mut)">Both</div></div>
+            <div style="flex:1"></div>
+            <span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">Per-site override: the Alerts column in Blocking → Overview</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:14px">
+          <div style="flex:1.3;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Upcoming blocks</span></div>
+            <div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div><span style="font:500 12.5px Inter,sans-serif">Warn me</span><div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">5 min <span style="color:var(--mut)">▾</span></div><span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">before something gets blocked</span></div>
+            <div style="display:flex;align-items:center;gap:11px"><span style="font:400 12.5px Inter,sans-serif;color:var(--mut);padding-left:43px">While I’m using it, remind me again every</span><div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">never <span style="color:var(--mut)">▾</span></div></div>
+            <div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div><span style="font:500 12.5px Inter,sans-serif">Notify me when a block starts</span></div>
+            <div style="font:400 11.5px/1.5 Inter,sans-serif;color:var(--mut)">Blocks from the same group are announced together — “School nights starts in 5 min: Reddit, Steam, YouTube”.</div>
+          </div>
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Weekly summary</span></div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div><span style="font:500 12.5px Inter,sans-serif">Every</span><div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">Sunday <span style="color:var(--mut)">▾</span></div><span style="font:500 12.5px Inter,sans-serif">at</span><div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">19:00 <span style="color:var(--mut)">▾</span></div></div>
+            <div style="background:var(--bg);border:1px solid var(--bd);border-radius:3px;padding:12px 13px">
+              <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);margin-bottom:7px">Preview</div>
+              <div style="font:400 12px/1.6 Inter,sans-serif"><span style="font:800 15px 'Barlow Condensed',sans-serif;color:var(--grn)">▼ 12 %</span> less screen time than last week · 4 days within your goal · most blocked: Reddit (18 attempts).</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3j -->
+    <div id="3j" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3j</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Settings — now the same card style as every other page; accent swatches drive the whole UI · content area only</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Settings</span></div>
+        <div style="display:flex;gap:14px">
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:13px">
+            <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Appearance</span></div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:104px;font:400 12.5px Inter,sans-serif;color:var(--mut)">Theme</span>
+              <div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px">
+                <sc-for list="{{ themeOpts }}" as="o" hint-placeholder-count="4"><div style="padding:6px 14px;border-radius:2px;font:600 12px Inter,sans-serif;background:{{ o.bg }};color:{{ o.fg }}">{{ o.n }}</div></sc-for>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:104px;font:400 12.5px Inter,sans-serif;color:var(--mut)">Accent colour</span>
+              <div style="display:flex;gap:7px">
+                <sc-for list="{{ accents }}" as="a" hint-placeholder-count="8"><div style="width:24px;height:24px;border-radius:50%;background:{{ a.c }};box-shadow:0 0 0 {{ a.ring }} {{ a.rc }}"></div></sc-for>
+              </div>
+              <div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:6px 13px">Custom…</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:104px;font:400 12.5px Inter,sans-serif;color:var(--mut)">Daily goal</span><div style="display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">5 h <span style="color:var(--mut)">▾</span></div><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">drawn as the dashed line on every chart</span></div>
+            <div style="height:1px;background:var(--bd)"></div>
+            <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">When limits reset</span><div style="width:17px;height:17px;border-radius:50%;background:var(--s2);color:var(--mut);display:grid;place-items:center;font:600 10px Inter,sans-serif">?</div></div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:104px;font:400 12.5px Inter,sans-serif;color:var(--mut)">Reset at</span><div style="border:1.5px solid var(--bd);border-radius:2px;padding:6px 13px;font:600 12.5px Inter,sans-serif">00:00</div><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:7px 15px">Change</div><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">current limit day ends Sun 20 Sep 00:00</span></div>
+          </div>
+          <div style="width:400px;display:flex;flex-direction:column;gap:14px">
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--yel)"></span><span style="font:600 14px Inter,sans-serif">Emergency unlock</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="#8D9AA8" stroke-width="2" style="width:13px;height:13px"><rect x="5" y="11" width="14" height="9" rx="1.6"></rect><path d="M8.2 11V8.4a3.8 3.8 0 0 1 7.6 0V11"></path></svg>
+              </div>
+              <div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:17px;border-radius:9px;background:var(--ac);position:relative"><div style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></div></div><span style="font:500 12.5px Inter,sans-serif">Allow emergency unlocks</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">Each lasts</span><div style="display:flex;align-items:center;gap:7px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">20 min <span style="color:var(--mut)">▾</span></div><span style="font:400 12.5px Inter,sans-serif;color:var(--mut)">·</span><div style="display:flex;align-items:center;gap:7px;border:1.5px solid var(--bd);border-radius:2px;padding:6px 11px;font:500 12px Inter,sans-serif">3 <span style="color:var(--mut)">▾</span></div><div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px"><div style="padding:5px 11px;font:500 11.5px Inter,sans-serif;color:var(--mut)">per day</div><div style="padding:5px 11px;border-radius:2px;background:var(--ac);color:#fff;font:600 11.5px Inter,sans-serif">per week</div></div></div>
+              <div style="background:var(--bg);border:1px solid var(--bd);border-radius:3px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+                <div style="display:flex;gap:4px"><span style="width:16px;height:6px;background:var(--yel);border-radius:1px"></span><span style="width:16px;height:6px;background:var(--yel);border-radius:1px"></span><span style="width:16px;height:6px;background:var(--bd);border-radius:1px"></span></div>
+                <span style="font:400 11.5px Inter,sans-serif;color:var(--mut)"><span style="color:var(--tx);font-weight:600">2 of 3</span> left this week · resets Mon 21 Sep</span>
+              </div>
+            </div>
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Backup &amp; export</span></div>
+              <div style="display:flex;gap:9px;flex-wrap:wrap"><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 14px">Export settings…</div><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 14px">Import settings…</div><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 14px">Screen time (CSV)…</div></div>
+              <div style="font:400 11.5px/1.5 Inter,sans-serif;color:var(--mut)">Importing settings can loosen blocks, so it asks for the challenge first.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3k -->
+    <div id="3k" style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3k</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Screen Time → Overview — new trend line with “am I improving?”, goal line and emergency-unlock markers · content area only</span></div>
+      <div style="--bg:#101418;--s:#181D23;--s2:#202730;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;--yel:#E2A32B;--blu:#4E8FD1;width:1056px;background:var(--bg);color:var(--tx);font-family:Inter,sans-serif;padding:16px 24px 20px 24px;border-radius:4px;border:1px solid #05070A;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:11px"><span style="width:4px;height:26px;background:var(--ac)"></span><span style="font:700 30px 'Barlow Condensed',sans-serif">Screen Time</span></div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="display:flex;gap:24px;border-bottom:1px solid var(--bd)">
+              <sc-for list="{{ tabsST }}" as="t" hint-placeholder-count="6"><div style="padding:7px 1px 9px;font:{{ t.fw }} 13px Inter,sans-serif;letter-spacing:.005em;color:{{ t.fg }};border-bottom:2px solid {{ t.bg }};margin-bottom:-1px">{{ t.name }}</div></sc-for>
+            </div>
+            <div style="display:flex;background:var(--s2);border-radius:3px;padding:3px;gap:2px"><div style="padding:6px 12px;font:500 12px Inter,sans-serif;color:var(--mut)">Today</div><div style="padding:6px 12px;font:500 12px Inter,sans-serif;color:var(--mut)">7 days</div><div style="padding:6px 12px;border-radius:2px;background:var(--ac);color:#fff;font:600 12px Inter,sans-serif">30 days</div></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px">
+          <sc-for list="{{ stStats }}" as="s" hint-placeholder-count="4">
+            <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:13px 15px">
+              <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">{{ s.k }}</div>
+              <div style="font:800 32px 'Barlow Condensed',sans-serif;margin:3px 0 2px 0">{{ s.v }}</div>
+              <div style="font:500 11.5px Inter,sans-serif;color:{{ s.c }}">{{ s.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px">
+          <div style="display:flex;align-items:center;gap:11px;margin-bottom:6px">
+            <span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Trend</span>
+            <div style="display:flex;background:var(--bg);border-radius:3px;padding:3px;gap:2px;margin-left:6px"><div style="padding:5px 12px;border-radius:2px;background:var(--s2);color:var(--tx);font:600 11.5px Inter,sans-serif">Daily</div><div style="padding:5px 12px;font:500 11.5px Inter,sans-serif;color:var(--mut)">Weekly</div><div style="padding:5px 12px;font:500 11.5px Inter,sans-serif;color:var(--mut)">Monthly</div></div>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:baseline;gap:8px"><span style="font:800 24px 'Barlow Condensed',sans-serif;color:var(--grn)">▼ 12 %</span><span style="font:500 12px Inter,sans-serif;color:var(--mut)">vs last week · avg 4 h 56 m a day</span></div>
+          </div>
+          <svg viewBox="0 0 1000 200" preserveAspectRatio="none" style="width:100%;height:196px;display:block">
+            <line x1="0" y1="104" x2="1000" y2="104" stroke="#3A4552" stroke-width="1.5" stroke-dasharray="7 7"></line>
+            <polygon points="{{ trendArea }}" fill="rgba(219,81,38,.13)"></polygon>
+            <polyline points="{{ trendPts }}" fill="none" stroke="#DB5126" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></polyline>
+            <polyline points="{{ trendAvg }}" fill="none" stroke="#8D9AA8" stroke-width="1.6" stroke-dasharray="3 5"></polyline>
+            <sc-for list="{{ trendMarks }}" as="m" hint-placeholder-count="3">
+              <circle cx="{{ m.x }}" cy="{{ m.y }}" r="5.5" fill="#101418" stroke="#4E8FD1" stroke-width="2"></circle>
+            </sc-for>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font:500 10.5px Inter,sans-serif;color:var(--mut);padding-top:6px"><span>21 Aug</span><span>28 Aug</span><span>4 Sep</span><span>11 Sep</span><span>19 Sep</span></div>
+          <div style="display:flex;gap:18px;align-items:center;padding-top:11px;margin-top:11px;border-top:1px solid var(--bd);font:400 11.5px Inter,sans-serif;color:var(--mut)">
+            <span><span style="color:var(--ac)">▬</span> screen time</span><span><span style="color:#8D9AA8">▬ ▬</span> 7-day average</span><span><span style="color:#3A4552">– – –</span> daily goal 5 h</span><span><span style="color:var(--blu)">○</span> emergency unlock used</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:14px">
+          <div style="flex:1.5;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px">
+            <div style="display:flex;align-items:center;gap:11px;margin-bottom:12px"><span style="width:3px;height:16px;background:var(--ac)"></span><span style="font:600 14px Inter,sans-serif">Day timeline · today</span><div style="flex:1"></div>
+              <sc-for list="{{ catLegend }}" as="c" hint-placeholder-count="4"><div style="display:flex;align-items:center;gap:6px;font:500 11px Inter,sans-serif;color:var(--mut)"><span style="width:9px;height:9px;border-radius:2px;background:{{ c.c }}"></span>{{ c.n }}</div></sc-for>
+            </div>
+            <div style="display:flex;height:26px;border-radius:2px;overflow:hidden;background:var(--s2)">
+              <sc-for list="{{ timeline }}" as="t" hint-placeholder-count="30"><div style="width:{{ t.w }};background:{{ t.c }}"></div></sc-for>
+            </div>
+            <div style="display:flex;justify-content:space-between;font:500 10.5px Inter,sans-serif;color:var(--mut);padding-top:7px"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+          </div>
+          <div style="flex:1;background:var(--s);border:1px solid var(--bd);border-radius:4px;padding:15px 16px;display:flex;align-items:center;gap:16px">
+            <div style="position:relative;width:96px;height:96px;flex-shrink:0;border-radius:50%;background:conic-gradient(#27AE60 0 41%,#8D9AA8 41% 56%,#DB5126 56% 100%)"><div style="position:absolute;inset:15px;border-radius:50%;background:var(--s);display:grid;place-items:center;text-align:center"><div><div style="font:800 17px 'Barlow Condensed',sans-serif">34h32</div><div style="font:400 9.5px Inter,sans-serif;color:var(--mut)">total</div></div></div></div>
+            <div style="flex:1">
+              <sc-for list="{{ cats }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:9px;padding:4px 0"><span style="width:9px;height:9px;border-radius:2px;background:{{ c.c }}"></span><span style="flex:1;font:500 12.5px Inter,sans-serif">{{ c.n }}</span><span style="font:800 14px 'Barlow Condensed',sans-serif">{{ c.v }}</span></div>
+              </sc-for>
+              <div style="font:400 11px Inter,sans-serif;color:var(--mut);margin-top:6px">Assign a category per app in Apps.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 3l -->
+    <div id="3l" style="display:flex;flex-direction:column;gap:11px;width:1280px;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3l</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Small windows &amp; overlays — drawn at their real size</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">
+
+        <div style="--s:#181D23;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;width:470px;background:var(--s);border:1px solid var(--bd);border-radius:4px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="padding:9px 12px;font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);border-bottom:1px solid var(--bd)">Suggestions · “dis”</div>
+          <sc-for list="{{ suggestRows }}" as="s" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #1B2229;background:{{ s.bg }}">
+              <span style="width:18px;height:18px;border-radius:3px;background:{{ s.c }};display:grid;place-items:center;font:700 10px Inter,sans-serif;color:#fff">{{ s.l }}</span>
+              <span style="font:500 12.5px Inter,sans-serif">{{ s.n }}</span>
+              <span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ s.sub }}</span>
+              <div style="flex:1"></div>
+              <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:{{ s.bfg }};border:1px solid {{ s.bbd }};border-radius:2px;padding:1px 4px">{{ s.badge }}</span>
+              <span style="font:400 11px Inter,sans-serif;color:{{ s.tagc }}">{{ s.tag }}</span>
+            </div>
+          </sc-for>
+          <div style="padding:9px 12px;font:400 11px Inter,sans-serif;color:var(--mut)">Steam games sit under Steam · ↵ to add, ⇥ to autocomplete</div>
+        </div>
+
+        <div style="--s:#181D23;--bg:#101418;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--grn:#27AE60;width:520px;background:var(--bg);border:1px solid #05070A;border-radius:5px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding-left:10px;border-bottom:1px solid var(--bd)"><svg viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path></svg><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Browse apps</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut);padding-right:12px">✕</span></div>
+          <div style="padding:13px;display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;gap:9px"><div style="flex:1;border:1.5px solid var(--bd);border-radius:2px;padding:8px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">Search apps and Steam games…</div><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 13px">Other .exe…</div></div>
+            <div style="display:flex;align-items:center;gap:10px;font:400 11.5px Inter,sans-serif;color:var(--mut)"><span>95 apps · first 60 shown</span><div style="flex:1"></div><div style="display:flex;background:#202730;border-radius:3px;padding:2px;gap:2px"><div style="padding:4px 10px;border-radius:2px;background:var(--s);font:600 11px Inter,sans-serif;color:var(--tx)">All</div><div style="padding:4px 10px;font:500 11px Inter,sans-serif">Running</div><div style="padding:4px 10px;font:500 11px Inter,sans-serif">Games</div></div></div>
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:3px;overflow:hidden">
+              <sc-for list="{{ browseRows }}" as="b" hint-placeholder-count="7">
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid #1B2229;background:{{ b.bg }}">
+                  <span style="width:18px;height:18px;border-radius:3px;background:{{ b.c }};display:grid;place-items:center;font:700 10px Inter,sans-serif;color:#fff">{{ b.l }}</span>
+                  <span style="font:500 12.5px Inter,sans-serif">{{ b.n }}</span><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">{{ b.exe }}</span>
+                  <div style="flex:1"></div>
+                  <span style="font:600 10px Inter,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:{{ b.runc }}">{{ b.run }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:9px;justify-content:flex-end"><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 18px">Cancel</div><div style="font:600 12px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:8px 20px">Pick app</div></div>
+          </div>
+        </div>
+
+        <div style="--s:#181D23;--bg:#101418;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;width:390px;background:var(--bg);border:1px solid #05070A;border-radius:5px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--bd)"><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Adult words · English</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut)">✕</span></div>
+          <div style="padding:13px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:baseline;gap:9px"><span style="font:600 14px Inter,sans-serif">102 words</span><span style="font:400 11.5px Inter,sans-serif;color:var(--mut)">40 on · wildcards allowed (porn*)</span></div>
+            <div style="border:1.5px solid var(--bd);border-radius:2px;padding:7px 10px;font:400 12px Inter,sans-serif;color:var(--mut)">Search</div>
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:3px;padding:8px;display:flex;flex-wrap:wrap;gap:6px">
+              <sc-for list="{{ wordChips }}" as="w" hint-placeholder-count="12">
+                <div style="display:flex;align-items:center;gap:6px;background:{{ w.bg }};border:1px solid {{ w.bd }};border-radius:2px;padding:4px 8px;font:500 11.5px Inter,sans-serif;color:{{ w.fg }}"><span style="width:11px;height:11px;border-radius:1px;background:{{ w.tick }}"></span>{{ w.n }}</div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:9px;align-items:center"><div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:7px 13px">All on</div><div style="flex:1"></div><div style="font:600 11.5px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:7px 15px">Cancel</div><div style="font:600 11.5px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:7px 18px">Save</div></div>
+          </div>
+        </div>
+
+        <div style="--s:#181D23;--bg:#101418;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;width:470px;background:var(--bg);border:1px solid #05070A;border-radius:5px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--bd)"><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Anti-Bypass · challenge</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut)">✕</span></div>
+          <div style="padding:15px;display:flex;flex-direction:column;gap:12px">
+            <div style="font:600 15px Inter,sans-serif">This loosens your blocks</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font:400 12.5px Inter,sans-serif;color:var(--mut)"><div><span style="color:var(--ac)">→</span> Remove YouTube</div><div><span style="color:var(--ac)">→</span> Loosen group School nights</div></div>
+            <div style="font:400 12px/1.55 Inter,sans-serif;color:var(--mut)">Type each word into the highlighted box (click it first, no pasting). Passing unlocks changes like these for 5 minutes.</div>
+            <div style="display:flex;align-items:center;gap:11px"><span style="font:600 12px Inter,sans-serif;color:var(--mut)">Word 1 of 12</span><span style="font:700 15px 'Barlow Condensed',sans-serif;letter-spacing:.06em;background:#202730;border-radius:2px;padding:3px 10px">p98jy</span><div style="flex:1"></div><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">0 / 71</span></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+              <sc-for list="{{ gridCells }}" as="g" hint-placeholder-count="9">
+                <div style="height:42px;border:1.5px solid {{ g.bd }};border-radius:2px;background:{{ g.bg }};display:flex;align-items:center;padding-left:10px;font:500 13px 'Barlow Condensed',sans-serif;letter-spacing:.05em;animation:{{ g.anim }}"><span style="color:var(--tx)">{{ g.v }}</span><span style="width:1.5px;height:17px;background:var(--ac);margin-left:2px;opacity:{{ g.caret }};animation:ldCaret 1s steps(1,end) infinite"></span></div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:9px;justify-content:flex-end"><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 18px">Cancel</div><div style="font:600 12px Inter,sans-serif;background:rgba(219,81,38,.4);color:#F3D9CF;border-radius:2px;padding:8px 20px">Continue</div></div>
+          </div>
+        </div>
+
+        <div style="--s:#181D23;--bg:#101418;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;width:470px;background:var(--bg);border:1px solid #05070A;border-radius:5px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--bd)"><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Anti-Bypass · challenge</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut)">✕</span></div>
+          <div style="padding:15px;display:flex;flex-direction:column;gap:12px">
+            <div style="font:600 15px Inter,sans-serif">This loosens your blocks</div>
+            <div style="font:400 12.5px Inter,sans-serif;color:var(--mut)"><span style="color:var(--ac)">→</span> Switch the Adult protection list off</div>
+            <div style="background:var(--s);border:1px solid var(--bd);border-radius:3px;padding:12px;font:500 13px/1.9 'Barlow Condensed',sans-serif;letter-spacing:.08em;color:var(--tx)">uc66f ixe9u 1kc8q 6ga2a 6gy7j mjpuo 1wctj x0cxv aw1yv zpa6u tmqy9 0j6i5</div>
+            <div style="border:1.5px solid var(--ac);border-radius:2px;padding:9px 11px;display:flex;align-items:center;gap:2px;font:500 13px 'Barlow Condensed',sans-serif;letter-spacing:.06em">uc66f ixe9u<span style="width:1.5px;height:16px;background:var(--ac);animation:ldCaret 1s steps(1,end) infinite"></span></div>
+            <div style="display:flex;align-items:center;gap:10px"><div style="flex:1;height:4px;background:#202730;border-radius:1px;overflow:hidden"><div style="height:4px;width:16%;background:var(--ac)"></div></div><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">11 / 71</span></div>
+            <div style="display:flex;gap:9px;justify-content:flex-end"><div style="font:600 12px Inter,sans-serif;border:1.5px solid var(--bd);border-radius:2px;padding:8px 18px">Cancel</div><div style="font:600 12px Inter,sans-serif;background:rgba(219,81,38,.4);color:#F3D9CF;border-radius:2px;padding:8px 20px">Continue</div></div>
+          </div>
+        </div>
+
+        <div style="--bg:#101418;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;--red:#E05A44;width:400px;background:var(--bg);border:1px solid #05070A;border-radius:5px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--bd)"><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Anti-Bypass</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut)">✕</span></div>
+          <div style="padding:15px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:10px"><svg viewBox="0 0 24 24" fill="none" stroke="#E05A44" stroke-width="1.8" stroke-linecap="round" style="width:19px;height:19px"><rect x="4.5" y="10.5" width="15" height="10" rx="2"></rect><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"></path></svg><span style="font:600 15px Inter,sans-serif">Closed right now</span></div>
+            <div style="font:400 12.5px Inter,sans-serif;color:var(--mut)"><span style="color:var(--ac)">→</span> Stop the locked Focus mode</div>
+            <div style="background:rgba(224,90,68,.09);border:1px solid rgba(224,90,68,.4);border-left:3px solid var(--red);border-radius:3px;padding:11px 12px;font:400 12px/1.55 Inter,sans-serif">Changes like this are only possible <span style="color:var(--tx);font-weight:600">Sunday 03:00–03:01</span>.<br>Next chance: Sun 20 Sep 03:00 — in 20 h 42 m.</div>
+            <div style="display:flex;justify-content:flex-end"><div style="font:600 12px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:8px 24px">OK</div></div>
+          </div>
+        </div>
+
+        <div style="--bg:#101418;--s:#181D23;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;width:330px;background:var(--bg);border:1px solid #05070A;border-radius:5px;overflow:hidden;color:var(--tx);font-family:Inter,sans-serif">
+          <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--bd)"><span style="font:500 11.5px Inter,sans-serif;color:var(--mut)">Display · Dashboard</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:var(--mut)">✕</span></div>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:10px">
+            <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:var(--mut)">Cards to show</div>
+            <sc-for list="{{ displayRows }}" as="d" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:10px"><div style="width:15px;height:15px;border-radius:2px;background:{{ d.bg }};border:1.5px solid {{ d.bd }};display:grid;place-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" style="width:9px;height:9px;opacity:{{ d.on }}"><path d="M4 12.5l5 5L20 6.5"></path></svg></div><span style="font:500 12.5px Inter,sans-serif;color:{{ d.fg }}">{{ d.n }}</span><div style="flex:1"></div><span style="font:400 11px Inter,sans-serif;color:var(--mut)">{{ d.drag }}</span></div>
+            </sc-for>
+            <div style="font:400 11px Inter,sans-serif;color:var(--mut)">Drag ⠿ to reorder the cards.</div>
+            <div style="display:flex;justify-content:flex-end"><div style="font:600 12px Inter,sans-serif;background:var(--ac);color:#fff;border-radius:2px;padding:8px 22px">Done</div></div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;width:400px">
+          <div style="--s:#181D23;--bd:#2B333D;--tx:#E9EDF2;--mut:#8D9AA8;--ac:#DB5126;background:#181D23;border:1px solid #2B333D;border-left:3px solid #DB5126;border-radius:3px;padding:13px 14px;color:#E9EDF2;font-family:Inter,sans-serif;animation:ldRise 1.4s cubic-bezier(.25,0,0,1)">
+            <div style="display:flex;align-items:center;gap:9px"><svg viewBox="0 0 24 24" style="width:15px;height:15px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path></svg><span style="font:600 12.5px Inter,sans-serif">Lockdown</span><div style="flex:1"></div><span style="font:400 11px Inter,sans-serif;color:#8D9AA8">now</span><span style="font:400 12px Inter,sans-serif;color:#8D9AA8">✕</span></div>
+            <div style="font:400 12.5px/1.55 Inter,sans-serif;margin-top:7px">YouTube is blocked — it is over its time limit. <span style="color:#8D9AA8">Resets at 00:00.</span></div>
+            <div style="display:flex;gap:8px;margin-top:10px"><div style="font:600 11.5px Inter,sans-serif;border:1.5px solid #2B333D;border-radius:2px;padding:6px 12px">Open Lockdown</div><div style="font:600 11.5px Inter,sans-serif;border:1.5px solid #2B333D;border-radius:2px;padding:6px 12px;color:#8D9AA8">Mute 1 h</div></div>
+          </div>
+          <div style="background:#101418;border:1px solid #05070A;border-radius:5px;overflow:hidden;color:#E9EDF2;font-family:Inter,sans-serif">
+            <div style="height:32px;background:#0B0E12;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid #2B333D"><span style="font:500 11.5px Inter,sans-serif;color:#8D9AA8">Lockdown Setup</span><div style="flex:1"></div><span style="font:400 12px Inter,sans-serif;color:#8D9AA8">✕</span></div>
+            <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:center;gap:11px"><svg viewBox="0 0 24 24" style="width:30px;height:30px"><path d="M12 2.4 4.6 4.9v6.4C4.6 17.6 12 21.6 12 21.6s7.4-4 7.4-10.3V4.9z" fill="#DB5126"></path><path d="M8.6 12.1l2.4 2.4 4.5-4.6" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></path></svg><div><div style="font:700 21px 'Barlow Condensed',sans-serif">LOCK<span style="color:#DB5126">DOWN</span> 2.1.0</div><div style="font:400 11.5px Inter,sans-serif;color:#8D9AA8">1.4.0 installed · Windows 10/11</div></div></div>
+              <div style="display:flex;gap:9px"><div style="flex:1;text-align:center;font:600 12.5px Inter,sans-serif;background:#DB5126;color:#fff;border-radius:2px;padding:9px 0">Update</div><div style="flex:1;text-align:center;font:600 12.5px Inter,sans-serif;border:1.5px solid #2B333D;border-radius:2px;padding:9px 0">Repair</div><div style="flex:1;text-align:center;font:600 12.5px Inter,sans-serif;border:1.5px solid #E05A44;color:#E05A44;border-radius:2px;padding:9px 0">Uninstall</div></div>
+              <div style="display:flex;align-items:center;gap:10px"><div style="width:15px;height:15px;border-radius:2px;border:1.5px solid #3A434F"></div><span style="font:500 12px Inter,sans-serif;color:#8D9AA8">also delete my screen-time data and settings</span></div>
+              <div style="font:400 11px/1.5 Inter,sans-serif;color:#8D9AA8">Uninstalling asks for the Anti-Bypass challenge while it is on.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <!-- 3m -->
+    <div id="3m" style="display:flex;flex-direction:column;gap:11px;width:1280px;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3m</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">Light mode fixes (7b) — switch tracks, secondary buttons, the selected nav item and card edges</span></div>
+      <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+        <div style="width:236px;background:#E3E6EA;border:1px solid #D2D7DE;border-radius:4px;padding:16px 12px;display:flex;flex-direction:column;gap:3px">
+          <div style="font:800 22px 'Barlow Condensed',sans-serif;letter-spacing:.06em;padding:0 8px 16px 8px;color:#14181D">LOCK<span style="color:#DB5126">DOWN</span></div>
+          <sc-for list="{{ nav.lBlocking }}" as="p" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:4px;border-left:3px solid {{ p.bl }};background:{{ p.bg }};color:{{ p.fg }};box-shadow:{{ p.sh }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px;flex-shrink:0" dangerouslySetInnerHTML="{{ p.svg }}"></svg>
+              <span style="font:500 13px Inter,sans-serif">{{ p.name }}</span>
+            </div>
+          </sc-for>
+          <div style="height:10px"></div>
+          <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;font:600 12px Inter,sans-serif;color:#1E7A46"><span style="width:8px;height:8px;border-radius:50%;background:#27AE60"></span>Service running</div>
+          <div style="font:400 10.5px/1.5 Inter,sans-serif;color:#5E6874;padding:6px 10px 0 10px">Selected item = white surface + 3px accent bar + near-black label. The sidebar itself is #E3E6EA so the white reads as raised.</div>
+        </div>
+
+        <div style="flex:1;min-width:560px;background:#EFF1F4;border:1px solid #D2D7DE;border-radius:4px;padding:18px;display:flex;flex-direction:column;gap:14px">
+          <div style="background:#fff;border:1px solid #D2D7DE;border-radius:4px;padding:15px 16px;display:flex;flex-direction:column;gap:13px">
+            <div style="display:flex;align-items:center;gap:11px"><span style="width:3px;height:16px;background:#DB5126"></span><span style="font:600 14px Inter,sans-serif;color:#14181D">Switches — fixed</span><span style="font:400 11.5px Inter,sans-serif;color:#5E6874">off track #AEB6C0, knob #fff with a 1px #8A939F edge</span></div>
+            <div style="display:flex;gap:26px;flex-wrap:wrap">
+              <sc-for list="{{ lightSwitches }}" as="s" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:10px"><div style="width:34px;height:18px;border-radius:9px;background:{{ s.track }};position:relative"><div style="position:absolute;{{ s.side }}:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid {{ s.knob }}"></div></div><span style="font:500 12.5px Inter,sans-serif;color:#14181D">{{ s.n }}</span></div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding-top:4px;border-top:1px solid #E3E6EA">
+              <span style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#5E6874;width:100%">Buttons</span>
+              <div style="font:600 12.5px Inter,sans-serif;background:#DB5126;color:#fff;border-radius:2px;padding:9px 18px">Primary</div>
+              <div style="font:600 12.5px Inter,sans-serif;background:#F1F3F6;border:1.5px solid #B9C0C9;color:#14181D;border-radius:2px;padding:9px 18px">Secondary</div>
+              <div style="font:600 12.5px Inter,sans-serif;background:#fff;border:1.5px solid #14181D;color:#14181D;border-radius:2px;padding:9px 18px">Outline</div>
+              <div style="font:600 12.5px Inter,sans-serif;background:#fff;border:1.5px solid #C0392B;color:#C0392B;border-radius:2px;padding:9px 18px">Destructive</div>
+              <div style="font:600 12.5px Inter,sans-serif;background:#F1F3F6;border:1.5px solid #D2D7DE;color:#9AA3AE;border-radius:2px;padding:9px 18px">Disabled · locked</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px">
+            <div style="flex:1;background:#fff;border:1px solid #D2D7DE;border-top:3px solid #DB5126;border-radius:0 0 4px 4px;padding:14px 15px">
+              <div style="font:600 13.5px Inter,sans-serif;color:#14181D">Card · accent top bar</div>
+              <div style="font:400 11.5px/1.5 Inter,sans-serif;color:#5E6874;margin-top:5px">Squared top corners so the bar never looks clipped — that was the Modes bug.</div>
+            </div>
+            <div style="flex:1;background:#F1F3F6;border:1px solid #D2D7DE;border-left:3px solid #DB5126;border-radius:0 4px 4px 0;padding:14px 15px">
+              <div style="font:600 13.5px Inter,sans-serif;color:#14181D">Card · grey inset</div>
+              <div style="font:400 11.5px/1.5 Inter,sans-serif;color:#5E6874;margin-top:5px">For nested blocks inside a white card.</div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #D2D7DE;border-radius:4px;padding:14px 15px">
+            <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#5E6874;margin-bottom:10px">Light tokens</div>
+            <div style="display:flex;flex-wrap:wrap;gap:9px">
+              <sc-for list="{{ lightTokens }}" as="t" hint-placeholder-count="10">
+                <div style="display:flex;align-items:center;gap:8px;border:1px solid #D2D7DE;border-radius:2px;padding:5px 9px">
+                  <span style="width:16px;height:16px;border-radius:2px;background:{{ t.c }};border:1px solid rgba(0,0,0,.14)"></span>
+                  <span style="font:500 11px Inter,sans-serif;color:#14181D">{{ t.n }}</span><span style="font:400 10.5px Inter,sans-serif;color:#5E6874">{{ t.c }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3n -->
+    <div id="3n" style="display:flex;flex-direction:column;gap:11px;width:1280px;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font:800 13px Inter,sans-serif;color:#fff;background:#DB5126;padding:2px 8px;border-radius:2px">3n</span><span style="font:600 13px Inter,sans-serif;color:#93A0AE">App icon, tray icon (3 states), badges — and the animation notes</span></div>
+      <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+        <div style="background:#181D23;border:1px solid #2B333D;border-radius:4px;padding:18px;display:flex;flex-direction:column;gap:14px;color:#E9EDF2;font-family:Inter,sans-serif">
+          <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#8D9AA8">App icon · shield + closed padlock, one cut</div>
+          <div style="display:flex;align-items:flex-end;gap:18px">
+            <sc-for list="{{ iconSizes }}" as="s" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                <svg viewBox="0 0 64 64" style="width:{{ s.px }};height:{{ s.px }}">
+                  <path d="M32 4 10 11.5v18.2C10 46.2 32 60 32 60s22-13.8 22-30.3V11.5z" fill="#DB5126"></path>
+                  <path d="M32 4 10 11.5v18.2C10 46.2 32 60 32 60V4z" fill="#B33D18"></path>
+                  <rect x="22" y="30" width="20" height="15" rx="2.5" fill="#fff"></rect>
+                  <path d="M26.5 30v-4.5a5.5 5.5 0 0 1 11 0V30" fill="none" stroke="#fff" stroke-width="3.6"></path>
+                  <rect x="30.6" y="35" width="2.8" height="6" rx="1.4" fill="#B33D18"></rect>
+                </svg>
+                <span style="font:500 10.5px Inter,sans-serif;color:#8D9AA8">{{ s.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font:400 11.5px/1.55 Inter,sans-serif;color:#8D9AA8;max-width:430px">At 16 px the padlock becomes a solid white block inside the shield — the silhouette still reads. Deliver as SVG + PNG 16/24/32/48/64/128/256 and a multi-size .ico.</div>
+          <div style="height:1px;background:#2B333D"></div>
+          <div style="font:600 10px Inter,sans-serif;letter-spacing:.11em;text-transform:uppercase;color:#8D9AA8">Tray icon · 3 states, 16 px</div>
+          <sc-for list="{{ trayBars }}" as="b" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:14px;background:{{ b.bg }};border:1px solid {{ b.bd }};border-radius:3px;padding:8px 12px">
+              <span style="font:500 10.5px Inter,sans-serif;color:{{ b.fg }};width:82px">{{ b.n }}</span>
+              <sc-for list="{{ b.states }}" as="s" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <svg viewBox="0 0 16 16" style="width:16px;height:16px">
+                    <path d="M8 1 2.5 2.9v4.6C2.5 11.6 8 15 8 15s5.5-3.4 5.5-7.5V2.9z" fill="{{ s.c }}"></path>
+                    <rect x="5.6" y="7.4" width="4.8" height="4.1" rx="0.7" fill="{{ s.ink }}"></rect>
+                    <path d="M6.7 7.4V6.2a1.3 1.3 0 0 1 2.6 0v1.2" fill="none" stroke="{{ s.ink }}" stroke-width="1"></path>
+                  </svg>
+                  <span style="font:500 11px Inter,sans-serif;color:{{ b.fg }}">{{ s.n }}</span>
+                </div>
+              </sc-for>
+              <div style="flex:1"></div><span style="font:400 10.5px Inter,sans-serif;color:{{ b.mut }}">14:32</span>
+            </div>
+          </sc-for>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#8D9AA8;border:1px solid #2B333D;border-radius:2px;padding:2px 5px">site</span>
+            <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#4E8FD1;border:1px solid rgba(78,143,209,.5);border-radius:2px;padding:2px 5px">app</span>
+            <span style="font:700 9px Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#E2A32B;border:1px solid rgba(226,163,43,.5);border-radius:2px;padding:2px 5px">group</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;font:600 10px Inter,sans-serif;color:#8D9AA8"><svg viewBox="0 0 24 24" fill="none" stroke="#8D9AA8" stroke-width="2" style="width:12px;height:12px"><rect x="5" y="11" width="14" height="9" rx="1.6"></rect><path d="M8.2 11V8.4a3.8 3.8 0 0 1 7.6 0V11"></path></svg>locked</span>
+            <span style="font:400 11px Inter,sans-serif;color:#8D9AA8">· all Lucide-compatible, 1.7px stroke</span>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:430px;background:#181D23;border:1px solid #2B333D;border-radius:4px;padding:18px;color:#E9EDF2;font-family:Inter,sans-serif">
+          <div style="display:flex;align-items:center;gap:11px;margin-bottom:13px"><span style="width:3px;height:16px;background:#DB5126"></span><span style="font:600 14px Inter,sans-serif">Small animations — all buildable in customtkinter</span></div>
+          <sc-for list="{{ animNotes }}" as="a" hint-placeholder-count="7">
+            <div style="display:flex;gap:11px;padding:8px 0;border-bottom:1px solid #1B2229">
+              <span style="color:#DB5126;font:600 12px Inter,sans-serif">→</span>
+              <div><div style="font:600 12.5px Inter,sans-serif">{{ a.n }}</div><div style="font:400 11.5px/1.5 Inter,sans-serif;color:#8D9AA8;margin-top:2px">{{ a.d }}</div></div>
+            </div>
+          </sc-for>
+          <div style="font:400 11.5px/1.55 Inter,sans-serif;color:#8D9AA8;margin-top:12px">Nothing eases longer than 250 ms and nothing loops except the two 1-second status blinks — the app should feel calm, not busy.</div>
+        </div>
+      </div>
+    </div>
+<!--MORE-->
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  renderVals() {
+    const ic = {
+      'Dashboard':'<rect x="3" y="3" width="7.5" height="7.5" rx="1"></rect><rect x="13.5" y="3" width="7.5" height="7.5" rx="1"></rect><rect x="3" y="13.5" width="7.5" height="7.5" rx="1"></rect><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1"></rect>',
+      'Blocking':'<circle cx="12" cy="12" r="9"></circle><path d="M5.6 5.6 18.4 18.4"></path>',
+      'Anti-Bypass':'<path d="M12 3 5 5.5V12c0 5.8 7 9 7 9s7-3.2 7-9V5.5z"></path><path d="M9 12l2.2 2.2L15.5 10"></path>',
+      'Screen Time':'<path d="M2 20h20"></path><path d="M5.5 20V11"></path><path d="M11.5 20V5"></path><path d="M17.5 20v-6"></path>',
+      'Network Log':'<path d="M3 12h4l2.4-7 4 14L16 12h5"></path>',
+      'Modes':'<path d="M4 8h8"></path><path d="M17 8h3"></path><path d="M4 16h3"></path><path d="M12 16h8"></path><circle cx="14.5" cy="8" r="2.2"></circle><circle cx="9.5" cy="16" r="2.2"></circle>',
+      'Notifications':'<path d="M18 9a6 6 0 0 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"></path><path d="M10.2 20a2.2 2.2 0 0 0 3.6 0"></path>',
+      'Settings':'<circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"></path>'
+    };
+    const pages = Object.keys(ic);
+    const nav = {};
+    pages.forEach(active => {
+      ['d','l'].forEach(th => {
+        nav[th + active.replace(/[^A-Za-z]/g,'')] = pages.map(n => ({
+          name:n, svg:{__html:ic[n]},
+          bl: n===active ? '#DB5126' : 'transparent',
+          bg: n===active ? (th==='d' ? '#181D23' : '#FFFFFF') : 'transparent',
+          fg: n===active ? (th==='d' ? '#E9EDF2' : '#14181D') : (th==='d' ? '#8D9AA8' : '#5E6874'),
+          sh: n===active && th==='l' ? '0 1px 2px rgba(20,24,29,.10)' : 'none'
+        }));
+      });
+    });
+    const tab = (names, on, th) => names.map(n => ({
+      name:n,
+      fw: n===on ? 600 : 500,
+      bg: n===on ? '#DB5126' : 'transparent',
+      fg: n===on ? (th==='l' ? '#111820' : '#F2F5F8') : (th==='l' ? '#7A8694' : '#8D9AA8')
+    }));
+    const ch = (t, kind) => {
+      const map = {
+        time:['#E2A32B','rgba(226,163,43,.13)'],
+        limit:['#E2A32B','rgba(226,163,43,.13)'],
+        perm:['#E05A44','rgba(224,90,68,.14)'],
+        temp:['#E2A32B','rgba(226,163,43,.13)'],
+        opens:['#8D9AA8','rgba(141,154,168,.13)'],
+        group:['#DB5126','rgba(219,81,38,.14)']
+      };
+      return { t, c:map[kind][0], bg:map[kind][1] };
+    };
+    const row = o => Object.assign({ sep:'#222932', rowbg:'transparent', alert:'Default', rm:'Remove', rmc:'#2B333D', rmbg:'transparent', rmf:'#E9EDF2', rmtick:'0' }, o);
+    const blockRows = [
+      row({ name:'Netflix', badge:'site', badgeFg:'#8D9AA8', badgeBd:'#2B333D', letter:'N', icon:'#E50914', sub:'netflix.com',
+        chips:[ch('Temporary · 2h 58m left','temp')], next:'09:16 allowed', nextc:'#8D9AA8', status:'Blocked now', sc:'#E05A44', dot:'#E05A44' }),
+      row({ name:'TikTok', badge:'site', badgeFg:'#8D9AA8', badgeBd:'#2B333D', letter:'T', icon:'#111', sub:'tiktok.com',
+        chips:[ch('Permanent','perm')], next:'—', nextc:'#8D9AA8', status:'Blocked now', sc:'#E05A44', dot:'#E05A44' }),
+      row({ name:'Steam', badge:'app', badgeFg:'#4E8FD1', badgeBd:'rgba(78,143,209,.5)', letter:'S', icon:'#1B2838', sub:'steam.exe · closes + background processes',
+        chips:[ch('Allowed only Mon–Fri 18:00–22:00','time'), ch('→ School nights · 22:30–07:00','group')], next:'18:00 blocked', nextc:'#8D9AA8',
+        status:'Emergency unlock · 12m', sc:'#4E8FD1', dot:'#4E8FD1', rowbg:'rgba(78,143,209,.07)' }),
+      row({ name:'Instagram', badge:'site', badgeFg:'#8D9AA8', badgeBd:'#2B333D', letter:'I', icon:'#C13584', sub:'instagram.com',
+        chips:[ch('Opens 0 / 5 today','opens')], next:'after 5 opens', nextc:'#8D9AA8', status:'Allowed now', sc:'#27AE60', dot:'#27AE60' }),
+      row({ name:'League of Legends', badge:'app', badgeFg:'#4E8FD1', badgeBd:'rgba(78,143,209,.5)', letter:'L', icon:'#C89B3C', sub:'leagueclient.exe · closes',
+        chips:[ch('Limit 0m / 2h 00m today','limit')], next:'at 2h 00m', nextc:'#8D9AA8', status:'Allowed now', sc:'#27AE60', dot:'#27AE60' }),
+      row({ name:'Reddit', badge:'site', badgeFg:'#8D9AA8', badgeBd:'#2B333D', letter:'R', icon:'#FF4500', sub:'reddit.com · old.reddit.com',
+        chips:[ch('Allowed only Mon–Fri 18:00–22:00 · +10 min','time'), ch('→ School nights · 22:30–07:00','group')], next:'18:00 blocked', nextc:'#8D9AA8',
+        status:'Allowed now', sc:'#27AE60', dot:'#27AE60' }),
+      row({ name:'YouTube', badge:'site', badgeFg:'#8D9AA8', badgeBd:'#2B333D', letter:'Y', icon:'#FF0000', sub:'youtube.com · m.youtube.com · youtu.be',
+        chips:[ch('Limit 0m / 1h today · 0m / 5h week','limit'), ch('→ School nights · 22:30–07:00','group')], next:'22:30 blocked', nextc:'#E2A32B',
+        status:'Allowed now', sc:'#27AE60', dot:'#27AE60', rm:'Confirm?', rmc:'#E05A44', rmbg:'#E05A44', rmf:'#fff', rmtick:'.85' })
+    ];
+    const bcard = (name, sub, on, open) => ({
+      name, sub,
+      bg: on ? '#181D23' : 'transparent',
+      bd: on ? '#2B333D' : '#222932',
+      bar: open ? '#DB5126' : (on ? 'rgba(219,81,38,.45)' : 'transparent'),
+      tickBg: on ? '#DB5126' : 'transparent',
+      tickBd: on ? '#DB5126' : '#3A434F',
+      tickOn: on ? '1' : '0',
+      fg: on ? '#E9EDF2' : '#8D9AA8',
+      subc: on ? '#8D9AA8' : '#6B7683',
+      chev: open ? '▾' : '▸'
+    });
+    const dayRow = on => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(n => ({
+      n, bg: on.includes(n) ? '#DB5126' : 'transparent',
+      fg: on.includes(n) ? '#fff' : '#8D9AA8',
+      bd: on.includes(n) ? '#DB5126' : '#2B333D'
+    }));
+    return {
+      nav,
+      tabsBlocking: tab(['Overview','Groups','Add','Protection','Calendar'],'Overview','d'),
+      tabsAdd: tab(['Overview','Groups','Add','Protection','Calendar'],'Add','d'),
+      blockRows,
+      blockerCards: [
+        bcard('By time','Allowed only 09:00–17:00 · Mon–Fri', true, true),
+        bcard('Time limit','30m per day', true, false),
+        bcard('Opening limit','off', false, false),
+        bcard('Permanent','off', false, false),
+        bcard('Temporary','off', false, false)
+      ],
+      timeWindows: [
+        { days: dayRow(['Mon','Tue','Wed','Thu','Fri']), from:'09:00', to:'17:00' },
+        { days: dayRow(['Sat','Sun']), from:'10:00', to:'13:00' }
+      ],
+      ...(() => {
+        const KIND = { site:['#DB5126','rgba(219,81,38,.16)'], app:['#4E8FD1','rgba(78,143,209,.16)'], group:['#E2A32B','rgba(226,163,43,.16)'], prot:['#8D9AA8','rgba(141,154,168,.14)'] };
+        const pct = h => (h / 24 * 100).toFixed(2) + '%';
+        const bar = (from, to, kind) => ({ left:pct(from), w:pct(to - from), c:KIND[kind][0], bg:KIND[kind][1] });
+        const ticks = [2,4,6,8,10,12,14,16,18,20,22].map(pct);
+        const badge = t => ({ badge:t, bfg: t==='app' ? '#4E8FD1' : (t==='group' ? '#E2A32B' : (t==='list' ? '#8D9AA8' : '#8D9AA8')), bbd: t==='app' ? 'rgba(78,143,209,.5)' : (t==='group' ? 'rgba(226,163,43,.5)' : '#2B333D') });
+        const items = [
+          { name:'Adult + Scam lists', letter:'P', ic:'#3A4552', t:'list', kind:'prot', day:[[0,24]], sum:'all day', sumc:'#8D9AA8', sub:'protection lists, always on', total:'168 h' },
+          { name:'TikTok', letter:'T', ic:'#111', t:'site', kind:'site', day:[[0,24]], sum:'all day', sumc:'#E05A44', sub:'permanent', total:'168 h' },
+          { name:'School nights', letter:'S', ic:'#E2A32B', t:'group', kind:'group', day:[[0,7],[22.5,24]], sum:'00:00–07:00 · 22:30–24:00', sumc:'#E2A32B', sub:'3 members', total:'42 h' },
+          { name:'Netflix', letter:'N', ic:'#E50914', t:'site', kind:'site', day:[[0,9.27]], sum:'until 09:16', sumc:'#E05A44', sub:'temporary · 2 h 58 m left', total:'11 h' },
+          { name:'Reddit', letter:'R', ic:'#FF4500', t:'site', kind:'site', day:[[0,18],[22,24]], sum:'allowed only 18:00–22:00', sumc:'#8D9AA8', sub:'+10 min allowance', total:'140 h', marks:[20.5] },
+          { name:'Steam', letter:'S', ic:'#1B2838', t:'app', kind:'app', day:[[0,18],[22,24]], sum:'allowed only 18:00–22:00', sumc:'#8D9AA8', sub:'closes + background', total:'140 h' },
+          { name:'Discord', letter:'D', ic:'#5865F2', t:'app', kind:'app', day:[[0,9],[17,24]], sum:'allowed only 09:00–17:00', sumc:'#8D9AA8', sub:'30 m cap a day', total:'112 h' },
+          { name:'YouTube', letter:'Y', ic:'#FF0000', t:'site', kind:'site', day:[[12.6,13.5],[22.5,24]], sum:'limit hit 12:40 · night', sumc:'#E2A32B', sub:'0 m of 1 h left today', total:'12 h 50 m' }
+        ];
+        const calDayRows = items.map((it, i) => Object.assign({
+          name:it.name, letter:it.letter, ic:it.ic, ticks,
+          bars: it.day.map(d => bar(d[0], d[1], it.kind)),
+          marks: (it.marks || []).map(pct),
+          sum:it.sum, sumc:it.sumc, sub:it.sub,
+          rowbg: i % 2 ? 'rgba(255,255,255,.012)' : 'transparent'
+        }, badge(it.t)));
+        const weekPlan = {
+          'Adult + Scam lists': [[[0,24]],[[0,24]],[[0,24]],[[0,24]],[[0,24]],[[0,24]],[[0,24]]],
+          'TikTok': [[[0,24]],[[0,24]],[[0,24]],[[0,24]],[[0,24]],[[0,24]],[[0,24]]],
+          'School nights': [[[0,7],[22.5,24]],[[0,7],[22.5,24]],[[0,7],[22.5,24]],[[0,7],[22.5,24]],[[0,7]],[[]],[[0,7],[22.5,24]]],
+          'Netflix': [[[]],[[]],[[]],[[]],[[20,24]],[[0,9.27]],[[]]],
+          'Reddit': [[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]]],
+          'Steam': [[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,18],[22,24]],[[0,10],[13,24]],[[0,18],[22,24]]],
+          'Discord': [[[0,9],[17,24]],[[0,9],[17,24]],[[0,9],[17,24]],[[0,9],[17,24]],[[0,9],[17,24]],[[0,24]],[[0,9],[17,24]]],
+          'YouTube': [[[19,24]],[[13,15],[22.5,24]],[[22.5,24]],[[12.6,13.5],[22.5,24]],[[21,24]],[[12.6,13.5]],[[22.5,24]]]
+        };
+        const weekMarks = { 'Reddit':[null,[20.5],null,null,null,null,null], 'YouTube':[null,null,null,[13],null,null,null] };
+        const calWeekRows = items.map(it => Object.assign({
+          name:it.name, letter:it.letter, ic:it.ic, total:it.total,
+          days: weekPlan[it.name].map((segs, di) => ({
+            bars: segs.filter(s => s.length === 2).map(s => bar(s[0], s[1], it.kind)),
+            marks: ((weekMarks[it.name] || [])[di] || []).map(pct),
+            ring: di === 5 ? 'inset 0 0 0 1px rgba(219,81,38,.55)' : 'none'
+          }))
+        }, badge(it.t)));
+        return { calDayRows, calWeekRows, weekHead: ['Mon 14','Tue 15','Wed 16','Thu 17','Fri 18','Sat 19','Sun 20'].map((n, i) => ({ n, c: i===5 ? '#DB5126' : '#8D9AA8' })) };
+      })(),
+      lightSwitches: [
+        { n:'on', track:'#DB5126', knob:'#B33D18', side:'right' },
+        { n:'off', track:'#AEB6C0', knob:'#8A939F', side:'left' },
+        { n:'on · locked', track:'#E6A78F', knob:'#C08D79', side:'right' },
+        { n:'off · locked', track:'#CDD2D9', knob:'#B0B7C0', side:'left' }
+      ],
+      lightTokens: [
+        { n:'bg', c:'#EFF1F4' }, { n:'surface', c:'#FFFFFF' }, { n:'surface-2', c:'#F1F3F6' },
+        { n:'sidebar', c:'#E3E6EA' }, { n:'border', c:'#D2D7DE' }, { n:'border-strong', c:'#B9C0C9' },
+        { n:'text', c:'#14181D' }, { n:'muted', c:'#5E6874' }, { n:'switch-off', c:'#AEB6C0' },
+        { n:'accent', c:'#DB5126' }, { n:'green', c:'#1E7A46' }, { n:'red', c:'#C0392B' }, { n:'yellow', c:'#A9741B' }
+      ],
+      iconSizes: [{ px:'128px', label:'256 / 128' }, { px:'48px', label:'48' }, { px:'32px', label:'32' }, { px:'16px', label:'16' }],
+      trayBars: [
+        { n:'dark taskbar', bg:'#0B0E12', bd:'#2B333D', fg:'#E9EDF2', mut:'#8D9AA8',
+          states:[{ n:'enforced', c:'#27AE60', ink:'#0B0E12' }, { n:'mode on', c:'#E2A32B', ink:'#0B0E12' }, { n:'service down', c:'#E05A44', ink:'#0B0E12' }] },
+        { n:'light taskbar', bg:'#F1F3F6', bd:'#D2D7DE', fg:'#14181D', mut:'#5E6874',
+          states:[{ n:'enforced', c:'#1E7A46', ink:'#FFFFFF' }, { n:'mode on', c:'#A9741B', ink:'#FFFFFF' }, { n:'service down', c:'#C0392B', ink:'#FFFFFF' }] }
+      ],
+      animNotes: [
+        { n:'Service dot pulse', d:'One expanding ring every 2.4 s on the sidebar status and the tray tooltip — a 6-frame canvas redraw, stops when the window is hidden.' },
+        { n:'Live blink', d:'The Network Log “Live” dot alternates full / 20 % opacity once a second: two label images swapped.' },
+        { n:'Confirm countdown', d:'Remove → “Confirm?” draws a 2px bar that empties over 3 s, then falls back. A progress bar with a 100 ms tick.' },
+        { n:'Bars and progress grow once', d:'Limit bars, share-of-day bars and the Pomodoro bar animate from 4 % to their value in 250 ms when a page opens — never on every refresh.' },
+        { n:'Collapsible blocker panel', d:'The open blocker fades its body in over 150 ms (pack / pack_forget with an alpha step). No sliding height.' },
+        { n:'Challenge target box', d:'The active grid box breathes its border between accent and 45 % accent every 2.4 s so the eye finds it without a jump.' },
+        { n:'Popup notification', d:'Slides up 14 px and fades in over 250 ms in the bottom-right, auto-hides after 8 s unless hovered — a toplevel moved per frame.' },
+        { n:'Unlocked window', d:'The green “unlocked for 4:38” banner keeps a thin bar draining to zero, then the page re-locks with a 150 ms dim.' }
+      ],
+      suggestRows: [
+        { n:'Discord', sub:'discord.com', c:'#5865F2', l:'D', badge:'site', tag:'', on:1 },
+        { n:'Discord', sub:'discord.exe', c:'#5865F2', l:'D', badge:'app', tag:'running', on:1 },
+        { n:'Disney+', sub:'disneyplus.com', c:'#113CCF', l:'D', badge:'site', tag:'' },
+        { n:'Disk Cleanup', sub:'cleanmgr.exe', c:'#3A4552', l:'D', badge:'app', tag:'' },
+        { n:'Dishonored 2', sub:'Steam · steam://run/403640', c:'#1B2838', l:'S', badge:'app', tag:'' }
+      ].map((s, i) => Object.assign(s, {
+        bg: i===1 ? 'rgba(219,81,38,.1)' : 'transparent',
+        bfg: s.badge==='app' ? '#4E8FD1' : '#8D9AA8',
+        bbd: s.badge==='app' ? 'rgba(78,143,209,.5)' : '#2B333D',
+        tagc:'#27AE60'
+      })),
+      browseRows: [
+        { n:'Discord', exe:'discord.exe', c:'#5865F2', l:'D', run:'running' },
+        { n:'Google Chrome', exe:'chrome.exe', c:'#4285F4', l:'C', run:'running' },
+        { n:'League of Legends', exe:'leagueclient.exe', c:'#C89B3C', l:'L', run:'' },
+        { n:'Steam', exe:'steam.exe', c:'#1B2838', l:'S', run:'running' },
+        { n:'Visual Studio Code', exe:'code.exe', c:'#0E639C', l:'V', run:'' },
+        { n:'7-Zip File Manager', exe:'7zfm.exe', c:'#3A4552', l:'7', run:'' },
+        { n:'Anki', exe:'anki.exe', c:'#2F6FEB', l:'A', run:'' }
+      ].map((b, i) => Object.assign(b, { bg: i===0 ? 'rgba(219,81,38,.1)' : 'transparent', runc:'#27AE60' })),
+      wordChips: ['porn*','xxx','xvideos','xnxx','xhamster','redtube','youporn','youjizz','spankbang','brazzers','bangbros','realitykings','naughtyamerica','eporner'].map((n, i) => ({
+        n, on: i < 11,
+        bg: i < 11 ? 'rgba(219,81,38,.13)' : '#101418',
+        bd: i < 11 ? 'rgba(219,81,38,.4)' : '#2B333D',
+        fg: i < 11 ? '#E9EDF2' : '#8D9AA8',
+        tick: i < 11 ? '#DB5126' : '#3A434F'
+      })),
+      gridCells: Array.from({ length:9 }, (_, i) => ({
+        v: i===4 ? 'p98jy' : '', bd: i===4 ? '#DB5126' : '#2B333D',
+        bg: i===4 ? 'rgba(219,81,38,.08)' : '#181D23',
+        caret: i===4 ? '1' : '0', anim: i===4 ? 'ldBlink 2.4s ease-in-out infinite' : 'none'
+      })),
+      displayRows: ['Numbers at the top','Limits today','Today','Last 7 days','Trend','Coming up','Blocked visits today','At a glance'].map((n, i) => ({
+        n, on: i===4 ? '0' : '1',
+        bg: i===4 ? 'transparent' : '#DB5126',
+        bd: i===4 ? '#3A434F' : '#DB5126',
+        fg: i===4 ? '#8D9AA8' : '#E9EDF2',
+        drag:'⠿'
+      })),
+      tabsST: tab(['Overview','Apps','Websites','Switches','Calendar'],'Overview','d'),
+      stStats: [
+        { k:'Active', v:'34 h 32 m', sub:'of 38 h 58 m at the PC', c:'#8D9AA8' },
+        { k:'Daily average', v:'4 h 56 m', sub:'▼ 12 % vs last week', c:'#27AE60' },
+        { k:'Days within goal', v:'4 of 7', sub:'goal 5 h a day', c:'#8D9AA8' },
+        { k:'Longest focus', v:'37 m', sub:'Google Chrome, 21:33', c:'#8D9AA8' }
+      ],
+      ...(() => {
+        const vals = [6.2,5.4,7.1,4.8,5.9,8.2,6.6,5.1,4.4,6.8,7.4,5.6,4.9,6.1,5.3,7.8,6.4,4.2,5.0,6.9,5.7,4.6,3.9,5.5,6.3,4.1,5.2,3.6,4.7,4.3];
+        const X = i => (i / (vals.length - 1) * 1000).toFixed(1);
+        const Y = v => (190 - (v / 9) * 170).toFixed(1);
+        const pts = vals.map((v, i) => X(i) + ',' + Y(v)).join(' ');
+        const avg = vals.map((v, i) => {
+          const s = vals.slice(Math.max(0, i - 6), i + 1);
+          return X(i) + ',' + Y(s.reduce((a, b) => a + b, 0) / s.length);
+        }).join(' ');
+        const marks = [7, 18, 25].map(i => ({ x:X(i), y:Y(vals[i]) }));
+        return { trendPts:pts, trendAvg:avg, trendArea:'0,196 ' + pts + ' 1000,196', trendMarks:marks };
+      })(),
+      catLegend: [{n:'Productive',c:'#27AE60'},{n:'Neutral',c:'#8D9AA8'},{n:'Distracting',c:'#DB5126'},{n:'Idle',c:'#2B333D'}],
+      cats: [{n:'Productive',c:'#27AE60',v:'14 h 25 m'},{n:'Neutral',c:'#8D9AA8',v:'5 h 12 m'},{n:'Distracting',c:'#DB5126',v:'14 h 55 m'}],
+      timeline: (() => {
+        const seq = [['#2B333D',6],['#DB5126',2],['#27AE60',3],['#DB5126',1],['#27AE60',4],['#8D9AA8',2],['#DB5126',3],['#27AE60',5],['#2B333D',1],['#27AE60',2],['#DB5126',4],['#8D9AA8',2],['#2B333D',45]];
+        const total = seq.reduce((a, s) => a + s[1], 0);
+        return seq.map(s => ({ c:s[0], w:(s[1] / total * 100).toFixed(2) + '%' }));
+      })(),
+      alertTicks: ['Permanently blocked','Outside its allowed hours','Over its time limit','Opened too often','Temporarily blocked','Blocked by a mode','On a protection list'].map((n, i) => ({
+        n, on: i===5 ? '0' : '1',
+        bg: i===5 ? 'transparent' : '#DB5126',
+        bd: i===5 ? '#222932' : 'rgba(219,81,38,.4)',
+        bd2: i===5 ? '#3A434F' : '#DB5126',
+        fg: i===5 ? '#8D9AA8' : '#E9EDF2'
+      })),
+      msgRows: [
+        { k:'Over its time limit', v:'{name} is blocked — it is over its time limit (resets {reset}).' },
+        { k:'Outside allowed hours', v:'{name} is closed now. It opens again at {next}.' }
+      ],
+      themeOpts: ['Dark','AMOLED','Light','Match Windows'].map(n => ({ n, bg: n==='Dark' ? '#DB5126' : 'transparent', fg: n==='Dark' ? '#fff' : '#8D9AA8' })),
+      accents: ['#DB5126','#C0392B','#D6336C','#7048E8','#1C7ED6','#0CA678','#2F9E44','#D9A115'].map((c, i) => ({
+        c, ring: i===0 ? '2.5px' : '0px', rc:'#E9EDF2'
+      })),
+      netBars: (() => {
+        const vals = [9,4,13,20,11,10,12,15,7,6,17,22,9,14,5,3,19,16,8,12,21,13,6,11,18,10,7,15,9,20,4,12,16,8,14,23,11,6,13,17,9,15,7,19,12,5,18,10,22,14,8,16,11,24,13,7,17,9,15,12];
+        const blocked = [3, 27, 44];
+        return vals.map((v, i) => ({ h: (v / 24 * 100).toFixed(1) + '%', c: blocked.includes(i) ? '#E05A44' : '#3A4552' }));
+      })(),
+      topApps: [
+        { n:'Google Chrome', v:'270', w:'100%', c:'#4285F4', l:'C' },
+        { n:'Discord', v:'168', w:'62%', c:'#5865F2', l:'D' },
+        { n:'Visual Studio Code', v:'163', w:'60%', c:'#0E639C', l:'V' },
+        { n:'Spotify', v:'147', w:'54%', c:'#1DB954', l:'S' },
+        { n:'Steam', v:'143', w:'53%', c:'#1B2838', l:'S' }
+      ].map(a => Object.assign(a, { bar:'#3A4552' })),
+      topSites: [
+        { n:'gateway.discord.gg', v:'168', c:'#5865F2', l:'G', tag:'', tagc:'#8D9AA8', fg:'#E9EDF2' },
+        { n:'marketplace.visualstudio.com', v:'163', c:'#0E639C', l:'M', tag:'', tagc:'#8D9AA8', fg:'#E9EDF2' },
+        { n:'spclient.wg.spotify.com', v:'147', c:'#1DB954', l:'S', tag:'', tagc:'#8D9AA8', fg:'#E9EDF2' },
+        { n:'www.youtube.com', v:'141', c:'#FF0000', l:'W', tag:'limit 0m / 1h', tagc:'#E2A32B', fg:'#E9EDF2' },
+        { n:'github.com', v:'129', c:'#6E5494', l:'G', tag:'', tagc:'#8D9AA8', fg:'#E9EDF2' },
+        { n:'fake-shop.com', v:'1', c:'#E2A32B', l:'F', tag:'blocked · Scam list', tagc:'#E05A44', fg:'#E9EDF2' }
+      ],
+      pomodoro: ['#DB5126','#2B333D','#2B333D','#2B333D'],
+      modeCards: (() => {
+        const ic = {
+          Work:'<rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M9 7V5.5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2V7"></path>',
+          Study:'<path d="M4 6.5 12 3.5l8 3-8 3z"></path><path d="M6.5 9.5V16c0 1.4 2.5 2.5 5.5 2.5s5.5-1.1 5.5-2.5V9.5"></path>',
+          Focus:'<circle cx="12" cy="13" r="7.5"></circle><path d="M12 9.5V13l2.5 1.5"></path><path d="M9.5 3h5"></path>',
+          'Do Not Disturb':'<circle cx="12" cy="12" r="8.5"></circle><path d="M6.2 6.2 17.8 17.8"></path>',
+          Relax:'<path d="M4 17.5h16"></path><path d="M7 17.5c0-4 2.2-7 5-7s5 3 5 7"></path><path d="M12 6.5V4"></path>',
+          'New mode':'<path d="M12 5v14M5 12h14"></path>'
+        };
+        const rows = [
+          ['Work','blocks Distracting · mutes notifications','Start',0],
+          ['Study','blocks Distracting + Steam games','Start',0],
+          ['Focus','Pomodoro 25 / 5 min × 4, then 15 min','Running',1],
+          ['Do Not Disturb','blocks Distracting · hides every Lockdown alert','Start',0],
+          ['Relax','blocks nothing extra · keeps the protection lists on','Start',0],
+          ['New mode','pick what it blocks, a timer or a schedule','+ Create',2]
+        ];
+        return rows.map(r => ({
+          n:r[0], desc:r[1], btn:r[2], svg:{__html:ic[r[0]]},
+          bar: r[3]===1 ? '#DB5126' : (r[3]===2 ? '#2B333D' : 'rgba(219,81,38,.35)'),
+          ic: r[3]===1 ? '#DB5126' : '#8D9AA8',
+          tag: r[3]===1 ? 'running' : '', tagc:'#DB5126',
+          btnbg: r[3]===0 ? '#DB5126' : 'transparent',
+          btnfg: r[3]===0 ? '#fff' : (r[3]===1 ? '#DB5126' : '#8D9AA8'),
+          btnbd: r[3]===0 ? '#DB5126' : '#2B333D'
+        }));
+      })(),
+      tabsCal: tab(['Overview','Groups','Add','Protection','Calendar'],'Calendar','d'),
+      calLegend: [{n:'Site',c:'#DB5126'},{n:'App',c:'#4E8FD1'},{n:'Group rule',c:'#E2A32B'},{n:'Protection list',c:'#8D9AA8'}],
+      calHours: ['00','02','04','06','08','10','12','14','16','18','20','22'],
+      calWeek: (() => {
+        const pct = h => (h / 24 * 100).toFixed(2) + '%';
+        const bar = (from, to, label, kind, lane) => {
+          const map = { site:['#DB5126','rgba(219,81,38,.16)'], app:['#4E8FD1','rgba(78,143,209,.16)'], group:['#E2A32B','rgba(226,163,43,.16)'], prot:['#8D9AA8','rgba(141,154,168,.14)'] };
+          return { left:pct(from), w:pct(to-from), label, c:map[kind][0], bg:map[kind][1], top: lane ? '20px' : '3px' };
+        };
+        const ticks = [2,4,6,8,10,12,14,16,18,20,22].map(pct);
+        const days = [
+          { day:'Mon', bars:[bar(0,7,'School nights','group'), bar(22.5,24,'School nights','group'), bar(18,22,'Steam allowed only','app',1)], marks:[] },
+          { day:'Tue', bars:[bar(0,7,'School nights','group'), bar(22.5,24,'School nights','group'), bar(13,15,'TikTok · permanent','site',1)], marks:[pct(20.5)] },
+          { day:'Wed', bars:[bar(0,7,'School nights','group'), bar(22.5,24,'School nights','group'), bar(9,17,'Discord 09–17','app',1)], marks:[] },
+          { day:'Thu', bars:[bar(0,7,'School nights','group'), bar(22.5,24,'School nights','group'), bar(12,13.5,'YouTube limit hit','site',1)], marks:[] },
+          { day:'Fri', bars:[bar(9,17,'Discord 09–17','app'), bar(20,24,'Netflix temporary','site',1)], marks:[pct(21)] },
+          { day:'Sat', bars:[bar(0,24,'Adult list · always on','prot'), bar(10,13,'Games 3 h cap','app',1)], marks:[] },
+          { day:'Sun', bars:[bar(0,7,'School nights','group'), bar(22.5,24,'School nights','group'), bar(18,20,'Anti-Bypass window','prot',1)], marks:[] }
+        ];
+        return days.map((d, i) => Object.assign(d, {
+          ticks, fg: i===5 ? '#DB5126' : '#8D9AA8',
+          now: i===5 ? pct(6.3) : '-10px', nowc: i===5 ? '#DB5126' : 'transparent'
+        }));
+      })(),
+      netRows: (() => {
+        const apps = {
+          Steam:['#1B2838','S'], 'Visual Studio Code':['#0E639C','V'], 'Google Chrome':['#4285F4','C'],
+          Spotify:['#1DB954','S'], Discord:['#5865F2','D']
+        };
+        const raw = [
+          ['Steam','06:16','api.steampowered.com',' ×4','—','Allowed'],
+          ['Visual Studio Code','06:16','marketplace.visualstudio.com',' ×4','—','Allowed'],
+          ['Google Chrome','06:16','www.youtube.com',' ×4','limit 0m / 1h','Allowed'],
+          ['Google Chrome','06:16','fake-shop.com','','Scam list','Blocked'],
+          ['Spotify','06:16','spclient.wg.spotify.com',' ×2','—','Allowed'],
+          ['Steam','06:15','api.steampowered.com','','—','Allowed'],
+          ['Discord','06:15','gateway.discord.gg',' ×4','—','Allowed'],
+          ['Google Chrome','06:15','tiktok.com','','Permanent','Blocked'],
+          ['Visual Studio Code','06:15','marketplace.visualstudio.com',' ×3','—','Allowed'],
+          ['Steam','06:14','api.steampowered.com',' ×3','—','Allowed'],
+          ['Google Chrome','06:14','github.com','','—','Allowed'],
+          ['Spotify','06:14','spclient.wg.spotify.com','','—','Allowed'],
+          ['Discord','06:14','gateway.discord.gg','','—','Allowed'],
+          ['Google Chrome','06:13','www.youtube.com',' ×2','limit 0m / 1h','Allowed'],
+          ['Steam','06:13','api.steampowered.com',' ×4','—','Allowed']
+        ];
+        return raw.map(r => ({
+          app:r[0], time:r[1], site:r[2], x:r[3], rule:r[4], status:r[5]==='Blocked' ? '✕ Blocked' : '✓ Allowed',
+          c:apps[r[0]][0], l:apps[r[0]][1],
+          rowbg: r[5]==='Blocked' ? 'rgba(224,90,68,.09)' : 'transparent',
+          sc: r[5]==='Blocked' ? '#E05A44' : '#27AE60',
+          rulec: r[4]==='—' ? '#8D9AA8' : (r[5]==='Blocked' ? '#E05A44' : '#E2A32B')
+        }));
+      })(),
+      phraseLen: ['Short','Medium','Long','Very long'].map(n => ({ n, bg: n==='Medium' ? '#8A4E33' : 'transparent', fg: n==='Medium' ? '#F0E2DB' : '#8D9AA8' })),
+      abDays: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(n => ({ n, bg: n==='Sun' ? '#8A4E33' : 'transparent', fg: n==='Sun' ? '#F0E2DB' : '#8D9AA8', bd: n==='Sun' ? '#8A4E33' : '#2B333D' })),
+      abKeep: [
+        'The tray app comes back within a minute if it is closed any other way than Exit (e.g. Task Manager).',
+        'The service comes back within a minute if it is stopped.',
+        'Changing the Windows clock does nothing; a new time zone counts only after 24 hours.',
+        'Uninstalling Lockdown asks for the challenge too.'
+      ],
+      abNeeds: [
+        'Removing a blocked site / app / group, or taking members out of one',
+        'Weaker rules: higher or no limits, other blocked hours, a shorter temporary block',
+        'Switching a protection list off, or allowing a site it blocks',
+        'Turning SafeSearch or the blocked-words check off, adding exceptions',
+        'Emergency unlock: turning it on, longer unlocks, more uses',
+        'Quitting Lockdown from the tray',
+        'Weakening Anti-Bypass itself (these settings)'
+      ],
+      tabsProt: tab(['Overview','Groups','Add','Protection','Calendar'],'Protection','d'),
+      protLists: [
+        { name:'Scam', desc:'fake shops, fake support, crypto and other scams', src:'Block List Project + HaGeZi', count:'26 012', upd:'updated 3 h ago', on:1 },
+        { name:'Phishing', desc:'fake log-in pages that steal passwords', src:'Block List Project + Phishing Army', count:'190 228', upd:'updated 3 h ago', on:1 },
+        { name:'Malware', desc:'viruses, crypto-miners and other threats', src:'HaGeZi Threat Intelligence + URLhaus', count:'2 567 444', upd:'updated 2 h ago', on:1 },
+        { name:'Adult', desc:'porn and other adult sites', src:'Block List Project + HaGeZi', count:'1 028 039', upd:'updated 5 h ago', on:1 },
+        { name:'Gambling', desc:'betting and casino sites', src:'HaGeZi', count:'—', upd:'off', on:0 }
+      ].map(l => Object.assign(l, {
+        track: l.on ? '#DB5126' : '#3A434F', kbd: l.on ? '#DB5126' : '#4A5563',
+        side: l.on ? 'right' : 'left', fg: l.on ? '#E9EDF2' : '#8D9AA8'
+      })),
+      wordLists: [
+        { name:'Adult words · English', count:'102 words', on:1, sw:'1' },
+        { name:'Adult words · Polish', count:'45 words', on:1, sw:'1' },
+        { name:'Your words', count:'none yet', on:0, sw:'.35' },
+        { name:'Exceptions', count:'none', on:0, sw:'.35' }
+      ].map(w => Object.assign(w, {
+        track: w.on ? '#DB5126' : '#3A434F', kbd: w.on ? '#DB5126' : '#4A5563',
+        side: w.on ? 'right' : 'left', fg: w.on ? '#E9EDF2' : '#8D9AA8'
+      })),
+      whenBlocked: [
+        { n:'Close the app', on:'1', bg:'#DB5126', bd:'rgba(219,81,38,.45)', bd2:'#DB5126', fg:'#E9EDF2' },
+        { n:'Minimize', on:'0', bg:'transparent', bd:'#2B333D', bd2:'#3A434F', fg:'#8D9AA8' },
+        { n:'Block its internet', on:'1', bg:'#DB5126', bd:'rgba(219,81,38,.45)', bd2:'#DB5126', fg:'#E9EDF2' }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.36.0 - 2026-09-19 18:43
+- **New sub-tabs (Round 3 design)**: the page sub-tabs (Blocking, Screen Time, Modes, Network Log) are now the
+  underline / ink-bar style from the design - a row on the title line, the selected tab with an accent underline
+  and brighter text - instead of the filled segmented pills. Small in-form option switches keep the pill look.
+- **Continuous "now" line**: the current-time line on the block calendar is one full-height line across the whole
+  grid instead of a short segment inside today's row (no more gaps between rows).
+- **Live status**: the Anti-Bypass locked/unlocked banner now re-checks the clock on a timer, so its colour is
+  right when an allowed-hours window opens or closes even if you never leave the tab.
+- **Confirm before changing the challenge**: making the Anti-Bypass challenge stronger (a phrase, longer length,
+  the grid, or restricting the hours) now asks you to confirm - so you can't accidentally lock yourself out.
+
 ## 0.35.0 - 2026-09-19 19:20
 - **Installer finish flow**: the "run now" tick is hidden until it's done; when the update finishes you get a green
   check, a "Run Lockdown now" tick (on by default) and a **Finish** button - like a normal installer.

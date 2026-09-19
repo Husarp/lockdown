@@ -8,10 +8,12 @@ from gui import theme
 from gui.components import Card, Segmented, help_icon, page_head
 from gui.word_grid import WordGrid, block_paste
 from gui.rule_editors import WindowRow
+from gui.widgets import ConfirmDialog
 from rules import days_text, make_schedule, load_schedule
 from trusted_time import now_from_db
 
 MUTED = theme.MUTED
+LIVE_MS = 5_000   # re-check the lock state on a timer so the banner colour follows the clock (allowed-hours edges)
 PROTECTS = ["Removing a blocked site / app / group, or taking sites or members out of it",
             "Weaker rules: higher or no limits, other blocked hours, a shorter temporary block, gentler app blocking",
             "Switching a protection list off, or allowing a site it blocks",
@@ -217,7 +219,9 @@ class AntiBypassPage(ctk.CTkFrame):
             "•  Changing the Windows clock does nothing; a new time zone counts only after 24 hours.",
             "•  Uninstalling Lockdown asks for the challenge too."]), justify="left", anchor="w",
             wraplength=820).pack(anchor="w")
+        self._banner_sig = None
         self.refresh()
+        self.after(LIVE_MS, self._live)
 
     def _add_row(self, days, start, end):
         row = WindowRow(self.rows_box, days, start, end,
@@ -247,10 +251,18 @@ class AntiBypassPage(ctk.CTkFrame):
         for w in cfg["windows"]:
             self._add_row(w["days"], w["start"], w["end"])
         self.error.configure(text="")
-        self.lock_btn.pack_forget()
-        self.unlock_btn.pack_forget()
+        self._set_banner()
+
+    def _set_banner(self):
+        """Paint the status banner (lock / unlock / off) for the time right now. Split out from refresh() so a light
+        timer can update it when time crosses an allowed-hours boundary - without rebuilding the whole page."""
+        cfg = antibypass.settings(self.db)
+        now = now_from_db(self.db)
         status = antibypass.status(cfg, now)
         until = antibypass.unlocked_until(cfg, now)
+        self._banner_sig = (antibypass.active(cfg), status, bool(until))
+        self.lock_btn.pack_forget()
+        self.unlock_btn.pack_forget()
         if not antibypass.active(cfg):
             self._banner(theme.MUTED, "Anti-Bypass is off",
                          "Turn on a challenge below - then anything that loosens a block will need it first.")
@@ -262,13 +274,24 @@ class AntiBypassPage(ctk.CTkFrame):
             self._banner(theme.SUCCESS, "", "Changes that loosen your blocks are allowed until the timer runs out.")
             self.lock_btn.pack(side="right")
             self._tick_unlock()   # live mm:ss countdown + a draining bar
-            return
         elif status == "phrase":
             self._banner(theme.DANGER, "Locked - you can look at everything, but loosening a block needs the challenge",
                          describe(cfg))
             self.unlock_btn.pack(side="right")
         else:   # only allowed hours, and they're now
             self._banner(theme.SUCCESS, "Inside the allowed hours - loosening changes are allowed", describe(cfg))
+
+    def _live(self):
+        """Re-paint the banner when the lock state changes with the clock (e.g. an allowed-hours window opens or
+        closes), so its colour is right even if you never leave the tab. Cheap: only repaints on a real change."""
+        if not self.winfo_exists():
+            return
+        cfg = antibypass.settings(self.db)
+        now = now_from_db(self.db)
+        sig = (antibypass.active(cfg), antibypass.status(cfg, now), bool(antibypass.unlocked_until(cfg, now)))
+        if sig != getattr(self, "_banner_sig", None):
+            self._set_banner()
+        self.after(LIVE_MS, self._live)
 
     def _banner(self, color, title: str, sub: str):
         """Tint the status banner for the current lock state (red = locked, green = unlocked, grey = off)."""
@@ -321,8 +344,18 @@ class AntiBypassPage(ctk.CTkFrame):
             self.refresh()
         if antibypass.settings_looser(old, new):
             self.app.guard(["Weaken Anti-Bypass"], save, self.refresh)
+        elif self._challenge_changed(old, new):
+            # tightening the challenge is instant, but a phrase you can't reproduce (or hours you can't reach) would
+            # lock you out of ever loosening a block - so confirm the new challenge first
+            ConfirmDialog(self.app, "Change the Anti-Bypass challenge?",
+                          "This is what you'll need to loosen a block from now on. Make sure you can actually do it - "
+                          "if you can't, you won't be able to unlock anything.",
+                          on_yes=save, on_no=self.refresh, yes_text="Change it", lines=[describe(new)])
         else:
             save()
+
+    def _challenge_changed(self, old: dict, new: dict) -> bool:
+        return any(old[k] != new[k] for k in ("phrase", "length", "grid", "hours", "windows"))
 
     def _lock(self):
         antibypass.lock(self.db)

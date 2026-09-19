@@ -10,7 +10,7 @@ import customtkinter as ctk
 import stats
 from gui import app_browser, appinfo, categories, theme
 from gui.charts import DayBars, Donut, Heatmap, HourBars, MonthCalendar, TimelineBar, TrendLine
-from gui.components import Curtain, Card, Chip, Rows, Segmented, StatCard, help_icon, page_head
+from gui.components import Curtain, Card, Chip, Rows, Segmented, TabBar, StatCard, help_icon, page_head
 from gui.dashboard import goal_seconds
 from rules import DAY_NAMES
 from trusted_time import now_from_db
@@ -450,11 +450,13 @@ class ScreenTimePage(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.app, self.db = app, app.db
         app_browser.preload()
-        page_head(self, "Screen Time").pack(anchor="w", padx=30, pady=(12, 6))
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=30, pady=(12, 8))
+        page_head(head, "Screen Time").pack(side="left")
+        self.tab_bar = TabBar(head, values=TABS, command=self.show_tab)
+        self.tab_bar.pack(side="right", anchor="s")
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 10))
-        self.tab_bar = Segmented(bar, values=TABS, command=self.show_tab)
-        self.tab_bar.pack(side="left")
         self.range_bar = Segmented(bar, values=list(stats.RANGES), command=lambda v: self.refresh())
         self.range_bar.pack(side="right")
         from gui.display_settings import ST_RANGE_KEY, ST_TAB_KEY, gear_button

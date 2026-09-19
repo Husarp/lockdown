@@ -19,7 +19,7 @@ from PIL import ImageTk
 import search
 from gui import appinfo, icons, theme
 from gui.charts import MinuteBars
-from gui.components import Card, Rows, Segmented, page_head
+from gui.components import Card, Rows, Segmented, TabBar, page_head
 from gui.target_picker import guess_name, popular_hosts
 from trusted_time import now_from_db
 
@@ -140,14 +140,14 @@ class NetworkPage(ctk.CTkFrame):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
         page_head(head, "Network Log").pack(side="left")
+        self.view = TabBar(head, ["Table", "Graph"], command=lambda v: self._show_view())
+        self.view.set("Table")
+        self.view.pack(side="right", anchor="s")
         self.summary = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
-        self.summary.pack(side="right", anchor="s", pady=(0, 4))
+        self.summary.pack(side="right", anchor="s", padx=(0, 16), pady=(0, 4))
 
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 6))
-        self.view = Segmented(bar, ["Table", "Graph"], command=lambda v: self._show_view())
-        self.view.set("Table")
-        self.view.pack(side="left")
         self.status_filter = Segmented(bar, ["All", "Allowed", "Blocked"], command=lambda v: self._filtered())
         self.status_filter.set("All")
         self.status_filter.pack(side="left", padx=10)

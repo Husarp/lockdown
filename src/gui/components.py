@@ -198,6 +198,50 @@ class Segmented(ctk.CTkFrame):
                         hover_color=theme.ACCENT_PRESS if on else theme.BORDER)
 
 
+class TabBar(ctk.CTkFrame):
+    """Top-of-page sub-tabs, Round-3 underline / ink-bar style: a row of labels over a thin baseline; the chosen
+    one gets a 2px accent underline and brighter, semibold text. Sits on the page-title row, right-aligned.
+    Same API as Segmented (values, command(value), set(), get())."""
+
+    GAP = 22
+
+    def __init__(self, master, values: list[str], command=None, **_ignored):
+        super().__init__(master, fg_color="transparent")
+        self.command, self.value = command, None
+        self.tabs = {}
+        row = ctk.CTkFrame(self, fg_color="transparent")   # grid: each column sizes to its label (no fixed width)
+        row.pack(side="top", anchor="e")
+        ctk.CTkFrame(self, height=1, fg_color=theme.BORDER, corner_radius=0).pack(fill="x", side="top")  # baseline
+        for i, v in enumerate(values):
+            pad = (0, self.GAP if i < len(values) - 1 else 0)
+            lbl = ctk.CTkLabel(row, text=v, text_color=theme.MUTED, font=theme.body(13), height=22, cursor="hand2")
+            lbl.grid(row=0, column=i, padx=pad, pady=(6, 3))
+            underline = ctk.CTkFrame(row, height=2, width=1, fg_color="transparent", corner_radius=0)
+            underline.grid(row=1, column=i, padx=pad, sticky="ew")
+            for w in (lbl, underline):
+                w.bind("<Button-1>", lambda _e, v=v: self._clicked(v))
+            self.tabs[v] = (lbl, underline)
+        self._paint()
+
+    def _clicked(self, value: str):
+        self.set(value)
+        if self.command:
+            self.command(value)
+
+    def set(self, value: str):
+        self.value = value
+        self._paint()
+
+    def get(self) -> str:
+        return self.value
+
+    def _paint(self):
+        for v, (lbl, underline) in self.tabs.items():
+            on = v == self.value
+            lbl.configure(text_color=theme.TEXT if on else theme.MUTED, font=theme.semi(13) if on else theme.body(13))
+            underline.configure(fg_color=theme.ACCENT if on else "transparent")
+
+
 class Rows:
     """List rows that are made once and reused on every refresh - creating and destroying Tk widgets is what
     makes pages slow. make(parent) returns a frame (with its widgets as attributes); take(n) shows n of them.
