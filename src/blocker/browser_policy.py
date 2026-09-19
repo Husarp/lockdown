@@ -5,8 +5,8 @@
 - Chromium's built-in DNS client off: names are then looked up by Windows, so they land in the Windows DNS cache,
   where the network log finds which site each connection belongs to.
 
-- Forced SafeSearch (Protection tab, on by default): Google SafeSearch, YouTube Restricted Mode (moderate), Bing
-  strict SafeSearch - next to the DNS filter doing the same for every browser.
+- Forced SafeSearch (Protection tab, on by default): Google SafeSearch, Bing strict SafeSearch. YouTube Restricted
+  Mode (moderate) is a separate switch. Next to the DNS filter doing the same for every browser.
 
 Browsers show "managed by your organization" while these are set. Needs admin (HKLM).
 """
@@ -29,20 +29,24 @@ POLICIES = {
 }
 
 
-_SAFE = {"ForceGoogleSafeSearch": (REG_DWORD, 1), "ForceYouTubeRestrict": (REG_DWORD, 1)}
+_SAFE = {"ForceGoogleSafeSearch": (REG_DWORD, 1)}
+_YT = {"ForceYouTubeRestrict": (REG_DWORD, 1)}
 SAFE_SEARCH = {
     r"SOFTWARE\Policies\Google\Chrome": _SAFE,
     r"SOFTWARE\Policies\Microsoft\Edge": {**_SAFE, "ForceBingSafeSearch": (REG_DWORD, 2)},
     r"SOFTWARE\Policies\BraveSoftware\Brave": _SAFE,
 }
+YOUTUBE = {path: _YT for path in (r"SOFTWARE\Policies\Google\Chrome", r"SOFTWARE\Policies\Microsoft\Edge",
+                                  r"SOFTWARE\Policies\BraveSoftware\Brave")}
 
 
-def apply(safe_search: bool = False) -> bool:
-    """Set every policy that is missing or different (SafeSearch ones only when on - removed when off).
+def apply(safe_search: bool = False, youtube: bool = False) -> bool:
+    """Set every policy that is missing or different (SafeSearch / YouTube ones only when on - removed when off).
     Returns True if anything was written."""
     changed = False
-    for path in POLICIES.keys() | SAFE_SEARCH.keys():
-        wanted = {**POLICIES.get(path, {}), **(SAFE_SEARCH.get(path, {}) if safe_search else {})}
+    for path in POLICIES.keys() | SAFE_SEARCH.keys() | YOUTUBE.keys():
+        wanted = {**POLICIES.get(path, {}), **(SAFE_SEARCH.get(path, {}) if safe_search else {}),
+                  **(YOUTUBE.get(path, {}) if youtube else {})}
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
             for name, (kind, data) in wanted.items():
                 try:
@@ -52,7 +56,7 @@ def apply(safe_search: bool = False) -> bool:
                     pass
                 winreg.SetValueEx(key, name, 0, kind, data)
                 changed = True
-            for name in SAFE_SEARCH.get(path, {}).keys() - wanted.keys():
+            for name in (SAFE_SEARCH.get(path, {}).keys() | YOUTUBE.get(path, {}).keys()) - wanted.keys():
                 try:
                     winreg.DeleteValue(key, name)
                     changed = True
@@ -63,10 +67,10 @@ def apply(safe_search: bool = False) -> bool:
 
 def remove():
     """Delete the values set by apply() (used on uninstall). Keys are left in place."""
-    for path in POLICIES.keys() | SAFE_SEARCH.keys():
+    for path in POLICIES.keys() | SAFE_SEARCH.keys() | YOUTUBE.keys():
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as key:
-                for name in {**POLICIES.get(path, {}), **SAFE_SEARCH.get(path, {})}:
+                for name in {**POLICIES.get(path, {}), **SAFE_SEARCH.get(path, {}), **YOUTUBE.get(path, {})}:
                     try:
                         winreg.DeleteValue(key, name)
                     except FileNotFoundError:

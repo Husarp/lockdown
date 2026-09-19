@@ -73,6 +73,19 @@ def test_safe_targets():
         "restrictmoderate.youtube.com"
 
 
+def test_safesearch_and_youtube_are_separate_switches():
+    # YouTube Restricted Mode off but SafeSearch on: search engines still safe, YouTube left alone (comments show)
+    assert kw.safe_target("www.google.com", safesearch=True, youtube=False) == "forcesafesearch.google.com"
+    assert kw.safe_target("www.youtube.com", safesearch=True, youtube=False) is None
+    # the other way round
+    assert kw.safe_target("www.google.com", safesearch=False, youtube=True) is None
+    assert kw.safe_target("www.youtube.com", safesearch=False, youtube=True) == "restrictmoderate.youtube.com"
+    assert kw.safe_target("www.google.com", safesearch=False, youtube=False) is None
+    old = {**CFG}
+    assert kw.looser(old, {**old, "youtube": False}) == ["Turn YouTube Restricted Mode off"]
+    assert kw.looser({**old, "youtube": False}, old) == []                                    # turning it on: fine
+
+
 def _query(name, qtype=1):
     labels = b"".join(bytes([len(p)]) + p.encode() for p in name.split("."))
     return struct.pack(">HHHHHH", 0x4242, 0x0100, 1, 0, 0, 0) + labels + b"\0" + struct.pack(">HH", qtype, 1)

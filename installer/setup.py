@@ -140,10 +140,13 @@ def uninstall_entry(log):
 
 
 def start(log):
-    log("Starting Lockdown...")
+    log("Starting the Lockdown service...")
     run("schtasks", "/Change", "/TN", WATCHDOG, "/ENABLE")
     run("sc", "start", SERVICE)
-    # the app runs as you, not as admin: let Explorer start it
+
+
+def launch_app():
+    """Open the Lockdown window. It runs as you, not as admin, so let Explorer start it."""
     subprocess.Popen([tool("explorer.exe"), str(INSTALL_DIR / "Lockdown.exe")], creationflags=NO_WINDOW)
 
 
@@ -155,7 +158,7 @@ def install(log):
     shortcuts(log)
     uninstall_entry(log)
     start(log)
-    log(f"Lockdown {VERSION} is installed and running.")
+    log(f"Lockdown {VERSION} is installed. Blocking is active. Click Close to finish.")
 
 
 def challenge_passed() -> bool:
@@ -232,6 +235,10 @@ class SetupWindow(tk.Tk):
         self.log_box = tk.Text(box, height=9, width=60, state="disabled", relief="flat", background="#F2F2F2",
                                font=("Segoe UI", 9))
         self.log_box.pack(fill="both", expand=True, pady=12)
+        self.run_app = tk.BooleanVar(value=True)
+        if not uninstalling:
+            ttk.Checkbutton(box, text="Run Lockdown when I close this window", variable=self.run_app).pack(
+                anchor="w", pady=(0, 8))
         buttons = ttk.Frame(box)
         buttons.pack(fill="x")
         self.go = ttk.Button(buttons, text="Uninstall" if uninstalling else ("Update" if current else "Install"),
@@ -267,6 +274,7 @@ class SetupWindow(tk.Tk):
                     self.done = True
             else:
                 install(self.log)
+                self.done = True
         except Exception as e:   # show it rather than vanish
             self.log(f"Something went wrong: {e}")
         self.after(0, lambda: self.close.configure(state="normal", text="Close"))
@@ -277,6 +285,8 @@ class SetupWindow(tk.Tk):
         self.destroy()
         if self.uninstalling and self.done:
             remove_program_folder()
+        elif not self.uninstalling and self.done and self.run_app.get():
+            launch_app()
 
 
 def main():

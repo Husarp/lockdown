@@ -5,8 +5,8 @@
   ("analysis" doesn't match "anal"); a word ending in "*" also matches longer words ("porn*" -> "pornhub");
   several words = that phrase. Accents are ignored ("ruchać" = "ruchac").
   Exceptions: a site (has a dot: that site and its subdomains aren't checked) or a word (never counts).
-- SafeSearch: the DNS filter sends Google / Bing / DuckDuckGo / YouTube to their "safe" addresses (the search
-  engines' own documented way to force SafeSearch / Restricted Mode); browser policies force it as well.
+- SafeSearch: the DNS filter sends Google / Bing / DuckDuckGo to their "safe" addresses; browser policies force it
+  as well. YouTube Restricted Mode is a separate switch (it also hides all comments, so it's on its own).
 Standard library only (used by the service too)."""
 import json
 import re
@@ -16,7 +16,7 @@ from urllib.parse import unquote_plus, urlsplit
 SETTINGS_KEY = "words"   # JSON {"enabled", "safesearch", "action": "close" / "back", "lists": {ready list: on},
 #                                "off": [ready-list words turned off], "words": [yours], "exceptions": [...]}
 DEFAULTS = {"enabled": True, "safesearch": True, "action": "close", "lists": {"adult_en": True, "adult_pl": True},
-            "off": [], "words": [], "exceptions": []}
+            "youtube": True, "off": [], "words": [], "exceptions": []}
 ACTIONS = {"close": "Close the tab", "back": "Go back"}
 
 # Ready-made lists you can switch on (both on by default) and open to turn single words off.
@@ -42,13 +42,13 @@ READY = {
         "dziwki", "prostytutk*", "roksa", "anonse towarzyskie", "masturbac*", "walenie konia", "orgia", "orgie",
         "striptiz", "filmy dla doroslych"]),
 }
-SAFE_TARGETS = {   # DNS names -> the search engines' "always safe" address
+SEARCH_TARGETS = {   # DNS names -> the search engines' "always safe" address (SafeSearch switch)
     "forcesafesearch.google.com": re.compile(r"^(www\.)?google\.(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$"),
     "strict.bing.com": re.compile(r"^(www\.)?bing\.com$"),
     "safe.duckduckgo.com": re.compile(r"^(www\.|start\.|html\.)?duckduckgo\.com$"),
-    "restrictmoderate.youtube.com": re.compile(r"^((www|m)\.youtube\.com|youtubei?\.googleapis\.com|"
-                                               r"www\.youtube-nocookie\.com)$"),
 }
+YOUTUBE_TARGET = ("restrictmoderate.youtube.com",   # YouTube Restricted Mode switch (separate: it hides comments)
+                  re.compile(r"^((www|m)\.youtube\.com|youtubei?\.googleapis\.com|www\.youtube-nocookie\.com)$"))
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
@@ -78,6 +78,8 @@ def looser(old: dict, new: dict) -> list[str]:
         out.append("Turn the blocked-words check off")
     if old["safesearch"] and not new["safesearch"]:
         out.append("Turn forced SafeSearch off")
+    if old["youtube"] and not new["youtube"]:
+        out.append("Turn YouTube Restricted Mode off")
     for key, (name, _words) in READY.items():
         if old["lists"].get(key) and not new["lists"].get(key):
             out.append(f"Turn the {name} list off")
@@ -138,9 +140,13 @@ def find(address: str | None, title: str | None, cfg: dict) -> str | None:
     return None
 
 
-def safe_target(name: str) -> str | None:
-    """The "safe" address to answer with for a search engine / YouTube name, else None."""
-    for target, pattern in SAFE_TARGETS.items():
-        if pattern.match(name):
-            return target
+def safe_target(name: str, safesearch: bool = True, youtube: bool = True) -> str | None:
+    """The "safe" address to answer with for a search-engine name (when safesearch) or a YouTube name (when
+    youtube), else None."""
+    if safesearch:
+        for target, pattern in SEARCH_TARGETS.items():
+            if pattern.match(name):
+                return target
+    if youtube and YOUTUBE_TARGET[1].match(name):
+        return YOUTUBE_TARGET[0]
     return None

@@ -115,8 +115,14 @@ class WordsCards:
         self.safe_sw = ctk.CTkSwitch(line, text="Force SafeSearch", font=theme.semi(13), command=self._save_safe)
         self.safe_sw.pack(side="left")
         help_icon(line, "Google, Bing and DuckDuckGo always search with SafeSearch on (adult pictures and videos "
-                        "filtered out), YouTube runs in Restricted Mode - in every browser, also in private "
-                        "windows.").pack(side="left", padx=4)
+                        "filtered out) - in every browser, also in private windows.").pack(side="left", padx=4)
+        line_yt = ctk.CTkFrame(safe.body, fg_color="transparent")
+        line_yt.pack(anchor="w", pady=(8, 0))
+        self.yt_sw = ctk.CTkSwitch(line_yt, text="YouTube Restricted Mode", font=theme.semi(13), command=self._save_yt)
+        self.yt_sw.pack(side="left")
+        help_icon(line_yt, "Hides mature videos on YouTube. Note: Restricted Mode also hides all comments, so turn "
+                           "this off if you want to read comments - SafeSearch above stays on either way.").pack(
+            side="left", padx=4)
 
         words = Card(parent, "Blocked words")
         words.pack(fill="x", pady=(0, 12))
@@ -160,6 +166,7 @@ class WordsCards:
     def refresh(self):
         cfg = keywords.settings(self.db)
         self.safe_sw.select() if cfg["safesearch"] else self.safe_sw.deselect()
+        self.yt_sw.select() if cfg["youtube"] else self.yt_sw.deselect()
         self.words_sw.select() if cfg["enabled"] else self.words_sw.deselect()
         self.action.set(keywords.ACTIONS[cfg["action"]])
         off = set(cfg["off"])
@@ -191,6 +198,9 @@ class WordsCards:
 
     def _save_safe(self):
         self._changed(safesearch=bool(self.safe_sw.get()))
+
+    def _save_yt(self):
+        self._changed(youtube=bool(self.yt_sw.get()))
 
     def _save_enabled(self):
         self._changed(enabled=bool(self.words_sw.get()))

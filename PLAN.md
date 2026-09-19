@@ -1346,8 +1346,11 @@ change that is put back afterwards).
   exact tool list before building.
 - Note: the strongest protection is using a standard (non-admin) Windows account day-to-day; a determined admin can
   eventually undo anything. Lockdown doesn't need admin for itself (the service already runs as SYSTEM).
-- [ ] YouTube Restricted Mode as its own switch (it always hides comments), so search-engine SafeSearch can stay on
-  while YouTube comments show
+- [x] YouTube Restricted Mode as its own switch (it always hides comments), so search-engine SafeSearch can stay on
+  while YouTube comments show (done 2026-09-19)
+- [x] Installer finish screen: "Close" button + "Run Lockdown when I close" tick (on by default) instead of just
+  launching the app behind the open setup window (requested 2026-09-19)
+- [x] Dashboard "Blocked visits today" box shrinks back to small after Show then Hide (reported 2026-09-19)
 
 ### Phase 7 — Anti-Bypass
 Approved 2026-09-19 with changes: challenges are only "type a random phrase" and "only during these hours" (no

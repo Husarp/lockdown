@@ -135,7 +135,8 @@ class Enforcer:
             log.info("Hosts file updated: %d hostnames blocked", len(blocks))
         self.blocks = blocks
 
-        if browser_policy.apply(safe_search=keywords.settings(self.db)["safesearch"]):
+        kw = keywords.settings(self.db)
+        if browser_policy.apply(safe_search=kw["safesearch"], youtube=kw["youtube"]):
             log.info("Browser policies (re)applied")
 
         self.closing = {ip: until for ip, until in self.closing.items() if until > now}
@@ -312,8 +313,9 @@ def dns_loop(enforcer: Enforcer):
     """DNS filter for the protection lists: keep the lists loaded (a big list takes a few seconds, so not in the
     2-second loop) and the network adapters pointed at the filter; restore them if every list is off."""
     db = Database()
-    safe = {"on": False}   # forced SafeSearch (Protection tab), read every 2 s
-    server = dnsfilter.Server(enforcer.protection.which, log, safe=lambda name: safe["on"] and keywords.safe_target(name))
+    safe = {"search": False, "youtube": False}   # forced SafeSearch / YouTube Restricted (Protection tab), read every 2 s
+    server = dnsfilter.Server(enforcer.protection.which, log,
+                              safe=lambda name: keywords.safe_target(name, safe["search"], safe["youtube"]))
     try:
         server.start()
     except OSError as e:   # port 53 taken by another program: never point Windows at a filter that isn't there
@@ -326,10 +328,11 @@ def dns_loop(enforcer: Enforcer):
             cfg = protection.settings(db)
             if enforcer.protection.refresh(cfg):
                 log.info("Protection lists loaded: %d domains", enforcer.protection.count())
-            safe["on"] = keywords.settings(db)["safesearch"]
+            kw = keywords.settings(db)
+            safe["search"], safe["youtube"] = kw["safesearch"], kw["youtube"]
             if time.monotonic() - last_adapters >= DNS_ADAPTER_CHECK_SEC:
                 last_adapters = time.monotonic()
-                if enforcer.protection.count() or safe["on"]:
+                if enforcer.protection.count() or safe["search"] or safe["youtube"]:
                     server.upstreams = dnsfilter.point_to_filter(db, log)
                 elif db.get_setting(dnsfilter.SAVED_KEY, "{}") != "{}":
                     dnsfilter.restore(db, log)

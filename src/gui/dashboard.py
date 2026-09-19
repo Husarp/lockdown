@@ -446,8 +446,10 @@ class DashboardPage(ctk.CTkFrame):
         self.visits_toggle.configure(text="Hide" if opened else "Show")
         if opened:
             self.visit_rows.frame.pack(fill="x")
+            self.visits.body.configure(height=0)   # let it grow back to the rows
         else:
             self.visit_rows.frame.pack_forget()
+            self.visits.body.configure(height=1)   # tk keeps the grown height otherwise - force it small again
 
     def _visits(self, today, items):
         events = stats.blocked_events(self.db, today)

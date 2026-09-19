@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.28.0 — 2026-09-19 13:04
+- **YouTube Restricted Mode is now its own switch** (Blocking > Protection > Safe search), separate from Force
+  SafeSearch. Restricted Mode also hides *all* YouTube comments, so turn it off if you want to read comments -
+  SafeSearch for Google / Bing / DuckDuckGo stays on either way. (On by default, so nothing changes unless you turn
+  it off; turning it off needs the Anti-Bypass challenge.)
+- **Installer finish**: after an install / update it no longer just pops the app open behind the still-open setup
+  window. It says it's done ("Blocking is active. Click Close to finish"), the button becomes **Close**, and a
+  **"Run Lockdown when I close this window"** tick (on by default) opens the app when you close - like a normal
+  installer.
+- **Dashboard**: the "Blocked visits today" box now shrinks back to the small size after you Show then Hide it
+  again (it used to stay tall).
+
 ## 0.27.1 — 2026-09-19 12:44
 - **Installer fix**: `LockdownSetup.exe` failed with "[WinError 2] The system cannot find the file specified" when
   the admin account's PATH didn't include System32 (some PCs). It now calls every Windows tool (powershell, sc,
