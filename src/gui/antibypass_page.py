@@ -6,6 +6,7 @@ import customtkinter as ctk
 import antibypass
 from gui import theme
 from gui.components import Card, Segmented
+from gui.real_keys import RealKeysOnly
 from gui.rule_editors import WindowRow
 from rules import days_text, make_schedule, load_schedule
 from trusted_time import now_from_db
@@ -27,7 +28,7 @@ def hours_text(cfg: dict) -> str:
 def describe(cfg: dict) -> str:
     parts = []
     if cfg["phrase"]:
-        parts.append(f"typing a {cfg['length']}-character phrase")
+        parts.append(f"typing a {cfg['length']}-character phrase" + (" on a real keyboard" if cfg["real_keys"] else ""))
     if cfg["hours"]:
         parts.append(f"only {hours_text(cfg)}")
     return "Loosening a block needs: " + " · ".join(parts) if parts else "Off - loosening a block needs nothing."
@@ -77,7 +78,11 @@ class ChallengeWindow(ctk.CTkToplevel):
             for seq in ("<<Paste>>", "<Control-v>", "<Control-V>", "<Shift-Insert>", "<Button-3>", "<<PasteSelection>>"):
                 inner.bind(seq, lambda e: "break")
             inner.bind("<KeyRelease>", lambda e: self._typed())
+            self.keys = RealKeysOnly(lambda: self.after(0, self._program_typed)) if cfg["real_keys"] else None
             self.progress = ctk.CTkLabel(box, text=f"0 / {len(self.phrase)}", text_color=MUTED, height=18)
+            if cfg["real_keys"]:
+                ctk.CTkLabel(box, text="Real keyboard only - keys typed by macros or other programs are blocked.",
+                             text_color=MUTED, font=theme.body(11), height=16).pack(anchor="w")
             self.progress.pack(anchor="w", pady=(4, 0))
             buttons.pack(fill="x", pady=(12, 0))
             self.go = ctk.CTkButton(buttons, text="Continue", width=110, state="disabled", command=self._pass)
@@ -94,6 +99,16 @@ class ChallengeWindow(ctk.CTkToplevel):
             self.grab_set()
         except Exception:   # window not viewable yet
             self.after(50, self._modal)
+
+    def destroy(self):
+        if getattr(self, "keys", None):
+            self.keys.stop()
+        super().destroy()
+
+    def _program_typed(self):
+        if self.winfo_exists():
+            self.progress.configure(text="A program tried to type here - blocked. Type it yourself.",
+                                    text_color=theme.DANGER)
 
     def _typed(self):
         typed = self.entry.get()
@@ -154,6 +169,10 @@ class AntiBypassPage(ctk.CTkFrame):
         self.length.pack(side="left")
         self.length_note = ctk.CTkLabel(line, text="", text_color=MUTED)
         self.length_note.pack(side="left", padx=10)
+        self.real_keys = ctk.CTkCheckBox(challenges.body, text="Real keyboard only - block macros and auto-typers "
+                                         "(keys typed by a program)", command=self._apply)
+        self.real_keys.pack(anchor="w", padx=(46, 0), pady=(0, 12))
+        line.pack_configure(pady=(4, 6))
         self.hours_sw = ctk.CTkSwitch(challenges.body, text="Only during these hours", font=theme.semi(13),
                                       command=self._apply)
         self.hours_sw.pack(anchor="w")
@@ -202,6 +221,7 @@ class AntiBypassPage(ctk.CTkFrame):
         now = now_from_db(self.db)
         self.summary.configure(text=describe(cfg), text_color=theme.TEXT if antibypass.active(cfg) else MUTED)
         self.phrase_sw.select() if cfg["phrase"] else self.phrase_sw.deselect()
+        self.real_keys.select() if cfg["real_keys"] else self.real_keys.deselect()
         self.length.set(next((k for k, v in antibypass.LENGTHS.items() if v == cfg["length"]), "Medium"))
         self.length_note.configure(text=f"{cfg['length']} characters")
         self.hours_sw.select() if cfg["hours"] else self.hours_sw.deselect()
@@ -237,6 +257,7 @@ class AntiBypassPage(ctk.CTkFrame):
         if self.hours_sw.get() and not windows:
             raise ValueError("Turn on at least one day.")
         return {**cfg, "phrase": bool(self.phrase_sw.get()), "length": antibypass.LENGTHS[self.length.get()],
+                "real_keys": bool(self.real_keys.get()),
                 "hours": bool(self.hours_sw.get()),
                 "windows": load_schedule(make_schedule("allow", windows))["windows"] if windows else cfg["windows"]}
 

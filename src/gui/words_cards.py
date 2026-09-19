@@ -122,8 +122,8 @@ class WordsCards:
         self.words_sw = ctk.CTkSwitch(words.body, text="Check the browser tab for blocked words", font=theme.semi(13),
                                       command=self._save_enabled)
         self.words_sw.pack(anchor="w")
-        ctk.CTkLabel(words.body, text="The address and title of the tab in front are checked every second. Whole words "
-                                      "only (\"analysis\" is fine); a word ending in * also matches longer ones "
+        ctk.CTkLabel(words.body, text="The address and title of the tab in front are checked twice a second. Whole "
+                                      "words only (\"analysis\" is fine); a word ending in * also matches longer ones "
                                       "(porn* -> pornhub).", text_color=MUTED, wraplength=820,
                      justify="left").pack(anchor="w", pady=(2, 8))
         line = ctk.CTkFrame(words.body, fg_color="transparent")

@@ -1,4 +1,4 @@
-"""Bad-word check in the tray agent: every second, the address and title of the browser tab in front are checked
+"""Bad-word check in the tray agent: twice a second, the address and title of the browser tab in front are checked
 (keywords.find); on a blocked word the tab is closed (Ctrl+W) or the browser goes back (Alt+Left) - if going back
 doesn't leave the page (e.g. a new tab has no previous page), the tab is closed."""
 import logging
@@ -8,7 +8,7 @@ import time
 import keywords
 from db import Database
 
-TICK_SEC = 1
+TICK_SEC = 0.5
 RETRY_SEC = 2   # the same page still there this long after acting: act again (going back -> closing)
 
 log = logging.getLogger("lockdown.words")

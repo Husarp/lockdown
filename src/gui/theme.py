@@ -6,6 +6,7 @@ from pathlib import Path
 import customtkinter as ctk
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
+APP_ICON = ASSETS / "lockdown.ico"   # the Lockdown logo (windows, notifications)
 
 BG = ("#F2F2F2", "#14181D")
 SIDEBAR = ("#EBEBEB", "#0F1319")
@@ -90,6 +91,8 @@ def eyebrow():
 def apply():
     """customtkinter defaults from the tokens. Call before any widget is created."""
     load_fonts()
+    # every pop-up window gets the Lockdown logo (customtkinter would put its own icon there after 200 ms)
+    ctk.CTkToplevel._windows_set_titlebar_icon = lambda self: self.iconbitmap(str(APP_ICON))
     ctk.set_default_color_theme("dark-blue")
     t = ctk.ThemeManager.theme
     t["CTk"]["fg_color"] = list(BG)

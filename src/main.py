@@ -16,6 +16,17 @@ from gui import single_instance
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WATCHDOG_TASK = "Lockdown Agent Watchdog"
+APP_ID = "Lockdown.App"   # Windows app identity: notifications / taskbar show "Lockdown" + its icon, not "Python"
+ICON = Path(__file__).resolve().parents[1] / "assets" / "lockdown.ico"
+
+
+def set_identity():
+    """Register the app's name + icon for this user (no admin) and use them for this process."""
+    import ctypes
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\AppUserModelId\{APP_ID}") as key:
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "Lockdown")
+        winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, str(ICON))
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
 
 def register_autostart():
@@ -73,10 +84,11 @@ def challenge(text: str) -> int:
 
 
 if __name__ == "__main__":
-    if "--challenge" in sys.argv:
-        sys.exit(challenge(sys.argv[sys.argv.index("--challenge") + 1]))
     if "--watchdog" in sys.argv and not watchdog_should_start():
         sys.exit(0)
+    set_identity()
+    if "--challenge" in sys.argv:
+        sys.exit(challenge(sys.argv[sys.argv.index("--challenge") + 1]))
     from gui.app import LockdownApp
     events: queue.Queue = queue.Queue()
     if not single_instance.acquire(events):

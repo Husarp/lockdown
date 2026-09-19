@@ -1279,6 +1279,13 @@ sleep / forced-break overlays still show.
   add words (requested 2026-09-19)
 - [x] Pages with a lot of info lagged when switching to them (Network Log, Notifications) - rows in pages, sections
   you open, no needless redraws, pages built in the background after start (requested 2026-09-19)
+- [x] Notifications show the Lockdown logo and name (not a red dot and "Python"); windows / taskbar use the logo
+  (requested 2026-09-19)
+- [x] Blocked-word notices came up to ~20 s late after many tabs: the first shows at once, the rest as one summary;
+  notices replace each other instead of queuing; tab checked twice a second (requested 2026-09-19)
+- [x] Network Log scrolling glitch: the table is one native Treeview (requested 2026-09-19)
+- [x] Anti-Bypass option "Real keyboard only" (blocks macros / auto-typers in the phrase box), off by default
+  (requested 2026-09-19)
 - [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
   designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
 

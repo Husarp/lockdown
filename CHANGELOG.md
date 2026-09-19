@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.21.0 — 2026-09-19 04:19
+- **Lockdown logo** (assets/lockdown.ico - white shield with a check on orange): Windows notifications now show the
+  logo and "Lockdown" (Windows app identity registered for your user) instead of the red status dot and "Python";
+  the main window, pop-up windows and the taskbar use it too
+- **Faster blocked-word notices**: after closing many tabs at once, the first notice shows immediately and the rest
+  come as one ("Closed 3 more tabs with blocked words") instead of one each; a new notification replaces the one still
+  showing instead of queuing behind it (that's where the ~20 s delay came from); the tab is checked twice a second
+- **Network Log scrolling glitch fixed**: the table is now one native table (Treeview) instead of hundreds of small
+  widgets that tore while scrolling - smooth scrolling, "Show more" adds 100 rows in ~30 ms, a live refresh with
+  nothing new takes ~10 ms; hover highlight, click menu, icons and light / dark theme kept
+- **Anti-Bypass: "Real keyboard only"** (off by default): while the phrase window is open, keys typed by a program
+  (macro tools, auto-typers) are blocked - the phrase has to be typed on a real keyboard; turning it off needs the
+  challenge
+- 157 tests passing
+
 ## 0.20.0 — 2026-09-19 03:57
 - **Word lists**: blocked words are now lists, one line each - ready-made **Adult words - English** (102 words) and
   **Adult words - Polish** (45 words) that you switch on / off, **Your words** and **Exceptions**. "Open" shows a list:

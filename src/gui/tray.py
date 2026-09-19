@@ -1,9 +1,15 @@
 """System tray icon (pystray runs on its own thread)."""
+import ctypes
+
 import pystray
 from PIL import Image, ImageDraw
+from pystray._util import win32
+
+from gui.theme import APP_ICON
 
 GREEN = "#3fb950"   # enforcing
 RED = "#f85149"     # service down
+NIIF_USER, NIIF_LARGE_ICON = 0x4, 0x20
 
 
 def _dot(color: str) -> Image.Image:
@@ -53,8 +59,16 @@ class Tray:
         self.icon.stop()
 
     def notify(self, message: str):
-        """Windows notification (toast) from the tray icon."""
-        self.icon.notify(message, "Lockdown")
+        """Windows notification (toast) with the Lockdown logo. It replaces the one still showing, so several in a
+        row don't queue up (Windows shows each for a few seconds)."""
+        hwnd = getattr(self.icon, "_hwnd", None)   # (pystray's own notify can't set the picture)
+        if not hwnd:
+            return
+        if not getattr(self, "_logo", None):
+            self._logo = ctypes.windll.user32.LoadImageW(None, str(APP_ICON), 1, 48, 48, 0x10)   # icon, from file
+        self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo="")
+        self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo=message[:255], szInfoTitle="Lockdown",
+                           dwInfoFlags=NIIF_USER | NIIF_LARGE_ICON, hBalloonIcon=self._logo)
 
     def update(self, running: bool, status_text: str):
         self.status_text = status_text

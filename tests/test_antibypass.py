@@ -130,3 +130,17 @@ def test_time_zone_change_counts_after_24_hours():
     assert shift == 3600 + 25200 and msg is None
     state, shift, msg = zone_step(state, "Pacific Standard Time", -25200, 200 + ZONE_DELAY_SEC)
     assert shift == 0 and state["name"] == "Pacific Standard Time" and "accepted" in msg
+
+
+def test_real_keyboard_only():
+    from gui.real_keys import LLKHF_INJECTED, RealKeysOnly, should_block
+    assert should_block(LLKHF_INJECTED, 5, 5)             # a program typing into Lockdown: blocked
+    assert not should_block(0, 5, 5)                      # real keyboard
+    assert not should_block(LLKHF_INJECTED, 9, 5)         # a program typing somewhere else: not our business
+    base = {**ab.DEFAULTS, "phrase": True, "real_keys": True}
+    assert ab.settings_looser(base, {**base, "real_keys": False})
+    assert not ab.settings_looser({**base, "real_keys": False}, base)
+    hook = RealKeysOnly(lambda: None)                     # the hook installs and uninstalls
+    assert hook.active
+    hook.stop()
+    assert not hook.active

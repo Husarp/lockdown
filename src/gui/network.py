@@ -2,16 +2,19 @@
 
 Table or graph, search, app filter, All / Allowed / Blocked, Windows' own and local-network traffic hidden by
 default, live updates, CSV export. Click a row: block the site or the app (opens Add, filled in), copy the site
-or app name, or show only that app. The table shows the newest PAGE rows first ("Show more" for the rest) and is
-only redrawn when something changed - each row is a handful of widgets, so drawing hundreds made the page lag."""
+or app name, or show only that app. The table is one native Treeview (rows made of customtkinter widgets were ~11
+windows each: slow to build and they tore while scrolling); it shows the newest PAGE rows ("Show more" for the rest)
+and is only redrawn when something changed."""
 import csv
 import time
 import tkinter as tk
 from collections import Counter
+from tkinter import ttk
 from datetime import timedelta
 from tkinter import filedialog
 
 import customtkinter as ctk
+from PIL import ImageTk
 
 from gui import appinfo, icons, theme
 from gui.charts import MinuteBars
@@ -20,7 +23,7 @@ from gui.target_picker import guess_name, popular_hosts
 from trusted_time import now_from_db
 
 LIVE_MS = 3000
-PAGE = 25          # rows shown at first / added by "Show more"
+PAGE = 100         # rows shown at first / added by "Show more"
 ALL_APPS = "All apps"
 SECOND_LEVEL = {"co", "com", "org", "net", "ac", "gov", "edu"}   # example.co.uk -> three labels
 
@@ -35,21 +38,84 @@ def site_to_block(host: str) -> str:
     return ".".join(labels[-keep:])
 
 
-def _row(parent):
-    f = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=4)
-    for col, width in enumerate((60, 190, 0, 60, 90)):
-        f.grid_columnconfigure(col, minsize=width, weight=1 if col == 2 else 0)
-    f.time = ctk.CTkLabel(f, text="", text_color=theme.MUTED, font=theme.body(12), anchor="w")
-    f.time.grid(row=0, column=0, sticky="w", padx=(8, 0))
-    f.app = ctk.CTkLabel(f, text="", compound="left", anchor="w")
-    f.app.grid(row=0, column=1, sticky="w")
-    f.site = ctk.CTkLabel(f, text="", anchor="w")
-    f.site.grid(row=0, column=2, sticky="w", padx=8)
-    f.port = ctk.CTkLabel(f, text="", text_color=theme.MUTED, font=theme.body(12))
-    f.port.grid(row=0, column=3, sticky="e", padx=8)
-    f.status = ctk.CTkLabel(f, text="", font=theme.body(12))
-    f.status.grid(row=0, column=4, sticky="e", padx=(0, 8))
-    return f
+class LogTable(ctk.CTkFrame):
+    """The log as one ttk.Treeview in a card: App (icon + name) | Time | Site | Port | Status. Blocked visits in red.
+    on_click(row index, x, y) when a row is clicked."""
+    COLUMNS = (("time", "Time", 70, "w"), ("site", "Site", 380, "w"), ("port", "Port", 70, "center"),
+               ("status", "Status", 110, "w"))
+    STYLE = "Log.Treeview"
+
+    def __init__(self, master, on_click):
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=6)
+        self.on_click = on_click
+        self.scale = ctk.ScalingTracker.get_widget_scaling(self)
+        self.images: dict[str, ImageTk.PhotoImage] = {}   # (Tk needs the references kept)
+        self.mode = None
+        self.hover = None
+        self.tree = ttk.Treeview(self, columns=[c[0] for c in self.COLUMNS], style=self.STYLE, selectmode="none",
+                                 show="tree headings")
+        self.tree.heading("#0", text="APP", anchor="w")
+        self.tree.column("#0", width=int(210 * self.scale), stretch=False)
+        for key, text, width, anchor in self.COLUMNS:
+            self.tree.heading(key, text=text.upper(), anchor=anchor)
+            self.tree.column(key, width=int(width * self.scale), anchor=anchor, stretch=key == "site")
+        self.scrollbar = ctk.CTkScrollbar(self, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side="right", fill="y", padx=(0, 4), pady=8)
+        self.tree.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=8)
+        self.tree.bind("<ButtonRelease-1>", self._click)
+        self.tree.bind("<Motion>", self._motion)
+        self.tree.bind("<Leave>", lambda e: self._set_hover(None))
+        self.restyle()
+
+    def restyle(self):
+        """Colours / fonts for the current theme (a Treeview isn't a customtkinter widget)."""
+        mode = ctk.get_appearance_mode()
+        if mode == self.mode:
+            return
+        self.mode = mode
+        style, pick, px = ttk.Style(self), theme.pick, lambda n: -int(n * self.scale)
+        style.theme_use("clam")   # (the only theme that lets a Treeview's colours be set)
+        style.layout(self.STYLE, [("Treeview.treearea", {"sticky": "nswe"})])   # no frame around it
+        style.configure(self.STYLE, background=pick(theme.SURFACE), fieldbackground=pick(theme.SURFACE),
+                        foreground=pick(theme.TEXT), font=(theme.BODY, px(13)), rowheight=int(30 * self.scale),
+                        borderwidth=0, indent=0)
+        style.configure(f"{self.STYLE}.Heading", background=pick(theme.SURFACE), foreground=pick(theme.MUTED),
+                        font=(theme.BODY_SEMI, px(10)), relief="flat", borderwidth=0, padding=(0, 4))
+        style.map(f"{self.STYLE}.Heading", background=[("active", pick(theme.SURFACE))])
+        self.tree.tag_configure("blocked", foreground=pick(theme.BLOCKED))
+        self.tree.tag_configure("hover", background=pick(theme.SURFACE2))
+
+    def image(self, key: str, ctk_image) -> ImageTk.PhotoImage:
+        if key not in self.images:
+            size = int(16 * self.scale)
+            self.images[key] = ImageTk.PhotoImage(ctk_image.cget("light_image").resize((size, size)), master=self)
+        return self.images[key]
+
+    def fill(self, rows: list[tuple]):
+        """rows: (app text, image key, CTkImage, time, site, port, status, blocked)."""
+        self.hover = None
+        self.tree.delete(*self.tree.get_children())
+        for i, (app, key, img, when, site, port, status, blocked) in enumerate(rows):
+            self.tree.insert("", "end", iid=str(i), text=f"  {app}", image=self.image(key, img),
+                             values=(when, site, port, status), tags=("blocked",) if blocked else ())
+
+    def _set_hover(self, iid):
+        if iid == self.hover:
+            return
+        if self.hover and self.tree.exists(self.hover):
+            self.tree.item(self.hover, tags=[t for t in self.tree.item(self.hover, "tags") if t != "hover"])
+        if iid:
+            self.tree.item(iid, tags=list(self.tree.item(iid, "tags")) + ["hover"])
+        self.hover = iid
+
+    def _motion(self, event):
+        self._set_hover(self.tree.identify_row(event.y) or None)
+
+    def _click(self, event):
+        iid = self.tree.identify_row(event.y)
+        if iid:
+            self.on_click(int(iid), event.x_root, event.y_root)
 
 
 def _count_row(parent):
@@ -103,18 +169,16 @@ class NetworkPage(ctk.CTkFrame):
         ctk.CTkLabel(bar2, text="Keeps the last hour. Click a row to block or copy it.", text_color=theme.MUTED,
                      font=theme.body(11)).pack(side="right")
 
-        self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.body.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
-        self.table = Card(self.body)
-        head_row = _row(self.table.body)
-        head_row.pack(fill="x", pady=(4, 2))
-        for widget, text in ((head_row.time, "Time"), (head_row.app, "App"), (head_row.site, "Site"),
-                             (head_row.port, "Port"), (head_row.status, "Status")):
-            widget.configure(text=text.upper(), font=theme.eyebrow(), text_color=theme.MUTED)
-        self.rows = Rows(self.table.body, self._make_row, "No connections in the last hour yet.",
-                         {"fill": "x", "pady": 1})
-        self.more = ctk.CTkButton(self.table.body, text="", width=160, **theme.OUTLINE, command=self._show_more)
+        self.table_view = ctk.CTkFrame(self, fg_color="transparent")
+        self.table = LogTable(self.table_view, self._row_clicked)
+        self.table.pack(fill="both", expand=True)
+        self.table_foot = ctk.CTkFrame(self.table_view, fg_color="transparent")
+        self.table_foot.pack(fill="x", pady=(6, 0))
+        self.empty = ctk.CTkLabel(self.table_foot, text="No connections in the last hour yet.", text_color=theme.MUTED)
+        self.more = ctk.CTkButton(self.table_foot, text="", width=160, **theme.OUTLINE, command=self._show_more)
+        self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")   # the graph view
         self.graph = ctk.CTkFrame(self.body, fg_color="transparent")
+        self.graph.pack(fill="both", expand=True)
         card = Card(self.graph, "Connections per minute", note="last hour")
         card.pack(fill="x", pady=(0, 12))
         self.chart = MinuteBars(card.body)
@@ -131,14 +195,6 @@ class NetworkPage(ctk.CTkFrame):
         self.after(LIVE_MS, self._live)
 
     # ---------- data ----------
-
-    def _make_row(self, parent):
-        row = _row(parent)
-        for w in (row, row.time, row.app, row.site, row.port, row.status):
-            w.bind("<Button-1>", lambda e, r=row: self._menu(r))
-            w.bind("<Enter>", lambda e, r=row: r.configure(fg_color=theme.SURFACE2))
-            w.bind("<Leave>", lambda e, r=row: r.configure(fg_color="transparent"))
-        return row
 
     def _load(self) -> list[dict]:
         """Connections + blocked visits of the last hour, newest first, filtered."""
@@ -170,6 +226,9 @@ class NetworkPage(ctk.CTkFrame):
 
     def refresh(self):
         self.refreshed = time.monotonic()
+        if self.table.mode != ctk.get_appearance_mode():   # light / dark switched
+            self.table.restyle()
+            self.drawn = None
         self.items = self.db.list_items()
         self.shown = self._load()
         exes = sorted({r["exe"] for r in self.all_rows if r["exe"] and (self.windows.get() or not r["windows"])},
@@ -199,23 +258,24 @@ class NetworkPage(ctk.CTkFrame):
 
     def _fill_table(self):
         shown = self.shown[:self.limit]
-        self.more.pack_forget()
-        if len(self.shown) > len(shown):
-            self.more.configure(text=f"Show more ({len(self.shown) - len(shown)} older)")
-            self.more.pack(pady=(6, 4))
-        for row, r in zip(self.rows.take(len(shown)), shown):
-            row.data = r
-            row.time.configure(text=r["minute"][11:])
+        rows = []
+        for r in shown:
             if r["exe"]:
                 name, path = appinfo.app_name_path(r["exe"], self.items)
-                row.app.configure(text=f"  {name}", image=icons.get_app(r["exe"], path, 16))
+                app, key, img = name, f"app:{r['exe']}", icons.get_app(r["exe"], path, 16)
             else:
-                row.app.configure(text="  Blocked visit", image=icons.get(r["domain"], 16))
-            site = r["domain"] or r["ip"]
-            row.site.configure(text=site + (f"  ×{r['count']}" if r["count"] > 1 else ""))
-            row.port.configure(text=str(r["port"]))
-            row.status.configure(text="✗ Blocked" if r["blocked"] else "✓ Allowed",
-                                 text_color=theme.BLOCKED if r["blocked"] else theme.ALLOWED)
+                app, key, img = "Blocked visit", f"site:{r['domain']}", icons.get(r["domain"], 16)
+            site = (r["domain"] or r["ip"]) + (f"  ×{r['count']}" if r["count"] > 1 else "")
+            rows.append((app, key, img, r["minute"][11:], site, r["port"],
+                         "✗ Blocked" if r["blocked"] else "✓ Allowed", r["blocked"]))
+        self.table.fill(rows)
+        self.more.pack_forget()
+        self.empty.pack_forget()
+        if not shown:
+            self.empty.pack(anchor="w")
+        if len(self.shown) > len(shown):
+            self.more.configure(text=f"Show more ({len(self.shown) - len(shown)} older)")
+            self.more.pack()
 
     def _fill_graph(self, per_app: Counter):
         now = now_from_db(self.db)
@@ -241,8 +301,9 @@ class NetworkPage(ctk.CTkFrame):
     # ---------- actions ----------
 
     def _show_view(self):
-        (self.graph if self.view.get() == "Table" else self.table).pack_forget()
-        (self.table if self.view.get() == "Table" else self.graph).pack(fill="both", expand=True)
+        table = self.view.get() == "Table"
+        (self.body if table else self.table_view).pack_forget()
+        (self.table_view if table else self.body).pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         self.refresh()
 
     def _app_chosen(self, label: str):
@@ -267,10 +328,11 @@ class NetworkPage(ctk.CTkFrame):
         if time.monotonic() - self.refreshed > 1:   # (just built: already fresh)
             self.refresh()
 
-    def _menu(self, row):
-        r = getattr(row, "data", None)
-        if not r:
-            return
+    def _row_clicked(self, index: int, x: int, y: int):
+        if index < len(self.shown):
+            self._menu(self.shown[index], x, y)
+
+    def _menu(self, r: dict, x: int, y: int):
         menu = tk.Menu(self, tearoff=False)
         host = r["domain"]
         if host:
@@ -288,7 +350,7 @@ class NetworkPage(ctk.CTkFrame):
             else:
                 menu.add_command(label=f"Show only {self._app_name(r['exe'])}",
                                  command=lambda: self._app_chosen(self._app_name(r["exe"])))
-        menu.tk_popup(row.winfo_pointerx(), row.winfo_pointery())
+        menu.tk_popup(x, y)
 
     def _copy(self, text: str):
         self.clipboard_clear()

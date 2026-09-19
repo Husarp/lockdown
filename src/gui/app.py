@@ -52,6 +52,7 @@ EVENT_POLL_MS = 1000
 WATCH_MS = 5000
 MINIMIZE_MS = 250
 GC_MS = 2000
+WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
 PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
 
@@ -66,6 +67,7 @@ class LockdownApp(ctk.CTk):
         gc.disable()
         self._collect_garbage()
         self.title("Lockdown")
+        self.iconbitmap(default=str(theme.APP_ICON))   # (default=: every Lockdown window gets the logo)
         self.geometry("1100x720")
         self.minsize(900, 560)
         if start_hidden:
@@ -75,6 +77,7 @@ class LockdownApp(ctk.CTk):
         self.draft.listeners.append(self._on_draft_change)
         self.draft.guard = self.guard
         self.challenge: ChallengeWindow | None = None
+        self.word_batch: list | None = None   # tabs closed for blocked words since the last notice (None = none open)
         self.exited = False
         self.db.set_setting(antibypass.EXITED_KEY, "0")
         self.service_running = False
@@ -241,8 +244,7 @@ class LockdownApp(ctk.CTk):
                 if self.exited:
                     return
             elif isinstance(event, tuple) and event[0] == "words":   # from the bad-word check
-                done = "Tab closed" if event[2] == "close" else "Went back"
-                self._show(f'{done} - "{event[1].rstrip("*")}" is a blocked word.')
+                self._word_notice(event[1], event[2])
             elif isinstance(event, tuple) and event[0] == "mode":   # from the tray menu
                 try:
                     if event[1]:
@@ -252,6 +254,24 @@ class LockdownApp(ctk.CTk):
                 except (ValueError, StopIteration) as e:
                     self._show(str(e) or "That mode doesn't exist any more.", force=True)
         self.after(200, self._poll_events)
+
+    def _word_notice(self, word: str, action: str):
+        """The first tab closed shows a notice at once; more within WORDS_BATCH_MS become one summary."""
+        if self.word_batch is not None:
+            self.word_batch.append(word)
+            return
+        done = "Tab closed" if action == "close" else "Went back"
+        self._show(f'{done} - "{word.rstrip("*")}" is a blocked word.')
+        self.word_batch = []
+        self.after(WORDS_BATCH_MS, self._word_summary)
+
+    def _word_summary(self):
+        batch, self.word_batch = self.word_batch, None
+        if batch:
+            n = len(batch)
+            self._show(f"Closed {n} more tab{'s' * (n > 1)} with blocked words.")
+            self.word_batch = []
+            self.after(WORDS_BATCH_MS, self._word_summary)
 
     def _exit(self):
         self.exited = True

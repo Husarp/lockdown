@@ -42,7 +42,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   times / random) with snooze, "did you really do it?" check and quotes; they wait while you're in a full-screen game.
 - **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
   emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
-  pasting) and/or only during chosen hours; tightening is always instant. The tray app and the service come back
+  pasting; optionally real keyboard only - no macros) and/or only during chosen hours; tightening is always instant. The tray app and the service come back
   within a minute if they're closed; a new time zone counts only after 24 hours; uninstalling asks for the challenge.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
   cache); table or graph, filters, export; click a row to block the site/app or copy it.
