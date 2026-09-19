@@ -32,10 +32,34 @@ class SettingsPage(ctk.CTkFrame):
         self.body.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         self.locked = LockedStrip(self, self.app, self.body)
         self._build_appearance()
+        self._build_categories()
         self._build_reset()
         self._build_emergency()
         self._build_backup()
         self.load()
+
+    def _build_categories(self):
+        box = self._section("Categories", "Screen time is split into Productive / Neutral / Distracting (plus any of "
+                            "your own, each with a colour). Modes that block \"Distracting\" follow these. Set an "
+                            "app's or site's category on Screen Time > Apps / Websites.")
+        self.cat_row = ctk.CTkFrame(box, fg_color="transparent")
+        self.cat_row.pack(anchor="w", padx=16, pady=(4, 12))
+
+    def _load_categories(self):
+        from gui import categories
+        for w in self.cat_row.winfo_children():
+            w.destroy()
+        for c in categories.load(self.db):
+            chip = ctk.CTkFrame(self.cat_row, fg_color="transparent")
+            chip.pack(side="left", padx=(0, 14))
+            ctk.CTkFrame(chip, width=12, height=12, corner_radius=3, fg_color=c["color"]).pack(side="left", padx=(0, 6))
+            ctk.CTkLabel(chip, text=c["name"], font=theme.body(12)).pack(side="left")
+        ctk.CTkButton(self.cat_row, text="Manage categories…", width=170, **theme.OUTLINE,
+                      command=self._manage_categories).pack(side="left", padx=(4, 0))
+
+    def _manage_categories(self):
+        from gui.categories import CategoryEditor
+        CategoryEditor(self, self.db, self._load_categories)
 
     def _section(self, title: str, help_text: str = "") -> ctk.CTkFrame:
         box = ctk.CTkFrame(self.body)
@@ -255,6 +279,7 @@ class SettingsPage(ctk.CTkFrame):
 
     def load(self):
         self.locked.update()
+        self._load_categories()
         now = now_from_db(self.db)
         clock = self.db.limit_clock()
         self.reset_entry.delete(0, "end")

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.31.2 - 2026-09-19 17:10
+- **Categories are now easy to find**: a "Categories" section on the Settings page shows Productive / Neutral / Distracting (and your own) with their colours and a "Manage categories..." button (add, rename-by-colour, delete). Before, this was only reachable by clicking a category on an app/site.
+
 ## 0.31.1 - 2026-09-19 16:55
 - **Blocked words: on/off switches for "Your words" and "Exceptions"** - quickly disable your own words (e.g. when they catch something you're writing) or your exceptions without deleting them. Turning your words off needs the Anti-Bypass challenge (it loosens blocking); turning exceptions off is stricter, so it's instant.
 - **No more double word notice**: when a blocked word closes a tab or sends it back you now get a single message ("<word> is a blocked word - closing the tab / going back") instead of two.
