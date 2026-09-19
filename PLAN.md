@@ -1316,8 +1316,9 @@ sleep / forced-break overlays still show.
   (requested 2026-09-19)
 - [x] Themes (Dark / AMOLED / Light / Match Windows) and accent colour (8 swatches + colour picker), restart button
   (requested 2026-09-19)
-- [ ] Better app icon + tray icon (3 states) - in the designer brief (design/DESIGN.md 7c + 9.4, requested 2026-09-19)
-- [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - in the designer
+- [x] App icon + tray icon (3 states: green/yellow/red) implemented from the design (gui/icon_art.py, 2026-09-19)
+- [x] Light mode contrast fixes done (switch off-tracks, outlined/secondary buttons, selected nav) - phase A; any
+  further token polish would come from the designer
   brief (design/DESIGN.md 7b + 9.3, requested 2026-09-19)
 - [x] Notifications page: "Recent blocked visits" removed (they're on the Dashboard) (reported 2026-09-19)
 - [x] Dashboard blocked-visits card small while hidden (was an older running copy; checked 2026-09-19)

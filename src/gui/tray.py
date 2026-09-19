@@ -2,20 +2,12 @@
 import ctypes
 
 import pystray
-from PIL import Image, ImageDraw
 from pystray._util import win32
 
+from gui import icon_art
 from gui.theme import APP_ICON
 
-GREEN = "#3fb950"   # enforcing
-RED = "#f85149"     # service down
 NIIF_USER, NIIF_LARGE_ICON = 0x4, 0x20
-
-
-def _dot(color: str) -> Image.Image:
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    ImageDraw.Draw(img).ellipse((6, 6, 58, 58), fill=color)
-    return img
 
 
 class Tray:
@@ -25,8 +17,9 @@ class Tray:
         self.on_mode = on_mode
         self.modes: list[tuple[str, str]] = []   # (id, name)
         self.active_mode: str | None = None
+        self._icon_state: str | None = None
         self.icon = pystray.Icon(
-            "Lockdown", _dot(RED), "Lockdown",
+            "Lockdown", icon_art.tray_icon("red"), "Lockdown",
             menu=pystray.Menu(
                 pystray.MenuItem("Open Lockdown", lambda: on_open(), default=True),
                 pystray.MenuItem(lambda item: self.status_text, None, enabled=False),
@@ -50,7 +43,15 @@ class Tray:
     def set_modes(self, modes: list[tuple[str, str]], active: str | None):
         if modes != self.modes or active != self.active_mode:
             self.modes, self.active_mode = modes, active
+            self._refresh_icon()   # a mode turning on/off changes the tray colour (green <-> yellow)
             self.icon.update_menu()
+
+    def _refresh_icon(self):
+        """green = blocking enforced, yellow = a mode is on, red = service down."""
+        state = "red" if not self.running else "yellow" if self.active_mode else "green"
+        if state != self._icon_state:
+            self._icon_state = state
+            self.icon.icon = icon_art.tray_icon(state)
 
     def start(self):
         self.icon.run_detached()
@@ -72,8 +73,7 @@ class Tray:
 
     def update(self, running: bool, status_text: str):
         self.status_text = status_text
-        if running != self.running:
-            self.running = running
-            self.icon.icon = _dot(GREEN if running else RED)
+        self.running = running
+        self._refresh_icon()
         self.icon.title = f"Lockdown - {status_text}" + ("" if running else " (service not running)")
         self.icon.update_menu()

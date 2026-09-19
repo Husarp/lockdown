@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.34.0 - 2026-09-19 18:45
+- **New app icon and tray icon** (from the design): a shield with a padlock. The app icon (window, taskbar, notifications, installer) is a two-tone orange shield + white padlock; the tray icon shows the state in colour - **green** = blocking enforced, **yellow** = a mode is on, **red** = service down. Drawn with Pillow, so it scales cleanly from 16 px up.
+
 ## 0.33.0 - 2026-09-19 18:20
 - **Break reminders reworked** (Modes > Reminders > Breaks):
   - **Default (gentle)**: the reminder pops up; "Start break" just closes it (it trusts you) and "Snooze" reminds you again after a customisable number of minutes.
