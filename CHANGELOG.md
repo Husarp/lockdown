@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.42.0 - 2026-09-19 21:30
+- **Restart fixed**: "Restart now" (after a theme/colour change) no longer flashes a console window and now
+  reliably starts a fresh copy - the relaunch helper waits (hidden) until this copy has fully quit before
+  launching, instead of racing it.
+- **"Distracting" is always red**: the Distracting category no longer follows the accent colour (so changing
+  the accent to blue won't make Distracting blue) - red is the logical "avoid" colour. Custom colours still win.
+- **Import review**: importing a backup now shows exactly what will change (blocked items, groups, categories,
+  which settings) and asks you to confirm, before the Anti-Bypass challenge and applying.
+- **Polish**: the page sub-tabs lighten on hover; the confirm dialogs get a thin accent top edge like the cards.
+
 ## 0.41.1 - 2026-09-19 21:18
 - **One-click Allow / Block on "Check a site"**: checking a site now shows an "Allow anyway" button when it's
   blocked (by any list - community or your own) and a "Block again" button when it's already allowed, so you

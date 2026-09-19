@@ -219,6 +219,8 @@ class TabBar(ctk.CTkFrame):
             underline.grid(row=1, column=i, padx=pad, sticky="ew")
             for w in (lbl, underline):
                 w.bind("<Button-1>", lambda _e, v=v: self._clicked(v))
+            lbl.bind("<Enter>", lambda _e, v=v: self._hover(v, True))    # a subtle lighten so tabs feel clickable
+            lbl.bind("<Leave>", lambda _e, v=v: self._hover(v, False))
             self.tabs[v] = (lbl, underline)
         self._paint()
 
@@ -226,6 +228,11 @@ class TabBar(ctk.CTkFrame):
         self.set(value)
         if self.command:
             self.command(value)
+
+    def _hover(self, value: str, on: bool):
+        lbl = self.tabs[value][0]
+        if value != self.value:   # the selected tab already stands out
+            lbl.configure(text_color=theme.TEXT if on else theme.MUTED)
 
     def set(self, value: str):
         self.value = value

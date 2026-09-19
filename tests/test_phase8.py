@@ -55,6 +55,21 @@ def test_backup_round_trip(tmp_path):
         assert "isn't a Lockdown backup" in str(e)
 
 
+def test_backup_diff(tmp_path):
+    db = Database(tmp_path / "c.db")
+    db.add_item("Reddit", ["reddit.com"], "site", "manual", [{"rule_type": "permanent"}])
+    db.set_setting("ui.accent", "#2F6FEB")
+    db.set_setting("antibypass", json.dumps({"phrase": True, "unlocked_until": "2026-09-20 10:00:00"}))
+    assert backup.diff(db, backup.export(db)) == ["No differences - it matches your current setup."]  # incl. unlock
+    other = json.loads(json.dumps(backup.export(db)))
+    other["items"] = other["items"] + [{"id": 9, "display_name": "TikTok", "target": "tiktok.com",
+                                         "item_type": "site", "source": "manual", "rules": []}]
+    other["settings"]["ui.accent"] = "#DB5126"
+    lines = backup.diff(db, other)
+    assert any("Blocked sites & apps: 1 now -> 2 after (+1, -0)" in l for l in lines)
+    assert "Accent colour will change" in lines
+
+
 def test_screen_time_csv(tmp_path):
     db = Database(tmp_path / "a.db")
     _activity(db, date.today(), 30, "chrome.exe", "youtube.com")

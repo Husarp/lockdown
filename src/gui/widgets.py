@@ -65,6 +65,8 @@ class ConfirmDialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.configure(fg_color=theme.BG)
         self.protocol("WM_DELETE_WINDOW", self._no)
+        ctk.CTkFrame(self, height=3, corner_radius=0, fg_color=theme.DANGER if danger else theme.ACCENT).pack(
+            fill="x", side="top")   # a thin accent edge, like the round-2 cards
         box = ctk.CTkFrame(self, fg_color="transparent")
         box.pack(fill="both", expand=True, padx=24, pady=20)
         ctk.CTkLabel(box, text=title, font=theme.card_title()).pack(anchor="w")

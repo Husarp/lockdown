@@ -72,7 +72,7 @@ if ACCENT_HEX != ACCENTS["Orange"] and len(ACCENT_HEX) == 7:   # (orange keeps t
 
 # Status (blocked = red, allowed = green - the user's choice over the design's green "blocked")
 BLOCKED, ALLOWED, PENDING = DANGER, SUCCESS, WARNING
-CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": ACCENT}
+CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": DANGER}
 
 # Secondary buttons: a light-grey fill in light mode (so they don't vanish on white cards - fix 7b), a plain
 # outline in dark. Border is darker than the card edge in light mode for contrast.

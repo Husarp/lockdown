@@ -13,7 +13,7 @@ from gui.widgets import ConfirmButton
 
 KEY = "stats.categories"   # JSON {"custom": [{"key", "name", "color"}], "colors": {key: "#rrggbb"}}
 BUILTIN = [("productive", "Productive", theme.SUCCESS), ("neutral", "Neutral", theme.MUTED),
-           ("distracting", "Distracting", theme.ACCENT)]
+           ("distracting", "Distracting", theme.DANGER)]   # always red - it doesn't follow the accent colour
 NEW_COLORS = ["#8E6CEF", "#2F9FD8", "#D4A017", "#E0559B", "#20B2AA", "#9C6B3F"]
 
 

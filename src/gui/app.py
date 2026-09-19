@@ -327,12 +327,13 @@ class LockdownApp(ctk.CTk):
         self.destroy()
 
     def restart(self):
-        """Start Lockdown again (new theme / accent colour): a helper process waits until this one is gone."""
+        """Start Lockdown again (new theme / accent colour): a helper waits until this one is gone, then launches
+        a fresh copy. CREATE_NO_WINDOW keeps the helper's console hidden (no flash); `ping` is the delay because
+        it needs no console input, and it must outlast this process freeing its single-instance port."""
         import subprocess
         from paths import command_line, gui_command
-        # (a new copy would find this one still running and just show it: start it once this one has quit)
-        subprocess.Popen(f'cmd /c timeout /t 2 /nobreak >nul & start "" {command_line(gui_command())}',
-                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+        subprocess.Popen(f'ping -n 4 127.0.0.1 >nul & start "" {command_line(gui_command())}',
+                         shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         self.tray.stop()
         self.destroy()
 

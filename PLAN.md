@@ -1377,12 +1377,16 @@ Proposed, need a decision (I asked "what do you think"):
   lists, via app.grace_note / grace_ok).
 - [x] Confirm dialog when changing Anti-Bypass challenge settings (so you don't accidentally set a 250-char phrase
   and lock yourself out). Done in 0.36.0 (ConfirmDialog before tightening the challenge).
-- [ ] Import settings: show a review of what would change vs current settings before applying (confirm/cancel).
+- [x] Import settings: show a review/diff of what changes before applying (backup.diff + ConfirmDialog). (0.42.0)
 - [ ] Settings > Appearance: a live preview of a theme/accent without restarting.
 - [x] Trend chart: hover marker (dot) on the day + follows the 7/30 range selector. Done 0.39.0.
 - [x] Day timeline: shown only for a single day (Today/Yesterday); hidden for 7/30-day ranges. Done 0.39.0.
 - [ ] Anti-Bypass unlocked: a ring that drains (currently a bar) - optional nicety.
-- [ ] Pass over the round-2 design again for subtle polish (edges/rounding) not yet copied.
+- [~] Design polish pass: tab hover lighten + accent top edge on confirm dialogs done (0.42.0). More on request.
+
+### Round 7 fixes (2026-09-19, night)
+- [x] Restart: no console flash + actually relaunches (CREATE_NO_WINDOW + ping delay, waits for the port). (0.42.0)
+- [x] "Distracting" category always red, independent of the accent colour. (0.42.0)
 
 User decided (2026-09-19): implement the 6 "Approved, still to do" above PLUS grace-undo, the
 challenge-settings confirm dialog, trend hover marker, and the day-timeline 7/30 behaviour. The

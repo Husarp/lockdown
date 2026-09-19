@@ -56,6 +56,54 @@ def load(path: str) -> dict:
     return data
 
 
+def _norm(key: str, value):
+    """Normalise a setting for comparison: drop the volatile bits so a diff doesn't flag them."""
+    if value is None:
+        return None
+    if key in ("antibypass", "protection"):
+        try:
+            d = json.loads(value)
+            for drop in ("unlocked_until", "info", "update_now"):
+                d.pop(drop, None)
+            return json.dumps(d, sort_keys=True)
+        except ValueError:
+            return value
+    return value
+
+
+def diff(db, data: dict) -> list[str]:
+    """A short, human review of what importing `data` would change vs the current setup (import replaces
+    everything). Empty-ish backups still return at least one line."""
+    lines = []
+    cur_items = db.list_items()
+    cur_t, new_t = {i["target"] for i in cur_items}, {i["target"] for i in data.get("items", [])}
+    added, removed = len(new_t - cur_t), len(cur_t - new_t)
+    if len(cur_items) != len(data.get("items", [])) or added or removed:
+        extra = f" (+{added}, -{removed})" if added or removed else ""
+        lines.append(f"Blocked sites & apps: {len(cur_items)} now -> {len(data.get('items', []))} after{extra}")
+    cur_g = {g["name"] for g in db.list_groups()}
+    new_g = {g["name"] for g in data.get("groups", [])}
+    if cur_g != new_g:
+        lines.append(f"Groups: {len(cur_g)} -> {len(new_g)}")
+    cur_c = db.categories()
+    new_c = {(c["kind"], c["name"]): c["category"] for c in data.get("categories", [])}
+    if cur_c != new_c:
+        lines.append(f"App / site categories: {len(cur_c)} -> {len(new_c)}")
+    cur_s = {k: v for k, v in db.all_settings().items() if k not in RUNTIME_KEYS}
+    new_s = data.get("settings", {})
+    labels = {"antibypass": "Anti-Bypass challenge", "protection": "Protection lists / your blocklists",
+              "keywords": "Safe search & blocked words", "limits.reset": "When limits reset",
+              "stats.categories": "Categories", "ui.theme": "Theme", "ui.accent": "Accent colour"}
+    changed = {k for k in set(cur_s) | set(new_s) if _norm(k, cur_s.get(k)) != _norm(k, new_s.get(k))}
+    for key, label in labels.items():
+        if key in changed:
+            lines.append(f"{label} will change")
+            changed.discard(key)
+    if changed:
+        lines.append(f"{len(changed)} other setting{'s' * (len(changed) != 1)} will change")
+    return lines or ["No differences - it matches your current setup."]
+
+
 def restore(db, data: dict):
     """Replace blocks, groups, categories and settings with the backup's."""
     for item_id in db.item_ids():

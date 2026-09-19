@@ -266,7 +266,13 @@ class SettingsPage(ctk.CTkFrame):
                                             "Restart Lockdown to see a different theme or colour.",
                                        text_color=theme.ALLOWED)
         from pathlib import Path
-        self.app.guard([f"Import settings from {Path(path).name} (replaces your blocks and settings)"], restore)
+        from gui.widgets import ConfirmDialog
+        # show a review of what changes first, then the Anti-Bypass challenge, then apply
+        ConfirmDialog(self.app, "Import these settings?",
+                      f"Importing {Path(path).name} replaces your current setup with the backup. What changes:",
+                      on_yes=lambda: self.app.guard(
+                          [f"Import settings from {Path(path).name} (replaces your blocks and settings)"], restore),
+                      yes_text="Import", lines=backup.diff(self.db, data))
 
     def _export_screen_time(self):
         from tkinter import filedialog
