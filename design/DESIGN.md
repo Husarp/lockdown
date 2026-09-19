@@ -117,6 +117,20 @@ chips/cards per blocker) would help.
 3. Spacing rules (padding inside cards, gaps between cards) and corner radius.
 4. The chosen icon for each sidebar page.
 
+## 7b. Next design round: fix light mode (requested 2026-09-19)
+
+Several elements don't stand out in the **light** theme - mostly white things on white / very light grey:
+- **Switches**: the white knob disappears on white cards and on the light background (Auto-save at the top right,
+  every switch in cards); an *off* switch is a pale grey track + white knob and is almost invisible
+  (`light_anti-bypass.png`, `light_blocking_protection.png`, `light_settings.png`).
+- **Outlined / secondary buttons** ("Add", "Change", "Edit", "Choose categories for your apps"): white on white with
+  a faint border (`light_settings.png`, `light_modes.png`, `light_dashboard.png`).
+- **Selected sidebar item**: white on a light grey sidebar - weak contrast.
+- **Mode cards**: the top edge / corners look clipped (`light_modes.png`).
+- **Settings page**: its sections don't use the same card style (title size, padding) as the other pages.
+Please give light-mode tokens (switch track on/off, knob, secondary button fill/border, selected nav item) that
+keep enough contrast, and check every page in light mode. Screenshots: `screenshots/light_*.png`.
+
 ## 8. Screenshots (current app)
 
 | File | Shows |
@@ -127,3 +141,4 @@ chips/cards per blocker) would help.
 | `screenshots/04_edit_item.png` | Blocking → Add in edit mode (an item's blockers loaded) |
 | `screenshots/05_group_editor.png` | Group editor: name, combined rules, members |
 | `screenshots/06_notifications.png` | Notifications settings |
+| `screenshots/light_*.png` | Light theme: Dashboard, Blocking Overview / Protection, Anti-Bypass, Modes, Settings (see 7b) |

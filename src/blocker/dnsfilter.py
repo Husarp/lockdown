@@ -2,7 +2,8 @@
 
 A small DNS server on 127.0.0.1:53 and [::1]:53 (UDP + TCP). A name on a protection list gets 127.0.0.1 (so the
 blocked-visit listener can show which list blocked it; other record types get an empty answer); everything else is
-passed on unchanged to the network's own DNS servers.
+passed on unchanged to the network's own DNS servers. Forced SafeSearch: a search engine's name (e.g. www.google.com)
+is answered with the addresses of its "safe" name (forcesafesearch.google.com), looked up from the network's DNS.
 
 Windows is pointed at it per network adapter: IPv4 DNS = "127.0.0.1, <the adapter's own DNS servers>", IPv6 DNS =
 "::1". Windows only asks the second server when the first doesn't answer, so if the service ever stops, the internet
@@ -24,7 +25,7 @@ LISTEN = [("127.0.0.1", socket.AF_INET), ("::1", socket.AF_INET6)]
 FILTER_V4, FILTER_V6 = "127.0.0.1", "::1"
 UPSTREAM_TIMEOUT = 2.0
 BLOCK_TTL = 60
-TYPE_A = 1
+TYPE_A, TYPE_AAAA = 1, 28
 _IFACES = {False: r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces",
            True: r"SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces"}
 
@@ -58,16 +59,51 @@ def blocked_reply(msg: bytes, qtype: int, end: int) -> bytes:
     return msg[:2] + struct.pack(">HHHHH", flags, 1, 1 if answer else 0, 0, 0) + msg[12:end] + answer
 
 
+def query(name: str, qtype: int, qid: bytes) -> bytes:
+    labels = b"".join(bytes([len(p)]) + p.encode("ascii") for p in name.split("."))
+    return qid + struct.pack(">HHHHH", 0x0100, 1, 0, 0, 0) + labels + b"\0" + struct.pack(">HH", qtype, 1)
+
+
+def _skip_name(msg: bytes, i: int) -> int:
+    while msg[i]:
+        if msg[i] & 0xC0:
+            return i + 2
+        i += 1 + msg[i]
+    return i + 1
+
+
+def records(reply: bytes, qtype: int) -> list[tuple[int, bytes]]:
+    """(ttl, data) of the answer records of type `qtype` in a DNS reply."""
+    count = struct.unpack(">H", reply[6:8])[0]
+    i = _skip_name(reply, 12) + 4
+    out = []
+    for _ in range(count):
+        i = _skip_name(reply, i)
+        rtype, _cls, ttl, length = struct.unpack(">HHIH", reply[i:i + 10])
+        if rtype == qtype:
+            out.append((ttl, reply[i + 10:i + 10 + length]))
+        i += 10 + length
+    return out
+
+
+def renamed_reply(msg: bytes, qtype: int, end: int, found: list[tuple[int, bytes]]) -> bytes:
+    """Answer the question in `msg` with these A / AAAA records (as if they were the asked name's own)."""
+    flags = 0x8180 | (struct.unpack(">H", msg[2:4])[0] & 0x0100)
+    answers = b"".join(struct.pack(">HHHIH", 0xC00C, qtype, 1, ttl, len(data)) + data for ttl, data in found)
+    return msg[:2] + struct.pack(">HHHHH", flags, 1, len(found), 0, 0) + msg[12:end] + answers
+
+
 def failure_reply(msg: bytes) -> bytes:
     """SERVFAIL - no network DNS server answered."""
     return msg[:2] + struct.pack(">H", 0x8182) + msg[4:6] + b"\0" * 6 + msg[12:]
 
 
 class Server:
-    """blocked(name) -> truthy if the name is on a list. `upstreams`: the network's DNS servers (set by the service)."""
+    """blocked(name) -> truthy if the name is on a list; safe(name) -> the "safe" name to answer with instead, or
+    None. `upstreams`: the network's DNS servers (set by the service)."""
 
-    def __init__(self, blocked, log=None, listen=LISTEN, port=53):
-        self.blocked, self.log, self.listen, self.port = blocked, log, listen, port
+    def __init__(self, blocked, log=None, listen=LISTEN, port=53, safe=lambda name: None):
+        self.blocked, self.log, self.listen, self.port, self.safe = blocked, log, listen, port, safe
         self.upstreams: list[str] = []
         self.upstream_port = 53
         self.pool = ThreadPoolExecutor(max_workers=32)
@@ -89,6 +125,18 @@ class Server:
         q = question(msg)
         if q and self.blocked(q[0]):
             return blocked_reply(msg, q[1], q[2])
+        target = q and self.safe(q[0])
+        if target:
+            name, qtype, end = q
+            if qtype not in (TYPE_A, TYPE_AAAA):   # e.g. HTTPS records could hint the normal addresses: none
+                return blocked_reply(msg, qtype, end)
+            reply = self._forward(query(target, qtype, msg[:2]), tcp)
+            if reply[3] & 0x0F:   # the network's DNS failed: say so (not "no addresses")
+                return failure_reply(msg)
+            try:
+                return renamed_reply(msg, qtype, end, records(reply, qtype))
+            except (struct.error, IndexError):
+                return failure_reply(msg)
         return self._forward(msg, tcp)
 
     def _forward(self, msg: bytes, tcp: bool) -> bytes:

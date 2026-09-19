@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.19.0 — 2026-09-19 03:39
+- **Forced SafeSearch** (Blocking > Protection, on by default): Google, Bing and DuckDuckGo always search with
+  SafeSearch, YouTube runs in Restricted Mode (moderate) - the DNS filter answers their names with the engines' own
+  "safe" addresses (forcesafesearch.google.com, strict.bing.com, safe.duckduckgo.com, restrictmoderate.youtube.com),
+  in every browser and private windows; Chrome / Edge / Brave policies force it too
+- **Blocked words** (on by default): every second the tray app checks the address and title of the browser tab in
+  front for blocked words - 84 built-in English and Polish adult words + your own words, whole words only (a word
+  ending in * also matches longer ones, several words = a phrase, accents ignored); on a match it **closes the tab**
+  or **goes back** (your choice; a tab with nothing to go back to is closed) and says which word. Exceptions: a site
+  (not checked) or a word (never counts). Search words still being typed into the address bar aren't checked
+- Turning either off, removing one of your words or adding an exception needs the Anti-Bypass challenge
+- The DNS filter stays on for SafeSearch even with every protection list off
+- Designer brief: light-mode problems (switch knobs, outlined buttons, selected nav item blend in) + screenshots
+- 154 tests passing
+
 ## 0.18.0 — 2026-09-19 03:23
 - **Anti-Bypass** (Phase 7, new Anti-Bypass page): anything that loosens a block needs the challenges you turn on;
   making blocks stricter is always instant. Off until you turn a challenge on.

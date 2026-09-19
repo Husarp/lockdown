@@ -1270,6 +1270,12 @@ sleep / forced-break overlays still show.
 - [x] Bigger lists if not laggy (requested 2026-09-19): ~4.3M sites (HaGeZi + Block List Project), 34 MB, ~15 µs/lookup
 - [x] Download progress on the Protection tab (requested 2026-09-19)
 - [x] Fix: "Start service" did nothing while a stuck copy was running (now ends it first) (reported 2026-09-19)
+- [x] "Bad words" check (approved 2026-09-19: both parts, close tab or go back as an option, English + Polish):
+  (1) forced SafeSearch on Google / Bing / DuckDuckGo + YouTube Restricted Mode (DNS filter + browser policies);
+  (2) check of the active tab's address and title every second (whole words / word* / phrases, built-in adult list
+  + your own words, exceptions) -> close the tab or go back + notice; loosening goes through Anti-Bypass
+- [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
+  designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
 
 ### Phase 7 — Anti-Bypass
 Approved 2026-09-19 with changes: challenges are only "type a random phrase" and "only during these hours" (no

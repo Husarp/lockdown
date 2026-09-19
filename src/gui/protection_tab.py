@@ -1,5 +1,5 @@
-"""Blocking > Protection: the always-on community lists (scam, phishing, malware, adult, gambling), a "check a
-site" box and sites allowed anyway. Changes apply at once; the service downloads / updates the lists."""
+"""Blocking > Protection: the always-on community lists (scam, phishing, malware, adult, gambling), forced SafeSearch,
+the blocked-words check, a "check a site" box and sites allowed anyway. Changes apply at once; the service downloads / updates the lists."""
 import threading
 from datetime import datetime
 
@@ -10,6 +10,7 @@ from blocker import protection
 from blocker.hosts import normalize_host
 from gui import icons, theme
 from gui.components import Card, Rows
+from gui.words_cards import WordsCards
 from trusted_time import now_from_db
 
 MUTED = theme.MUTED
@@ -66,6 +67,8 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             info.pack(anchor="w")
             self.switches[key], self.infos[key] = sw, info
 
+        self.words = WordsCards(self, page.app)
+
         check = Card(self, "Check a site")
         check.pack(fill="x", pady=(0, 12))
         line = ctk.CTkFrame(check.body, fg_color="transparent")
@@ -119,6 +122,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
                                   for k in cfg["enabled"] if k in self.switches)
         if waiting and self._poll is None:   # follow the download
             self._poll = self.after(1000, self._tick)
+        self.words.refresh()
         allowed = sorted(cfg["allowed"])
         for chip, site in zip(self.chips.take(len(allowed)), allowed):
             chip.name.configure(text=f" {site}", image=icons.get(site, 16))

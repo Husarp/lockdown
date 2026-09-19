@@ -29,6 +29,7 @@ from gui.settings import SettingsPage
 from gui.tray import Tray
 from monitor import win
 from monitor.usage import UsageTracker
+from monitor.word_guard import WordGuard
 from rules import TIME_FMT
 from service import HEARTBEAT_KEY
 from trusted_time import now_from_db
@@ -110,6 +111,8 @@ class LockdownApp(ctk.CTk):
         self._poll_block_events()
         self.usage_tracker = UsageTracker()   # counts time on blocked sites/apps (limits, allowances)
         self.usage_tracker.start()
+        self.word_guard = WordGuard(lambda word, action: self.events.put(("words", word, action)))
+        self.word_guard.start()   # bad-word check of the browser tab in front (Protection tab)
         self.watcher = alerts.BlockWatcher()
         self.minimize_blocks: dict[str, dict] = {}   # exe -> block, for apps blocked with "Minimize"
         self._poll_watcher()
@@ -224,6 +227,9 @@ class LockdownApp(ctk.CTk):
                             "start it again)"], self._exit)
                 if self.exited:
                     return
+            elif isinstance(event, tuple) and event[0] == "words":   # from the bad-word check
+                done = "Tab closed" if event[2] == "close" else "Went back"
+                self._show(f'{done} - "{event[1].rstrip("*")}" is a blocked word.')
             elif isinstance(event, tuple) and event[0] == "mode":   # from the tray menu
                 try:
                     if event[1]:

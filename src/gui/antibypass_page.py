@@ -14,6 +14,7 @@ MUTED = theme.MUTED
 PROTECTS = ["Removing a blocked site / app / group, or taking sites or members out of it",
             "Weaker rules: higher or no limits, other blocked hours, a shorter temporary block, gentler app blocking",
             "Switching a protection list off, or allowing a site it blocks",
+            "Turning SafeSearch or the blocked-words check off, removing your words, adding exceptions",
             "Emergency unlock: turning it on, longer unlocks, more uses",
             "Quitting Lockdown from the tray",
             "Weakening Anti-Bypass itself (these settings)"]

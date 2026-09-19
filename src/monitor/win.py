@@ -107,6 +107,25 @@ def minimize_app(exe: str) -> int:
     return count
 
 
+def window_title(hwnd: int) -> str:
+    buf = ctypes.create_unicode_buffer(512)
+    _user32.GetWindowTextW(hwnd, buf, 512)
+    return buf.value
+
+
+VK_CONTROL, VK_MENU, VK_LEFT, VK_W = 0x11, 0x12, 0x25, 0x57
+KEYEVENTF_KEYUP = 0x2
+
+
+def press(hwnd: int, modifier: int, key: int) -> bool:
+    """Press modifier+key (e.g. Ctrl+W) - only if `hwnd` is still the window in front."""
+    if _user32.GetForegroundWindow() != hwnd:
+        return False
+    for vk, flags in ((modifier, 0), (key, 0), (key, KEYEVENTF_KEYUP), (modifier, KEYEVENTF_KEYUP)):
+        _user32.keybd_event(vk, 0, flags, 0)
+    return True
+
+
 def idle_seconds() -> float:
     """Seconds since the last keyboard/mouse input."""
     class LASTINPUTINFO(ctypes.Structure):

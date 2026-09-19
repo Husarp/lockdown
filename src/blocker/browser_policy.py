@@ -5,6 +5,9 @@
 - Chromium's built-in DNS client off: names are then looked up by Windows, so they land in the Windows DNS cache,
   where the network log finds which site each connection belongs to.
 
+- Forced SafeSearch (Protection tab, on by default): Google SafeSearch, YouTube Restricted Mode (moderate), Bing
+  strict SafeSearch - next to the DNS filter doing the same for every browser.
+
 Browsers show "managed by your organization" while these are set. Needs admin (HKLM).
 """
 import json
@@ -26,12 +29,22 @@ POLICIES = {
 }
 
 
-def apply() -> bool:
-    """Set every policy that is missing or different. Returns True if anything was written."""
+_SAFE = {"ForceGoogleSafeSearch": (REG_DWORD, 1), "ForceYouTubeRestrict": (REG_DWORD, 1)}
+SAFE_SEARCH = {
+    r"SOFTWARE\Policies\Google\Chrome": _SAFE,
+    r"SOFTWARE\Policies\Microsoft\Edge": {**_SAFE, "ForceBingSafeSearch": (REG_DWORD, 2)},
+    r"SOFTWARE\Policies\BraveSoftware\Brave": _SAFE,
+}
+
+
+def apply(safe_search: bool = False) -> bool:
+    """Set every policy that is missing or different (SafeSearch ones only when on - removed when off).
+    Returns True if anything was written."""
     changed = False
-    for path, values in POLICIES.items():
+    for path in POLICIES.keys() | SAFE_SEARCH.keys():
+        wanted = {**POLICIES.get(path, {}), **(SAFE_SEARCH.get(path, {}) if safe_search else {})}
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
-            for name, (kind, data) in values.items():
+            for name, (kind, data) in wanted.items():
                 try:
                     if winreg.QueryValueEx(key, name) == (data, kind):
                         continue
@@ -39,15 +52,21 @@ def apply() -> bool:
                     pass
                 winreg.SetValueEx(key, name, 0, kind, data)
                 changed = True
+            for name in SAFE_SEARCH.get(path, {}).keys() - wanted.keys():
+                try:
+                    winreg.DeleteValue(key, name)
+                    changed = True
+                except FileNotFoundError:
+                    pass
     return changed
 
 
 def remove():
     """Delete the values set by apply() (used on uninstall). Keys are left in place."""
-    for path, values in POLICIES.items():
+    for path in POLICIES.keys() | SAFE_SEARCH.keys():
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as key:
-                for name in values:
+                for name in {**POLICIES.get(path, {}), **SAFE_SEARCH.get(path, {})}:
                     try:
                         winreg.DeleteValue(key, name)
                     except FileNotFoundError:

@@ -32,6 +32,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 - **Protection lists** (Blocking > Protection): always-on community lists of scam, phishing, malware and adult sites
   (gambling optional; ~4.3M sites from HaGeZi, Block List Project, Phishing Army, URLhaus), updated daily with a
   download progress, with exceptions and a "check a site" box. Blocked by the service's own DNS filter.
+  Also **forced SafeSearch** (Google / Bing / DuckDuckGo, YouTube Restricted Mode) and **blocked words**: the browser
+  tab in front is closed (or sent back) when its address or title has a blocked word (built-in English + Polish
+  adult words + your own, exceptions).
 - **Modes** (Phase 6a): Work / Study / Focus (Pomodoro) / Do Not Disturb / Relax + your own - each blocks a
   category plus picked sites/apps while it's on; start for a while, until a time or until stopped (optionally locked),
   or on a schedule; also from the tray menu.
