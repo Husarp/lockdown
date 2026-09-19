@@ -1,12 +1,19 @@
-"""Site input with suggestions (popular + previously blocked sites) and the "Popular sites" popup."""
+"""Site input with suggestions (popular + previously blocked sites) while typing."""
+import os
+import tkinter as tk
+
 import customtkinter as ctk
 
 import search
-
 from gui import icons, theme
+from gui.components import Rows
 from importer.popular import POPULAR_SITES
+from monitor import win
 
 MAX_SUGGESTIONS = 8
+WIDTH = 380        # px (the text is shortened to fit, so the icon never gets pushed out)
+MAX_CHARS = 42
+WATCH_MS = 250
 MUTED = theme.MUTED
 
 
@@ -15,26 +22,68 @@ def popular_entries() -> list[tuple[str, str]]:
     return [(name, hosts[0]) for sites in POPULAR_SITES.values() for name, hosts in sites.items()]
 
 
-class SuggestionList(ctk.CTkToplevel):
-    """Borderless dropdown shown under the site entry."""
+class SuggestionList:
+    """Borderless dropdown under the site entry. One window, made once and only updated while typing (a new window
+    per key press flashed); it hides itself when the entry loses the focus or Lockdown isn't the app in front."""
 
-    def __init__(self, entry: ctk.CTkEntry, matches: list[tuple[str, str, bool]], on_pick, on_clear_history):
-        super().__init__(entry)
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-        frame = ctk.CTkFrame(self, border_width=1)
-        frame.pack(fill="both", expand=True)
-        for name, host, _mine in matches:
-            ctk.CTkButton(frame, text=f"{name}   {host}", image=icons.get(host, 18), anchor="w", height=30,
-                          fg_color="transparent", hover_color=theme.SURFACE2, text_color=theme.TEXT,
-                          command=lambda n=name, h=host: on_pick(n, h)).pack(fill="x", padx=4, pady=1)
-        if on_clear_history:
-            ctk.CTkButton(frame, text="Clear my suggestions", height=24, fg_color="transparent", text_color=MUTED,
-                          hover_color=theme.SURFACE2, command=on_clear_history).pack(anchor="e", padx=6, pady=(2, 4))
-        x, y = entry.winfo_rootx(), entry.winfo_rooty() + entry.winfo_height() + 2
-        self.geometry(f"+{x}+{y}")
-        self.update_idletasks()
-        self.geometry(f"{max(entry.winfo_width(), 320)}x{self.winfo_reqheight()}+{x}+{y}")
+    def __init__(self, entry: ctk.CTkEntry, on_pick, on_clear_history):
+        self.entry, self.on_pick = entry, on_pick
+        self.win = tk.Toplevel(entry)
+        self.win.withdraw()
+        self.win.overrideredirect(True)
+        self.win.transient(entry.winfo_toplevel())   # (goes away with Lockdown's window, never over other apps)
+        self.frame = ctk.CTkFrame(self.win, corner_radius=0, fg_color=theme.SURFACE)
+        self.frame.pack(fill="both", expand=True, padx=1, pady=1)
+        self.rows = Rows(self.frame, self._make_row, "", {"fill": "x", "padx": 4, "pady": 1})
+        self.clear = ctk.CTkButton(self.frame, text="Clear my suggestions", height=24, fg_color="transparent",
+                                   text_color=MUTED, hover_color=theme.SURFACE2, command=on_clear_history)
+        self.shown = False
+
+    def _make_row(self, parent):
+        return ctk.CTkButton(parent, text="", anchor="w", height=30, fg_color="transparent",
+                             hover_color=theme.SURFACE2, text_color=theme.TEXT)
+
+    def show(self, matches: list[tuple[str, str, bool]]):
+        if not matches:
+            self.hide()
+            return
+        for row, (name, host, _mine) in zip(self.rows.take(len(matches)), matches):
+            text = f"{name}   {host}"
+            if len(text) > MAX_CHARS:
+                text = text[:MAX_CHARS - 1] + "…"
+            row.configure(text=text, image=icons.get(host, 18), command=lambda n=name, h=host: self.on_pick(n, h))
+        self.clear.pack_forget()
+        if any(m[2] for m in matches):
+            self.clear.pack(anchor="e", padx=6, pady=(2, 4))
+        self.win.configure(bg=theme.pick(theme.BORDER))   # (the 1-px frame around it)
+        self.win.update_idletasks()
+        e = self.entry
+        width = max(e.winfo_width(), int(WIDTH * ctk.ScalingTracker.get_widget_scaling(e)))
+        self.win.geometry(f"{width}x{self.frame.winfo_reqheight() + 2}+{e.winfo_rootx()}+"
+                          f"{e.winfo_rooty() + e.winfo_height() + 2}")
+        if not self.shown:
+            self.shown = True
+            self.win.deiconify()
+            self.win.lift()
+            self.win.after(WATCH_MS, self._watch)
+
+    def hide(self):
+        if self.shown:
+            self.shown = False
+            self.win.withdraw()
+
+    def _watch(self):
+        """Hide once the entry lost the focus (clicking a suggestion keeps it), the entry isn't on screen any more, or
+        another app is in front."""
+        if not self.shown:
+            return
+        focus = self.win.focus_get()
+        mine = focus is not None and (str(focus).startswith(str(self.entry)) or str(focus).startswith(str(self.win)))
+        in_front = win.window_pid(win.foreground()[0]) == os.getpid()
+        if not (mine and in_front and self.entry.winfo_viewable()):
+            self.hide()
+            return
+        self.win.after(WATCH_MS, self._watch)
 
 
 class SiteEntry(ctk.CTkEntry):
@@ -46,7 +95,6 @@ class SiteEntry(ctk.CTkEntry):
         self.on_pick = on_pick
         self.dropdown: SuggestionList | None = None
         self.bind("<KeyRelease>", self._on_key, add="+")
-        self.bind("<FocusOut>", lambda e: self.after(300, self.hide), add="+")
         self.bind("<Escape>", lambda e: self.hide(), add="+")
 
     def _matches(self, text: str) -> list[tuple[str, str, bool]]:
@@ -68,15 +116,13 @@ class SiteEntry(ctk.CTkEntry):
         self.show(self._matches(self.get()))
 
     def show(self, matches):
-        self.hide()
-        if matches:
-            has_history = any(m[2] for m in matches)
-            self.dropdown = SuggestionList(self, matches, self._pick, self._clear_history if has_history else None)
+        if self.dropdown is None:
+            self.dropdown = SuggestionList(self, self._pick, self._clear_history)
+        self.dropdown.show(matches)
 
     def hide(self):
-        if self.dropdown and self.dropdown.winfo_exists():
-            self.dropdown.destroy()
-        self.dropdown = None
+        if self.dropdown:
+            self.dropdown.hide()
 
     def _pick(self, name: str, host: str):
         self.hide()
@@ -85,31 +131,3 @@ class SiteEntry(ctk.CTkEntry):
     def _clear_history(self):
         self.db.clear_history()
         self.show(self._matches(self.get()))
-
-
-class PopularSitesPopup(ctk.CTkToplevel):
-    """Popular sites by category; clicking one calls on_pick(name, host) and closes the popup."""
-
-    def __init__(self, master, on_pick):
-        super().__init__(master)
-        self.title("Popular sites")
-        self.geometry("620x520")
-        self.transient(master.winfo_toplevel())
-        self.after(50, self.grab_set)
-        body = ctk.CTkScrollableFrame(self)
-        body.pack(fill="both", expand=True, padx=10, pady=10)
-        for category, sites in POPULAR_SITES.items():
-            ctk.CTkLabel(body, text=category, font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=8, pady=(10, 4))
-            grid = ctk.CTkFrame(body, fg_color="transparent")
-            grid.pack(fill="x", padx=4)
-            for i, (name, hosts) in enumerate(sites.items()):
-                ctk.CTkButton(grid, text=name, image=icons.get(hosts[0], 20), anchor="w", width=180, height=34,
-                              fg_color=theme.SURFACE2, hover_color=theme.BORDER,
-                              text_color=theme.TEXT,
-                              command=lambda n=name, h=hosts[0]: self._pick(on_pick, n, h)
-                              ).grid(row=i // 3, column=i % 3, padx=4, pady=4, sticky="w")
-
-    def _pick(self, on_pick, name, host):
-        self.grab_release()
-        self.destroy()
-        on_pick(name, host)

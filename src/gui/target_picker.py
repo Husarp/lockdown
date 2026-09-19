@@ -6,7 +6,7 @@ from gui import theme
 from blocker.apps import PROTECTED, block_flags, make_block_type
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
-from gui.site_picker import PopularSitesPopup, SiteEntry
+from gui.site_picker import SiteEntry
 from gui.widgets import clear_entry
 from importer.popular import POPULAR_SITES
 
@@ -33,7 +33,7 @@ def guess_name(host: str) -> str:
 
 
 class TargetPicker(ctk.CTkFrame):
-    """Site entry (with suggestions) or app, display name, "+ Popular sites", "Browse apps", and for apps
+    """Site entry (with suggestions, popular sites included) or app, display name, "Browse apps", and for apps
     the block type. Extra widgets (Add/Update/Cancel buttons) can be packed into `self.buttons`."""
 
     def __init__(self, master, db, **kw):
@@ -48,8 +48,6 @@ class TargetPicker(ctk.CTkFrame):
         self.name.pack(side="left", padx=4)
         self.pickers = ctk.CTkFrame(row, fg_color="transparent")
         self.pickers.pack(side="left")
-        ctk.CTkButton(self.pickers, text="+ Popular sites", width=120, **theme.OUTLINE,
-                      command=lambda: PopularSitesPopup(self, self._fill_site)).pack(side="left", padx=4)
         ctk.CTkButton(self.pickers, text="Browse apps", width=110, **theme.OUTLINE,
                       command=lambda: AppBrowser(self, self._fill_app)).pack(side="left", padx=4)
         # optional slot for Add/Update buttons; tiny when empty (an empty frame would default to 200x200)

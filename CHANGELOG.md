@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.23.1 — 2026-09-19 04:58
+- **Site suggestions fixed**: the box flashed while typing (a new window was made on every key, first shown at its
+  default 200 × 200 size) and stayed on screen over other apps until you picked something. Now it's one window that
+  is only updated, sized to its rows, a bit wider (long names are shortened, icons no longer pushed out), and it
+  hides as soon as the focus leaves the box, the tab changes or another app comes to the front
+- "+ Popular sites" button removed - the site box already suggests popular sites while you type
+- Anti-Bypass: the "Real keyboard only" option removed; the 3×3 grid continues by itself once every word is typed
+- 164 tests passing
+
 ## 0.23.0 — 2026-09-19 04:49
 - **Fix: the window didn't come back** (taskbar / Alt+Tab) after minimizing Lockdown while a pop-up was open
   (Browse apps, a word list, the phrase window...): the pop-up held the focus and Tk ignored Windows' "restore"; now

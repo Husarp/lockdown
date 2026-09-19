@@ -21,7 +21,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   "N minutes allowed during blocked hours", warnings before blocks + reminders while in use + "block started".
 - **Blocking UI:** three tabs — **Overview** (everything with rules as chips, sortable, Edit/Remove), **Groups** (list + editor), **Add** (pick a site or app,
   tick any number of blockers: hours, time limit, opening limit, permanent, temporary). Site suggestions while typing,
-  "+ Popular sites" picker with site icons. **Auto-save** is on by default; turn it off to stage changes until you
+  popular sites suggested while typing (small typos are fine). **Auto-save** is on by default; turn it off to stage changes until you
   press **Save changes** (unsaved items then show "Not applied").
 - **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week), a configurable **limit reset
   time** (Settings; a change never ends the current limit day, week or month early), and **Emergency unlock**
@@ -43,7 +43,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   times / random) with snooze, "did you really do it?" check and quotes; they wait while you're in a full-screen game.
 - **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
   emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
-  pasting; optionally real keyboard only - no macros, and/or word by word in a 3×3 grid of boxes picked at random)
+  pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)
   and/or only during chosen hours; tightening is always instant. The tray app and the service come back
   within a minute if they're closed; a new time zone counts only after 24 hours; uninstalling asks for the challenge.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS

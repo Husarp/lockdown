@@ -1303,6 +1303,13 @@ sleep / forced-break overlays still show.
 - [x] Search tolerates small typos - Browse apps, site suggestions, Network Log, word lists (requested 2026-09-19)
 - [x] Dashboard "Blocked visits today": only the count by default, "Show" opens the list (remembered)
   (requested 2026-09-19)
+- [x] Site suggestions: flashed while typing, box too big, stayed on screen over other apps - one window updated
+  in place, sized to its rows, hides when the focus leaves or another app is in front (reported 2026-09-19)
+- [x] "+ Popular sites" button removed (the site box suggests them) (requested 2026-09-19)
+- [x] "Real keyboard only" Anti-Bypass option removed (requested 2026-09-19)
+- [x] 3×3 grid: continues by itself once every word is typed (requested 2026-09-19)
+- [ ] Proposed (waiting for OK, asked 2026-09-19): apps in the same search box as sites (one list of suggestions:
+  sites + installed apps + Steam games), "Browse apps" kept for browsing / "Other .exe"
 - [ ] Better app icon + tray icon - added to the designer brief (design/DESIGN.md 7c, requested 2026-09-19)
 - [ ] Light mode: white elements blend in (switch knobs, outlined buttons, selected nav item) - added to the next
   designer prompt (design/DESIGN.md 7b, requested 2026-09-19)
