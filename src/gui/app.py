@@ -56,6 +56,8 @@ WATCH_MS = 5000
 MINIMIZE_MS = 250
 GC_MS = 2000
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
+TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
+APP_ID = "Lockdown.App"   # Windows app identity (matches main.py); used to clear only our own notifications
 PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
 
@@ -509,7 +511,25 @@ class LockdownApp(ctk.CTk):
         fmt = alerts.get(self.db, "notify.format")
         if fmt in ("toast", "both"):
             self.tray.notify(message)
+            self.after(TOAST_CLEAR_MS, self._clear_toast_history)   # don't let one-time alerts pile up as unread
         if fmt in ("inapp", "both"):
             if self.popup:
                 self.popup.close()
             self.popup = Popup(self, message)
+
+    def _clear_toast_history(self):
+        """Remove Lockdown's own notifications from the Windows Action Center (the bell), a few seconds after they
+        show, so these one-time alerts don't stack up as "unread". Only Lockdown's AUMID is cleared - never any
+        other app's notifications."""
+        import os
+        import subprocess
+        ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                          r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        cmd = ("$null=[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
+               "ContentType=WindowsRuntime];"
+               f"[Windows.UI.Notifications.ToastNotificationManager]::History.Clear('{APP_ID}')")
+        try:
+            subprocess.Popen([ps, "-NoProfile", "-NonInteractive", "-Command", cmd],
+                             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+        except OSError:
+            pass

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.29.0 — 2026-09-19 15:05
+- **Notifications don't pile up as unread**: after a Windows notification shows, Lockdown removes *its own* entries from the Windows notification centre (the bell) a few seconds later, so one-time block/word alerts don't accumulate. Only Lockdown's notifications are cleared - never other apps'. Both display options stay (Windows notification / Lockdown popup / Both).
+
 ## 0.28.6 — 2026-09-19 14:40
 - **Redesign fix (from verification pass)**: the Notifications page section titles ("Blocked Visit Alerts", "Upcoming Blocks", "Weekly Summary") now show the accent bar like every other page. A background verification agent checked all 11 pages in dark + light and found this as the only accent-bar inconsistency; everything else passed.
 

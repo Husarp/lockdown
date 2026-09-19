@@ -62,6 +62,9 @@ class NotificationsPage(ctk.CTkFrame):
         self.fmt = Segmented(fmt_row, values=list(alerts.FORMATS.values()), command=lambda v: self.draft.set_setting(
             "notify.format", next(k for k, lbl in alerts.FORMATS.items() if lbl == v)))
         self.fmt.pack(side="left", padx=8)
+        help_icon(fmt_row, "Windows notifications clear themselves from the notification centre (the bell) a few "
+                           "seconds later, so these one-time alerts don't pile up as unread. Only Lockdown's own "
+                           "notifications are cleared.").pack(side="left", padx=4)
         ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > All.", text_color=MUTED).grid(
             row=row + 3, column=0, columnspan=2, padx=16, pady=(4, 12), sticky="w")
         self._build_warnings(parent)
