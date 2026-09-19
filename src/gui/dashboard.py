@@ -112,8 +112,10 @@ class DashboardPage(ctk.CTkFrame):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
         ctk.CTkLabel(head, text="Dashboard", font=theme.page_title()).pack(side="left")
+        from gui.display_settings import gear_button
+        gear_button(head, app).pack(side="right", anchor="s")
         self.date = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
-        self.date.pack(side="right", anchor="s", pady=(0, 4))
+        self.date.pack(side="right", anchor="s", pady=(0, 4), padx=(0, 6))
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.body.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         self._build()
@@ -181,11 +183,19 @@ class DashboardPage(ctk.CTkFrame):
         self.visits_toggle = ctk.CTkButton(self.visits.title.master, text="", width=60, height=24, **theme.OUTLINE,
                                            command=self._toggle_visits)
         self.visits_toggle.pack(side="right", padx=(0, 10))
+        self.visits.body.configure(height=1)   # (an empty frame would be 200 px tall while the list is hidden)
         self.visit_rows = Rows(self.visits.body, _visit_row, "No blocked visits today.", {"fill": "x", "pady": 1})
         self._show_visits(self.db.get_setting(VISITS_OPEN_KEY, "0") == "1")
         self.glance = Card(right, "At a glance")
         self.glance.pack(fill="x")
         self.glance_rows = Rows(self.glance.body, _glance_entry, "Not enough data yet.", {"anchor": "w"})
+        # (card, how it's packed) per column, in order - the ⚙ Display settings can hide any of them
+        self.layout = [[("stats", cards, {"fill": "x", "pady": (0, 12), "before": grid})],
+                       [("limits", self.limits, {"fill": "x", "pady": (0, 12)}),
+                        ("today", self.today, {"fill": "x", "pady": (0, 12)}), ("week", self.week, {"fill": "x"})],
+                       [("coming", self.coming, {"fill": "x", "pady": (0, 12)}),
+                        ("visits", self.visits, {"fill": "x", "pady": (0, 12)}), ("glance", self.glance, {"fill": "x"})]]
+        self.apply_layout()
 
         self.empty = Card(b)
         inner = ctk.CTkFrame(self.empty.body, fg_color="transparent")
@@ -407,6 +417,17 @@ class DashboardPage(ctk.CTkFrame):
             else:
                 row.sub.pack_forget()
 
+    def apply_layout(self):
+        """Show the cards that aren't hidden in the Display settings, in their order."""
+        from gui.display_settings import hidden
+        off = hidden(self.db)
+        for column in self.layout:
+            for _key, card, _how in column:
+                card.pack_forget()
+            for key, card, how in column:
+                if key not in off:
+                    card.pack(**how)
+
     def _toggle_visits(self):
         opened = self.visits_toggle.cget("text") == "Show"
         self.db.set_setting(VISITS_OPEN_KEY, "1" if opened else "0")
@@ -446,6 +467,12 @@ class DashboardPage(ctk.CTkFrame):
             quiet = min(span, key=lambda h: summary["per_hour"].get(h, 0))
             n = summary["per_hour"].get(quiet, 0)
             entries.append(("Quietest hour", f"{quiet:02d}:00 - {quiet + 1:02d}:00", f"{n} switch{'es' * (n != 1)}"))
+        streak = stats.streaks(self.db, now.date(), goal_seconds(self.db))
+        if goal_seconds(self.db):
+            n = streak["goal"]
+            entries.append(("Goal streak", f"{n} day{'s' * (n != 1)} in a row", "within your daily goal"))
+        n = streak["no_unlock"]
+        entries.append(("No emergency unlock", f"{n} day{'s' * (n != 1)} in a row", ""))
         for row, (label, main, extra) in zip(self.glance_rows.take(len(entries)), entries):
             row.label.configure(text=label.upper())
             row.main.configure(text=main)

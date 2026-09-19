@@ -236,6 +236,30 @@ def time_saved(events: list[dict], items: list[dict], history_rows: list[dict], 
 
 # ---------- text ----------
 
+def streaks(db, today: date, goal_sec: float | None, max_days: int = 366) -> dict[str, int]:
+    """Days in a row (back from today, not before Lockdown started recording): "goal" - active screen time within
+    the daily goal (today counts while it still is); "no_unlock" - without an emergency unlock."""
+    first = first_activity(db)
+    if not first:
+        return {"goal": 0, "no_unlock": 0}
+    start = max(first.date(), today - timedelta(days=max_days))
+    days = [today - timedelta(days=i) for i in range((today - start).days + 1)]
+    active = per_day(activity(db, start, today + timedelta(days=1)))
+    goal = 0
+    if goal_sec:
+        for d in days:
+            if active.get(d.isoformat(), 0) > goal_sec:
+                break
+            goal += 1
+    unlocked = {u["started"].date() for u in db.unlocks_since(datetime.combine(start, time()))}
+    no_unlock = 0
+    for d in days:
+        if d in unlocked:
+            break
+        no_unlock += 1
+    return {"goal": goal, "no_unlock": no_unlock}
+
+
 def hm(seconds: float) -> str:
     """'4 h 12 m' / '52 m' / '0 m'."""
     minutes = int(seconds // 60)

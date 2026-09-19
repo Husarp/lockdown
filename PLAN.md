@@ -1344,21 +1344,19 @@ stays outside (own limit). Built: 7a + the hardening that doesn't change how set
 - Moved to Phase 8: convert the enforcement scheduled task into a real Windows Service (with PyInstaller packaging)
 
 ### Phase 8 — Import & Polish
-Proposed 2026-09-19 (waiting for OK): 8a in the app - your own lists by URL on the Protection tab (preview first),
-settings export / import + CSV exports, weekly digest, streaks, a month calendar on Screen Time, and the per-page
-display settings (show / hide / reorder cards - planned in 3.1 but never scheduled); 8b packaging - Lockdown.exe
-(PyInstaller), a real Windows service instead of the scheduled task, and an installer.
-- [ ] GitHub blocklist import (StevenBlack, oisd, Energized) - mostly done by the protection lists; left: your own
-  list by URL
-- [ ] Import from custom URL
-- [ ] Import preview (count, sample domains, categories)
-- [ ] Export settings / logs
-- [ ] Weekly digest notification
-- [ ] Streak tracker
-- [ ] Heatmap calendar view
+Approved 2026-09-19 ("complete everything", my defaults: streaks = within goal + no emergency unlock, weekly
+summary Sunday 19:00). 8a built; 8b (packaging) waits for OK to install PyInstaller + pywin32 (downloads).
+- [x] GitHub blocklist import (StevenBlack, oisd, Energized) - done by the protection lists + your own lists
+- [x] Import from custom URL - "Add your own list" on the Protection tab (hosts / domains / adblock format)
+- [x] Import preview (count, sample domains) before adding
+- [x] Export settings / logs - Settings > Backup & export (settings backup JSON + import, screen-time CSV;
+  Network Log CSV was already there)
+- [x] Weekly digest notification - Notifications > Weekly Summary (day + time)
+- [x] Streak tracker - Dashboard "At a glance": days within the goal, days without an emergency unlock
+- [x] Heatmap calendar view - Screen Time > Calendar (a month at a time, over-goal days marked)
 - [x] SVG sidebar/UI icons (Lucide, pre-rendered to PNG) - done in the design batch
-- [ ] Per-page display settings (⚙: show / hide / reorder cards, default range) - planned in 3.1, never scheduled
-  (asked about 2026-09-19)
+- [x] Per-page display settings (⚙ on Dashboard / Screen Time: show / hide Dashboard cards, Screen Time's opening
+  tab and range) - no reordering (asked about 2026-09-19)
 - [ ] PyInstaller packaging (.exe)
 - [ ] Real Windows Service (moved from Phase 7)
 - [ ] Installer with service registration

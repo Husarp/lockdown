@@ -467,6 +467,9 @@ class Database:
 
     # ---------- settings ----------
 
+    def all_settings(self) -> dict[str, str]:
+        return {r[0]: r[1] for r in self.conn.execute("SELECT key, value FROM settings")}
+
     def get_setting(self, key: str, default: str | None = None) -> str | None:
         row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default

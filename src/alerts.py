@@ -48,11 +48,12 @@ def until_text(until: str | None, now: datetime) -> str:
     return f"{DAY_NAMES[u.weekday()]} {u:%H:%M}"   # not strftime("%A"): that follows the system language
 
 
-def format_message(template: str, event: dict, now: datetime) -> str:
+def format_message(template: str, event: dict, now: datetime, lists: dict = LISTS) -> str:
+    """lists: the protection lists by key (built-in + your own), to name the list a site is on."""
     reason = REASONS.get(event["reason"], ("", event["reason"]))[1]
     if event["reason"].startswith("protection:"):   # which list: "on the scam list"
         key = event["reason"].split(":", 1)[1]
-        reason = f"on the {LISTS[key][0].lower()} list" if key in LISTS else REASONS["protection"][1]
+        reason = f"on the {lists[key][0].lower()} list" if key in lists else REASONS["protection"][1]
     values = {"site": event["display_name"], "reason": reason,
               "until": until_text(event["until"], now)}
     try:

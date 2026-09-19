@@ -1,4 +1,5 @@
-"""Screen Time: Overview · Apps · Websites · Switches, for Today / Yesterday / 7 days / 30 days.
+"""Screen Time: Overview · Apps · Websites · Switches, for Today / Yesterday / 7 days / 30 days; Calendar: a month
+at a time.
 Each tab is built once and then only updated (rebuilding Tk widgets is what makes switching slow).
 Clicking an app's or site's category opens a small menu (pick / new category / edit colours)."""
 from collections import Counter
@@ -8,13 +9,15 @@ import customtkinter as ctk
 
 import stats
 from gui import app_browser, appinfo, categories, theme
-from gui.charts import DayBars, Donut, Heatmap, HourBars, TimelineBar
+from gui.charts import DayBars, Donut, Heatmap, HourBars, MonthCalendar, TimelineBar
 from gui.components import Curtain, Card, Chip, Rows, Segmented, StatCard, help_icon
 from gui.dashboard import goal_seconds
 from rules import DAY_NAMES
 from trusted_time import now_from_db
 
-TABS = ["Overview", "Apps", "Websites", "Switches"]
+TABS = ["Overview", "Apps", "Websites", "Switches", "Calendar"]
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+               "November", "December"]
 REFRESH_MS = 60_000
 MAX_ROWS = 40
 STYLE = {"checking": ("Short visits - often just checking", theme.WARNING),
@@ -347,13 +350,73 @@ class SwitchesView(ctk.CTkScrollableFrame):
             entry.frame.pack_forget()
 
 
+# ---------------------------------------------------------------- Calendar
+
+class CalendarView(ctk.CTkScrollableFrame):
+    """A month as a calendar coloured by screen time (◀ / ▶ for other months), with the month's totals."""
+
+    def __init__(self, master):
+        super().__init__(master, fg_color="transparent")
+        self.month: date | None = None   # the 1st of the month shown
+        card = Card(self, "")
+        card.pack(fill="x", pady=(0, 12))
+        head = card.title.master
+        self.prev = ctk.CTkButton(head, text="‹", width=32, height=28, **theme.OUTLINE, command=lambda: self._step(-1))
+        self.prev.pack(side="left", before=card.title)
+        self.next = ctk.CTkButton(head, text="›", width=32, height=28, **theme.OUTLINE, command=lambda: self._step(1))
+        self.next.pack(side="left", after=card.title, padx=(0, 8))
+        card.title.pack_configure(padx=10)
+        self.title = card.title
+        help_icon(head, "Each day is coloured by its active screen time (darker = more); days over your daily goal "
+                        "have a red dot. Hover a day for its time.").pack(side="left")
+        self.cal = MonthCalendar(card.body)
+        self.cal.pack(fill="x")
+        self.stats = _stat_row(self, ["This month", "Average day", "Within goal", "Busiest day"])
+        self.ctx = None
+
+    def _step(self, months: int):
+        m = self.month.month - 1 + months
+        self.month = date(self.month.year + m // 12, m % 12 + 1, 1)
+        self.update_view(self.ctx)
+
+    def update_view(self, c: Context):
+        self.ctx = c
+        if self.month is None:
+            self.month = c.today.replace(day=1)
+        first = self.month
+        nxt = date(first.year + first.month // 12, first.month % 12 + 1, 1)
+        rows = stats.activity(c.db, first, nxt)
+        per_day = {date.fromisoformat(d): sec for d, sec in stats.per_day(rows).items()}
+        goal = goal_seconds(c.db)
+        self.title.configure(text=f"{MONTH_NAMES[first.month - 1]} {first.year}")
+        self.next.configure(state="disabled" if nxt > c.today else "normal")
+        self.cal.set(first, per_day, goal, c.today,
+                     lambda d, sec: day_tip(d, sec) + ("  (over your goal)" if goal and sec > goal else ""))
+        days = [d for d in per_day if d <= c.today]
+        total = sum(per_day.values())
+        past = max(1, min((c.today - first).days + 1, (nxt - first).days))
+        self.stats["This month"].set(stats.hm(total))
+        self.stats["Average day"].set(stats.hm(total / past), f"over {past} day{'s' * (past != 1)}")
+        if goal:
+            within = sum(1 for i in range(past) if per_day.get(first + timedelta(days=i), 0) <= goal)
+            self.stats["Within goal"].set(f"{within} / {past}", f"goal {stats.hm(goal)} a day")
+        else:
+            self.stats["Within goal"].set("-", "no daily goal set (Settings)")
+        if days:
+            busiest = max(days, key=lambda d: per_day[d])
+            self.stats["Busiest day"].set(stats.hm(per_day[busiest]), day_tip(busiest, per_day[busiest]).split("  ")[0])
+        else:
+            self.stats["Busiest day"].set("-")
+
+
 # ---------------------------------------------------------------- page
 
 class ScreenTimePage(ctk.CTkFrame):
     VIEWS = {"Overview": lambda m: OverviewView(m),
              "Apps": lambda m: TableView(m, "app", ["App", "Share of day", "Time", "Switches", "Category"]),
              "Websites": lambda m: TableView(m, "site", ["Website", "Share of browsing", "Time", "Visits", "Category"]),
-             "Switches": lambda m: SwitchesView(m)}
+             "Switches": lambda m: SwitchesView(m),
+             "Calendar": lambda m: CalendarView(m)}
 
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
@@ -366,14 +429,17 @@ class ScreenTimePage(ctk.CTkFrame):
         self.tab_bar.pack(side="left")
         self.range_bar = Segmented(bar, values=list(stats.RANGES), command=lambda v: self.refresh())
         self.range_bar.pack(side="right")
-        self.tab_bar.set("Overview")
-        self.range_bar.set("Today")
+        from gui.display_settings import ST_RANGE_KEY, ST_TAB_KEY, gear_button
+        gear_button(bar, app).pack(side="right", padx=(8, 0), before=self.range_bar)
+        self.range_bar.set(self.db.get_setting(ST_RANGE_KEY, "Today"))   # (as chosen in the ⚙ Display settings)
+        start_tab = self.db.get_setting(ST_TAB_KEY, "Overview")
         self.holder = ctk.CTkFrame(self, fg_color="transparent")
         self.holder.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
         self.holder.grid_columnconfigure(0, weight=1)
         self.holder.grid_rowconfigure(0, weight=1)
         self.views: dict[str, ctk.CTkScrollableFrame] = {}
-        self._show_view("Overview")
+        self.tab_bar.set(start_tab if start_tab in TABS else "Overview")
+        self._show_view(self.tab_bar.get())
         self.after(REFRESH_MS, self._auto_refresh)
 
     def _show_view(self, tab: str):
@@ -390,6 +456,10 @@ class ScreenTimePage(ctk.CTkFrame):
     def show_tab(self, tab: str):
         self.tab_bar.set(tab)
         self._show_view(tab)
+        if tab == "Calendar":   # (a month at a time: the range buttons don't apply)
+            self.range_bar.pack_forget()
+        elif not self.range_bar.winfo_manager():
+            self.range_bar.pack(side="right")
         self.refresh()
 
     def on_show(self):

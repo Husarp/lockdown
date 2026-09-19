@@ -32,7 +32,7 @@ LISTS = {
 }
 LIST_DIR = DATA_DIR / "protection"
 SETTINGS_KEY = "protection"   # JSON {"enabled": [keys], "allowed": [domains], "info": {key: {count, updated}},
-#                                     "update_now": timestamp}
+#                                     "update_now": timestamp, "custom": [{key, name, url}] (your own lists)}
 PROGRESS_KEY = "protection.progress"   # JSON {key, part, parts, done, total} while the service downloads, else ""
 UPDATE_EVERY = timedelta(days=1)
 RETRY_AFTER = timedelta(hours=1)
@@ -50,37 +50,62 @@ def settings(db) -> dict:
     cfg.setdefault("enabled", [k for k, v in LISTS.items() if v[3]])
     cfg.setdefault("allowed", [])
     cfg.setdefault("info", {})
+    cfg.setdefault("custom", [])
     return cfg
+
+
+def all_lists(cfg: dict) -> dict:
+    """The built-in lists + your own ones (by URL; their format is detected per line - None = auto)."""
+    own = {c["key"]: (c["name"], c["url"], [(c["url"], None)], False) for c in cfg.get("custom", [])}
+    return {**LISTS, **own}
+
+
+def new_custom_key(cfg: dict) -> str:
+    used = {c["key"] for c in cfg.get("custom", [])}
+    return next(f"custom{i}" for i in range(1, 10_000) if f"custom{i}" not in used)
 
 
 def save_settings(db, cfg: dict):
     db.set_setting(SETTINGS_KEY, json.dumps(cfg))
 
 
-def parse(lines) -> list[str]:
-    """Domains from hosts-file lines ("0.0.0.0 example.com") or a plain list; comments and localhost lines skipped."""
+def parse_entries(lines) -> list[tuple[str, bool]]:
+    """(domain, with its subdomains) from hosts-file lines ("0.0.0.0 example.com"), a plain list, "*.example.com"
+    or adblock-style "||example.com^" (subdomains too); comments ("#", "!") and localhost lines skipped."""
     out = []
     for line in lines:
         line = line.split("#", 1)[0].strip().lower()
-        if not line:
+        if not line or line[0] in "![":
+            continue
+        if line.startswith("||"):   # adblock: ||example.com^ (options after $ ignored)
+            name = line[2:].split("$", 1)[0].rstrip("^|")
+            if "/" not in name and name not in _SKIP and _DOMAIN.match(name):
+                out.append((name, True))
             continue
         parts = line.split()
         for name in parts[1:] if len(parts) > 1 and parts[0][0].isdigit() else parts[:1]:
+            wild = name.startswith("*.")
+            name = name[2:] if wild else name
             if name not in _SKIP and _DOMAIN.match(name):
-                out.append(name)
+                out.append((name, wild))
     return out
+
+
+def parse(lines) -> list[str]:
+    """Domains from hosts-file lines ("0.0.0.0 example.com") or a plain list; comments and localhost lines skipped."""
+    return [d for d, _wild in parse_entries(lines)]
 
 
 def list_path(key: str, folder: Path = LIST_DIR) -> Path:
     return folder / f"{key}.txt"
 
 
-def download(key: str, folder: Path = LIST_DIR, progress=None) -> int:
+def download(key: str, folder: Path = LIST_DIR, progress=None, lists: dict = LISTS) -> int:
     """Fetch a list's sources into folder/<key>.txt, streamed line by line (the big ones are ~50 MB).
     progress(part, parts, done_bytes, total_bytes) is called as it goes. Returns how many domains."""
     folder.mkdir(parents=True, exist_ok=True)
     tmp = list_path(key, folder).with_suffix(".tmp")
-    sources = LISTS[key][2]
+    name, _what, sources, _default = lists[key]
     count = 0
     with open(tmp, "w", encoding="utf-8") as out:
         for part, (url, wildcard) in enumerate(sources, 1):
@@ -90,15 +115,16 @@ def download(key: str, folder: Path = LIST_DIR, progress=None) -> int:
                 for raw in response:
                     done += len(raw)
                     if done > MAX_DOWNLOAD:
-                        raise ValueError(f"{LISTS[key][0]} list is unexpectedly big")
-                    domains = parse([raw.decode("utf-8", errors="ignore")])
-                    out.writelines(("*." if wildcard else "") + d + "\n" for d in domains)
-                    count += len(domains)
+                        raise ValueError(f"{name} list is unexpectedly big")
+                    entries = parse_entries([raw.decode("utf-8", errors="ignore")])
+                    out.writelines(("*." if (wild if wildcard is None else wildcard) else "") + d + "\n"
+                                   for d, wild in entries)
+                    count += len(entries)
                     if progress:
                         progress(part, len(sources), done, total)
     if not count:
         tmp.unlink()
-        raise ValueError(f"{LISTS[key][0]} list came back empty")
+        raise ValueError(f"{name} list came back empty")
     tmp.replace(list_path(key, folder))
     return count
 
@@ -120,18 +146,37 @@ def _time(d: dict, key: str) -> datetime | None:
     return datetime.fromisoformat(d[key]) if d.get(key) else None
 
 
-def sources(key: str) -> str:
-    return " ".join(url for url, _ in LISTS[key][2])
+def sources(key: str, lists: dict = LISTS) -> str:
+    return " ".join(url for url, _ in lists[key][2])
+
+
+def preview(url: str, limit: int = MAX_DOWNLOAD) -> tuple[int, list[str]]:
+    """A list at `url` before adding it: (how many domains, a few of them). Raises on network / format errors."""
+    request = urllib.request.Request(url, headers={"User-Agent": "Lockdown/1.0"})
+    count, sample, done = 0, [], 0
+    with urllib.request.urlopen(request, timeout=30) as response:
+        for raw in response:
+            done += len(raw)
+            if done > limit:
+                raise ValueError("That list is too big (over 150 MB).")
+            for domain, wild in parse_entries([raw.decode("utf-8", errors="ignore")]):
+                count += 1
+                if len(sample) < 5:
+                    sample.append(("*." if wild else "") + domain)
+    if not count:
+        raise ValueError("No sites found there - is it a block list (hosts file, domains or adblock format)?")
+    return count, sample
 
 
 def due(cfg: dict, key: str, now: datetime) -> bool:
     """Needs downloading: never downloaded, a day old, its sources changed (a Lockdown update) or "Update now"
     pressed since - but after a failed try, wait an hour."""
     info = cfg["info"].get(key, {})
+    lists = all_lists(cfg)
     updated, failed, asked = _time(info, "updated"), _time(info, "failed"), _time(cfg, "update_now")
     if failed and (not updated or failed > updated) and now - failed < RETRY_AFTER:
         return False
-    if asked and (not updated or asked > updated) or updated and info.get("sources") != sources(key):
+    if asked and (not updated or asked > updated) or updated and info.get("sources") != sources(key, lists):
         return True
     return not updated or now - updated >= UPDATE_EVERY
 
@@ -159,7 +204,7 @@ class Protection:
         """Load changed / newly enabled lists, drop disabled ones. Returns True when the lists changed."""
         self.allowed = frozenset(cfg["allowed"])
         tables, changed = {}, False
-        for key in (k for k in LISTS if k in cfg["enabled"]):   # LISTS order: the first list that has it names it
+        for key in (k for k in all_lists(cfg) if k in cfg["enabled"]):   # (list order: the first one names it)
             path = list_path(key, self.folder)
             stamp = path.stat().st_mtime if path.exists() else 0
             if key in self.tables and self.tables[key][0] == stamp:
@@ -201,9 +246,10 @@ class Protection:
 def update_due_lists(db, now: datetime, folder: Path = LIST_DIR, log=None) -> bool:
     """Download what's due (runs in a background thread of the service). Returns True if a list changed."""
     cfg = settings(db)
+    lists = all_lists(cfg)
     changed = False
     for key in cfg["enabled"]:
-        if key not in LISTS or not due(cfg, key, now):
+        if key not in lists or not due(cfg, key, now):
             continue
         last = 0.0
 
@@ -214,9 +260,9 @@ def update_due_lists(db, now: datetime, folder: Path = LIST_DIR, log=None) -> bo
                 db.set_setting(PROGRESS_KEY, json.dumps({"key": key, "part": part, "parts": parts, "done": done,
                                                          "total": total}))
         try:
-            count = download(key, folder, progress)
+            count = download(key, folder, progress, lists)
             cfg["info"][key] = {"count": count, "updated": now.isoformat(timespec="seconds"),   # (clears "failed")
-                                "sources": sources(key)}
+                                "sources": sources(key, lists)}
             changed = True
             if log:
                 log.info("Protection list %s updated: %d domains", key, count)

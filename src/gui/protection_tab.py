@@ -10,6 +10,7 @@ from blocker import protection
 from blocker.hosts import normalize_host
 from gui import icons, theme
 from gui.components import Card, Rows, help_icon
+from gui.widgets import clear_entry
 from gui.words_cards import WordsCards
 from trusted_time import now_from_db
 
@@ -55,17 +56,29 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         ctk.CTkButton(lists.title.master, text="Update now", width=110, **theme.OUTLINE,
                       command=self._update_now).pack(side="right")
         self.switches, self.infos = {}, {}
-        for key, (name, what, _url, _default) in protection.LISTS.items():
-            row = ctk.CTkFrame(lists.body, fg_color="transparent")
-            row.pack(fill="x", pady=4)
-            sw = ctk.CTkSwitch(row, text=name, font=theme.semi(13), width=150, command=self._save)
-            sw.pack(side="left")
-            texts = ctk.CTkFrame(row, fg_color="transparent")
-            texts.pack(side="left", fill="x", expand=True)
-            ctk.CTkLabel(texts, text=what, anchor="w", height=18).pack(anchor="w")
-            info = ctk.CTkLabel(texts, text="", text_color=MUTED, font=theme.body(11), anchor="w", height=14)
-            info.pack(anchor="w")
-            self.switches[key], self.infos[key] = sw, info
+        self.list_rows = ctk.CTkFrame(lists.body, fg_color="transparent")
+        self.list_rows.pack(fill="x")
+        self.row_keys: list[str] = []
+        self._build_list_rows(protection.all_lists(protection.settings(self.db)))
+        own = ctk.CTkFrame(lists.body, fg_color="transparent")
+        own.pack(fill="x", pady=(10, 0))
+        head = ctk.CTkFrame(own, fg_color="transparent")
+        head.pack(anchor="w")
+        ctk.CTkLabel(head, text="Add your own list", font=theme.semi(13)).pack(side="left")
+        help_icon(head, "Any block list on the internet: a hosts file, a plain list of domains or an adblock-style "
+                        "list (||site.com^ - blocks its subdomains too). It's downloaded and updated once a day like "
+                        "the others. Preview it first to see what's in it.").pack(side="left", padx=6)
+        line = ctk.CTkFrame(own, fg_color="transparent")
+        line.pack(anchor="w", pady=(4, 0))
+        self.own_name = ctk.CTkEntry(line, width=150, placeholder_text="Name (e.g. Crypto)")
+        self.own_name.pack(side="left")
+        self.own_url = ctk.CTkEntry(line, width=380, placeholder_text="https://... list address")
+        self.own_url.pack(side="left", padx=8)
+        ctk.CTkButton(line, text="Preview", width=90, **theme.OUTLINE, command=self._preview).pack(side="left")
+        self.own_add = ctk.CTkButton(line, text="Add list", width=90, command=self._add_own)
+        self.own_result = ctk.CTkLabel(own, text="", anchor="w", justify="left", wraplength=820)
+        self.own_result.pack(anchor="w", pady=(4, 0))
+        self.previewed: tuple[str, int] | None = None   # (url, count) of the last good preview
 
         self.words = WordsCards(self, page.app)
 
@@ -95,11 +108,96 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.allow_error.pack(anchor="w")
         self._poll = None
 
+    def _build_list_rows(self, lists: dict):
+        """One row per list (switch, what it blocks, status); your own lists also get a remove button."""
+        for w in self.list_rows.winfo_children():
+            w.destroy()
+        self.switches, self.infos = {}, {}
+        for key, (name, what, _sources, _default) in lists.items():
+            row = ctk.CTkFrame(self.list_rows, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            sw = ctk.CTkSwitch(row, text=name, font=theme.semi(13), width=150, command=self._save)
+            sw.pack(side="left")
+            texts = ctk.CTkFrame(row, fg_color="transparent")
+            texts.pack(side="left", fill="x", expand=True)
+            ctk.CTkLabel(texts, text=what if key in protection.LISTS else f"your list · {what}", anchor="w",
+                         height=18).pack(anchor="w")
+            info = ctk.CTkLabel(texts, text="", text_color=MUTED, font=theme.body(11), anchor="w", height=14)
+            info.pack(anchor="w")
+            if key not in protection.LISTS:
+                ctk.CTkButton(row, text="Remove", width=80, **theme.OUTLINE,
+                              command=lambda k=key, n=name: self._remove_own(k, n)).pack(side="right")
+            self.switches[key], self.infos[key] = sw, info
+        self.row_keys = list(lists)
+
+    # ---------- your own lists ----------
+
+    def _preview(self):
+        url = self.own_url.get().strip()
+        if not url.lower().startswith(("http://", "https://")):
+            self.own_result.configure(text="Paste the list's full address (starting with https://).",
+                                      text_color=theme.DANGER)
+            return
+        self.own_add.pack_forget()
+        self.previewed = None
+        self.own_result.configure(text="Downloading the list to have a look...", text_color=MUTED)
+        result = []
+
+        def work():
+            try:
+                result.append(protection.preview(url))
+            except Exception as e:   # offline, not a list, too big
+                result.append(e)
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+        self._show_preview(url, worker, result)
+
+    def _show_preview(self, url: str, worker, result: list):
+        if worker.is_alive():
+            self.after(100, self._show_preview, url, worker, result)
+            return
+        if isinstance(result[0], Exception):
+            text = str(result[0]) if isinstance(result[0], ValueError) else f"Couldn't download it: {result[0]}"
+            self.own_result.configure(text=text, text_color=theme.DANGER)
+            return
+        count, sample = result[0]
+        self.previewed = (url, count)
+        self.own_result.configure(text=f"{count:,} sites, e.g. {', '.join(sample)}", text_color=theme.TEXT)
+        self.own_add.pack(side="left", padx=8)
+
+    def _add_own(self):
+        if not self.previewed:
+            return
+        url, count = self.previewed
+        cfg = protection.settings(self.db)
+        name = self.own_name.get().strip() or url.split("/")[2]
+        key = protection.new_custom_key(cfg)
+        cfg["custom"].append({"key": key, "name": name, "url": url})
+        cfg["enabled"].append(key)
+        protection.save_settings(self.db, cfg)   # (a new list only blocks more: no challenge)
+        self.own_add.pack_forget()
+        self.previewed = None
+        for entry in (self.own_name, self.own_url):
+            clear_entry(entry)
+        self.own_result.configure(text=f"Added {name} ({count:,} sites) - it's downloaded in a few seconds.",
+                                  text_color=theme.ALLOWED)
+        self.refresh()
+
+    def _remove_own(self, key: str, name: str):
+        cfg = protection.settings(self.db)
+        cfg["custom"] = [c for c in cfg["custom"] if c["key"] != key]
+        cfg["enabled"] = [k for k in cfg["enabled"] if k != key]
+        cfg["info"].pop(key, None)
+        self._store(cfg, f"Remove your {name} list")
+
     # ---------- data ----------
 
     def refresh(self, now=None, usage=None):
         now = now_from_db(self.db)
         cfg = protection.settings(self.db)
+        lists = protection.all_lists(cfg)
+        if list(lists) != self.row_keys:   # your own list added / removed
+            self._build_list_rows(lists)
         progress = protection.download_progress(self.db)
         for key, sw in self.switches.items():
             sw.select() if key in cfg["enabled"] else sw.deselect()
@@ -137,7 +235,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         """Save; switching a list off / allowing a site loosens blocks, so that goes through Anti-Bypass."""
         def save():   # (the service may have updated the lists' info meanwhile: keep that)
             protection.save_settings(self.db, {**protection.settings(self.db), "enabled": cfg["enabled"],
-                                               "allowed": cfg["allowed"]})
+                                               "allowed": cfg["allowed"], "custom": cfg["custom"]})
             self.refresh()
         if antibypass.protection_looser(protection.settings(self.db), cfg):
             self.page.app.guard([what], save, self.refresh)
@@ -146,7 +244,8 @@ class ProtectionTab(ctk.CTkScrollableFrame):
 
     def _save(self):
         cfg = protection.settings(self.db)
-        off = [protection.LISTS[k][0] for k in cfg["enabled"] if k in self.switches and not self.switches[k].get()]
+        lists = protection.all_lists(cfg)
+        off = [lists[k][0] for k in cfg["enabled"] if k in self.switches and not self.switches[k].get()]
         cfg["enabled"] = [k for k, sw in self.switches.items() if sw.get()]
         self._store(cfg, f"Switch the {', '.join(off)} protection list off")
 
@@ -166,8 +265,8 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             return
         self.check_result.configure(text="Checking...", text_color=MUTED)
         result = []   # the lists are big (~70 MB): searched in a thread so the window doesn't freeze
-        worker = threading.Thread(target=lambda: result.append(protection.lists_with(host, protection.LISTS)),
-                                  daemon=True)
+        keys = list(protection.all_lists(protection.settings(self.db)))
+        worker = threading.Thread(target=lambda: result.append(protection.lists_with(host, keys)), daemon=True)
         worker.start()
         self._show_check(host, worker, result)
 
@@ -176,7 +275,8 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             self.after(50, self._show_check, host, worker, result)
             return
         cfg = protection.settings(self.db)
-        found = [protection.LISTS[k][0] + ("" if k in cfg["enabled"] else " (list is off)") for k in result[0]]
+        lists = protection.all_lists(cfg)
+        found = [lists[k][0] + ("" if k in cfg["enabled"] else " (list is off)") for k in result[0]]
         if host in cfg["allowed"]:
             text, color = f"{host} is allowed anyway by you.", theme.ALLOWED
         elif found:

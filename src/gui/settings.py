@@ -4,6 +4,7 @@ import customtkinter as ctk
 from gui import theme
 
 import antibypass
+import backup
 import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
@@ -32,6 +33,7 @@ class SettingsPage(ctk.CTkFrame):
         self._build_appearance()
         self._build_reset()
         self._build_emergency()
+        self._build_backup()
         self.load()
 
     def _section(self, title: str, help_text: str = "") -> ctk.CTkFrame:
@@ -186,6 +188,62 @@ class SettingsPage(ctk.CTkFrame):
             self.app.guard(["Allow more or longer emergency unlocks"], save, self.load)
         else:
             save()
+
+    # ---------- backup / export ----------
+
+    def _build_backup(self):
+        box = self._section("Backup & export", "A backup has everything you set up: blocked sites and apps with their "
+                                               "rules, groups, categories, modes, reminders and settings. Importing "
+                                               "one replaces yours (needs the Anti-Bypass challenge if it's on).")
+        line = ctk.CTkFrame(box, fg_color="transparent")
+        line.pack(anchor="w", padx=16, pady=(4, 4))
+        ctk.CTkButton(line, text="Export settings...", width=150, **theme.OUTLINE, command=self._export).pack(
+            side="left")
+        ctk.CTkButton(line, text="Import settings...", width=150, **theme.OUTLINE, command=self._import).pack(
+            side="left", padx=8)
+        ctk.CTkButton(line, text="Export screen time (CSV)...", width=200, **theme.OUTLINE,
+                      command=self._export_screen_time).pack(side="left")
+        self.backup_info = ctk.CTkLabel(box, text="", anchor="w", justify="left", wraplength=760)
+        self.backup_info.pack(anchor="w", padx=16, pady=(4, 12))
+
+    def _export(self):
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(parent=self, title="Export Lockdown settings", defaultextension=".json",
+                                            filetypes=[("Lockdown backup", "*.json")],
+                                            initialfile=f"lockdown-backup-{now_from_db(self.db):%Y-%m-%d}.json")
+        if path:
+            backup.save(self.db, path)
+            self.backup_info.configure(text=f"Saved to {path}", text_color=theme.ALLOWED)
+
+    def _import(self):
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(parent=self, title="Import Lockdown settings",
+                                          filetypes=[("Lockdown backup", "*.json")])
+        if not path:
+            return
+        try:
+            data = backup.load(path)
+        except ValueError as e:
+            self.backup_info.configure(text=str(e), text_color=theme.DANGER)
+            return
+
+        def restore():
+            backup.restore(self.db, data)
+            self.app.draft.discard()   # (reloads the blocks everywhere)
+            self.load()
+            self.backup_info.configure(text=f"Imported {len(data['items'])} blocked sites / apps and your settings. "
+                                            "Restart Lockdown to see a different theme or colour.",
+                                       text_color=theme.ALLOWED)
+        from pathlib import Path
+        self.app.guard([f"Import settings from {Path(path).name} (replaces your blocks and settings)"], restore)
+
+    def _export_screen_time(self):
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(parent=self, title="Export screen time", defaultextension=".csv",
+                                            filetypes=[("CSV", "*.csv")], initialfile="screen-time.csv")
+        if path:
+            rows = backup.screen_time_csv(self.db, path)
+            self.backup_info.configure(text=f"{rows} rows saved to {path}", text_color=theme.ALLOWED)
 
     # ---------- load ----------
 

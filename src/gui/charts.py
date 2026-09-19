@@ -247,6 +247,64 @@ class Heatmap(Chart):
         self.text(x0 - self.px(6), y, "less", "e")
 
 
+class MonthCalendar(Chart):
+    """A month as a calendar (Monday first): each day coloured by its active screen time (5 levels, like the
+    heatmap), with its number; days over the daily goal get a red dot. Hover a day for its time."""
+
+    LEVELS = (1, 2, 4, 6)   # hours: below 1 = level 0 ... 6 h and more = level 4
+    WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    def __init__(self, master):
+        super().__init__(master, height=330)
+        self.first: date | None = None
+        self.per_day: dict[date, float] = {}
+        self.goal: float | None = None
+        self.today: date | None = None
+        self.tip_of = lambda d, sec: ""
+
+    def set(self, first: date, per_day: dict[date, float], goal: float | None, today: date, tip_of):
+        """first: the month's 1st day; per_day: active seconds; tip_of(day, seconds) -> tooltip text."""
+        self.first, self.per_day, self.goal, self.today, self.tip_of = first, per_day, goal, today, tip_of
+        self._schedule()
+
+    def draw(self, w, h):
+        if not self.first:
+            return
+        import calendar
+        from stats import hm
+        palette = theme.HEAT[1] if ctk.get_appearance_mode() == "Dark" else theme.HEAT[0]
+        weeks = calendar.Calendar().monthdatescalendar(self.first.year, self.first.month)
+        top = self.fh + self.px(8)
+        cw, ch = w / 7, (h - top) / len(weeks)
+        gap = self.px(4)
+        for i, name in enumerate(self.WEEKDAYS):
+            self.text(i * cw + cw / 2, 0, name)
+        big = (theme.BODY, 10)
+        for r, week in enumerate(weeks):
+            for c, day in enumerate(week):
+                if day.month != self.first.month:
+                    continue
+                x, y = c * cw, top + r * ch
+                sec = self.per_day.get(day, 0)
+                future = day > self.today
+                level = 0 if future else sum(sec / 3600 >= t for t in self.LEVELS)
+                self.rect(x, y, x + cw - gap, y + ch - gap, theme.TRACK if future else palette[level], self.px(4))
+                if self.goal and sec > self.goal and not future:   # over the goal: a red dot in the corner
+                    r, cx, cy = self.px(4.5), x + cw - gap - self.px(10), y + self.px(10)
+                    self.pen.ellipse([(cx - r - self.px(1.5)) * SS, (cy - r - self.px(1.5)) * SS,
+                                      (cx + r + self.px(1.5)) * SS, (cy + r + self.px(1.5)) * SS],
+                                     fill=theme.pick(theme.SURFACE))
+                    self.pen.ellipse([(cx - r) * SS, (cy - r) * SS, (cx + r) * SS, (cy + r) * SS],
+                                     fill=theme.pick(theme.DANGER))
+                color = theme.WHITE if level >= 3 else theme.TEXT if not future else theme.MUTED
+                self.text(x + self.px(8), y + self.px(6), str(day.day), "nw", color, big)
+                if sec >= 60 and not future:
+                    self.text(x + cw - gap - self.px(8), y + ch - gap - self.px(6), hm(sec), "se",
+                              theme.WHITE if level >= 3 else theme.MUTED)
+                if not future:
+                    self.hit(x, y, x + cw - gap, y + ch - gap, self.tip_of(day, sec))
+
+
 class Donut(Chart):
     """Smooth ring split into parts, with a total in the middle; hover a part for its name and time."""
 

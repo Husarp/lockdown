@@ -46,6 +46,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)
   and/or only during chosen hours; tightening is always instant. The tray app and the service come back
   within a minute if they're closed; a new time zone counts only after 24 hours; uninstalling asks for the challenge.
+- **Phase 8a**: your own block lists by URL (with a preview), settings backup / import, screen-time CSV, a weekly
+  summary notification, streaks, a month calendar on Screen Time, display settings (⚙) for Dashboard / Screen Time.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
   cache); table or graph, filters, export; click a row to block the site/app or copy it.
 

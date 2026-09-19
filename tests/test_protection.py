@@ -41,7 +41,7 @@ def test_update_lists_exceptions_and_which(tmp_path, monkeypatch):
     lists = {"scam": "fake-shop.com\nwww.fake-shop.com\n", "adult": "*.adult.example\nok.example\n"}
     seen_progress = []
 
-    def fake_download(key, folder, progress=None):
+    def fake_download(key, folder, progress=None, _lists=None):
         if key not in lists:
             raise OSError("offline")
         folder.mkdir(parents=True, exist_ok=True)
@@ -80,3 +80,24 @@ def test_message_names_the_list():
     msg = alerts.format_message(alerts.DEFAULT_MESSAGES["protection"], event, NOW)
     assert msg == "fake-shop.com is blocked - it's on the scam list."
     assert alerts.base_reason("protection:scam") == "protection"
+
+
+def test_adblock_format_and_your_own_lists(tmp_path):
+    text = ["! comment", "[Adblock Plus 2.0]", "||tracker.example^", "||ads.example^$third-party",
+            "||site.example/path^", "*.wild.example", "plain.example", "0.0.0.0 hosts.example"]
+    assert protection.parse_entries(text) == [("tracker.example", True), ("ads.example", True),
+                                              ("wild.example", True), ("plain.example", False),
+                                              ("hosts.example", False)]
+    cfg = {"enabled": ["scam"], "allowed": [], "info": {},
+           "custom": [{"key": "custom1", "name": "Crypto", "url": "https://example.org/list.txt"}]}
+    lists = protection.all_lists(cfg)
+    assert "scam" in lists and lists["custom1"][0] == "Crypto" and protection.new_custom_key(cfg) == "custom2"
+    assert protection.due(cfg, "custom1", NOW)                                   # never downloaded
+    event = {"display_name": "coin.example", "reason": "protection:custom1", "until": None}
+    msg = alerts.format_message("{site} is blocked - it's {reason}.", event, NOW, lists)
+    assert msg == "coin.example is blocked - it's on the crypto list."
+    (tmp_path / "custom1.txt").write_text("*.coin.example\n")
+    cfg["enabled"].append("custom1")
+    p = protection.Protection(tmp_path)
+    p.refresh(cfg)
+    assert p.which("a.coin.example") == "custom1"

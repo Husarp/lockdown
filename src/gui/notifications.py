@@ -3,9 +3,11 @@ The alert messages and the recent visits are in sections you open (built the fir
 import customtkinter as ctk
 
 from gui import theme
-from gui.components import Collapsible, Rows, Segmented
+from gui.components import Collapsible, Rows, Segmented, help_icon
 
 import alerts
+import digest
+from rules import DAY_NAMES
 
 MUTED = theme.MUTED
 POPUP_MS = 6000
@@ -64,6 +66,7 @@ class NotificationsPage(ctk.CTkFrame):
         ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > All.", text_color=MUTED).grid(
             row=row + 3, column=0, columnspan=2, padx=16, pady=(4, 12), sticky="w")
         self._build_warnings(parent)
+        self._build_digest(parent)
 
     def _build_messages(self, parent):
         parent.grid_columnconfigure(1, weight=1)
@@ -92,6 +95,33 @@ class NotificationsPage(ctk.CTkFrame):
         for cell, text in zip(head.cells, ["Time", "Site", "Hostname", "Reason"]):
             cell.configure(text=text, text_color=MUTED)
         self.visit_rows = Rows(parent, make, "No blocked visits yet.")
+
+    def _build_digest(self, parent):
+        box = ctk.CTkFrame(parent)
+        box.pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(box, text="Weekly Summary", font=ctk.CTkFont(size=16, weight="bold")).pack(
+            anchor="w", padx=16, pady=(12, 6))
+        line = ctk.CTkFrame(box, fg_color="transparent")
+        line.pack(anchor="w", padx=16, pady=(0, 12))
+        self.digest_switch = ctk.CTkSwitch(line, text="Once a week, show how it went on", command=self._save_digest)
+        self.digest_switch.pack(side="left")
+        self.digest_day = ctk.CTkOptionMenu(line, width=120, values=DAY_NAMES, command=lambda v: self._save_digest())
+        self.digest_day.pack(side="left", padx=8)
+        ctk.CTkLabel(line, text="at").pack(side="left")
+        self.digest_time = ctk.CTkOptionMenu(line, width=90, values=[f"{h:02d}:00" for h in range(24)],
+                                             command=lambda v: self._save_digest())
+        self.digest_time.pack(side="left", padx=8)
+        help_icon(line, "Screen time compared with the week before, blocked visits, your top app and site, the days "
+                        "within your goal and your streaks.").pack(side="left", padx=4)
+        g = lambda k: digest.get(self.db, k)
+        self.digest_switch.select() if g("digest.enabled") == "1" else self.digest_switch.deselect()
+        self.digest_day.set(DAY_NAMES[int(g("digest.day"))])
+        self.digest_time.set(g("digest.time"))
+
+    def _save_digest(self):
+        self.db.set_setting("digest.enabled", "1" if self.digest_switch.get() else "0")
+        self.db.set_setting("digest.day", str(DAY_NAMES.index(self.digest_day.get())))
+        self.db.set_setting("digest.time", self.digest_time.get())
 
     def _build_warnings(self, parent):
         box = ctk.CTkFrame(parent)

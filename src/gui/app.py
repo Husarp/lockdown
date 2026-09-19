@@ -11,8 +11,10 @@ import customtkinter as ctk
 
 import alerts
 import antibypass
+import digest
 import modes
 import reminders
+from blocker import protection
 from blocker.apps import minimizes
 from db import Database
 from gui import shortcuts, theme
@@ -379,7 +381,9 @@ class LockdownApp(ctk.CTk):
         if not alerts.should_notify(event, item_notify, enabled, self.last_alert.get(event["item_id"]), now, cooldown):
             return
         self.last_alert[event["item_id"]] = now
-        self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{reason}"), event, now_from_db(self.db)))
+        lists = protection.all_lists(protection.settings(self.db))   # (your own lists have their own names)
+        self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{reason}"), event, now_from_db(self.db),
+                                         lists))
 
     def _poll_watcher(self):
         """Warnings before blocks start, reminders while in use, "block started" notices."""
@@ -392,6 +396,13 @@ class LockdownApp(ctk.CTk):
                 self._show(message)
             self.minimize_blocks = {b["item"]["target"].lower(): b for b in self.db.blocks(now)
                                     if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
+            if digest.due(self.db, now):   # the weekly summary
+                from gui import appinfo
+                from gui.dashboard import goal_seconds
+                items = self.db.list_items()
+                self._show(digest.summary(self.db, now.date(), goal_seconds(self.db),
+                                          lambda kind, name: appinfo.name_of(kind, name, items)))
+                digest.mark_shown(self.db, now)
         finally:
             self.after(WATCH_MS, self._poll_watcher)
 

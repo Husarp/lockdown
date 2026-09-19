@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.25.0 — 2026-09-19 05:33
+- **Phase 8a (Import & Polish)**:
+  - **Your own block lists** (Blocking > Protection > "Add your own list"): any list on the internet by its address -
+    hosts file, plain domains or adblock-style (||site.com^, blocks subdomains too). **Preview** first (how many sites
+    + a few examples), then Add; downloaded / updated daily like the others, own switch, "on the <name> list" in the
+    blocked notice, "Remove" (needs the Anti-Bypass challenge)
+  - **Backup & export** (Settings): export everything you set up to a file and import it again (replaces your blocks
+    and settings - Anti-Bypass challenge first), screen time as CSV (per day and app / site, with categories)
+  - **Weekly summary** (Notifications): once a week (Sunday 19:00 by default) - screen time vs the week before,
+    blocked visits, top app and site, days within your goal, streaks
+  - **Streaks** (Dashboard > At a glance): days in a row within your daily goal, days without an emergency unlock
+  - **Calendar** (Screen Time): a month at a time coloured by screen time, a red dot on days over your goal, ‹ ›
+    for other months, the month's total / average day / days within goal / busiest day
+  - **Display settings** (⚙ on Dashboard and Screen Time): show / hide each Dashboard card; which tab and range
+    Screen Time opens with
+- Fix: "Blocked visits today" was a tall empty box while its list was hidden
+- 169 tests passing
+
 ## 0.24.0 — 2026-09-19 05:20
 - **One search box for sites and apps** (Blocking > Add): typing suggests your sites, popular sites, installed apps
   and Steam games together ("Discord   discord.exe · app"); picking an app shows the app options. "Browse apps" stays
