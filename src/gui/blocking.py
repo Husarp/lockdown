@@ -138,9 +138,13 @@ class OverviewTab(ctk.CTkScrollableFrame):
         ctk.CTkLabel(panel, text=f"{left} of {allowed} left {per} (resets {DAY_NAMES[reset.weekday()]} {reset:%H:%M}). "
                                  f"Pick what to unblock for {minutes} min - several at once still count as one use.",
                      text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
-        # things on your list (a mode can also block made-up items, without an id, that can't be unlocked)
-        blocked = sorted({b["item"]["id"]: b["item"] for b in db.blocks(now) if b["item"]["id"] is not None}.values(),
+        # things on your list, except permanently-blocked ones - the emergency unlock is for limits/hours, not for
+        # things you chose to block for good (so it can't be turned against you, e.g. adult sites). A mode can also
+        # block made-up items (no id) that can't be unlocked.
+        blocked = sorted({b["item"]["id"]: b["item"] for b in db.blocks(now)
+                          if b["item"]["id"] is not None and b["reason"] != "permanent"}.values(),
                          key=lambda i: i["display_name"].lower())
+        permanent = any(b["reason"] == "permanent" for b in db.blocks(now) if b["item"]["id"] is not None)
         boxes = []
         for item in blocked:
             line = ctk.CTkFrame(panel, fg_color="transparent")
@@ -151,7 +155,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
                          compound="left").pack(side="left")
             boxes.append((box, item))
         if not blocked:
-            ctk.CTkLabel(panel, text="Nothing is blocked right now.").pack(anchor="w", padx=14, pady=4)
+            ctk.CTkLabel(panel, text="Nothing here can be emergency-unlocked right now.").pack(anchor="w", padx=14,
+                                                                                               pady=4)
+        if permanent:
+            ctk.CTkLabel(panel, text="Permanently-blocked items can't be emergency-unlocked.", text_color=MUTED,
+                         font=theme.body(11)).pack(anchor="w", padx=14, pady=(2, 0))
         error = ctk.CTkLabel(panel, text="", text_color=ERROR)
         error.pack(anchor="w", padx=14)
         buttons = ctk.CTkFrame(panel, fg_color="transparent")

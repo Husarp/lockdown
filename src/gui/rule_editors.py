@@ -98,10 +98,17 @@ class WindowRow(ctk.CTkFrame):
         self.end = ctk.CTkEntry(line, width=58, justify="center")
         self.end.insert(0, end)
         self.end.pack(side="left")
+        self.remove_btn = None
         if on_remove:
-            ctk.CTkButton(line, text="×", width=28, height=28, fg_color="transparent", hover_color=theme.SURFACE2,
-                          text_color=MUTED, font=theme.body(16), command=lambda: on_remove(self)).pack(
-                side="left", padx=(8, 0))
+            self.remove_btn = ctk.CTkButton(line, text="×", width=28, height=28, fg_color="transparent",
+                                            hover_color=theme.SURFACE2, text_color=MUTED, font=theme.body(16),
+                                            command=lambda: on_remove(self))
+            self.remove_btn.pack(side="left", padx=(8, 0))
+
+    def set_removable(self, removable: bool):
+        """Hide the × on the only window - removing the last one would make the setting do nothing."""
+        if self.remove_btn:
+            self.remove_btn.pack(side="left", padx=(8, 0)) if removable else self.remove_btn.pack_forget()
 
     def value(self):
         return [i for i, b in enumerate(self.day_boxes) if b.get()], self.start.get(), self.end.get()

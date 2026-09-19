@@ -132,6 +132,15 @@ def eyebrow():
 def apply():
     """customtkinter defaults from the tokens. Call before any widget is created."""
     load_fonts()
+    if not getattr(ctk.CTkSwitch, "_lockdown_sized", False):   # a bit chunkier so the track doesn't look thin
+        _orig_switch_init = ctk.CTkSwitch.__init__
+
+        def _switch_init(self, *a, **kw):
+            kw.setdefault("switch_width", 42)
+            kw.setdefault("switch_height", 22)
+            _orig_switch_init(self, *a, **kw)
+        ctk.CTkSwitch.__init__ = _switch_init
+        ctk.CTkSwitch._lockdown_sized = True
     # every pop-up window gets the Lockdown logo (customtkinter would put its own icon there after 200 ms)
     ctk.CTkToplevel._windows_set_titlebar_icon = lambda self: self.iconbitmap(str(APP_ICON))
     ctk.set_default_color_theme("dark-blue")

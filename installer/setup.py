@@ -236,15 +236,16 @@ class SetupWindow(tk.Tk):
                                font=("Segoe UI", 9))
         self.log_box.pack(fill="both", expand=True, pady=12)
         self.run_app = tk.BooleanVar(value=True)
-        if not uninstalling:
-            ttk.Checkbutton(box, text="Run Lockdown when I close this window", variable=self.run_app).pack(
-                anchor="w", pady=(0, 8))
-        buttons = ttk.Frame(box)
-        buttons.pack(fill="x")
-        self.go = ttk.Button(buttons, text="Uninstall" if uninstalling else ("Update" if current else "Install"),
+        # shown only once the install / update finishes: a ✓ note + a "run now" tick, then the button becomes Finish
+        self.done_note = ttk.Label(box, text="", foreground="#1E7A46", font=("Segoe UI", 9, "bold"))
+        self.run_check = ttk.Checkbutton(box, text="Run Lockdown now", variable=self.run_app)
+        self.buttons = ttk.Frame(box)
+        self.buttons.pack(fill="x")
+        self.go = ttk.Button(self.buttons,
+                             text="Uninstall" if uninstalling else ("Update" if current else "Install"),
                              command=self._start)
         self.go.pack(side="right")
-        self.close = ttk.Button(buttons, text="Cancel", command=self._close)
+        self.close = ttk.Button(self.buttons, text="Cancel", command=self._close)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.done = False
         self.close.pack(side="right", padx=8)
@@ -272,12 +273,22 @@ class SetupWindow(tk.Tk):
                 else:
                     uninstall(self.log, self.delete_data.get())
                     self.done = True
+                self.after(0, lambda: self.close.configure(state="normal", text="Close"))
             else:
                 install(self.log)
                 self.done = True
+                self.after(0, self._finish_install)
         except Exception as e:   # show it rather than vanish
             self.log(f"Something went wrong: {e}")
-        self.after(0, lambda: self.close.configure(state="normal", text="Close"))
+            self.after(0, lambda: self.close.configure(state="normal", text="Close"))
+
+    def _finish_install(self):
+        """Install/update finished: show the ✓ note and the "run now" tick, and turn the button into Finish."""
+        self.go.pack_forget()
+        self.done_note.configure(text=f"✓  Lockdown {VERSION} is installed.")
+        self.done_note.pack(anchor="w", pady=(0, 2), before=self.buttons)
+        self.run_check.pack(anchor="w", pady=(0, 8), before=self.buttons)
+        self.close.configure(state="normal", text="Finish")
 
     def _close(self):
         if str(self.close.cget("state")) == "disabled":   # (busy: don't quit halfway)

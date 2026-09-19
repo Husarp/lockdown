@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.35.0 - 2026-09-19 19:20
+- **Installer finish flow**: the "run now" tick is hidden until it's done; when the update finishes you get a green
+  check, a "Run Lockdown now" tick (on by default) and a **Finish** button - like a normal installer.
+- **Anti-Bypass hours**: you can't remove the *only* time window any more (the x appears once there are two).
+- **Emergency unlock can't be turned against you**: it no longer lists permanently-blocked items (e.g. adult sites)
+  - it's for limits and scheduled hours, not for things you blocked for good.
+- **Anti-Bypass unlocked banner**: shows a live "Unlocked for 4:59" countdown with a draining bar, instead of a
+  fixed "until HH:MM".
+- **Switches** are a bit chunkier so the track no longer looks too thin.
+
 ## 0.34.0 - 2026-09-19 18:45
 - **New app icon and tray icon** (from the design): a shield with a padlock. The app icon (window, taskbar, notifications, installer) is a two-tone orange shield + white padlock; the tray icon shows the state in colour - **green** = blocking enforced, **yellow** = a mode is on, **red** = service down. Drawn with Pillow, so it scales cleanly from 16 px up.
 

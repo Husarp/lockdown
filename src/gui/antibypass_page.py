@@ -160,6 +160,8 @@ class AntiBypassPage(ctk.CTkFrame):
         self.summary.pack(anchor="w", pady=(3, 0))
         self.lock_btn = ctk.CTkButton(strip, text="Lock now", width=100, **theme.OUTLINE, command=self._lock)
         self.unlock_btn = ctk.CTkButton(strip, text="Unlock to edit", width=130, command=self._unlock)
+        self.unlock_bar = ctk.CTkProgressBar(self.banner, height=3, corner_radius=0, progress_color=theme.SUCCESS)
+        self._unlock_job = None
 
         challenges = Card(body, "Challenges")
         challenges.pack(fill="x", pady=(0, 12))
@@ -218,9 +220,15 @@ class AntiBypassPage(ctk.CTkFrame):
         self.refresh()
 
     def _add_row(self, days, start, end):
-        row = WindowRow(self.rows_box, days, start, end, on_remove=lambda r: (self.rows.remove(r), r.destroy()))
+        row = WindowRow(self.rows_box, days, start, end,
+                        on_remove=lambda r: (self.rows.remove(r), r.destroy(), self._update_removes()))
         row.pack(anchor="w", pady=2)
         self.rows.append(row)
+        self._update_removes()
+
+    def _update_removes(self):
+        for row in self.rows:   # the last remaining window keeps no × (removing it would make the hours pointless)
+            row.set_removable(len(self.rows) > 1)
 
     def on_show(self):
         self.refresh()
@@ -251,9 +259,10 @@ class AntiBypassPage(ctk.CTkFrame):
             self._banner(theme.DANGER, "Locked - outside the allowed hours",
                          describe(cfg) + (f"   ·   next chance {when(nxt, now)}" if nxt else ""))
         elif until:
-            self._banner(theme.SUCCESS, f"Unlocked until {until:%H:%M} - loosening changes are allowed",
-                         "Changes that loosen your blocks are allowed until the timer runs out.")
+            self._banner(theme.SUCCESS, "", "Changes that loosen your blocks are allowed until the timer runs out.")
             self.lock_btn.pack(side="right")
+            self._tick_unlock()   # live mm:ss countdown + a draining bar
+            return
         elif status == "phrase":
             self._banner(theme.DANGER, "Locked - you can look at everything, but loosening a block needs the challenge",
                          describe(cfg))
@@ -263,11 +272,31 @@ class AntiBypassPage(ctk.CTkFrame):
 
     def _banner(self, color, title: str, sub: str):
         """Tint the status banner for the current lock state (red = locked, green = unlocked, grey = off)."""
+        if self._unlock_job:
+            self.after_cancel(self._unlock_job)
+            self._unlock_job = None
+        self.unlock_bar.pack_forget()
         tint = (theme._mix(color[0], theme.BG[0], 0.88), theme._mix(color[1], theme.BG[1], 0.86))
         self.banner.configure(fg_color=tint, border_color=color)
         self.banner_icon.configure(image=theme.icon("shield-check", color, 20), text="")
         self.banner_title.configure(text=title, text_color=theme.TEXT)
         self.summary.configure(text=sub, text_color=MUTED)
+
+    def _tick_unlock(self):
+        """While unlocked: show the minutes:seconds left and a bar that drains, then re-lock when it runs out."""
+        if not self.winfo_exists():
+            return
+        now = now_from_db(self.db)
+        until = antibypass.unlocked_until(antibypass.settings(self.db), now)
+        if not until:
+            self.refresh()
+            return
+        left = (until - now).total_seconds()
+        m, s = divmod(max(0, int(left)), 60)
+        self.banner_title.configure(text=f"Unlocked for {m}:{s:02d} - loosening changes are allowed")
+        self.unlock_bar.pack(fill="x", side="bottom")
+        self.unlock_bar.set(max(0.0, min(1.0, left / (antibypass.UNLOCK_MIN * 60))))
+        self._unlock_job = self.after(1000, self._tick_unlock)
 
     def _read(self) -> dict:
         cfg = antibypass.settings(self.db)
