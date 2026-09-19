@@ -1272,6 +1272,13 @@ sleep / forced-break overlays still show.
 - [x] Fix: "Start service" did nothing while a stuck copy was running (now ends it first) (reported 2026-09-19)
 
 ### Phase 7 — Anti-Bypass
+Proposed 2026-09-19 (waiting for OK): 7a "unlock rules" in the app - anything that loosens a block (remove / edit
+down a rule, allow a protected-list site, switch a list off, change reset time / emergency settings, stop a locked
+mode, tray Exit, loosen Anti-Bypass itself) goes through the chosen challenge; tightening is always instant.
+Challenges (combinable): wait N min then a 5-min window to make changes, type a random phrase (no paste), math
+problems; optional "only during these hours" window. 7b hardening - the service owns the settings (GUI asks it
+over a local pipe, `C:\ProgramData\Lockdown` read-only for Users), watchdog task restarts service + tray, uninstall
+needs the challenge, time-zone / offline clock tricks. Real Windows Service moves to packaging (Phase 8).
 - [ ] Settings change window (specific hours only)
 - [ ] Delay unlock mechanism
 - [ ] Type-a-phrase challenge
