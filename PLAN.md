@@ -1371,21 +1371,25 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [x] B6 (0.49.0, agent-reviewed PASS). Settings (3j, ~827-871): TWO-column grouped layout - left: Appearance (theme + accents + daily goal in
   one card) then "When limits reset"; right (~400px): Emergency unlock (YELLOW accent bar + a small usage
   meter "2 of 3 left") and Backup & export. Currently single column stacked.
-- [ ] B7. Small windows (3l, ~937-1050): Browse apps window (sort: all / running / games; list styling), the
+- [x] B7 (0.50.0, agent-reviewed; badge border / count placement / disabled Continue fixed in 0.51.0). Small windows (3l, ~937-1050): Browse apps window (sort: all / running / games; list styling), the
   Suggestions dropdown, the grid challenge, and the alert popup (accent left edge + "Open Lockdown" /
   "Mute 1 h" buttons). Verify each against the plate.
 - [x] B8 (0.43.0, agent-reviewed: switches PASS; light secondary buttons fixed). Global controls (3m): SWITCHES to the design pill (34x18 track, radius 9, 14px knob with a
   1px edge, off-track #AEB6C0) - current ones look skinny; BUTTONS to the design size (padding 9px 18px ->
   taller, font 600 12.5px, radius 2) with the Primary / Secondary / Outline / Destructive / Disabled
   variants; card variants (accent top bar, grey inset). Do this FIRST - it changes every screen.
-- [ ] B9. Screen Time trend legend (3k): the legend swatches must be solid straight lines (no dashes/gaps).
-- [ ] B10. App / taskbar icon (3n): the 16px title-bar/taskbar icon is still blurry - ship a crisp small icon
-  (tile + padlock option, or the design's mark) - user to confirm which.
+- [x] B9 (0.50.1, agent-reviewed PASS). Screen Time trend legend (3k): the legend swatches must be solid straight lines (no dashes/gaps).
+- [x] B10 (0.51.0). App / taskbar icon (3n): the .ico lacked the 20/40 px sizes Windows uses at 125% scaling
+  (it scaled the nearest one = blur); added them, and ≤20 px draws the design's mark with a pixel-snapped
+  padlock block. User to eyeball the real title bar / taskbar after installing.
 - [ ] B11 (optional, user liked it): Calendar redesign to section 4 (4a/4b): one row per blocked item, Day /
   3 days / Week range switcher, full-height bars, labels outside bars, "Next change / Busiest stretch /
   Free window" summary cards.
-- [ ] B12 (last). Strict break must NEVER minimise Lockdown itself: while a strict break minimises other
-  windows, the Lockdown window stays usable so the user can't be soft-locked for the break's duration.
+- [x] B12 (0.51.0, verified). Strict break must NEVER minimise Lockdown itself: `win.minimize_all` /
+  `minimize_foreground` skip Lockdown's own pid (popups and overlays are in-process, so they're covered);
+  pinned by tests/test_strict_break.py.
+- [ ] Follow-up from the B9 review: the trend chart's first / last x-axis date labels are clipped at the plot
+  edges ("22" -> "?2"). Small chart fix in gui/charts.py TrendLine.
   (minimize_all / minimize_foreground already skip Lockdown's own pid - verify end to end incl. the popup.)
 Suggested order: B8 first (global), then B1, B2, B3, B4, B5, B6, B7, B9, B10, B11, B12.
 

@@ -26,15 +26,24 @@ class WordGrid(ctk.CTkFrame):
         self.done = False
         self._error = False
         self._phase = 0
-        self.prompt = ctk.CTkLabel(self, text="", font=ctk.CTkFont("Consolas", 18), anchor="w")
-        self.prompt.pack(anchor="w", pady=(0, 8))
+        # design 3l: "Word 1 of 12" + the word in a small condensed chip
+        self.head = ctk.CTkFrame(self, fg_color="transparent")   # (the owner may put its progress count at the right)
+        self.head.pack(anchor="w", fill="x", pady=(0, 10))
+        head = self.head
+        self.prompt = ctk.CTkLabel(head, text="", font=theme.semi(12), text_color=MUTED, anchor="w")
+        self.prompt.pack(side="left")
+        self.chip = ctk.CTkLabel(head, text="", font=theme.numeral(15), fg_color=theme.SURFACE2, corner_radius=2,
+                                 height=24)
+        self.chip.pack(side="left", padx=(11, 0), ipadx=10)
         board = ctk.CTkFrame(self, fg_color="transparent")
-        board.pack(anchor="w")
+        board.pack(anchor="w", fill="x")
+        for col in range(3):
+            board.grid_columnconfigure(col, weight=1, uniform="g")
         self.boxes: list[ctk.CTkEntry] = []
         for i in range(9):
-            box = ctk.CTkEntry(board, width=150, height=40, justify="center", font=ctk.CTkFont("Consolas", 15),
-                               border_width=2)
-            box.grid(row=i // 3, column=i % 3, padx=4, pady=4)
+            box = ctk.CTkEntry(board, width=140, height=42, font=ctk.CTkFont(theme.DISPLAY, 15), border_width=2,
+                               corner_radius=2)
+            box.grid(row=i // 3, column=i % 3, padx=4, pady=4, sticky="ew")
             box._entry.configure(takefocus=0)   # Tab never lands in a box: click the lit one
             block_paste(box)
             box._entry.bind("<KeyRelease>", lambda e, b=box: self._typed(b))
@@ -60,6 +69,7 @@ class WordGrid(ctk.CTkFrame):
         if self.index == len(self.words):
             self.done = True
             self.prompt.configure(text="All words typed.")
+            self.chip.pack_forget()
             for box in self.boxes:
                 box.configure(state="disabled", border_color=theme.BORDER)
             self.on_done()
@@ -74,8 +84,9 @@ class WordGrid(ctk.CTkFrame):
                           fg_color=theme.SURFACE2 if lit else theme.SURFACE)
         self._error = False
         self.master.focus_set()   # nothing focused: the lit box has to be clicked
-        self.prompt.configure(text=f"Word {self.index + 1} of {len(self.words)}:   {self.words[self.index]}")
-        self.status("Click the orange box and type the word.", False)
+        self.prompt.configure(text=f"Word {self.index + 1} of {len(self.words)}")
+        self.chip.configure(text=self.words[self.index])
+        self.status("Click the highlighted box and type the word.", False)
 
     def _typed(self, box):
         if box is not self.active:

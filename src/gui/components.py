@@ -67,7 +67,7 @@ def type_badge(parent, kind: str) -> ctk.CTkFrame:
     fg, bd = (getattr(theme, name) for name in _BADGE.get(kind, ("MUTED", "BORDER")))
     f = ctk.CTkFrame(parent, fg_color="transparent", border_width=1, border_color=bd, corner_radius=2)
     ctk.CTkLabel(f, text=kind.upper(), font=ctk.CTkFont(theme.BODY_SEMI, 9), text_color=fg, height=13).pack(
-        padx=4, pady=0)
+        padx=4, pady=1)   # (pady 0 let the label cover the frame's top / bottom border lines)
     return f
 
 

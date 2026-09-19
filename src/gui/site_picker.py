@@ -7,7 +7,7 @@ import customtkinter as ctk
 
 import search
 from gui import app_browser, icons, theme
-from gui.components import Rows, type_badge
+from gui.components import Rows, hairline, type_badge
 from importer.popular import POPULAR_SITES
 from monitor import win
 
@@ -42,30 +42,45 @@ class SuggestionList:
         self.win.transient(entry.winfo_toplevel())   # (goes away with Lockdown's window, never over other apps)
         self.frame = ctk.CTkFrame(self.win, corner_radius=0, fg_color=theme.SURFACE)
         self.frame.pack(fill="both", expand=True, padx=1, pady=1)
-        self.rows = Rows(self.frame, self._make_row, "", {"fill": "x", "padx": 4, "pady": 1})
-        self.clear = ctk.CTkButton(self.frame, text="Clear my suggestions", height=24, fg_color="transparent",
-                                   text_color=MUTED, hover_color=theme.SURFACE2, command=on_clear_history)
+        # design 3l: an eyebrow with what was typed, hairlines between rows, a hint at the foot
+        self.head = ctk.CTkLabel(self.frame, text="SUGGESTIONS", font=theme.eyebrow(), text_color=MUTED, anchor="w",
+                                 height=16)
+        self.head.pack(fill="x", padx=12, pady=(8, 6))
+        hairline(self.frame).pack(fill="x")
+        self.rows = Rows(self.frame, self._make_row, "", {"fill": "x"})
+        self.foot = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self.foot.pack(fill="x")
+        ctk.CTkLabel(self.foot, text="Steam games sit under Steam", text_color=MUTED, font=theme.body(11),
+                     height=16).pack(side="left", padx=12, pady=(6, 8))
+        self.clear = ctk.CTkButton(self.foot, text="Clear my suggestions", height=22, width=130, fg_color="transparent",
+                                   text_color=MUTED, hover_color=theme.SURFACE2, font=theme.body(11),
+                                   command=on_clear_history)
         self.shown = False
 
     def _make_row(self, parent):
-        row = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=4, height=32)
-        row.icon = ctk.CTkLabel(row, text="", width=20)
-        row.icon.pack(side="left", padx=(8, 7))
-        row.name = ctk.CTkLabel(row, text="", anchor="w", font=theme.body(13))
+        row = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
+        line = ctk.CTkFrame(row, fg_color="transparent", corner_radius=0, height=34)
+        line.pack(fill="x")
+        row.line = line
+        row.icon = ctk.CTkLabel(line, text="", width=20)
+        row.icon.pack(side="left", padx=(12, 8))
+        row.name = ctk.CTkLabel(line, text="", anchor="w", font=theme.semi(13))
         row.name.pack(side="left")
-        row.sub = ctk.CTkLabel(row, text="", anchor="w", text_color=MUTED, font=theme.body(11))
+        row.sub = ctk.CTkLabel(line, text="", anchor="w", text_color=MUTED, font=theme.body(11))
         row.sub.pack(side="left", padx=(7, 0))
-        row.badge = ctk.CTkFrame(row, fg_color="transparent")
-        row.badge.pack(side="right", padx=8)
-        for w in (row, row.icon, row.name, row.sub):
-            w.bind("<Enter>", lambda e, r=row: r.configure(fg_color=theme.SURFACE2))
-            w.bind("<Leave>", lambda e, r=row: r.configure(fg_color="transparent"))
+        row.badge = ctk.CTkFrame(line, fg_color="transparent")
+        row.badge.pack(side="right", padx=12)
+        hairline(row).pack(fill="x")
+        for w in (line, row.icon, row.name, row.sub):
+            w.bind("<Enter>", lambda e, r=row: r.line.configure(fg_color=theme.SURFACE2))
+            w.bind("<Leave>", lambda e, r=row: r.line.configure(fg_color="transparent"))
         return row
 
-    def show(self, matches: list[dict]):
+    def show(self, matches: list[dict], typed: str = ""):
         if not matches:
             self.hide()
             return
+        self.head.configure(text=f"SUGGESTIONS · “{typed}”" if typed else "SUGGESTIONS")
         for row, m in zip(self.rows.take(len(matches)), matches):
             if m["kind"] == "app":
                 app = m["app"]
@@ -81,11 +96,11 @@ class SuggestionList:
             for w in row.badge.winfo_children():
                 w.destroy()
             type_badge(row.badge, kind).pack()
-            for w in (row, row.icon, row.name, row.sub, row.badge):
+            for w in (row.line, row.icon, row.name, row.sub, row.badge):
                 w.bind("<Button-1>", lambda e, m=m: self.on_pick(m))
         self.clear.pack_forget()
         if any(m.get("mine") for m in matches):
-            self.clear.pack(anchor="e", padx=6, pady=(2, 4))
+            self.clear.pack(side="right", padx=6, pady=(4, 6))
         self.win.configure(bg=theme.pick(theme.BORDER))   # (the 1-px frame around it)
         self.win.update_idletasks()
         e = self.entry
@@ -152,7 +167,7 @@ class SiteEntry(ctk.CTkEntry):
     def show(self, matches):
         if self.dropdown is None:
             self.dropdown = SuggestionList(self, self._pick, self._clear_history)
-        self.dropdown.show(matches)
+        self.dropdown.show(matches, self.get().strip())
 
     def hide(self):
         if self.dropdown:

@@ -198,10 +198,11 @@ class NotificationsPage(ctk.CTkFrame):
 
 
 class Popup(ctk.CTkToplevel):
-    """Small message that slides up and fades in at the bottom-right; an accent edge, the Lockdown mark and a
-    close ✕. Click it or wait (it stays while the mouse is over it) to dismiss."""
+    """Small message that slides up and fades in at the bottom-right; an accent edge, the Lockdown mark, a close ✕
+    and (design 3l) "Open Lockdown" / "Mute 1 h" buttons. Click the text or wait (it stays while the mouse is over
+    it) to dismiss. `on_open()` brings Lockdown up, `on_mute()` holds popups for an hour."""
 
-    def __init__(self, root, message: str):
+    def __init__(self, root, message: str, on_open=None, on_mute=None):
         super().__init__(root)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -209,7 +210,7 @@ class Popup(ctk.CTkToplevel):
             self.attributes("-alpha", 0.0)
         except Exception:
             pass
-        self.w, self.h = 372, 96
+        self.w, self.h = 400, 136 if (on_open or on_mute) else 96
         self.x = self.winfo_screenwidth() - self.w - 16
         self.target_y = self.winfo_screenheight() - self.h - 64
         self.geometry(f"{self.w}x{self.h}+{self.x}+{self.target_y + 14}")
@@ -224,11 +225,20 @@ class Popup(ctk.CTkToplevel):
         ctk.CTkLabel(head, text=" Lockdown", font=theme.semi(12)).pack(side="left")
         ctk.CTkLabel(head, text="✕", text_color=MUTED, font=theme.body(11), cursor="hand2").pack(side="right")
         ctk.CTkLabel(head, text="now", text_color=MUTED, font=theme.body(10)).pack(side="right", padx=(0, 8))
-        ctk.CTkLabel(inner, text=message, wraplength=322, justify="left", font=theme.body(12), anchor="w").pack(
+        ctk.CTkLabel(inner, text=message, wraplength=350, justify="left", font=theme.body(12), anchor="w").pack(
             anchor="w", pady=(6, 0))
         self.hovered = False
         for widget in (self, frame, inner, head, *head.winfo_children(), *inner.winfo_children()):
             widget.bind("<Button-1>", lambda e: self.close())
+        if on_open or on_mute:
+            buttons = ctk.CTkFrame(inner, fg_color="transparent")
+            buttons.pack(anchor="w", pady=(10, 0))
+            if on_open:
+                ctk.CTkButton(buttons, text="Open Lockdown", width=110, height=28, **theme.OUTLINE,
+                              command=lambda: (self.close(), on_open())).pack(side="left", padx=(0, 8))
+            if on_mute:
+                ctk.CTkButton(buttons, text="Mute 1 h", width=80, height=28, **{**theme.OUTLINE, "text_color": MUTED},
+                              command=lambda: (self.close(), on_mute())).pack(side="left")
         self.bind("<Enter>", lambda e: setattr(self, "hovered", True))
         self.bind("<Leave>", lambda e: (setattr(self, "hovered", False), self.after(POPUP_MS, self._maybe_close)))
         self._animate(0)

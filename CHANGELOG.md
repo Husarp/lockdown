@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.51.0 - 2026-09-20 01:40
+- **App icon (design 3n)**: crisp title-bar / taskbar icon. The .ico now carries 20 px and 40 px images (what
+  Windows shows at 125% scaling - it used to scale the nearest size, which blurred it), and the 16-20 px
+  versions draw the padlock as a pixel-snapped block with a 1 px shackle. The tray icon uses the same tiny mark.
+- Strict break: a test pins that it never minimises Lockdown's own windows (it already skipped them).
+- Challenge window: the "0 / 71" count sits at the right of the "Word 1 of 12" row; a disabled Continue is a
+  faded accent with pale text. SITE / APP badges draw their full border.
+
+## 0.50.1 - 2026-09-20 01:36
+- Screen Time trend legend (design 3k): the swatches are solid short lines - the 3px CTk frames drew them broken.
+
+## 0.50.0 - 2026-09-20 01:36
+- **Small windows (design 3l)**:
+  - Browse apps: an All / Running / Games filter, the list on its own bordered surface (icon · name · exe ·
+    RUNNING), a Cancel button.
+  - Suggestions dropdown: "SUGGESTIONS · “what you typed”" eyebrow, hairlines between rows, a footer hint.
+  - Anti-Bypass challenge: the word in a chip ("Word 1 of 12"), left-aligned grid boxes; the phrase challenge
+    gets a bordered phrase box, an accent-bordered entry and a thin progress bar; the "closed" variant says
+    "Closed right now" with a red-tinted note.
+  - Alert popup: **Open Lockdown** and **Mute 1 h** buttons (mute holds every popup for an hour).
+
 ## 0.49.0 - 2026-09-20 01:35
 - **Settings (design 3j)**: two columns. Left: Appearance (theme, accent, daily goal) and "When limits reset" in
   one card, then Categories. Right: Emergency unlock with a yellow bar and a usage meter ("2 of 3 left this

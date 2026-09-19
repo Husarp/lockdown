@@ -1,6 +1,7 @@
 """Popup for picking an app to block: Start Menu apps, Steam games + apps with an open window, with icons and search.
 Rows are made once and reused (rebuilding hundreds of buttons on every key made searching slow); the search waits
-until you pause typing and shows the first MAX_SHOWN matches."""
+until you pause typing and shows the first MAX_SHOWN matches. Design 3l: search + "Other .exe", a count line with an
+All / Running / Games filter, the list on its own bordered surface (icon · name · exe · RUNNING), Cancel at the foot."""
 import threading
 from tkinter import filedialog
 
@@ -8,12 +9,12 @@ import customtkinter as ctk
 
 import search
 from gui import icons, theme
-from gui.components import Rows
-from monitor import win
+from gui.components import Rows, Segmented, hairline
 
 MUTED = theme.MUTED
 MAX_SHOWN = 60
 SEARCH_DELAY_MS = 150
+FILTERS = {"All": lambda a: True, "Running": lambda a: a["running"], "Games": lambda a: bool(a.get("steam"))}
 _cache: list[dict] | None = None   # the app list takes a few seconds; keep it for the session
 _loading = threading.Lock()
 
@@ -51,32 +52,57 @@ class AppBrowser(ctk.CTkToplevel):
         super().__init__(master)
         self.on_pick = on_pick
         self.title("Browse apps")
-        self.geometry("560x560")
+        self.geometry("560x600")
+        self.configure(fg_color=theme.BG)
         self.transient(master.winfo_toplevel())
         self.after(50, self.grab_set)
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=12, pady=(12, 6))
+        top.pack(fill="x", padx=13, pady=(13, 10))
         self.search = ctk.CTkEntry(top, placeholder_text="Search apps and Steam games...")
         self.search.pack(side="left", fill="x", expand=True)
         self.search.bind("<KeyRelease>", lambda e: self._search_soon())
         ctk.CTkButton(top, text="Other .exe...", width=110, **theme.OUTLINE, command=self._browse_file).pack(
-            side="left", padx=(8, 0))
-        self.status = ctk.CTkLabel(self, text="Loading apps...", text_color=MUTED, height=18)
-        self.status.pack(anchor="w", padx=14)
-        self.body = ctk.CTkScrollableFrame(self)
-        self.body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-        self.rows = Rows(self.body, self._make_row, "No apps found.", {"fill": "x", "pady": 1})
+            side="left", padx=(9, 0))
+        line = ctk.CTkFrame(self, fg_color="transparent")
+        line.pack(fill="x", padx=13, pady=(0, 10))
+        self.status = ctk.CTkLabel(line, text="Loading apps...", text_color=MUTED, font=theme.body(12), height=18)
+        self.status.pack(side="left")
+        self.filter = Segmented(line, values=list(FILTERS), command=lambda v: self._render(), height=26)
+        self.filter.pack(side="right")
+        self.filter.set("All")
+        surface = ctk.CTkFrame(self, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=3)
+        surface.pack(fill="both", expand=True, padx=13)
+        self.body = ctk.CTkScrollableFrame(surface, fg_color="transparent")
+        self.body.pack(fill="both", expand=True, padx=1, pady=1)
+        self.rows = Rows(self.body, self._make_row, "No apps found.", {"fill": "x"})
+        foot = ctk.CTkFrame(self, fg_color="transparent")
+        foot.pack(fill="x", padx=13, pady=(10, 13))
+        ctk.CTkButton(foot, text="Cancel", width=90, **theme.OUTLINE, command=self._cancel).pack(side="right")
+        ctk.CTkLabel(foot, text="Click an app to pick it", text_color=MUTED, font=theme.body(11)).pack(side="left")
         self.apps: list[dict] | None = None
         self._pending = None
         preload()
         self._wait_for_list()
 
     def _make_row(self, parent):
-        row = ctk.CTkButton(parent, text="", anchor="w", height=32, fg_color="transparent",
-                            hover_color=theme.SURFACE2, text_color=theme.TEXT)
-        row.running = ctk.CTkLabel(row, text="● running", text_color=theme.SUCCESS, font=theme.body(11),
-                                   fg_color="transparent", height=16)
-        row.running.bind("<Button-1>", lambda e, r=row: r.invoke())
+        """icon · name · exe (muted) · RUNNING at the right; a hairline under each row; hover tint."""
+        row = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
+        line = ctk.CTkFrame(row, fg_color="transparent", corner_radius=0, cursor="hand2")
+        line.pack(fill="x", padx=4, pady=(0, 0))
+        row.line = line
+        row.icon = ctk.CTkLabel(line, text="", width=18, height=30)
+        row.icon.pack(side="left", padx=(8, 10))
+        row.name = ctk.CTkLabel(line, text="", font=theme.semi(13), anchor="w")
+        row.name.pack(side="left")
+        row.exe = ctk.CTkLabel(line, text="", text_color=MUTED, font=theme.body(12), anchor="w")
+        row.exe.pack(side="left", padx=(8, 0))
+        row.running = ctk.CTkLabel(line, text="RUNNING", text_color=theme.SUCCESS, font=theme.semi(10), width=60,
+                                   anchor="e")
+        row.running.pack(side="right", padx=(0, 10))
+        hairline(row).pack(fill="x")
+        for w in (line, row.icon, row.name, row.exe, row.running):
+            w.bind("<Enter>", lambda e, r=row: r.line.configure(fg_color=theme.SURFACE2))
+            w.bind("<Leave>", lambda e, r=row: r.line.configure(fg_color="transparent"))
         return row
 
     def _wait_for_list(self):
@@ -98,26 +124,31 @@ class AppBrowser(ctk.CTkToplevel):
         self._pending = None
         if self.apps is None:
             return
-        found = matches(self.apps, self.search.get().strip())
+        keep = FILTERS[self.filter.value or "All"]
+        found = [a for a in matches(self.apps, self.search.get().strip()) if keep(a)]
         shown = found[:MAX_SHOWN]
         for row, a in zip(self.rows.take(len(shown)), shown):
-            label = f"  {a['name']}   ·   {a['exe']}" + ("   · Steam" if a.get("steam") else "")
-            row.configure(text=label, image=icons.get_app(a["exe"], a["path"], 20), command=lambda a=a: self._pick(a))
-            if a["running"]:   # small green tag at the right end
-                row.running.place(relx=1.0, rely=0.5, x=-12, anchor="e")
-            else:
-                row.running.place_forget()
+            row.icon.configure(image=icons.get_app(a["exe"], a["path"], 18))
+            row.name.configure(text=a["name"])
+            row.exe.configure(text=a["exe"] + (" · Steam" if a.get("steam") else ""))
+            row.running.configure(text="RUNNING" if a["running"] else "")
+            for w in (row.line, row.icon, row.name, row.exe, row.running):
+                w.bind("<Button-1>", lambda e, a=a: self._pick(a))
         more = len(found) - len(shown)
         count = f"{len(found)} app{'s' * (len(found) != 1)}"
-        self.status.configure(text=count + (f" - showing the first {len(shown)}, type to narrow down"
-                                                            if more else ""))
+        self.status.configure(text=count + (f" · first {len(shown)} shown - type to narrow down" if more else ""))
         self.body._parent_canvas.yview_moveto(0)   # back to the top (a shorter list keeps no stale scroll position)
 
     def _browse_file(self):
+        from monitor import win
         path = filedialog.askopenfilename(parent=self, title="Choose an app", filetypes=[("Programs", "*.exe")])
         if path:
             path = path.replace("/", "\\")
             self._pick({"name": path.rsplit("\\", 1)[-1][:-4], "exe": win.exe_name(path), "path": path})
+
+    def _cancel(self):
+        self.grab_release()
+        self.destroy()
 
     def _pick(self, app: dict):
         self.grab_release()

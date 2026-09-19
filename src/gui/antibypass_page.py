@@ -1,4 +1,5 @@
 """Anti-Bypass page (the challenges, what they protect) and the challenge window shown before a loosening change."""
+import tkinter as tk
 from datetime import datetime
 
 import customtkinter as ctk
@@ -57,7 +58,8 @@ class ChallengeWindow(ctk.CTkToplevel):
         cfg = antibypass.settings(self.db)
         box = ctk.CTkFrame(self, fg_color="transparent")
         box.pack(fill="both", expand=True, padx=24, pady=20)
-        ctk.CTkLabel(box, text="This loosens your blocks", font=theme.card_title()).pack(anchor="w")
+        title = ctk.CTkLabel(box, text="This loosens your blocks", font=theme.card_title())
+        title.pack(anchor="w")
         shown = changes[:5] + ([f"and {len(changes) - 5} more"] if len(changes) > 5 else [])
         items = ctk.CTkFrame(box, fg_color="transparent")
         items.pack(anchor="w", fill="x", pady=(5, 12))
@@ -70,35 +72,66 @@ class ChallengeWindow(ctk.CTkToplevel):
         buttons = ctk.CTkFrame(box, fg_color="transparent")
         self.phrase = None
         if antibypass.status(cfg, now) == "closed":
+            # design 3l: "Closed right now" + a red-tinted note with the hours and the next chance
+            title.configure(text="  Closed right now", image=theme.icon("shield-check", theme.DANGER, 19),
+                            compound="left")
             nxt = antibypass.next_hours(cfg, now)
-            ctk.CTkLabel(box, text=f"Changes like this are only possible {hours_text(cfg)}."
-                                   + (f"\nNext chance: {when(nxt, now)}." if nxt else ""),
-                         justify="left", wraplength=520).pack(anchor="w")
+            c = theme.DANGER
+            note = ctk.CTkFrame(box, corner_radius=3, border_width=1, border_color=c,
+                                fg_color=(theme._mix(c[0], theme.BG[0], 0.9), theme._mix(c[1], theme.BG[1], 0.9)))
+            note.pack(fill="x")
+            tk.Frame(note, width=3, bg=theme.pick(c), bd=0, highlightthickness=0).pack(side="left", fill="y",
+                                                                                     padx=(1, 0), pady=1)
+            ctk.CTkLabel(note, text=f"Changes like this are only possible {hours_text(cfg)}."
+                                    + (f"\nNext chance: {when(nxt, now)}." if nxt else ""),
+                         justify="left", wraplength=470, font=theme.body(12)).pack(anchor="w", padx=12, pady=10)
             buttons.pack(fill="x", pady=(16, 0))
             ctk.CTkButton(buttons, text="OK", width=90, command=self._cancel).pack(side="right")
         else:
+            self.title("Anti-Bypass · challenge")
             self.phrase = antibypass.phrase_for(cfg)
             self.grid = None
+            self.bar = None
             if cfg["grid"]:
-                ctk.CTkLabel(box, text=f"Type each word into the orange box (click it first; no pasting). It unlocks "
-                                       f"changes like this for {antibypass.UNLOCK_MIN} minutes.", justify="left",
-                             wraplength=520).pack(anchor="w", pady=(0, 8))
+                ctk.CTkLabel(box, text=f"Type each word into the highlighted box (click it first, no pasting). "
+                                       f"Passing unlocks changes like these for {antibypass.UNLOCK_MIN} minutes.",
+                             justify="left", wraplength=520, text_color=MUTED, font=theme.body(12)).pack(
+                    anchor="w", pady=(0, 10))
                 self.grid = WordGrid(box, self.phrase.split(), self._pass, self._grid_status)   # all typed: go on
-                self.grid.pack(anchor="w")
+                self.grid.pack(anchor="w", fill="x")
             else:
-                ctk.CTkLabel(box, text=f"Type this phrase to continue (no pasting). It unlocks changes like this for "
-                                       f"{antibypass.UNLOCK_MIN} minutes.", justify="left", wraplength=520).pack(anchor="w")
-                ctk.CTkLabel(box, text=self.phrase, font=ctk.CTkFont("Consolas", 16), wraplength=520, justify="left",
-                             fg_color=theme.SURFACE, corner_radius=6).pack(anchor="w", fill="x", pady=8, ipadx=10,
-                                                                          ipady=8)
-                self.entry = ctk.CTkEntry(box, font=ctk.CTkFont("Consolas", 14))
+                ctk.CTkLabel(box, text=f"Type this phrase to continue (no pasting). Passing unlocks changes like "
+                                       f"these for {antibypass.UNLOCK_MIN} minutes.", justify="left", wraplength=520,
+                             text_color=MUTED, font=theme.body(12)).pack(anchor="w")
+                shown_phrase = ctk.CTkFrame(box, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER,
+                                            corner_radius=3)
+                shown_phrase.pack(anchor="w", fill="x", pady=10)
+                ctk.CTkLabel(shown_phrase, text=self.phrase, font=ctk.CTkFont(theme.DISPLAY, 15), wraplength=490,
+                             justify="left", anchor="w").pack(anchor="w", padx=12, pady=8)
+                self.entry = ctk.CTkEntry(box, font=ctk.CTkFont(theme.DISPLAY, 15), height=36, corner_radius=2,
+                                          border_color=theme.ACCENT)
                 self.entry.pack(fill="x")
                 block_paste(self.entry)   # the phrase must be typed
                 self.entry._entry.bind("<KeyRelease>", lambda e: self._typed())
-            self.progress = ctk.CTkLabel(box, text=f"0 / {len(self.phrase)}", text_color=MUTED, height=18, anchor="w")
-            self.progress.pack(anchor="w", fill="x", pady=(4, 0))
+            if self.grid:   # the count sits at the right of the "Word 1 of 12" row (3l)
+                self.progress = ctk.CTkLabel(self.grid.head, text=f"0 / {len(self.phrase)}", text_color=MUTED,
+                                             height=18, anchor="e", font=theme.body(12))
+                self.progress.pack(side="right")
+            else:           # a thin progress bar with the count at its right (3l)
+                foot = ctk.CTkFrame(box, fg_color="transparent")
+                foot.pack(fill="x", pady=(10, 0))
+                self.bar = ctk.CTkProgressBar(foot, height=4, corner_radius=1, fg_color=theme.SURFACE2,
+                                              progress_color=theme.ACCENT)
+                self.bar.set(0)
+                self.bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
+                self.progress = ctk.CTkLabel(foot, text=f"0 / {len(self.phrase)}", text_color=MUTED, height=18,
+                                             anchor="e", font=theme.body(12))
+                self.progress.pack(side="left")
             buttons.pack(fill="x", pady=(12, 0))
-            self.go = ctk.CTkButton(buttons, text="Continue", width=110, state="disabled", command=self._pass)
+            # disabled Continue: a faded accent with pale text (3l), not a full-strength orange that looks clickable
+            self.go = ctk.CTkButton(buttons, text="Continue", width=110, command=self._pass,
+                                    text_color_disabled="#F3D9CF")
+            self._enable_go(False)
             self.go.pack(side="right")
             ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self._cancel).pack(
                 side="right", padx=8)
@@ -114,9 +147,15 @@ class ChallengeWindow(ctk.CTkToplevel):
         except Exception:   # window not viewable yet
             self.after(50, self._modal)
 
+    def _enable_go(self, enabled: bool):
+        faded = (theme._mix(theme.ACCENT[0], theme.BG[0], 0.6), theme._mix(theme.ACCENT[1], theme.BG[1], 0.6))
+        self.go.configure(state="normal" if enabled else "disabled", fg_color=theme.ACCENT if enabled else faded)
+
     def _grid_status(self, text: str, error: bool):
         if hasattr(self, "progress"):
             self.progress.configure(text=text, text_color=theme.DANGER if error else MUTED)
+            if self.grid and self.grid.done:
+                self._enable_go(True)
 
     def _typed(self):
         typed = self.entry.get()
@@ -125,7 +164,8 @@ class ChallengeWindow(ctk.CTkToplevel):
             self.progress.configure(text=f"Mistake at character {correct + 1} - fix it to go on", text_color=theme.DANGER)
         else:
             self.progress.configure(text=f"{correct} / {len(self.phrase)}", text_color=MUTED)
-        self.go.configure(state="normal" if typed == self.phrase else "disabled")
+        self.bar.set(correct / max(1, len(self.phrase)))
+        self._enable_go(typed == self.phrase)
 
     def _pass(self):
         if not (self.grid.done if self.grid else self.entry.get() == self.phrase):

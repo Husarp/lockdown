@@ -2,6 +2,7 @@
 at a time.
 Each tab is built once and then only updated (rebuilding Tk widgets is what makes switching slow).
 Clicking an app's or site's category opens a small menu (pick / new category / edit colours)."""
+import tkinter as tk
 from collections import Counter
 from datetime import date, datetime, timedelta
 
@@ -119,7 +120,9 @@ class OverviewView(ctk.CTkScrollableFrame):
         legend = ctk.CTkFrame(self.trend_card.body, fg_color="transparent")
         legend.pack(anchor="w", pady=(4, 0))
         for text, color in (("each day", theme.ACCENT), ("7-day average", theme.MUTED), ("your goal", theme.NEUTRAL)):
-            ctk.CTkFrame(legend, width=12, height=3, corner_radius=0, fg_color=color).pack(side="left", padx=(10, 5))
+            # a plain Tk frame: a 3px CTkFrame draws a broken / striped line (design 3k wants solid swatches)
+            tk.Frame(legend, width=12, height=3, bg=theme.pick(color), bd=0, highlightthickness=0).pack(
+                side="left", padx=(10, 5))
             ctk.CTkLabel(legend, text=text, text_color=theme.MUTED, font=theme.body(11), height=14).pack(side="left")
         left, right = _columns(self)
         self.timeline_card = Card(left, "Day timeline")

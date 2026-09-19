@@ -41,13 +41,15 @@ def _left_half():
 
 
 def mark(size: int, shield: str, shield_dark: str | None, lock: str, keyhole: str,
-         bold: bool = False) -> Image.Image:
+         bold: bool = False, tiny: bool = False) -> Image.Image:
     """The mark at `size` px. shield_dark None = a flat single-tone shield (used for the tray). bold = a simplified
-    version for tiny sizes (e.g. the 16px title-bar icon): the shield fills the canvas and the keyhole is dropped,
-    so it stays crisp instead of turning to mud."""
+    version for small sizes (24-32px): the shield fills the canvas and the keyhole is dropped. tiny = the 16-20px
+    title-bar / tray version (design 3n: "at 16px the padlock becomes a solid block"): the padlock body is a
+    pixel-snapped block with a 1px shackle, so it stays crisp instead of turning to mud."""
     s = size * SS
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    bold = bold or tiny
     if bold:   # map the shield's bounding box to (almost) fill the canvas
         bx0, by0, bx1, by1 = 10, 4, 54, 60
         m = s * 0.04
@@ -62,6 +64,14 @@ def mark(size: int, shield: str, shield_dark: str | None, lock: str, keyhole: st
     d.polygon([P(x, y) for x, y in _shield()], fill=shield)
     if shield_dark:
         d.polygon([P(x, y) for x, y in _left_half()], fill=shield_dark)
+    if tiny:
+        # body and shackle on whole output pixels (no anti-aliased edges inside the shield)
+        bx0, by0 = (round(v / SS) for v in P(22, 30))
+        bx1, by1 = (round(v / SS) for v in P(42, 45))
+        d.rectangle([bx0 * SS, by0 * SS, bx1 * SS - 1, by1 * SS - 1], fill=lock)
+        sx0, sx1, sy0 = bx0 + 1, bx1 - 1, max(1, by0 - 3)
+        d.rectangle([sx0 * SS, sy0 * SS, sx1 * SS - 1, by0 * SS - 1], outline=lock, width=SS)
+        return img.resize((size, size), Image.LANCZOS)
     d.rounded_rectangle([P(22, 30), P(42, 45)], radius=2.5 * k, fill=lock)   # padlock body
     w = max(1, round(3.6 * k))
     d.arc([*P(26.5, 20), *P(37.5, 31)], 180, 360, fill=lock, width=w)        # shackle
@@ -72,12 +82,12 @@ def mark(size: int, shield: str, shield_dark: str | None, lock: str, keyhole: st
     return img.resize((size, size), Image.LANCZOS)
 
 
-def app_icon(size: int, bold: bool = False) -> Image.Image:
-    """The full-colour app icon: orange two-tone shield, white padlock (bold = simplified for tiny sizes)."""
-    return mark(size, ACCENT, None if bold else ACCENT_DARK, "#FFFFFF", ACCENT_DARK, bold=bold)
+def app_icon(size: int, bold: bool = False, tiny: bool = False) -> Image.Image:
+    """The full-colour app icon: orange two-tone shield, white padlock (bold / tiny = simplified for small sizes)."""
+    return mark(size, ACCENT, None if (bold or tiny) else ACCENT_DARK, "#FFFFFF", ACCENT_DARK, bold=bold, tiny=tiny)
 
 
 def tray_icon(state: str, size: int = 64) -> Image.Image:
     """Tray mark: a flat shield in the state colour with a dark padlock. state: green / yellow / red."""
     color = {"green": GREEN, "yellow": YELLOW, "red": RED}[state]
-    return mark(size, color, None, INK, color)
+    return mark(size, color, None, INK, color, tiny=size <= 20)

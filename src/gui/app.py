@@ -59,6 +59,7 @@ GC_MS = 2000
 GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
 TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
+MUTE_S = 3600           # the popup's "Mute 1 h"
 APP_ID = "Lockdown.App"   # Windows app identity (matches main.py); used to clear only our own notifications
 PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
@@ -95,6 +96,7 @@ class LockdownApp(ctk.CTk):
         self.last_alert: dict[int, float] = {}               # item id -> when last notified
         self._grace: dict[str, tuple] = {}                   # domain -> (revert-to state, expiry) for grace-undo
         self.popup: Popup | None = None
+        self.muted_until = 0.0                               # popup "Mute 1 h": no alerts until this time.time()
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -539,6 +541,8 @@ class LockdownApp(ctk.CTk):
     def _show(self, message: str, force: bool = False):
         """Notification in the chosen format. Muted while a mode with "mute" is on (unless force)."""
         if not force:
+            if time.time() < self.muted_until:
+                return
             state = modes.active(self.db, now_from_db(self.db))
             if state and state["mode"].get("mute"):
                 return
@@ -549,7 +553,10 @@ class LockdownApp(ctk.CTk):
         if fmt in ("inapp", "both"):
             if self.popup:
                 self.popup.close()
-            self.popup = Popup(self, message)
+            self.popup = Popup(self, message, on_open=lambda: self.events.put("open"), on_mute=self._mute)
+
+    def _mute(self):
+        self.muted_until = time.time() + MUTE_S
 
     def _clear_toast_history(self):
         """Remove Lockdown's own notifications from the Windows Action Center (the bell), a few seconds after they
