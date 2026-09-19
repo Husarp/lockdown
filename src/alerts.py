@@ -27,7 +27,9 @@ FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "
 COOLDOWN_OPTIONS = [1, 5, 15, 30, 60]
 WARN_MINUTE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 60]
 REPEAT_OPTIONS = [0, 1, 2, 5, 10]   # 0 = don't repeat
-DEFAULTS = {"notify.cooldown_min": "5", "notify.format": "toast",
+# notify.format defaults to Lockdown's own popup (nicer than the Windows toast and it doesn't pile up in the
+# Action Center); the Notifications page still offers Windows notification / Both.
+DEFAULTS = {"notify.cooldown_min": "5", "notify.format": "inapp",
             "notify.warn.enabled": "1", "notify.warn.minutes": "5", "notify.warn.repeat_min": "0",
             "notify.started.enabled": "1"}
 for _r in REASONS:

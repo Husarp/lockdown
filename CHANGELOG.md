@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.42.3 - 2026-09-19 22:20
+- **Notifications default to Lockdown's own popup** (the nice in-app one that slides up bottom-right) instead of
+  the Windows notification - so "YouTube is blocked" shows as a Lockdown popup by default. You can still choose
+  Windows notification or Both on the Notifications page.
+
 ## 0.42.2 - 2026-09-19 21:40
 - **Site protection tidy-up**: the URL feature is now **"Connect a blocking list"** (it subscribes to an online
   list), set off from your own lists; **"Your blocking lists"** sits below the community lists with a divider.
