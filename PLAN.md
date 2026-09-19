@@ -1420,14 +1420,17 @@ Parked (revisit later):
 ### Round 5 requests (2026-09-19, evening)
 - [ ] Verify the round-4 design changes look right with a second agent BEFORE the next feature work
   (in progress).
-- [ ] Add a piracy / "unofficial streaming & reading" protection list (find a reputable public GitHub
-  source). Should cover pirated manga, manhwa, anime and similar streaming/reading sites - the big
-  long-tail the adult list misses.
-- [ ] "No site in two lists" -> DECIDED: rely on "Allowed anyway" (it already overrides ALL lists), and
-  surface a one-click Remove/Allow wherever a blocked site is shown (Check-a-site, list previews), so you
-  never hunt per-list. No fragile cross-list de-duplication.
-- [ ] Protection lists: see what's blocked - preview a list's sites, and add / remove entries yourself
-  (removing needs the Anti-Bypass unlock, since it loosens).
+- [ ] Add a **manga / manhwa / anime** sites protection list (built-in community list from a reputable public
+  GitHub source; I pick it). The big long-tail the adult list misses. (User: call it manga/manhwa/anime, not
+  "piracy".) No installer build until the lists are in.
+- [x] Personal blocking lists: create named lists, add sites by name+address, toggle, add/remove, delete;
+  enforced via the DNS filter (entries live in settings, Protection reads them). Removing/off/delete needs
+  the challenge. (0.41.0)
+- [x] Manga/manhwa/anime built-in list (HaGeZi Anti-Piracy), off by default. (0.41.0)
+- [x] Protection lists: see/add/remove your own list's sites via the ManualListWindow (preview = the entries
+  shown inline). (0.41.0)
+- [ ] "No site in two lists" -> rely on "Allowed anyway" (overrides ALL lists). Still TODO: surface a
+  one-click Remove/Allow on Check-a-site so you never hunt per-list. (community lists)
 - [x] Auto-close transient editors/panels when you leave a page: Modes Start panel + mode editor and the
   reminder editor reset on on_show. (0.37.0) Blocking/Screen Time already reset to their default sub-tab.
 - [x] Promote "Reminders" (breaks / sleep / your reminders) to its own top-level sidebar item (hourglass

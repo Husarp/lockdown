@@ -176,8 +176,13 @@ def emergency_looser(old: dict, new: dict) -> bool:
 
 
 def protection_looser(old: dict, new: dict) -> bool:
-    """Protection lists: a list switched off, or a site allowed anyway."""
-    return not set(old["enabled"]) <= set(new["enabled"]) or not set(new["allowed"]) <= set(old["allowed"])
+    """Protection lists: a list switched off, a site allowed anyway, or a hand-made list that's on losing sites."""
+    if not set(old["enabled"]) <= set(new["enabled"]) or not set(new["allowed"]) <= set(old["allowed"]):
+        return True
+    old_manual = {m["key"]: {e["host"] for e in m["entries"]} for m in old.get("manual", [])}
+    new_manual = {m["key"]: {e["host"] for e in m.get("entries", [])} for m in new.get("manual", [])}
+    return any(key in old_manual and not old_manual[key] <= new_manual.get(key, set())
+               for key in old["enabled"])   # a list still on lost some of its sites (or was deleted)
 
 
 def settings_looser(old: dict, new: dict) -> bool:

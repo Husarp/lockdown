@@ -103,6 +103,22 @@ def test_adblock_format_and_your_own_lists(tmp_path):
     assert p.which("a.coin.example") == "custom1"
 
 
+def test_your_own_hand_made_list(tmp_path):
+    cfg = {"enabled": ["mine1"], "allowed": [], "info": {}, "custom": [],
+           "manual": [{"key": "mine1", "name": "Distractions", "entries": [{"name": "Reddit", "host": "reddit.com"},
+                                                                           {"name": "", "host": "tiktok.com"}]}]}
+    lists = protection.all_lists(cfg)
+    assert lists["mine1"][0] == "Distractions" and not lists["mine1"][2]      # no source to download
+    assert not protection.due(cfg, "mine1", NOW)                             # never tries to download it
+    assert protection.new_manual_key(cfg) == "mine2"
+    p = protection.Protection(tmp_path)
+    assert p.refresh(cfg) and p.count() == 4                                 # 2 hosts x (exact + wildcard)
+    assert p.which("reddit.com") == "mine1" and p.which("old.reddit.com") == "mine1"   # domain + subdomains
+    assert p.which("example.com") is None
+    cfg["manual"][0]["entries"].pop()                                        # editing it reloads (content hash)
+    assert p.refresh(cfg) and p.which("tiktok.com") is None
+
+
 def test_update_interval_and_automatic_updates_off():
     info = {"scam": {"updated": NOW.isoformat(), "sources": protection.sources("scam")}}
     cfg = {"info": info, "auto": True, "every_hours": 6}

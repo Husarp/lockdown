@@ -43,6 +43,84 @@ def download_text(p: dict) -> str:
     return text + (f" (part {p['part']} of {p['parts']})" if p.get("parts", 1) > 1 else "")
 
 
+class ManualListWindow(ctk.CTkToplevel):
+    """Edit one of your hand-made blocking lists: add a site (name + address), remove sites. Saved on Save;
+    on_save(entries) with entries = [{"name", "host"}]. Removing sites loosens a block, so the caller guards it."""
+
+    def __init__(self, app, name: str, entries: list[dict], on_save):
+        super().__init__(app)
+        self.on_save = on_save
+        self.entries = [dict(e) for e in entries]
+        self.title(name)
+        self.geometry("470x520")
+        self.configure(fg_color=theme.BG)
+        box = ctk.CTkFrame(self, fg_color="transparent")
+        box.pack(fill="both", expand=True, padx=18, pady=16)
+        ctk.CTkLabel(box, text=name, font=theme.card_title()).pack(anchor="w")
+        self.count = ctk.CTkLabel(box, text="", text_color=MUTED)
+        self.count.pack(anchor="w", pady=(0, 6))
+        line = ctk.CTkFrame(box, fg_color="transparent")
+        line.pack(fill="x", pady=(0, 4))
+        self.name_e = ctk.CTkEntry(line, width=130, placeholder_text="Name (optional)")
+        self.name_e.pack(side="left")
+        self.addr_e = ctk.CTkEntry(line, placeholder_text="site address, e.g. reddit.com")
+        self.addr_e.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.addr_e.bind("<Return>", lambda e: self._add())
+        ctk.CTkButton(line, text="Add", width=70, command=self._add).pack(side="left", padx=(8, 0))
+        self.error = ctk.CTkLabel(box, text="", text_color=theme.DANGER, height=14)
+        self.error.pack(anchor="w")
+        self.list = ctk.CTkScrollableFrame(box, fg_color=theme.SURFACE, corner_radius=6)
+        self.list.pack(fill="both", expand=True)
+        buttons = ctk.CTkFrame(box, fg_color="transparent")
+        buttons.pack(fill="x", pady=(10, 0))
+        ctk.CTkButton(buttons, text="Save", width=90, command=self._save).pack(side="right")
+        ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self.destroy).pack(side="right",
+                                                                                                    padx=8)
+        self.transient(app)
+        self._fill()
+        self.after(50, self._modal)
+
+    def _modal(self):
+        try:
+            self.grab_set()
+        except Exception:
+            self.after(50, self._modal)
+
+    def _fill(self):
+        for w in self.list.winfo_children():
+            w.destroy()
+        for i, e in enumerate(self.entries):
+            row = ctk.CTkFrame(self.list, fg_color="transparent")
+            row.pack(fill="x")
+            text = e["host"] + (f"   ·   {e['name']}" if e.get("name") else "")
+            ctk.CTkLabel(row, text=text, anchor="w", height=24).pack(side="left", padx=6)
+            ctk.CTkButton(row, text="×", width=24, height=22, fg_color="transparent", hover_color=theme.BORDER,
+                          text_color=MUTED, command=lambda i=i: self._remove(i)).pack(side="right", padx=4)
+        n = len(self.entries)
+        self.count.configure(text=f"{n} site{'s' * (n != 1)}")
+
+    def _add(self):
+        try:
+            host = normalize_host(self.addr_e.get())
+        except ValueError as ex:
+            self.error.configure(text=str(ex))
+            return
+        self.error.configure(text="")
+        if not any(e["host"] == host for e in self.entries):
+            self.entries.insert(0, {"name": self.name_e.get().strip(), "host": host})
+            clear_entry(self.name_e)
+            clear_entry(self.addr_e)
+            self._fill()
+
+    def _remove(self, i: int):
+        self.entries.pop(i)
+        self._fill()
+
+    def _save(self):
+        self.destroy()
+        self.on_save(self.entries)
+
+
 class ProtectionTab(ctk.CTkScrollableFrame):
     def __init__(self, master, page):
         super().__init__(master, fg_color="transparent")
@@ -64,7 +142,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.list_rows = ctk.CTkFrame(lists.body, fg_color="transparent")
         self.list_rows.pack(fill="x")
         self.row_keys: list[str] = []
-        self._build_list_rows(protection.all_lists(protection.settings(self.db)))
+        self._build_list_rows(self._community(protection.settings(self.db)))
         own = ctk.CTkFrame(lists.body, fg_color="transparent")
         own.pack(fill="x", pady=(10, 0))
         head = ctk.CTkFrame(own, fg_color="transparent")
@@ -84,6 +162,22 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         self.own_result = ctk.CTkLabel(own, text="", anchor="w", justify="left", wraplength=820)
         self.own_result.pack(anchor="w", pady=(4, 0))
         self.previewed: tuple[str, int] | None = None   # (url, count) of the last good preview
+
+        mine = Card(self, "Your blocking lists")
+        mine.pack(fill="x", pady=(0, 12))
+        help_icon(mine.title.master, "Your own lists of sites to block. Type a site into a list; turn the list on to "
+                                     "block everything in it (and its subdomains). Adding sites is instant; removing "
+                                     "them or turning a list off needs the Anti-Bypass challenge.").pack(side="left",
+                                                                                                        padx=8)
+        self.manual_rows = ctk.CTkFrame(mine.body, fg_color="transparent")
+        self.manual_rows.pack(fill="x")
+        line = ctk.CTkFrame(mine.body, fg_color="transparent")
+        line.pack(anchor="w", pady=(8, 0))
+        self.new_list = ctk.CTkEntry(line, width=220, placeholder_text="New list name (e.g. Distractions)")
+        self.new_list.pack(side="left")
+        self.new_list.bind("<Return>", lambda e: self._create_manual())
+        ctk.CTkButton(line, text="Create list", width=110, **theme.OUTLINE, command=self._create_manual).pack(
+            side="left", padx=8)
 
         self.words = WordsCards(self, page.app)
 
@@ -195,13 +289,75 @@ class ProtectionTab(ctk.CTkScrollableFrame):
         cfg["info"].pop(key, None)
         self._store(cfg, f"Remove your {name} list")
 
+    # ---------- your own hand-made lists ----------
+
+    def _community(self, cfg: dict) -> dict:
+        """The lists shown in the community "Lists" card: everything except your hand-made lists (own card)."""
+        manual = protection.manual_lists(cfg)
+        return {k: v for k, v in protection.all_lists(cfg).items() if k not in manual}
+
+    def _refresh_manual(self, cfg: dict):
+        for w in self.manual_rows.winfo_children():
+            w.destroy()
+        if not cfg["manual"]:
+            ctk.CTkLabel(self.manual_rows, text="No lists yet - create one below, then open it to add sites.",
+                         text_color=MUTED).pack(anchor="w", pady=2)
+            return
+        for m in cfg["manual"]:
+            row = ctk.CTkFrame(self.manual_rows, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            sw = ctk.CTkSwitch(row, text=m["name"], font=theme.semi(13), width=220)
+            sw.configure(command=lambda k=m["key"], s=sw: self._toggle_manual(k, s))
+            sw.select() if m["key"] in cfg["enabled"] else sw.deselect()
+            sw.pack(side="left")
+            n = len(m["entries"])
+            ctk.CTkLabel(row, text=f"{n} site{'s' * (n != 1)}", text_color=MUTED, width=80, anchor="w").pack(
+                side="left", padx=10)
+            ctk.CTkButton(row, text="Remove list", width=110, **theme.OUTLINE,
+                          command=lambda k=m["key"], nm=m["name"]: self._remove_manual(k, nm)).pack(side="right")
+            ctk.CTkButton(row, text="Open", width=70, **theme.OUTLINE,
+                          command=lambda k=m["key"]: self._open_manual(k)).pack(side="right", padx=8)
+
+    def _create_manual(self):
+        name = " ".join(self.new_list.get().split())
+        if not name:
+            return
+        cfg = protection.settings(self.db)
+        key = protection.new_manual_key(cfg)
+        cfg["manual"] = cfg["manual"] + [{"key": key, "name": name, "entries": []}]
+        cfg["enabled"] = cfg["enabled"] + [key]          # a new, empty list blocks nothing yet: no challenge
+        protection.save_settings(self.db, cfg)
+        clear_entry(self.new_list)
+        self.refresh()
+
+    def _toggle_manual(self, key: str, sw):
+        cfg = protection.settings(self.db)
+        enabled = [k for k in cfg["enabled"] if k != key] + ([key] if sw.get() else [])
+        name = protection.manual_lists(cfg)[key]["name"]
+        self._store({**cfg, "enabled": enabled}, f"Turn your {name} list off")
+
+    def _remove_manual(self, key: str, name: str):
+        cfg = protection.settings(self.db)
+        self._store({**cfg, "manual": [m for m in cfg["manual"] if m["key"] != key],
+                     "enabled": [k for k in cfg["enabled"] if k != key]}, f"Remove your {name} list")
+
+    def _open_manual(self, key: str):
+        m = protection.manual_lists(protection.settings(self.db))[key]
+
+        def save(entries):
+            latest = protection.settings(self.db)
+            manual = [{**x, "entries": entries} if x["key"] == key else x for x in latest["manual"]]
+            self._store({**latest, "manual": manual}, f"Remove sites from your {m['name']} list")
+        ManualListWindow(self.page.app, m["name"], m["entries"], save)
+
     # ---------- data ----------
 
     def refresh(self, now=None, usage=None):
         now = now_from_db(self.db)
         cfg = protection.settings(self.db)
-        lists = protection.all_lists(cfg)
-        if list(lists) != self.row_keys:   # your own list added / removed
+        self._refresh_manual(cfg)
+        lists = self._community(cfg)
+        if list(lists) != self.row_keys:   # your own URL list added / removed
             self._build_list_rows(lists)
         progress = protection.download_progress(self.db)
         for key, sw in self.switches.items():
@@ -246,7 +402,8 @@ class ProtectionTab(ctk.CTkScrollableFrame):
 
         def save():   # (the service may have updated the lists' info meanwhile: keep that)
             protection.save_settings(self.db, {**protection.settings(self.db), "enabled": cfg["enabled"],
-                                               "allowed": cfg["allowed"], "custom": cfg["custom"]})
+                                               "allowed": cfg["allowed"], "custom": cfg["custom"],
+                                               "manual": cfg["manual"]})
             self.refresh()
         key = (sorted(cfg["enabled"]), sorted(cfg["allowed"]), cfg["custom"])
         if antibypass.protection_looser(old, cfg) and not self.page.app.grace_ok("protection", key):

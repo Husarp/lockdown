@@ -29,6 +29,8 @@ LISTS = {
     "adult": ("Adult", "porn and other adult sites (Block List Project + HaGeZi)",
               [(BLP.format("porn"), False), (HAGEZI.format("nsfw"), True)], True),
     "gambling": ("Gambling", "betting and casino sites (HaGeZi)", [(HAGEZI.format("gambling"), True)], False),
+    "anime": ("Manga & anime", "unofficial manga, manhwa, anime and other pirate streaming / download sites "
+              "(HaGeZi Anti-Piracy)", [(HAGEZI.format("anti.piracy"), True)], False),
 }
 LIST_DIR = DATA_DIR / "protection"
 SETTINGS_KEY = "protection"   # JSON {"enabled": [keys], "allowed": [domains], "info": {key: {count, updated}},
@@ -52,20 +54,33 @@ def settings(db) -> dict:
     cfg.setdefault("allowed", [])
     cfg.setdefault("info", {})
     cfg.setdefault("custom", [])
+    cfg.setdefault("manual", [])                                   # your own hand-made lists (sites you type)
     cfg.setdefault("auto", True)                                   # update automatically (on by default)
     cfg.setdefault("every_hours", UPDATE_EVERY // timedelta(hours=1))
     return cfg
 
 
+def manual_lists(cfg: dict) -> dict:
+    """Your hand-made lists by key: {key: {"key", "name", "entries": [{"name", "host"}]}}."""
+    return {m["key"]: m for m in cfg.get("manual", [])}
+
+
 def all_lists(cfg: dict) -> dict:
-    """The built-in lists + your own ones (by URL; their format is detected per line - None = auto)."""
+    """The built-in lists + your own URL lists (format detected per line) + your own hand-made lists (no source)."""
     own = {c["key"]: (c["name"], c["url"], [(c["url"], None)], False) for c in cfg.get("custom", [])}
-    return {**LISTS, **own}
+    made = {m["key"]: (m["name"], f"{len(m['entries'])} site{'s' * (len(m['entries']) != 1)} you added", [], False)
+            for m in cfg.get("manual", [])}
+    return {**LISTS, **own, **made}
 
 
 def new_custom_key(cfg: dict) -> str:
     used = {c["key"] for c in cfg.get("custom", [])}
     return next(f"custom{i}" for i in range(1, 10_000) if f"custom{i}" not in used)
+
+
+def new_manual_key(cfg: dict) -> str:
+    used = {m["key"] for m in cfg.get("manual", [])}
+    return next(f"mine{i}" for i in range(1, 10_000) if f"mine{i}" not in used)
 
 
 def save_settings(db, cfg: dict):
@@ -176,6 +191,8 @@ def due(cfg: dict, key: str, now: datetime) -> bool:
     sources changed (a Lockdown update) or "Update now" pressed since - but after a failed try, wait an hour."""
     info = cfg["info"].get(key, {})
     lists = all_lists(cfg)
+    if not lists[key][2]:   # a hand-made list has no source to download
+        return False
     updated, failed, asked = _time(info, "updated"), _time(info, "failed"), _time(cfg, "update_now")
     if failed and (not updated or failed > updated) and now - failed < RETRY_AFTER:
         return False
@@ -208,8 +225,18 @@ class Protection:
     def refresh(self, cfg: dict) -> bool:
         """Load changed / newly enabled lists, drop disabled ones. Returns True when the lists changed."""
         self.allowed = frozenset(cfg["allowed"])
+        made = manual_lists(cfg)
         tables, changed = {}, False
         for key in (k for k in all_lists(cfg) if k in cfg["enabled"]):   # (list order: the first one names it)
+            if key in made:   # a hand-made list: its sites live in settings, blocked with their subdomains too
+                hosts = [e["host"] for e in made[key]["entries"] if e.get("host")]
+                stamp = hash(("manual", tuple(hosts)))
+                if key in self.tables and self.tables[key][0] == stamp:
+                    tables[key] = self.tables[key]
+                    continue
+                tables[key] = (stamp, _table([hash(h) for h in hosts]), _table([hash(h) for h in hosts]))
+                changed = True
+                continue
             path = list_path(key, self.folder)
             stamp = path.stat().st_mtime if path.exists() else 0
             if key in self.tables and self.tables[key][0] == stamp:

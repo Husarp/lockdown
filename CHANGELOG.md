@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.41.0 - 2026-09-19 21:11
+- **Your own blocking lists**: on Blocking → Protection, create named lists and add sites to them by name +
+  address, turn each list on/off, and open one to add/remove sites. They block the site and its subdomains via
+  the same always-on filter as the community lists. Adding is instant; removing sites, turning a list off or
+  deleting one needs the Anti-Bypass challenge (with the ~10s mis-click grace).
+- **Manga & anime list**: a new built-in community list (off by default) covering unofficial manga / manhwa /
+  anime and other pirate streaming/download sites (HaGeZi Anti-Piracy).
+
 ## 0.40.0 - 2026-09-19 20:59
 - **Challenge phrase options** (Anti-Bypass): the random phrase is now **letters only by default**; a new
   "Include numbers and CAPITAL letters" toggle makes it harder. Dropping it counts as loosening (needs the
