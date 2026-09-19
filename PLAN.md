@@ -1256,9 +1256,9 @@ sleep / forced-break overlays still show.
 - [x] Custom mode creation
 - [x] Mode scheduling (auto-switch by time/day)
 - [x] Quick-switch from tray
-- [ ] Sleep reminder (bedtime, escalating alerts)
-- [ ] Break reminder (interval, forced break option)
-- [ ] Custom reminders
+- [x] Sleep reminder (bedtime, escalating alerts)
+- [x] Break reminder (interval, forced break option)
+- [x] Custom reminders
 
 ### Protection lists (requested 2026-09-19, waiting for decisions)
 - [ ] Always-on lists of scam / phishing / malware sites (community lists, updated automatically by the service),

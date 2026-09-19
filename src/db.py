@@ -136,6 +136,13 @@ CREATE TABLE IF NOT EXISTS network_log (
     PRIMARY KEY (minute, exe, ip, port)
 );
 
+-- What happened with reminders: breaks taken, reminders done / snoozed / "really done?" answers
+CREATE TABLE IF NOT EXISTS reminder_log (
+    timestamp TEXT,               -- trusted local time
+    what TEXT,                    -- "break", "sleep" or a reminder id
+    result TEXT
+);
+
 -- Screen-time category chosen for an app (exe) or site (hostname)
 CREATE TABLE IF NOT EXISTS categories (
     kind TEXT NOT NULL,           -- "app" or "site"

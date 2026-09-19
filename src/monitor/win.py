@@ -1,5 +1,6 @@
 """Desktop helpers for the tray agent: foreground app, idle time, closing an app's windows politely."""
 import ctypes
+import os
 from ctypes import wintypes
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -42,6 +43,33 @@ def foreground() -> tuple[int, str]:
     """(window handle, lowercase exe name) of the foreground window; (0, '') if none (e.g. locked)."""
     hwnd = _user32.GetForegroundWindow()
     return (hwnd, process_name(hwnd)) if hwnd else (0, "")
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD)]
+
+
+_user32.MonitorFromWindow.restype = wintypes.HANDLE   # a 64-bit handle: don't let ctypes cut it to an int
+_user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
+
+
+def is_fullscreen() -> bool:
+    """Is a full-screen app (a game, a video) in front? Not the desktop, not Lockdown itself."""
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd or window_pid(hwnd) == os.getpid():
+        return False
+    cls = ctypes.create_unicode_buffer(64)
+    _user32.GetClassNameW(hwnd, cls, 64)
+    if cls.value in ("Progman", "WorkerW", "Shell_TrayWnd"):
+        return False
+    rect = wintypes.RECT()
+    info = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+    monitor = _user32.MonitorFromWindow(hwnd, 2)   # MONITOR_DEFAULTTONEAREST
+    if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)) or not _user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        return False
+    m = info.rcMonitor
+    return rect.left <= m.left and rect.top <= m.top and rect.right >= m.right and rect.bottom >= m.bottom
 
 
 def top_windows() -> list[tuple[int, str, str]]:

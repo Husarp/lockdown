@@ -1,0 +1,315 @@
+"""Reminders (run by the tray agent every few seconds): sleep, breaks, 20-20-20 and your own reminders.
+
+The engine only decides; a `ui` object shows things: popup(key, title, text, buttons), close(key),
+overlay(key, title, text, until, buttons), toast(text), start_mode(mode_id, until). Buttons are (label, action)
+and the UI calls answer(key, action) back. While a full-screen app (a game) is in front, popups wait and a
+Windows notification is shown instead; sleep and forced-break overlays still appear - that's their point.
+"""
+import json
+import random
+from datetime import datetime, time, timedelta
+
+from rules import TIME_FMT, days_text, parse_hhmm
+
+TICK_SEC = 5
+USING_IDLE_SEC = 60            # input within the last minute = using the PC
+BREAK_RESET_SEC = 5 * 60       # away this long = you had a break
+TWENTY_SEC = 20 * 60
+LATE_FIRE_MIN = 30             # a set-time reminder still fires up to 30 min late (PC was asleep etc.)
+
+SLEEP_KEY, BREAK_KEY, CUSTOM_KEY = "reminders.sleep", "reminders.break", "reminders.custom"
+DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat": 5, "mode": ""}
+DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "forced": False, "twenty": False}
+DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
+                  "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
+                  "check": 0, "packs": [], "quotes": ""}
+
+# Short public-domain quotes
+PACKS = {
+    "Stoic": ["You have power over your mind - not outside events. - Marcus Aurelius",
+              "Waste no more time arguing what a good man should be. Be one. - Marcus Aurelius",
+              "We suffer more often in imagination than in reality. - Seneca",
+              "It is not that we have a short time to live, but that we waste a lot of it. - Seneca",
+              "First say to yourself what you would be; then do what you have to do. - Epictetus"],
+    "Motivation": ["Well begun is half done. - Aristotle",
+                   "The secret of getting ahead is getting started. - attributed to Mark Twain",
+                   "It does not matter how slowly you go as long as you do not stop. - attributed to Confucius",
+                   "Small steps every day.", "Future you will thank you."],
+    "Health": ["Drink a glass of water.", "Roll your shoulders and stretch your neck.",
+               "Look out of the window for a moment.", "Stand up and walk around for a minute."],
+}
+
+
+def load(db, key: str, default):
+    try:
+        saved = json.loads(db.get_setting(key, "") or "null")
+    except ValueError:
+        saved = None
+    if isinstance(default, dict):
+        return {**default, **(saved or {})}
+    return saved if saved is not None else default
+
+
+def save(db, key: str, value):
+    db.set_setting(key, json.dumps(value))
+
+
+def custom_list(db) -> list[dict]:
+    return [{**DEFAULT_CUSTOM, **r} for r in load(db, CUSTOM_KEY, [])]
+
+
+def log(db, what: str, result: str, now: datetime):
+    with db.conn:
+        db.conn.execute("INSERT INTO reminder_log VALUES (?, ?, ?)", (now.strftime(TIME_FMT), what, result))
+
+
+def counts(db, what: str, since: datetime) -> dict[str, int]:
+    rows = db.conn.execute("SELECT result, COUNT(*) FROM reminder_log WHERE what = ? AND timestamp >= ? "
+                           "GROUP BY result", (what, since.strftime(TIME_FMT)))
+    return dict(rows.fetchall())
+
+
+def schedule_text(r: dict) -> str:
+    if r["kind"] == "interval":
+        return f"every {r['every']} min of use"
+    if r["kind"] == "times":
+        return f"{days_text(r['days'])} at {', '.join(r['times'])}"
+    return f"once a day, at a random time {r['window'][0]}-{r['window'][1]}"
+
+
+class Engine:
+    def __init__(self, db, ui, rng: random.Random | None = None):
+        self.db, self.ui, self.rng = db, ui, rng or random.Random()
+        self.now = datetime.now()
+        self.fullscreen = False
+        self.open: set[str] = set()          # popups / overlays on screen
+        self.waiting: dict[str, tuple] = {}  # popups held back while a full-screen app is in front
+        self.continuous = 0.0                # seconds of use since the last break
+        self.twenty = 0.0
+        self.break_until: datetime | None = None
+        self.snoozed: dict[str, datetime] = {}               # key -> fire again at
+        self.snoozes_used: dict[str, int] = {}               # key -> snoozes since it was last done
+        self.counters: dict[str, float] = {}                 # interval reminders: seconds of use so far
+        self.fired: set[tuple] = set()                       # (id, date, "HH:MM") already shown
+        self.random_at: dict[tuple, time] = {}               # (id, date) -> today's random time
+        self.checks: dict[str, datetime] = {}                # reminder id -> ask "did you do it?" at
+        self.sleep_next: dict[str, datetime] = {}            # night -> next bedtime overlay
+
+    # ---------- showing ----------
+
+    def _popup(self, key: str, title: str, text: str, buttons: list[tuple[str, str]]):
+        if key in self.open:
+            return
+        if self.fullscreen:
+            if key not in self.waiting:
+                self.ui.toast(f"{title}: {text.splitlines()[0]}")
+                self.waiting[key] = (title, text, buttons)
+            return
+        self.waiting.pop(key, None)
+        self.open.add(key)
+        self.ui.popup(key, title, text, buttons)
+
+    def _overlay(self, key: str, title: str, text: str, until: datetime | None, buttons: list[tuple[str, str]]):
+        if key not in self.open:
+            self.open.add(key)
+            self.ui.overlay(key, title, text, until, buttons)
+
+    def _close(self, key: str):
+        self.waiting.pop(key, None)
+        if key in self.open:
+            self.open.discard(key)
+            self.ui.close(key)
+
+    # ---------- tick ----------
+
+    def tick(self, now: datetime, idle_sec: float, fullscreen: bool, dt: float = TICK_SEC):
+        self.now, self.fullscreen = now, fullscreen
+        using = idle_sec < USING_IDLE_SEC
+        self._breaks(now, idle_sec, using, dt)
+        self._sleep(now)
+        self._custom(now, using, dt)
+        if not fullscreen:
+            for key, (title, text, buttons) in list(self.waiting.items()):
+                self._popup(key, title, text, buttons)
+
+    # ---------- breaks ----------
+
+    def _breaks(self, now, idle_sec, using, dt):
+        b = load(self.db, BREAK_KEY, DEFAULT_BREAK)
+        if self.break_until:
+            if now >= self.break_until:
+                self._close("break-overlay")
+                self.break_until = None
+                self.continuous = 0
+                log(self.db, "break", "taken", now)
+            return
+        if not b["on"]:
+            self.continuous = 0
+            return
+        if idle_sec >= BREAK_RESET_SEC:
+            if self.continuous >= 10 * 60:   # a real stretch of use, then away = a break
+                log(self.db, "break", "away", now)
+            self.continuous = 0
+            self._close("break")
+        elif using:
+            self.continuous += dt
+            if b["twenty"]:
+                self.twenty += dt
+                if self.twenty >= TWENTY_SEC:
+                    self.twenty = 0
+                    self.ui.toast("20-20-20: look at something 20 feet (6 m) away for 20 seconds.")
+        if now < self.snoozed.get("break", now):
+            return
+        if self.continuous >= b["every"] * 60 and "break" not in self.open:
+            if b["forced"]:
+                self._start_break(now, b, closable=False)
+            else:
+                self._popup("break", "Time for a break", f"You've been at the PC for {b['every']} min. "
+                                                         f"Take {b['length']} min away from the screen.",
+                            [("Start break", "start"), ("Snooze 5 min", "snooze")])
+
+    def _start_break(self, now, b, closable: bool):
+        self.break_until = now + timedelta(minutes=b["length"])
+        self._overlay("break-overlay", "Break time", "Stand up, look away, stretch.", self.break_until,
+                      [("End break early", "end")] if closable else [])
+
+    # ---------- sleep ----------
+
+    def _night(self, s: dict, now: datetime) -> tuple[datetime, datetime] | None:
+        """(bedtime, wake time) of the night we're in or about to start, if within the warning window."""
+        bed_t, wake_t = parse_hhmm(s["bedtime"]), parse_hhmm(s["wake"])
+        for day in (now.date() - timedelta(days=1), now.date()):
+            bed = datetime.combine(day, bed_t)
+            wake = datetime.combine(day, wake_t)
+            if wake <= bed:
+                wake += timedelta(days=1)
+            if bed - timedelta(minutes=s["before"]) <= now < wake:
+                return bed, wake
+        return None
+
+    def _sleep(self, now):
+        s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
+        night = self._night(s, now) if s["on"] else None
+        if not night:
+            self._close("sleep")
+            return
+        bed, wake = night
+        key = bed.strftime(TIME_FMT)
+        if now < bed:
+            if ("warn", key) not in self.fired:
+                self.fired.add(("warn", key))
+                self._popup("sleep-warn", "Bedtime soon", f"Bedtime is at {bed:%H:%M} - time to wrap up.",
+                            [("OK", "ok")])
+            return
+        if ("bed", key) not in self.fired:
+            self.fired.add(("bed", key))
+            self.sleep_next[key] = now
+            if s["mode"]:
+                self.ui.start_mode(s["mode"], wake)
+        if now >= self.sleep_next.get(key, now) and "sleep" not in self.open:
+            self._overlay("sleep", "Time for bed", f"It's {now:%H:%M}. Sleep well - the screen can wait until "
+                                                   "tomorrow.", None, [("Going to bed", "bed"),
+                                                                      ("5 more minutes", "more")])
+
+    # ---------- your reminders ----------
+
+    def _custom(self, now, using, dt):
+        today = now.date()
+        for r in custom_list(self.db):
+            if not r["on"] or not r["text"].strip():
+                continue
+            key = f"custom:{r['id']}"
+            if key in self.snoozed:
+                if now >= self.snoozed[key] and key not in self.open:
+                    del self.snoozed[key]
+                    self._fire(r, now)
+                continue
+            if r["kind"] == "interval":
+                if using:
+                    self.counters[r["id"]] = self.counters.get(r["id"], 0) + dt
+                if self.counters.get(r["id"], 0) >= r["every"] * 60:
+                    self.counters[r["id"]] = 0
+                    self._fire(r, now)
+            elif r["kind"] == "times":
+                if today.weekday() not in r["days"]:
+                    continue
+                for t in r["times"]:
+                    at = datetime.combine(today, parse_hhmm(t))
+                    if at <= now < at + timedelta(minutes=LATE_FIRE_MIN) and (r["id"], today, t) not in self.fired:
+                        self.fired.add((r["id"], today, t))
+                        self._fire(r, now)
+            else:
+                start, end = (parse_hhmm(x) for x in r["window"])
+                pick = self.random_at.get((r["id"], today))
+                if pick is None:
+                    lo, hi = start.hour * 60 + start.minute, end.hour * 60 + end.minute
+                    m = self.rng.randint(lo, max(lo, hi - 1))
+                    pick = self.random_at[(r["id"], today)] = time(m // 60, m % 60)
+                at = datetime.combine(today, pick)
+                if at <= now < at + timedelta(minutes=LATE_FIRE_MIN) and (r["id"], today, "random") not in self.fired:
+                    self.fired.add((r["id"], today, "random"))
+                    self._fire(r, now)
+        for rid, at in list(self.checks.items()):
+            if now >= at:
+                del self.checks[rid]
+                r = next((x for x in custom_list(self.db) if x["id"] == rid), None)
+                if r:
+                    self._popup(f"check:{rid}", "Did you actually do it?", r["text"], [("Yes", "yes"), ("No", "no")])
+
+    def _quote(self, r: dict) -> str:
+        pool = [q.strip() for q in r["quotes"].splitlines() if q.strip()]
+        for pack in r["packs"]:
+            pool += PACKS.get(pack, [])
+        return self.rng.choice(pool) if pool else ""
+
+    def _fire(self, r: dict, now: datetime):
+        """Show a reminder; Snooze only while it has snoozes left (then it stays until Done)."""
+        key = f"custom:{r['id']}"
+        quote = self._quote(r)
+        buttons = [("Done", "done")]
+        if self.snoozes_used.get(key, 0) < r["max_snooze"]:
+            buttons.append((f"Snooze {r['snooze']} min", "snooze"))
+        self._popup(key, "Reminder", r["text"] + (f"\n\n{quote}" if quote else ""), buttons)
+
+    # ---------- answers from the UI ----------
+
+    def answer(self, key: str, action: str):
+        now = self.now
+        self.open.discard(key)
+        if key == "break":
+            if action == "start":
+                self._start_break(now, load(self.db, BREAK_KEY, DEFAULT_BREAK), closable=True)
+            elif action == "snooze":
+                self.snoozed["break"] = now + timedelta(minutes=5)
+        elif key == "break-overlay" and action == "end":
+            self.break_until = None
+            self.continuous = 0
+            log(self.db, "break", "ended early", now)
+        elif key == "sleep":
+            s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
+            night = self._night(s, now)
+            if night:
+                wait = 5 if action == "more" else s["repeat"]
+                self.sleep_next[night[0].strftime(TIME_FMT)] = now + timedelta(minutes=wait)
+            log(self.db, "sleep", action, now)
+        elif key.startswith("custom:"):
+            rid = key.split(":", 1)[1]
+            r = next((x for x in custom_list(self.db) if x["id"] == rid), None)
+            if not r:
+                return
+            if action == "done":
+                self.snoozes_used.pop(key, None)
+                log(self.db, rid, "done", now)
+                if r["check"]:
+                    self.checks[rid] = now + timedelta(minutes=r["check"])
+            elif action == "snooze":
+                self.snoozes_used[key] = self.snoozes_used.get(key, 0) + 1
+                self.snoozed[key] = now + timedelta(minutes=r["snooze"])
+                log(self.db, rid, "snoozed", now)
+        elif key.startswith("check:"):
+            rid = key.split(":", 1)[1]
+            log(self.db, rid, "really done" if action == "yes" else "not done", now)
+            if action == "no":
+                r = next((x for x in custom_list(self.db) if x["id"] == rid), None)
+                if r:
+                    self._fire(r, now)

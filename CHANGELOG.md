@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.0 — 2026-09-19 02:28
+- **Reminders** (Phase 6b, Modes page > Reminders tab):
+  - Sleep: bedtime + wake-up time, heads-up before bedtime, a full-screen "Time for bed" overlay at bedtime ("Going to bed" / "5 more minutes") that comes back every N min until wake-up; optionally turns on a mode until wake-up
+  - Breaks: after 45 min of use (resets after 5 min away) a "Time for a break" popup with a break countdown; optional forced break (covers the screen, no way out until it ends); 20-20-20 option; breaks counted
+  - Your reminders: every X min of use / at set times on chosen days / once a day at a random time; Done / Snooze (limit, then it stays), "Did you actually do it?" check-back, quote packs (Stoic, Motivation, Health) or your own quotes; done / "not done" stats
+  - while a full-screen app (a game) is in front - or Do Not Disturb is on - popups wait and you get a Windows notification; sleep and forced-break overlays still show
+- 132 tests passing
+
 ## 0.14.0 — 2026-09-19 02:22
 - **Modes** (Phase 6a): a mode blocks a category (e.g. everything marked Distracting) plus picked sites / apps / groups, on top of the normal blockers; one at a time
   - built in: Work, Study, Focus (Pomodoro 25/5 x4 + 15, blocked only in focus rounds), Do Not Disturb (also mutes Lockdown's notifications), Relax (nothing extra); make your own

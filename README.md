@@ -32,6 +32,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 - **Modes** (Phase 6a): Work / Study / Focus (Pomodoro) / Do Not Disturb / Relax + your own - each blocks a
   category plus picked sites/apps while it's on; start for a while, until a time or until stopped (optionally locked),
   or on a schedule; also from the tray menu.
+- **Reminders** (Phase 6b): bedtime overlay, break reminders (optionally forced), your own reminders (interval / set
+  times / random) with snooze, "did you really do it?" check and quotes; they wait while you're in a full-screen game.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
   cache); table or graph, filters, export; click a row to block the site/app or copy it.
 

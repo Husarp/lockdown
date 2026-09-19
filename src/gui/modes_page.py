@@ -7,6 +7,7 @@ import customtkinter as ctk
 import modes
 from gui import categories, icons, theme
 from gui.components import Card, Rows, Segmented, eyebrow
+from gui.reminders_ui import RemindersView
 from gui.rule_editors import MUTED, WindowRow
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
@@ -302,9 +303,14 @@ class ModesPage(ctk.CTkFrame):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=30, pady=(12, 6))
         ctk.CTkLabel(head, text="Modes", font=theme.page_title()).pack(side="left")
-        ctk.CTkButton(head, text="+ New mode", width=120, command=lambda: self.open_editor(None)).pack(side="right")
+        self.new_btn = ctk.CTkButton(head, text="+ New mode", width=120, command=lambda: self.open_editor(None))
+        self.new_btn.pack(side="right")
+        self.tab = Segmented(self, ["Modes", "Reminders"], command=lambda v: self._switch())
+        self.tab.set("Modes")
+        self.tab.pack(anchor="w", padx=30, pady=(0, 10))
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.body.pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+        self.reminders = RemindersView(self, self)
 
         self.now_card = Card(self.body, "Now")
         self.now_card.pack(fill="x", pady=(0, 12))
@@ -350,7 +356,20 @@ class ModesPage(ctk.CTkFrame):
     def on_show(self):
         self.refresh()
 
+    def _switch(self):
+        reminders_tab = self.tab.get() == "Reminders"
+        (self.body if reminders_tab else self.reminders).pack_forget()
+        (self.reminders if reminders_tab else self.body).pack(fill="both", expand=True, padx=(20, 12), pady=(0, 14))
+        if reminders_tab:
+            self.new_btn.pack_forget()
+        else:
+            self.new_btn.pack(side="right")
+        self.refresh()
+
     def refresh(self):
+        if self.tab.get() == "Reminders":
+            self.reminders.refresh()
+            return
         now = now_from_db(self.db)
         all_modes = modes.load(self.db)
         names = categories.names_of(categories.load(self.db))

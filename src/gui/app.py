@@ -11,6 +11,7 @@ import customtkinter as ctk
 
 import alerts
 import modes
+import reminders
 from blocker.apps import minimizes
 from db import Database
 from gui import theme
@@ -20,6 +21,7 @@ from gui.draft import Draft
 from gui.modes_page import ModesPage
 from gui.network import NetworkPage
 from gui.notifications import NotificationsPage, Popup
+from gui.reminders_ui import ReminderUI
 from gui.screen_time import ScreenTimePage
 from gui.settings import SettingsPage
 from gui.tray import Tray
@@ -106,6 +108,9 @@ class LockdownApp(ctk.CTk):
         self.minimize_blocks: dict[str, dict] = {}   # exe -> block, for apps blocked with "Minimize"
         self._poll_watcher()
         self._poll_minimize()
+        self.reminder_ui = ReminderUI(self)
+        self.reminders = self.reminder_ui.engine = reminders.Engine(self.db, self.reminder_ui)
+        self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
 
     def _collect_garbage(self):
         gc.collect()
@@ -281,6 +286,16 @@ class LockdownApp(ctk.CTk):
                                     if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
         finally:
             self.after(WATCH_MS, self._poll_watcher)
+
+    def _poll_reminders(self):
+        """Sleep / break / your reminders. Popups wait while a full-screen app (a game) is in front."""
+        try:
+            now = now_from_db(self.db)
+            state = modes.active(self.db, now)
+            quiet = bool(state and state["mode"].get("mute"))   # Do Not Disturb: hold popups like in a game
+            self.reminders.tick(now, win.idle_seconds(), win.is_fullscreen() or quiet)
+        finally:
+            self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
 
     def _poll_minimize(self):
         """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front."""
