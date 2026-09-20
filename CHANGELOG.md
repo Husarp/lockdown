@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.64.0 - 2026-09-21 01:56
+- **Games is a category now**, next to Productive / Neutral / Distracting - purple, and available everywhere a
+  category is (the right-click menu, Screen Time, the timeline, and as a block target of its own).
+  - **Installed Steam games go into it by themselves.** The first time the app list is built, every Steam game
+    that you have not already put somewhere else is tagged Games. Anything you set by hand is left alone.
+  - Non-Steam games are not detected - right-click one and pick Games.
+- **The bedtime reminder takes any time you type**, instead of a menu of four. "Heads-up" and "Repeat every"
+  are boxes now: `30`, `30 min`, `45s`, `1h`, `1h30` all work, and `Off` turns the heads-up off. Seconds are
+  kept, so "repeat every 30s" really nags every 30 seconds (the reminder engine ticks every 5 s, so that is
+  the smallest useful step).
+
 ## 0.63.1 - 2026-09-20 23:18
 - **The setup notices when you are installing the version you already have.** It says so ("Lockdown 0.63.1 is
   already installed - this setup has the same version"), the button reads **Reinstall** instead of Update, and

@@ -7,6 +7,7 @@ Windows notification is shown instead; sleep and forced-break overlays still app
 """
 import json
 import random
+import re
 from datetime import datetime, time, timedelta
 
 from rules import TIME_FMT, days_text, parse_hhmm
@@ -39,6 +40,41 @@ PACKS = {
     "Health": ["Drink a glass of water.", "Roll your shoulders and stretch your neck.",
                "Look out of the window for a moment.", "Stand up and walk around for a minute."],
 }
+
+
+def parse_minutes(text: str, allow_off: bool = True, least: float = 5 / 60, most: float = 24 * 60) -> float:
+    """What you typed into a "how often" box, as minutes: "30" and "30 min" -> 30, "45s" -> 0.75,
+    "1h" -> 60, "1h30" -> 90, "off" / "0" -> 0. Seconds are kept as a fraction, so "every 30s" works."""
+    t = text.strip().lower().replace(",", ".")
+    if t in ("", "off", "0", "no", "never"):
+        if not allow_off:
+            raise ValueError("Write a time like 30, 45s or 1h30.")
+        return 0
+    if m := re.fullmatch(r"(\d+)\s*h(?:\s*(\d+)\s*(?:m|min|mins|minutes?)?)?", t):
+        value = int(m[1]) * 60 + int(m[2] or 0)
+    elif m := re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:s|sec|secs|seconds?)", t):
+        value = float(m[1]) / 60
+    elif m := re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:m|min|mins|minutes?)?", t):
+        value = float(m[1])
+    else:
+        raise ValueError("Write a time like 30, 45s or 1h30.")
+    if not least <= value <= most:
+        raise ValueError(f"Between {minutes_text(least)} and {minutes_text(most)}, please.")
+    return value
+
+
+def minutes_text(minutes: float) -> str:
+    """The other way round, for the box: 0 -> "Off", 0.5 -> "30s", 5 -> "5 min", 90 -> "1h30"."""
+    if not minutes:
+        return "Off"
+    seconds = round(minutes * 60)
+    if seconds % 60 and seconds < 5 * 60:      # 45s, 90s - rather than "1.5 min"
+        return f"{seconds}s"
+    whole = round(seconds / 60)
+    if whole >= 60:
+        h, m = divmod(whole, 60)
+        return f"{h}h{m:02d}" if m else f"{h}h"
+    return f"{whole} min"
 
 
 def load(db, key: str, default):

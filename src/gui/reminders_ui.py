@@ -165,6 +165,19 @@ def _option(parent, label: str, values: list[str], after: str = "", label_w: int
     return menu
 
 
+def _duration(parent, label: str, after: str, label_w: int, on_save) -> ctk.CTkEntry:
+    """"Heads-up [ 30 min ] before bedtime" - type any time ("45s", "30", "1h30"), not a fixed list."""
+    line = ctk.CTkFrame(parent, fg_color="transparent")
+    line.pack(anchor="w", pady=5)
+    ctk.CTkLabel(line, text=label, width=label_w, anchor="w", text_color=MUTED).pack(side="left", padx=(0, 12))
+    entry = ctk.CTkEntry(line, width=72, justify="center")
+    entry.pack(side="left")
+    entry.bind("<Return>", lambda e: on_save())
+    entry.bind("<FocusOut>", lambda e: on_save())
+    ctk.CTkLabel(line, text=after, text_color=MUTED).pack(side="left", padx=8)
+    return entry
+
+
 class RemindersView(ctk.CTkScrollableFrame):
     def __init__(self, master, page):
         super().__init__(master, fg_color="transparent")
@@ -195,13 +208,12 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.wake.pack(side="left")
         ctk.CTkButton(line, text="Save times", width=90, height=28, **theme.OUTLINE, command=self._save_sleep).pack(
             side="left", padx=12)
-        self.before = _option(b, "Heads-up", ["Off", "10 min", "15 min", "30 min", "60 min"], "before bedtime",
-                              LABEL_W)
-        self.repeat = _option(b, "Repeat every", ["5 min", "10 min", "15 min", "30 min"], "once it's past bedtime",
-                              LABEL_W)
+        self.before = _duration(b, "Heads-up", "before bedtime (\"Off\", \"30\", \"1h\")", LABEL_W,
+                                self._save_sleep)
+        self.repeat = _duration(b, "Repeat every", "once it's past bedtime (\"30s\", \"5\", \"1h30\")", LABEL_W,
+                                self._save_sleep)
         self.sleep_mode = _option(b, "Turn on", ["No mode"], "at bedtime, until wake-up time", LABEL_W)
-        for menu in (self.before, self.repeat, self.sleep_mode):
-            menu.configure(command=lambda v: self._save_sleep())
+        self.sleep_mode.configure(command=lambda v: self._save_sleep())
         self.sleep_error = ctk.CTkLabel(b, text="", text_color=theme.DANGER, height=16)   # packed while it says something
         tip = ctk.CTkFrame(b, fg_color=theme.BG, border_width=1, border_color=theme.BORDER, corner_radius=3)
         tip.pack(side="bottom", fill="x", pady=(10, 0))
@@ -251,8 +263,9 @@ class RemindersView(ctk.CTkScrollableFrame):
         for entry, value in ((self.bedtime, s["bedtime"]), (self.wake, s["wake"])):
             entry.delete(0, "end")
             entry.insert(0, value)
-        self.before.set("Off" if not s["before"] else f"{s['before']} min")
-        self.repeat.set(f"{s['repeat']} min")
+        for entry, value in ((self.before, s["before"]), (self.repeat, s["repeat"])):
+            entry.delete(0, "end")
+            entry.insert(0, reminders.minutes_text(value))
         all_modes = modes.load(self.db)
         self.mode_ids = {"No mode": ""} | {m["name"]: m["id"] for m in all_modes}
         self.sleep_mode.configure(values=list(self.mode_ids))
@@ -288,15 +301,23 @@ class RemindersView(ctk.CTkScrollableFrame):
         try:
             bedtime, wake = parse_hhmm(self.bedtime.get()), parse_hhmm(self.wake.get())
         except ValueError:
-            self.sleep_error.configure(text="Write times like 23:00.")
-            self.sleep_error.pack(anchor="w")
+            self._sleep_says("Write times like 23:00.")
+            return
+        try:
+            before = reminders.parse_minutes(self.before.get(), most=12 * 60)
+            repeat = reminders.parse_minutes(self.repeat.get(), allow_off=False)
+        except ValueError as e:
+            self._sleep_says(str(e))
             return
         self.sleep_error.pack_forget()
-        before = self.before.get()
         reminders.save(self.db, reminders.SLEEP_KEY, {
             "on": bool(self.sleep_on.get()), "bedtime": f"{bedtime:%H:%M}", "wake": f"{wake:%H:%M}",
-            "before": 0 if before == "Off" else int(before.split()[0]), "repeat": int(self.repeat.get().split()[0]),
+            "before": before, "repeat": repeat,
             "mode": self.mode_ids.get(self.sleep_mode.get(), "")})
+
+    def _sleep_says(self, text: str):
+        self.sleep_error.configure(text=text)
+        self.sleep_error.pack(anchor="w")
 
     def _save_break(self):
         reminders.save(self.db, reminders.BREAK_KEY, {

@@ -1461,6 +1461,12 @@ one shared pot for the whole category.
 - [x] The setup offered to "update" to the version already installed (user, 2026-09-20) - 0.63.1: it says the
   version matches, the button reads Reinstall, and it asks before doing anything. A setup OLDER than what is
   installed still says "updates it to <older>" - worth the same treatment if it ever bites.
+- [x] A Games category, with Steam games in it (user, 2026-09-20) - 0.64.0: built-in category + a one-off
+  tagging pass when the app list loads. Non-Steam games still need a right-click.
+- [x] The bedtime reminder only offered fixed intervals (user, 2026-09-20) - 0.64.0: both boxes take any time
+  ("45s", "1h30"), parsed by `reminders.parse_minutes`.
+- [ ] Polish characters: the user reports they are not supported somewhere. Not reproduced - sqlite, the Tk
+  widgets, Inter and the Pillow renderer all handle them (scratchpad/cap_polish.py). Waiting to hear where.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.
