@@ -1436,6 +1436,11 @@ one shared pot for the whole category.
 - [ ] C2. The blocked-visit alert could say which category blocked a site ("blocked - it's Distracting").
 - [x] D. Backup / import keeps category items - they are ordinary rows and nothing filters by item_type.
 
+- [x] Resizing and tab switching were heavy (user, 2026-09-20) - 0.59.0: only the visible page is laid out,
+  charts hold still during a drag, and a chart handed unchanged data does not redraw.
+- [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
+  build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
+  because Tk draws on the same thread that builds the widgets.
 - [ ] The background pre-build (a page every 0.5 s after start) freezes the window for as long as each page
   takes to build. Worth spreading out or doing lazily if the first few seconds feel stuttery.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed

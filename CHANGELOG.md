@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.59.0 - 2026-09-20 20:37
+- **Resizing the window and switching pages are much lighter.** Three things were doing work for nothing:
+  - All nine pages stayed **laid out** at once (only raised and lowered), so dragging the window edge made Tk
+    re-lay-out and repaint every one of them. On a single resize step, 4 of the 6 chart redraws were for pages
+    you could not see. Only the page you are on is laid out now - the rest are kept built, so switching to them
+    is still instant, but they are out of the layout until you open them.
+  - Charts re-rendered **while** the window was being dragged. They keep the picture they have during the drag
+    and render once, sharply, about 0.2 s after you let go - you only ever look at the size you stop at. A
+    <Configure> that doesn't change the size is ignored outright.
+  - Opening a page refreshes it, and that **re-rendered every chart on it even when the data was identical**.
+    A chart now compares what it is handed with what it is already showing and skips the work if they match
+    (light / dark mode is part of that comparison, so switching theme still redraws everything).
+  - Measured on the test machine: a 12-step drag went from 68 chart redraws / 1.7 s of drawing to 22 / 0.5 s,
+    and switching between pages that are already up to date went from 15 redraws to none.
+
 ## 0.58.0 - 2026-09-20 19:28
 - **Block a whole category.** On Blocking > Add there is now a **Category...** button next to Browse apps: pick
   Distracting (or any category of your own) instead of one site or app, and put any blocker on it - hours, a

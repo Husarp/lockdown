@@ -14,6 +14,7 @@ SS = 3                                  # supersampling factor
 AXIS_FONT = (theme.BODY, 8)
 TIP_FONT = (theme.BODY, 9)
 REDRAW_DELAY_MS = 40
+RESIZE_SETTLE_MS = 180   # while the window is being dragged, wait for it to settle instead of redrawing per frame
 
 
 class Chart(tk.Canvas):
@@ -25,7 +26,9 @@ class Chart(tk.Canvas):
         self.hits: list[tuple[float, float, float, float, str]] = []
         self._job = None
         self._photo = None
-        self.bind("<Configure>", lambda e: self._schedule())
+        self._drawn_size: tuple[int, int] | None = None
+        self._data = None                       # what the chart was last given (see _same)
+        self.bind("<Configure>", lambda e: self._schedule(resize=True))
         self.tooltip = Tooltip(self)
         self.bind("<Motion>", self._hover)
         self.bind("<Leave>", lambda e: self.tooltip.hide())
@@ -33,12 +36,30 @@ class Chart(tk.Canvas):
     def px(self, n: float) -> float:
         return n * self.s
 
-    def _schedule(self):
+    def _same(self, data) -> bool:
+        """True when a chart is handed the data it is already showing. Opening a page refreshes it, so without
+        this every chart on it is rendered again on every visit even though nothing changed. The light / dark
+        mode is part of the comparison - switching theme hands every chart the same data and it still has to be
+        drawn again, in the other set of colours."""
+        data = (data, ctk.get_appearance_mode())
+        if self._photo is not None and data == self._data:
+            return True
+        self._data = data
+        return False
+
+    def _schedule(self, resize: bool = False):
+        """resize: a <Configure>, which says nothing about the data. Redrawing a chart means rendering it with
+        Pillow, so while a window is being dragged we keep showing the picture we have and draw once at the end -
+        you only ever look at the size you stop at."""
+        if resize and self._drawn_size == (self.winfo_width(), self.winfo_height()):
+            return   # same size as what is on screen: nothing to do (a <Configure> fires for other reasons too)
         if self._job:
             self.after_cancel(self._job)
-        # first drawing: with the rest of the page, so a tab never shows up with empty chart boxes that fill in a
-        # moment later. Later ones wait out the delay (a window resize sends a burst of <Configure> events).
-        self._job = self.after_idle(self.redraw) if self._photo is None else self.after(REDRAW_DELAY_MS, self.redraw)
+        if self._photo is None:
+            # first drawing: with the rest of the page, so a tab never shows up with empty chart boxes
+            self._job = self.after_idle(self.redraw)
+        else:
+            self._job = self.after(RESIZE_SETTLE_MS if resize else REDRAW_DELAY_MS, self.redraw)
 
     def redraw(self):
         self._job = None
@@ -52,6 +73,7 @@ class Chart(tk.Canvas):
         self.hits, self.texts = [], []
         self.draw(w, h)
         self._photo = ImageTk.PhotoImage(self.img.resize((w, h), Image.LANCZOS))
+        self._drawn_size = (w, h)
         self.delete("all")
         self.create_image(0, 0, image=self._photo, anchor="nw")
         for x, y, text, anchor, color, font in self.texts:
@@ -126,6 +148,8 @@ class TimelineBar(Chart):
 
     def set(self, segments, start_hour: int, colors: dict, names: dict):
         """segments (start minute, minutes, kind); colors / names per kind ("idle" included)."""
+        if self._same((segments, start_hour, colors, names)):
+            return
         self.segments, self.start_hour, self.colors, self.names = segments, start_hour, colors, names
         self._schedule()
 
@@ -164,6 +188,8 @@ class DayBars(Chart):
         self.goal: float | None = None
 
     def set(self, days, goal: float | None):
+        if self._same((days, goal)):
+            return
         self.days, self.goal = days, goal
         self._schedule()
 
@@ -213,6 +239,8 @@ class TrendLine(Chart):
         self.bind("<Leave>", lambda e: self._clear_marker(), add="+")
 
     def set(self, days, goal: float | None):
+        if self._same((days, goal)):
+            return
         self.days, self.goal = days, goal
         self._marker = None   # the old marker id is dropped when the canvas is redrawn
         self._schedule()
@@ -286,6 +314,8 @@ class Heatmap(Chart):
         self.rows: list[tuple[str, date, list[float]]] = []
 
     def set(self, rows):
+        if self._same(rows):
+            return
         self.rows = rows
         self._schedule()
 
@@ -345,6 +375,8 @@ class MonthCalendar(Chart):
 
     def set(self, first: date, per_day: dict[date, float], goal: float | None, today: date, tip_of):
         """first: the month's 1st day; per_day: active seconds; tip_of(day, seconds) -> tooltip text."""
+        if self._same((first, per_day, goal, today)):
+            return
         self.first, self.per_day, self.goal, self.today, self.tip_of = first, per_day, goal, today, tip_of
         self._schedule()
 
@@ -410,6 +442,8 @@ class Donut(Chart):
 
     def set(self, parts, center: str):
         """parts: (value, colour, tooltip)."""
+        if self._same((parts, center)):
+            return
         self.parts, self.center = parts, center
         self._schedule()
 
@@ -446,6 +480,8 @@ class HourBars(Chart):
         self.counts: dict[int, int] = {}
 
     def set(self, counts):
+        if self._same(counts):
+            return
         self.counts = counts
         self._schedule()
 
@@ -482,6 +518,8 @@ class MinuteBars(Chart):
         self.values: list[tuple] = []
 
     def set(self, values):
+        if self._same(values):
+            return
         self.values = values
         self._schedule()
 

@@ -248,7 +248,10 @@ class LockdownApp(ctk.CTk):
         else:
             page = spec(self.content, self)
         page.grid(row=0, column=0, sticky="nsew")
-        page.lower()   # (built in the background: stays behind the page you're on)
+        if name != getattr(self, "current_page", None):
+            # built in the background, so take it back out of the layout: a page that is only hidden still gets
+            # laid out and redrawn on every window resize, and with nine of them that is most of the work
+            page.grid_remove()
         self.pages[name] = page
 
     def _seed_games(self):
@@ -269,6 +272,10 @@ class LockdownApp(ctk.CTk):
     def show_page(self, name: str):
         if name not in self.pages:
             self._build_page(name)
+        for other, page in self.pages.items():
+            if other != name and page.winfo_manager():
+                page.grid_remove()
+        self.pages[name].grid()
         self.pages[name].tkraise()
         if name != getattr(self, "current_page", None):
             self.curtain.cover()
