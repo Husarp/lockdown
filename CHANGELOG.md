@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.57.2 - 2026-09-20 17:52
+- **Setting a time limit on an app froze the window.** The note under the limit boxes measured the panel it was
+  in and re-wrapped itself to fit. Re-wrapping made it taller, that flipped the page's scrollbar on, the
+  scrollbar took the width it had just measured away, so it re-wrapped again - and CustomTkinter's scrollbar
+  redraws by running the event loop, so it span there forever. It only tipped over on an app (an app has extra
+  options, so the page sits right at the height where the scrollbar appears). The note has a fixed wrap width
+  now: the editor already knows whether it is in the narrow group panel or the wide Add panel.
+- **The window now writes its errors to the log.** Tk runs the whole GUI out of callbacks and throws away
+  anything they raise, so a crash left nothing behind - which is why this one took a while to find. Errors go
+  to `C:\ProgramData\Lockdown\lockdown.log` as "Lockdown window: ...". The same error in a row is written
+  once a minute at most, so a callback that fails on every frame can't fill the disk.
+
 ## 0.57.1 - 2026-09-20 16:02
 - **A site you put on "Allowed anyway" stayed blocked.** The lookup itself was right - it let the site and its
   subdomains through straight away - but the answer already handed out to Windows said "this is 127.0.0.1" and

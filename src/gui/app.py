@@ -2,6 +2,7 @@
 import gc
 import queue
 import time
+import traceback
 
 # Import COM libraries on the main thread: background threads importing them at the same time can deadlock.
 import comtypes.client  # noqa: F401
@@ -86,6 +87,7 @@ class LockdownApp(ctk.CTk):
         self.draft.listeners.append(self._on_draft_change)
         self.draft.guard = self.guard
         self.challenge: ChallengeWindow | None = None
+        self._last_error = ("", 0.0)     # (last logged error, when) - see report_callback_exception
         self.word_batch: list | None = None   # tabs closed for blocked words since the last notice (None = none open)
         self.exited = False
         self.db.set_setting(antibypass.EXITED_KEY, "0")
@@ -338,6 +340,23 @@ class LockdownApp(ctk.CTk):
                          shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         self.tray.stop()
         self.destroy()
+
+    def report_callback_exception(self, exc, value, tb):
+        """Tk runs the whole GUI out of callbacks and throws away anything they raise, so a bug in one left no
+        trace at all - the window just froze or went. Write it to the same log the service uses instead. The
+        same error in a row is only written once, so a callback that fails on every frame can't fill the disk."""
+        text = "".join(traceback.format_exception(exc, value, tb))
+        first = text.strip().splitlines()[-1]
+        now = time.time()
+        if first == self._last_error[0] and now - self._last_error[1] < 60:
+            return
+        self._last_error = (first, now)
+        try:
+            from paths import LOG_PATH
+            with open(LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')},000 ERROR Lockdown window: {text}")
+        except OSError:
+            pass
 
     def guard(self, changes: list[str], proceed, cancel=lambda: None, force: bool = False):
         """Anti-Bypass: run `proceed` if loosening is allowed now, else show the challenge first. force: ask even when

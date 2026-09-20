@@ -199,11 +199,13 @@ class LimitEditor(ctk.CTkFrame):
         note = ("For all members together. " if shared else "") + \
             "E.g. 45m, 2h, 1h30; leave empty for no limit. Counted while the app is in front / the site is the " \
             "active browser tab; resets at the limit reset time (Settings)."
-        label = ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=480, justify="left", anchor="w")
+        # A fixed wrap width, NOT one measured from the panel: `shared` already tells us which panel we are in
+        # (the group editor's is the narrow one). Measuring it in a <Configure> handler and re-wrapping the label
+        # made the app hang - the taller label flipped the scrollbar on, the scrollbar took width away, the label
+        # re-wrapped, and CTk's scrollbar redraws by calling update_idletasks, so it span forever.
+        label = ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=300 if shared else 480,
+                             justify="left", anchor="w")
         label.pack(anchor="w", fill="x", pady=(4, 0))
-        # wrap to whatever width the panel gives us (the group editor's panel is narrower than Add's)
-        label.bind("<Configure>", lambda e: label.configure(
-            wraplength=max(200, int(e.width / ctk.ScalingTracker.get_widget_scaling(label)) - 8)))
         self.load(None)
 
     def load(self, rule: dict | None):
