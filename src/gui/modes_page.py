@@ -277,10 +277,30 @@ class ModeEditor(ctk.CTkFrame):
         self.page.refresh()
 
 
+MODE_ICONS = {"work": "briefcase", "study": "book-open", "focus": "target", "dnd": "bell-off", "relax": "coffee"}
+CUSTOM_ICON = "sliders-horizontal"   # your own modes
+_icon_cache: dict[str, ctk.CTkImage] = {}
+
+
+def mode_icon(mode_id: str) -> ctk.CTkImage:
+    """Each built-in mode has its own icon, so the cards don't all look the same."""
+    name = MODE_ICONS.get(mode_id, CUSTOM_ICON)
+    if name not in _icon_cache:
+        _icon_cache[name] = theme.icon(name, theme.ACCENT, 17)
+    return _icon_cache[name]
+
+
 def _mode_card(parent):
     c = Card(parent, accent_top=True)
-    c.name = ctk.CTkLabel(c.body, text="", font=theme.semi(15), anchor="w")
-    c.name.pack(anchor="w", pady=(4, 0))
+    head = ctk.CTkFrame(c.body, fg_color="transparent")
+    head.pack(anchor="w", fill="x", pady=(4, 6))
+    tile = ctk.CTkFrame(head, width=32, height=32, corner_radius=4, fg_color=theme.SURFACE2)
+    tile.pack(side="left", padx=(0, 10))
+    tile.pack_propagate(False)
+    c.icon = ctk.CTkLabel(tile, text="", width=18, height=18)
+    c.icon.place(relx=0.5, rely=0.5, anchor="center")
+    c.name = ctk.CTkLabel(head, text="", font=theme.semi(15), anchor="w")
+    c.name.pack(side="left")
     c.what = ctk.CTkLabel(c.body, text="", text_color=MUTED, font=theme.body(11), anchor="w", justify="left",
                           wraplength=230)
     c.what.pack(anchor="w")
@@ -367,6 +387,7 @@ class ModesPage(ctk.CTkFrame):
             m = all_modes[i]
             card.grid(row=i // COLUMNS, column=i % COLUMNS, sticky="nsew", padx=6, pady=6)
             card.name.configure(text=m["name"])
+            card.icon.configure(image=mode_icon(m["id"]))
             card.what.configure(text=modes.describe(m, names) + (" · mutes notifications" if m["mute"] else ""))
             extra = []
             if m["pomodoro"]:

@@ -73,10 +73,17 @@ def _limit_row(parent):
     return f
 
 
+COMING_DOT = {"start": theme.DANGER, "end": theme.SUCCESS, "limit": theme.WARNING}   # gets blocked / allowed again
+
+
 def _coming_row(parent):
+    """dot (what happens) · time in the condensed face · what - close together, as in the design."""
     f = ctk.CTkFrame(parent, fg_color="transparent")
-    f.when = ctk.CTkLabel(f, text="", text_color=theme.ACCENT, font=theme.semi(13), width=84, anchor="nw")
-    f.when.pack(side="left", anchor="n")
+    f.dot = ctk.CTkLabel(f, text="●", font=theme.body(9), width=12, height=18, anchor="w")
+    f.dot.pack(side="left", anchor="n")
+    f.when = ctk.CTkLabel(f, text="", text_color=theme.ACCENT, font=theme.numeral(15), width=40, height=18,
+                          anchor="w")
+    f.when.pack(side="left", anchor="n", padx=(2, 9))
     texts = ctk.CTkFrame(f, fg_color="transparent")
     texts.pack(side="left", fill="x", expand=True)
     f.title = ctk.CTkLabel(texts, text="", anchor="w", height=18)
@@ -183,7 +190,7 @@ class DashboardPage(ctk.CTkFrame):
         self.coming = Card(right, "Coming up")
         self.coming.pack(fill="x", pady=(0, 12))
         self.coming_rows = Rows(self.coming.body, _coming_row, "Nothing in the next 24 hours.",
-                                {"fill": "x", "pady": 3})
+                                {"fill": "x", "pady": 4})
         self.visits = Card(right, "Blocked visits today")
         self.visits.pack(fill="x", pady=(0, 12))
         self.visits.note.configure(font=theme.numeral(22), text_color=theme.ACCENT)
@@ -414,8 +421,12 @@ class DashboardPage(ctk.CTkFrame):
 
     def _coming(self, now, items, groups, usage):
         upcoming = self._upcoming(now, items, groups, usage)[:4]
+        # the time column is only as wide as it has to be ("07:00"; "Mon 07:00" once something is tomorrow)
+        wide = any(e["when"] is not None and e["when"].date() != now.date() for e in upcoming)
         for row, e in zip(self.coming_rows.take(len(upcoming)), upcoming):
-            row.when.configure(text="Today" if e["when"] is None else when_text(e["when"], now))
+            row.dot.configure(text_color=COMING_DOT[e["kind"]])
+            row.when.configure(text="Today" if e["when"] is None else when_text(e["when"], now),
+                               width=64 if wide else 40)
             row.title.configure(text=e["title"])
             sub = f"about {round(e['left'] / 60)} minutes of use left" if e["kind"] == "limit" else \
                 " · ".join(e["names"]) if len(e["names"]) > 1 else ""

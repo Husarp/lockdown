@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.54.0 - 2026-09-20 04:06
+- **Dashboard "Coming up"**: tighter rows - a coloured dot per row (red = gets blocked, green = allowed again,
+  yellow = a limit runs out), the time in the condensed face right next to it, and the time column only widens
+  when something is on another day.
+- **Blocking > Groups**: the list card is as tall as its groups instead of a full-height panel that's mostly
+  empty; its scrollbar only appears when the list is actually longer than the room.
+- **Modes**: each mode card has its own icon (Work, Study, Focus, Do Not Disturb, Relax; your own modes get the
+  sliders icon) in a small tile next to the name - the cards used to be indistinguishable. Five Lucide icons
+  added to `assets/icons`.
+
 ## 0.53.0 - 2026-09-20 03:53
 - **Look-and-feel pass** (every page captured with realistic data and gone through):
   - Reminders: Sleep and Breaks sit side by side; labels in one muted column with the controls lined up after

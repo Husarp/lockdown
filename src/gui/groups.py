@@ -260,8 +260,11 @@ class GroupsTab(ctk.CTkFrame):
         cols.grid_columnconfigure(0, weight=1, uniform="g")
         cols.grid_columnconfigure(1, weight=3, uniform="g")   # the editor's rail + panel needs the room
         cols.grid_rowconfigure(0, weight=1)
+        # the list card is as tall as its groups (see _fit_list) - not a full-height panel that's mostly empty
+        self.cols = cols
         self.list_box = ctk.CTkScrollableFrame(cols, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
-        self.list_box.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.list_box.grid(row=0, column=0, sticky="new", padx=(0, 6))
+        cols.bind("<Configure>", lambda e: self._fit_list())
         self.right = ctk.CTkScrollableFrame(cols, fg_color="transparent")
         self.right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         # empty state: a quiet card instead of a bare line of text floating in the corner
@@ -275,6 +278,23 @@ class GroupsTab(ctk.CTkFrame):
         self.placeholder.pack(fill="x")
         self.editor = GroupEditor(self.right, self)
         self.last = (None, None)
+
+    def _fit_list(self):
+        """Size the list to its content, up to the room there is; the scrollbar only shows when it has to scroll."""
+        if not self.winfo_exists():
+            return
+        scale = ctk.ScalingTracker.get_widget_scaling(self)
+        need = self.list_box.winfo_reqheight() / scale + 4
+        room = max(120, self.cols.winfo_height() / scale - 14)
+        height = int(min(need, room))
+        if height == getattr(self, "_list_height", None):
+            return
+        self._list_height = height
+        self.list_box.configure(height=height)
+        if need > room:
+            self.list_box._scrollbar.grid()
+        else:
+            self.list_box._scrollbar.grid_remove()
 
     def open_editor(self, group_id: int | None):
         self.selected = group_id
@@ -299,6 +319,7 @@ class GroupsTab(ctk.CTkFrame):
         for w in self.list_box.winfo_children():
             w.destroy()
         groups = self.draft.sorted_groups()
+        self.after_idle(self._fit_list)   # (once the new rows have a size)
         if not groups:
             ctk.CTkLabel(self.list_box, text="No groups yet.", text_color=MUTED).pack(anchor="w", padx=12, pady=12)
             return

@@ -1392,9 +1392,11 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
   edges ("22" -> "?2"). Fixed in 0.53.0 (labels hang inwards).
 - [x] Look-and-feel pass (user, 2026-09-20: "go through the app and make some things prettier") - 0.53.0:
   Reminders two columns, Overview one-line statuses + wide group chips, Groups empty state, trend labels,
-  rail count alignment. Taste-dependent ideas left for the user to pick (not done): coloured Last-7-days bars
-  when nothing is categorised, tighter "Coming up" rows on the Dashboard, a shorter Groups list panel,
-  Modes cards with an icon / accent per mode.
+  rail count alignment.
+- [x] Polish ideas 2-4 the user picked (0.54.0): tighter "Coming up" rows with a coloured dot, the Groups list
+  card sized to its content, an icon per mode on the Modes cards.
+- [ ] Idea 1 (not picked): the Dashboard "Last 7 days" bars are grey while nothing is categorised - they could
+  use the accent colour instead.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed
   challenge's hours emphasised (600 weight) and the next chance with a "— in N h M m" countdown.
 All batches done in 0.43.0 - 0.52.0 (2026-09-20 01:50); installer built as build\LockdownSetup.exe.
