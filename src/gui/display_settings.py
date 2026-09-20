@@ -21,7 +21,8 @@ def hidden(db) -> set[str]:
 
 
 def gear_button(parent, app) -> ctk.CTkButton:
-    return ctk.CTkButton(parent, text="", image=theme.icon("settings", theme.MUTED, 16), width=30, height=28,
+    """The gear that opens "which cards to show". It used to be a 16px muted glyph that was easy to miss."""
+    return ctk.CTkButton(parent, text="", image=theme.icon("settings", theme.TEXT, 22), width=38, height=34,
                          fg_color="transparent", hover_color=theme.SURFACE2, command=lambda: DisplayWindow(app))
 
 

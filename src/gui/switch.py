@@ -9,7 +9,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-from gui import theme
+from gui import paint, theme
 
 TRACK_W, TRACK_H, KNOB, INSET = 34, 18, 14, 2
 KNOB_EDGE = ("#8A939F", "#3A434F")        # the 1px knob edge (light / dark)
@@ -122,9 +122,8 @@ class Switch(ctk.CTkFrame):
         if not self.winfo_exists():
             return
         s, c = self._scale, self.canvas
-        c.delete("all")
-        c.configure(bg=self._bg())
-        w, h, r = TRACK_W * s, TRACK_H * s, TRACK_H * s / 2
+        w, h = TRACK_W * s, TRACK_H * s
+        bg = self._bg()
         disabled = self._state == "disabled"
         if disabled:
             track = theme.pick(OFF_DISABLED)
@@ -132,14 +131,16 @@ class Switch(ctk.CTkFrame):
             track = theme.pick(theme.ACCENT_PRESS if self._hover else theme.ACCENT)
         else:
             track = theme.pick(theme.TRACK)
-        # the pill: two circles + a rectangle (tk has no rounded rectangle)
-        c.create_oval(0, 0, h, h, fill=track, outline=track)
-        c.create_oval(w - h, 0, w, h, fill=track, outline=track)
-        c.create_rectangle(r, 0, w - r, h, fill=track, outline=track)
-        # the knob, inset inside the track, with a 1px edge
+        # drawn with Pillow, not with canvas ovals: those come out with hard, stair-stepped edges
+        art = paint.Art(w, h, bg)
+        art.rrect(0, 0, w, h, h / 2, fill=track)
         k = KNOB * s
         x0 = (w - INSET * s - k) if self._on else INSET * s
         y0 = (h - k) / 2
         knob = theme.pick(KNOB_DISABLED if disabled else theme.WHITE)
-        edge = theme.pick(KNOB_EDGE) if not disabled else theme.pick(KNOB_DISABLED)
-        c.create_oval(x0, y0, x0 + k, y0 + k, fill=knob, outline=edge, width=max(1, int(s)))
+        edge = theme.pick(KNOB_DISABLED if disabled else KNOB_EDGE)
+        art.ellipse(x0, y0, x0 + k, y0 + k, fill=knob, outline=edge, width=s)
+        self._photo = art.photo()   # kept: Tk only keeps a pointer to the image
+        c.delete("all")
+        c.configure(bg=bg)
+        c.create_image(0, 0, image=self._photo, anchor="nw")

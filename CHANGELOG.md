@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.56.0 - 2026-09-20 15:09
+- **The switches are no longer pixelated.** Tk draws circles and rounded corners without anti-aliasing, so every
+  knob had stair-stepped edges. Anything we draw ourselves now goes through `gui/paint.py`, which renders it with
+  Pillow at 4x and scales it back down - the same trick the charts and the app icon already used.
+- **The small segmented tabs** (All / Allowed / Blocked, Today / Yesterday, Dark / AMOLED / Light, ...) were a
+  square block wedged inside a rounded track, in plain 13px text. They are redrawn to the design: a recessed
+  track with 3px padding and smooth 3 / 2px corners, semibold 12px labels, muted until chosen. The track is
+  darker than a card it sits on and lighter than the page background, as the design has it.
+- **The display-settings gear** on Dashboard and Screen Time was a 16px muted glyph that was hard to see - it is
+  22px now and in the normal text colour.
+
 ## 0.55.0 - 2026-09-20 04:36
 - **Switching pages and tabs no longer flashes.** Three things were wrong:
   - The curtain that hides a page while it's swapped opened on a 60 ms timer. Whenever the swap was quicker than

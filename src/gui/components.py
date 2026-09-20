@@ -1,9 +1,10 @@
 """Building blocks of the new design: cards, stat cards, chips, tab bars, blocker cards (charts: charts.py)."""
 import tkinter as tk
+import tkinter.font as tkfont
 
 import customtkinter as ctk
 
-from gui import theme
+from gui import paint, theme
 
 
 class PulseDot(tk.Canvas):
@@ -162,27 +163,35 @@ class Chip(ctk.CTkButton):
 
 
 class Segmented(ctk.CTkFrame):
-    """Tab bar / option switch: rounded buttons on a rounded track; the chosen one in the accent colour.
-    Same use as CTkSegmentedButton: values, command(value), set(), get()."""
+    """Tab bar / option switch: chips in a slightly recessed track, the chosen one in the accent colour.
+    Same use as CTkSegmentedButton: values, command(value), set(), get().
+
+    Drawn with Pillow onto a canvas (gui.paint) rather than out of CTk buttons: Tk rounds corners without
+    anti-aliasing, so at this size the chips came out as hard little blocks inside the track. Sizes follow the
+    design - a 3px track padding, 2px between chips, 14px either side of the label, radius 3 / 2."""
+
+    PAD, GAP, SIDE = 3, 2, 14
+    TRACK_R, CHIP_R = 3, 2
 
     def __init__(self, master, values: list[str], command=None, height: int = 30, **_ignored):
-        super().__init__(master, fg_color=theme.SURFACE2, corner_radius=3)
-        self.command, self.value = command, None
-        self.buttons = {}
-        font = theme.body(13)
-        scale = ctk.ScalingTracker.get_widget_scaling(self)
-        for i, v in enumerate(values):
-            # text width + padding on both sides (measure() is in screen px, widths are in design px)
-            b = ctk.CTkButton(self, text=v, width=int(font.measure(v) / scale) + 28, height=height - 6,
-                              corner_radius=2, font=font, command=lambda v=v: self._clicked(v))
-            b.pack(side="left", padx=(3 if i == 0 else 0, 3), pady=3)
-            self.buttons[v] = b
-        self._paint()
+        super().__init__(master, fg_color="transparent", corner_radius=0)
+        self.command, self.value, self.values = command, None, list(values)
+        self._hover = None
+        s = self._scale = ctk.ScalingTracker.get_widget_scaling(self)
+        self._font = tkfont.Font(family=theme.BODY_SEMI, size=round(12 * s))
+        self._seg = [self._font.measure(v) + round(self.SIDE * 2 * s) for v in self.values]
+        w = round(self.PAD * 2 * s) + sum(self._seg) + round(self.GAP * s) * max(0, len(self._seg) - 1)
+        self._size = (w, round(height * s))
+        self.canvas = tk.Canvas(self, width=self._size[0], height=self._size[1], highlightthickness=0, bd=0,
+                                cursor="hand2")
+        self.canvas.pack()
+        self.canvas.bind("<Button-1>", self._click)
+        self.canvas.bind("<Motion>", lambda e: self._set_hover(self._at(e.x)))
+        self.canvas.bind("<Leave>", lambda e: self._set_hover(None))
+        ctk.AppearanceModeTracker.add(self._mode_changed, self)
+        self.after(1, self._paint)   # (the colour behind it is known once it has been laid out)
 
-    def _clicked(self, value: str):
-        self.set(value)
-        if self.command:
-            self.command(value)
+    # ---------- the same API as before ----------
 
     def set(self, value: str):
         self.value = value
@@ -191,11 +200,65 @@ class Segmented(ctk.CTkFrame):
     def get(self) -> str:
         return self.value
 
+    # ---------- input ----------
+
+    def _spans(self) -> list[tuple[float, float]]:
+        """Each chip's left / right edge, in the canvas's own pixels."""
+        out, x = [], self.PAD * self._scale
+        for w in self._seg:
+            out.append((x, x + w))
+            x += w + self.GAP * self._scale
+        return out
+
+    def _at(self, x: float):
+        return next((v for (x0, x1), v in zip(self._spans(), self.values) if x0 <= x <= x1), None)
+
+    def _click(self, event):
+        value = self._at(event.x)
+        if value is None:
+            return
+        self.set(value)
+        if self.command:
+            self.command(value)
+
+    def _set_hover(self, value):
+        if value != self._hover:
+            self._hover = value
+            self._paint()
+
+    def _mode_changed(self, _mode=None):
+        self._paint()
+
+    # ---------- drawing ----------
+
+    def _bg(self) -> str:
+        try:
+            return self._apply_appearance_mode(self._detect_color_of_master())
+        except Exception:
+            return theme.pick(theme.BG)
+
     def _paint(self):
-        for v, b in self.buttons.items():
-            on = v == self.value
-            b.configure(fg_color=theme.ACCENT if on else "transparent", text_color=theme.WHITE if on else theme.TEXT,
-                        hover_color=theme.ACCENT_PRESS if on else theme.BORDER)
+        if not self.winfo_exists():
+            return
+        w, h = self._size
+        s, bg = self._scale, self._bg()
+        # the track is a well: darker on a card, lighter on the page background (as the design has it)
+        well = theme.pick(theme.BG if bg == theme.pick(theme.SURFACE) else theme.SURFACE2)
+        art = paint.Art(w, h, bg)
+        art.rrect(0, 0, w, h, self.TRACK_R * s, fill=well)
+        for (x0, x1), v in zip(self._spans(), self.values):
+            if v == self.value:
+                art.rrect(x0, self.PAD * s, x1, h - self.PAD * s, self.CHIP_R * s, fill=theme.pick(theme.ACCENT))
+            elif v == self._hover:
+                art.rrect(x0, self.PAD * s, x1, h - self.PAD * s, self.CHIP_R * s,
+                          fill=theme._mix(well, theme.pick(theme.TEXT), 0.1))
+        self._photo = art.photo()   # kept: Tk only keeps a pointer to the image
+        self.canvas.delete("all")
+        self.canvas.configure(bg=bg)
+        self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        for (x0, x1), v in zip(self._spans(), self.values):
+            colour = theme.WHITE if v == self.value else theme.TEXT if v == self._hover else theme.MUTED
+            self.canvas.create_text(round((x0 + x1) / 2), h / 2, text=v, fill=theme.pick(colour), font=self._font)
 
 
 class TabBar(ctk.CTkFrame):

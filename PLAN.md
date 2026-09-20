@@ -1403,6 +1403,9 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [ ] Still slowish when first opened (built once, then cached): Site protection ~1.6 s, Blocking > Calendar
   ~1.3 s, and Calendar re-renders its strips on every visit (~0.6 s on the test desktop). Pool the Strip charts
   / skip the re-render when the range and data haven't changed.
+- [x] Widgets looked cheap up close (user, 2026-09-20): switch knobs pixelated, the small segmented tabs a
+  square chip in a rounded track, the Dashboard gear too small - 0.56.0. Root cause of the first two was Tk
+  drawing shapes without anti-aliasing; `gui/paint.py` (Pillow at 4x) is now the place for hand-drawn widgets.
 - [ ] The background pre-build (a page every 0.5 s after start) freezes the window for as long as each page
   takes to build. Worth spreading out or doing lazily if the first few seconds feel stuttery.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed
