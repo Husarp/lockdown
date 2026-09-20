@@ -34,7 +34,7 @@ WHITE = ("#FFFFFF", "#FFFFFF")
 # ---- your theme + accent colour (Settings > Appearance). Read here, before any widget exists, because colours are
 # fixed when widgets are made - so a new theme / accent applies after a restart (light / dark switch at once).
 THEME_KEY, ACCENT_KEY = "ui.theme", "ui.accent"
-THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "Match Windows": "system"}
+THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "system"}
 MODES = {"dark": "dark", "amoled": "dark", "light": "light", "system": "system"}   # theme -> customtkinter mode
 ACCENTS = {"Orange": "#DB5126", "Red": "#D1342F", "Pink": "#D63F8C", "Purple": "#7C4DDB", "Blue": "#2F6FEB",
            "Teal": "#12948A", "Green": "#23945A", "Yellow": "#C99A0E"}

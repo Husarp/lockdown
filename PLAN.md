@@ -1438,6 +1438,8 @@ one shared pot for the whole category.
 
 - [x] Resizing and tab switching were heavy (user, 2026-09-20) - 0.59.0: only the visible page is laid out,
   charts hold still during a drag, and a chart handed unchanged data does not redraw.
+- [x] Option switches were too wide to fit a window that isn't maximised (user, 2026-09-20) - 0.59.1: smaller
+  control and shorter labels. If any are still too wide, the next step is a dropdown for the longest sets.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

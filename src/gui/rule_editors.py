@@ -15,7 +15,7 @@ DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours"
 CUSTOM = "Custom..."
 UNITS = {"days": 1440, "hours": 60, "minutes": 1}   # biggest first (used to display a custom duration)
 MAX_TEMPORARY_MIN = 30 * 1440
-MODES = {"Allow only during": ALLOW, "Block during": BLOCK}
+MODES = {"Allow only": ALLOW, "Block": BLOCK}   # short: these sit in a row that has to fit a narrow window
 SWITCH_MODES = {"Launches / new visits": VISIT, "Every switch": SWITCH}
 MUTED = theme.MUTED
 PERIOD_LABELS = {"day": "per day", "week": "per week", "month": "per month"}
@@ -121,8 +121,8 @@ class HoursEditor(ctk.CTkFrame):
         top.pack(anchor="w")
         self.mode = Segmented(top, values=list(MODES))
         self.mode.pack(side="left")
-        help_icon(top, "Allow only during: the site / app works only in these times.\nBlock during: it's blocked in "
-                       "these times.\nAn end before the start means overnight (22:00 to 07:00). × removes a time "
+        help_icon(top, "Allow only: the site / app works only in these times.\nBlock: it's blocked in these "
+                       "times.\nAn end before the start means overnight (22:00 to 07:00). × removes a time "
                        "window.").pack(side="left", padx=8)
         self.rows_box = ctk.CTkFrame(self, fg_color="transparent")
         self.rows_box.pack(anchor="w", pady=4)
@@ -160,7 +160,7 @@ class HoursEditor(ctk.CTkFrame):
             for w in s["windows"]:
                 self._add_row(w["days"], w["start"], w["end"])
         else:
-            self.mode.set("Allow only during")
+            self.mode.set("Allow only")
             self._add_row(ALL_DAYS, "09:00", "17:00")
 
     def value(self) -> dict:

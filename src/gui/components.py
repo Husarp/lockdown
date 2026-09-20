@@ -170,19 +170,19 @@ class Segmented(ctk.CTkFrame):
     Drawn with Pillow onto a canvas (gui.paint) rather than out of CTk buttons: Tk rounds corners without
     anti-aliasing, so at this size the chips came out as hard little blocks inside the track.
 
-    The chip hugs its label: 11px either side and 3px of track around it. Bigger than that (the design's own
-    numbers) leaves a band of colour above and below the text, which is what made these look cheap."""
+    The chip hugs its label: 8px either side and 2px of track around it. These sit in rows next to other
+    controls, so every pixel of width counts - a window that isn't maximised ran out of room for them."""
 
-    PAD, GAP, SIDE = 3, 2, 11
-    TRACK_R, CHIP_R = 5, 3
-    MIN = 34          # so a short label ("All", "Both") still gets a chip worth looking at
+    PAD, GAP, SIDE = 2, 2, 8
+    TRACK_R, CHIP_R = 4, 3
+    MIN = 30          # so a short label ("All", "Both") still gets a chip worth looking at
 
-    def __init__(self, master, values: list[str], command=None, height: int = 26, **_ignored):
+    def __init__(self, master, values: list[str], command=None, height: int = 24, **_ignored):
         super().__init__(master, fg_color="transparent", corner_radius=0)
         self.command, self.value, self.values = command, None, list(values)
         self._hover = None
         s = self._scale = ctk.ScalingTracker.get_widget_scaling(self)
-        self._font = tkfont.Font(family=theme.BODY_SEMI, size=round(12 * s))
+        self._font = tkfont.Font(family=theme.BODY_SEMI, size=round(11 * s))
         self._seg = [max(round(self.MIN * s), self._font.measure(v) + round(self.SIDE * 2 * s))
                      for v in self.values]
         w = round(self.PAD * 2 * s) + sum(self._seg) + round(self.GAP * s) * max(0, len(self._seg) - 1)

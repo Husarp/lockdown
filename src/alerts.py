@@ -23,7 +23,7 @@ DEFAULT_MESSAGES = {
     "mode": "{site} is blocked while this mode is on - until {until}.",
     "protection": "{site} is blocked - it's {reason}.",
 }
-FORMATS = {"toast": "Windows notification", "inapp": "Lockdown popup", "both": "Both"}
+FORMATS = {"toast": "Windows", "inapp": "Lockdown", "both": "Both"}   # shown after "Show as"
 COOLDOWN_OPTIONS = [1, 5, 15, 30, 60]
 WARN_MINUTE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 60]
 REPEAT_OPTIONS = [0, 1, 2, 5, 10]   # 0 = don't repeat

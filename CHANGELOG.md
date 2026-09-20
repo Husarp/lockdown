@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.59.1 - 2026-09-20 21:02
+- **The option switches are smaller again**, and the long ones are much shorter. They sit in rows next to other
+  controls, so a window that wasn't maximised ran out of room for them.
+  - The control: 11px text (was 12), 8px either side of a label (was 11), 24px tall (was 26).
+  - The labels that made them wide: "Windows notification / Lockdown popup" -> **Windows / Lockdown**,
+    "Match Windows" -> **System**, "Allow only during / Block during" -> **Allow only / Block**.
+  - Measured: the notification one 326 -> 186 px (43% narrower), the hours one 226 -> 122 px (46%), the theme
+    picker 302 -> 214 px (29%), and everything else 15-16% narrower.
+
 ## 0.59.0 - 2026-09-20 20:37
 - **Resizing the window and switching pages are much lighter.** Three things were doing work for nothing:
   - All nine pages stayed **laid out** at once (only raised and lowered), so dragging the window edge made Tk
