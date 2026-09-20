@@ -10,7 +10,7 @@ from gui import icons, theme
 from gui.components import BlockerRail, eyebrow
 from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, LimitEditor, SwitchEditor, summary
 from gui.target_picker import TargetPicker
-from gui.widgets import ConfirmButton, clear_entry
+from gui.widgets import ConfirmButton, clear_entry, once
 from rules import describe_rule, effective_rules, item_block
 
 MUTED = theme.MUTED
@@ -202,7 +202,7 @@ class GroupEditor(ctk.CTkFrame):
         def done(overrides):
             member["overrides"] = overrides
             self._render_members()
-        CustomizeMember(self, member, rules, done)
+        once("member", lambda: CustomizeMember(self, member, rules, done))
 
     def _remove_member(self, member):
         self.members.remove(member)

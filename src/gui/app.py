@@ -347,7 +347,12 @@ class LockdownApp(ctk.CTk):
             proceed()
             return
         if self.challenge and self.challenge.winfo_exists():
-            self.challenge.destroy()
+            # already asking about something else: keep that one (you may be halfway through typing the phrase)
+            # and turn this request down, so whatever asked for it puts itself back
+            self.challenge.lift()
+            self.challenge.focus_force()
+            cancel()
+            return
         self.deiconify()   # (tray Exit while the window is hidden)
         self.challenge = ChallengeWindow(self, changes, proceed, cancel)
 

@@ -6,6 +6,45 @@ from gui import theme
 CONFIRM_RED = theme.DANGER
 CONFIRM_MS = 3000
 
+_open: dict[str, ctk.CTkToplevel] = {}   # one window per kind (see `once`)
+
+
+def once(key: str, make):
+    """Open a window only if one of that kind isn't already open - otherwise bring the open one to the front.
+    Holding down (or double-clicking) a button that opens a window used to stack a pile of them, because a
+    window only takes the click grab once it is actually on screen."""
+    win = _open.get(key)
+    try:
+        if win is not None and win.winfo_exists():
+            win.deiconify()
+            win.lift()
+            win.focus_force()
+            return win
+    except Exception:
+        pass
+    win = make()
+    _open[key] = win
+    return win
+
+
+def modal(win, app):
+    """Make `win` the window to deal with first, as soon as it can take the grab. Waiting a fixed 50 ms before
+    even trying (what this replaces) left a gap where more clicks got through to the app behind it."""
+    try:
+        if app.winfo_viewable():
+            win.transient(app)
+    except Exception:
+        pass
+
+    def grab():
+        if not win.winfo_exists():
+            return
+        try:
+            win.grab_set()
+        except Exception:
+            win.after(30, grab)   # not on screen yet
+    grab()
+
 
 class ConfirmButton(ctk.CTkButton):
     """A button that needs two clicks: the first turns it into "Confirm" (red) for 3 s, the second runs on_confirm."""
@@ -87,15 +126,7 @@ class ConfirmDialog(ctk.CTkToplevel):
         extra = {"fg_color": theme.DANGER, "hover_color": theme.DANGER} if danger else {}
         ctk.CTkButton(buttons, text=yes_text, width=120, command=self._yes, **extra).pack(side="right")
         ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self._no).pack(side="right", padx=8)
-        if app.winfo_viewable():
-            self.transient(app)
-        self.after(50, self._modal)
-
-    def _modal(self):
-        try:
-            self.grab_set()
-        except Exception:
-            self.after(50, self._modal)
+        modal(self, app)
 
     def _yes(self):
         self._answered = True

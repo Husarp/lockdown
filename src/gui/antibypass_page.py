@@ -9,7 +9,7 @@ from gui import theme
 from gui.components import Card, Segmented, help_icon, page_head
 from gui.word_grid import WordGrid, block_paste
 from gui.rule_editors import WindowRow
-from gui.widgets import ConfirmDialog
+from gui.widgets import ConfirmDialog, modal, once
 from rules import days_text, make_schedule, load_schedule
 from trusted_time import now_from_db
 
@@ -137,15 +137,7 @@ class ChallengeWindow(ctk.CTkToplevel):
                 side="right", padx=8)
             if not self.grid:
                 self.after(100, self.entry.focus_force)
-        if app.winfo_viewable():   # (not when shown alone, e.g. by the uninstaller)
-            self.transient(app)
-        self.after(50, self._modal)
-
-    def _modal(self):
-        try:
-            self.grab_set()
-        except Exception:   # window not viewable yet
-            self.after(50, self._modal)
+        modal(self, app)   # (no transient when shown alone, e.g. by the uninstaller)
 
     def _enable_go(self, enabled: bool):
         faded = (theme._mix(theme.ACCENT[0], theme.BG[0], 0.6), theme._mix(theme.ACCENT[1], theme.BG[1], 0.6))
@@ -422,10 +414,11 @@ class AntiBypassPage(ctk.CTkFrame):
         elif self._challenge_changed(old, new):
             # tightening the challenge is instant, but a phrase you can't reproduce (or hours you can't reach) would
             # lock you out of ever loosening a block - so confirm the new challenge first
-            ConfirmDialog(self.app, "Change the Anti-Bypass challenge?",
-                          "This is what you'll need to loosen a block from now on. Make sure you can actually do it - "
-                          "if you can't, you won't be able to unlock anything.",
-                          on_yes=save, on_no=self.refresh, yes_text="Change it", lines=[describe(new)])
+            once("confirm", lambda: ConfirmDialog(
+                self.app, "Change the Anti-Bypass challenge?",
+                "This is what you'll need to loosen a block from now on. Make sure you can actually do it - "
+                "if you can't, you won't be able to unlock anything.",
+                on_yes=save, on_no=self.refresh, yes_text="Change it", lines=[describe(new)]))
         else:
             save()
 

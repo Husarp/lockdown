@@ -7,7 +7,7 @@ import keywords
 import search
 from gui import theme
 from gui.components import Card, Segmented, help_icon
-from gui.widgets import clear_entry
+from gui.widgets import clear_entry, once
 
 MUTED = theme.MUTED
 
@@ -236,7 +236,8 @@ class WordsCards:
         def save(_words, off):
             others = [w for w in cfg["off"] if w not in words]   # turned-off words of the other list stay
             self._changed(off=others + sorted(off))
-        WordListWindow(self.app, name, words, set(cfg["off"]) & set(words), save, can_add=False)
+        once("words", lambda: WordListWindow(self.app, name, words, set(cfg["off"]) & set(words), save,
+                                             can_add=False))
 
     def _open_words(self):
         WordListWindow(self.app, "Your words", keywords.settings(self.db)["words"], set(),

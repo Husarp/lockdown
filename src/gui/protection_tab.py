@@ -10,7 +10,7 @@ from blocker import protection
 from blocker.hosts import normalize_host
 from gui import icons, theme
 from gui.components import Card, Rows, hairline, help_icon
-from gui.widgets import clear_entry
+from gui.widgets import clear_entry, modal, once
 from gui.words_cards import WordsCards
 from trusted_time import now_from_db
 
@@ -76,15 +76,8 @@ class ManualListWindow(ctk.CTkToplevel):
         ctk.CTkButton(buttons, text="Save", width=90, command=self._save).pack(side="right")
         ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self.destroy).pack(side="right",
                                                                                                     padx=8)
-        self.transient(app)
         self._fill()
-        self.after(50, self._modal)
-
-    def _modal(self):
-        try:
-            self.grab_set()
-        except Exception:
-            self.after(50, self._modal)
+        modal(self, app)
 
     def _fill(self):
         for w in self.list.winfo_children():
@@ -374,7 +367,7 @@ class ProtectionTab(ctk.CTkScrollableFrame):
             latest = protection.settings(self.db)
             manual = [{**x, "entries": entries} if x["key"] == key else x for x in latest["manual"]]
             self._store({**latest, "manual": manual}, f"Remove sites from your {m['name']} list")
-        ManualListWindow(self.page.app, m["name"], m["entries"], save)
+        once("list", lambda: ManualListWindow(self.page.app, m["name"], m["entries"], save))
 
     # ---------- data ----------
 

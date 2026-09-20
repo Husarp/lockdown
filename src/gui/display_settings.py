@@ -6,6 +6,7 @@ import customtkinter as ctk
 
 from gui import theme
 from gui.components import Segmented
+from gui.widgets import once
 
 HIDDEN_KEY = "dash.hidden"            # JSON list of hidden Dashboard cards
 ST_RANGE_KEY, ST_TAB_KEY = "screentime.range", "screentime.tab"
@@ -23,7 +24,8 @@ def hidden(db) -> set[str]:
 def gear_button(parent, app) -> ctk.CTkButton:
     """The gear that opens "which cards to show". It used to be a 16px muted glyph that was easy to miss."""
     return ctk.CTkButton(parent, text="", image=theme.icon("settings", theme.TEXT, 22), width=38, height=34,
-                         fg_color="transparent", hover_color=theme.SURFACE2, command=lambda: DisplayWindow(app))
+                         fg_color="transparent", hover_color=theme.SURFACE2,
+                         command=lambda: once("display", lambda: DisplayWindow(app)))
 
 
 class DisplayWindow(ctk.CTkToplevel):

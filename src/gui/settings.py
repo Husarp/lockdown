@@ -10,7 +10,7 @@ import backup
 import emergency
 from rules import DAY_NAMES, RESET_KEY, change_reset
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
-from gui.widgets import ConfirmButton
+from gui.widgets import ConfirmButton, once
 from gui.components import Card, Segmented, accent_bar, hairline, help_icon, page_head, LockedStrip
 from trusted_time import now_from_db
 
@@ -96,7 +96,7 @@ class SettingsPage(ctk.CTkFrame):
 
     def _manage_categories(self):
         from gui.categories import CategoryEditor
-        CategoryEditor(self, self.db, self._load_categories, self.app.guard)
+        once("categories", lambda: CategoryEditor(self, self.db, self._load_categories, self.app.guard))
 
     # ---------- appearance / goal / reset (one card) ----------
 
@@ -300,11 +300,12 @@ class SettingsPage(ctk.CTkFrame):
         from pathlib import Path
         from gui.widgets import ConfirmDialog
         # show a review of what changes first, then the Anti-Bypass challenge, then apply
-        ConfirmDialog(self.app, "Import these settings?",
-                      f"Importing {Path(path).name} replaces your current setup with the backup. What changes:",
-                      on_yes=lambda: self.app.guard(
-                          [f"Import settings from {Path(path).name} (replaces your blocks and settings)"], restore),
-                      yes_text="Import", lines=backup.diff(self.db, data))
+        once("confirm", lambda: ConfirmDialog(
+            self.app, "Import these settings?",
+            f"Importing {Path(path).name} replaces your current setup with the backup. What changes:",
+            on_yes=lambda: self.app.guard(
+                [f"Import settings from {Path(path).name} (replaces your blocks and settings)"], restore),
+            yes_text="Import", lines=backup.diff(self.db, data)))
 
     def _export_screen_time(self):
         from tkinter import filedialog

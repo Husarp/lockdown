@@ -9,7 +9,7 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from gui import theme
-from gui.widgets import ConfirmButton
+from gui.widgets import ConfirmButton, once
 
 KEY = "stats.categories"   # JSON {"custom": [{"key", "name", "color"}], "colors": {key: "#rrggbb"}}
 BUILTIN = [("productive", "Productive", theme.SUCCESS), ("neutral", "Neutral", theme.MUTED),
@@ -104,7 +104,8 @@ def open_menu(widget, db, kind: str, name: str, current: str, on_done, guard=Non
                              lambda k=k: (db.set_category(kind, name, k), on_done())))
     menu.add_separator()
     menu.add_command(label="  New category...", command=lambda: _new(widget, db, kind, name, on_done, guard))
-    menu.add_command(label="  Edit categories...", command=lambda: CategoryEditor(widget, db, on_done, guard))
+    menu.add_command(label="  Edit categories...",
+                     command=lambda: once("categories", lambda: CategoryEditor(widget, db, on_done, guard)))
     widget._category_images = images   # Tk shows nothing if the images are garbage-collected
     menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.57.0 - 2026-09-20 15:47
+- **Clicking a button twice no longer opens the window twice.** A window only takes the click grab once it is
+  actually on screen, and every pop-up waited a fixed 50 ms before even trying - so a fast double-click, or
+  holding the button down, stacked a pile of them. Six confirm dialogs from six quick clicks, measured.
+  - `widgets.once()` opens a window only if one of that kind isn't already open, and brings the open one to
+    the front otherwise. Every pop-up goes through it: the challenge, confirm dialogs, Browse apps, the word
+    lists, your blocking lists, the category editor, the display settings and a group member's rules.
+  - `widgets.modal()` takes the grab as soon as the window can take one, instead of 50 ms later.
+  - The Anti-Bypass challenge used to throw away the open window and put up a new one when a second change
+    asked for it - losing a phrase you were halfway through typing. It now keeps the one you are answering and
+    turns the new request down, so whatever asked for it puts itself back.
+
 ## 0.56.1 - 2026-09-20 15:33
 - The segmented tabs were still too big: the chip left a band of colour above and below its label, which is what
   made them look cheap. The chip hugs its text now - track 30 -> 26 px, 14 -> 11 px either side, rounder corners

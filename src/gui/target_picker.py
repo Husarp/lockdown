@@ -1,14 +1,15 @@
 """'What to block' input shared by the rule tabs and the group editor: a site or an app."""
 import customtkinter as ctk
 
-from gui import theme
+from gui import theme
+
 from gui.components import help_icon
 
 from blocker.apps import PROTECTED, block_flags, make_block_type
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
 from gui.site_picker import SiteEntry
-from gui.widgets import clear_entry
+from gui.widgets import clear_entry, once
 from importer.popular import POPULAR_SITES
 
 ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then force-closed; started while blocked: "
@@ -51,7 +52,8 @@ class TargetPicker(ctk.CTkFrame):
         self.pickers = ctk.CTkFrame(row, fg_color="transparent")
         self.pickers.pack(side="left")
         ctk.CTkButton(self.pickers, text="Browse apps", width=110, **theme.OUTLINE,
-                      command=lambda: AppBrowser(self, self._fill_app)).pack(side="left", padx=4)
+                      command=lambda: once("apps", lambda: AppBrowser(self, self._fill_app))).pack(
+            side="left", padx=4)
         # optional slot for Add/Update buttons; tiny when empty (an empty frame would default to 200x200)
         self.buttons = ctk.CTkFrame(row, fg_color="transparent", width=1, height=1)
         self.buttons.pack(side="left")
