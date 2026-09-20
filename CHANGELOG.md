@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.55.0 - 2026-09-20 04:36
+- **Switching pages and tabs no longer flashes.** Three things were wrong:
+  - The curtain that hides a page while it's swapped opened on a 60 ms timer. Whenever the swap was quicker than
+    that - the normal case - a flat rectangle sat on screen for the rest of the 60 ms: the flash. It now opens on
+    the next idle moment, before Tk paints, so it's never seen at all and the page just appears.
+  - Charts drew 40 ms after the rest of the page, so a tab appeared with empty chart boxes that filled in a
+    moment later. The first drawing now happens with the rest of the page (the delay stays for window resizing).
+  - **Blocking > Overview was rebuilt from scratch every time you opened it** - every row, chip and button
+    destroyed and made again. Rows are reused now, the way the rest of the app already did it. Opening Blocking
+    went from ~1.6 s to ~0.16 s, and the Overview tab from ~1.2 s to ~0.08 s (measured on the test desktop).
+
 ## 0.54.0 - 2026-09-20 04:06
 - **Dashboard "Coming up"**: tighter rows - a coloured dot per row (red = gets blocked, green = allowed again,
   yellow = a limit runs out), the time in the condensed face right next to it, and the time column only widens

@@ -17,8 +17,8 @@ import emergency
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
 from gui.block_calendar import CalendarTab
-from gui.components import (Curtain, Card, BlockerRail, LockedStrip, Segmented, TabBar, eyebrow, rule_chip, help_icon,
-                            page_head, type_badge)
+from gui.components import (CHIP_STYLES, Curtain, Card, BlockerRail, LockedStrip, Segmented, TabBar, eyebrow,
+                            rule_chip, help_icon, page_head, type_badge)
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, summary
@@ -112,6 +112,17 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.list_box.pack_configure(pady=(8, 10))
         help_icon(top, "Rules from a group are marked with → and can only be changed in Groups.").pack(
             side="left", padx=8, after=self.title)
+        # the table is made once and its rows are reused on every refresh - building them from scratch each time
+        # is what made opening this tab take a moment (see components.Rows for the same idea)
+        self.table = ctk.CTkFrame(self.list_box, fg_color="transparent")
+        self.table.pack(fill="x")
+        self.table.grid_columnconfigure(1, weight=1)
+        for col, name in enumerate(["Item", "Rules", "Status", "Alerts"]):
+            eyebrow(self.table, name).grid(row=0, column=col, padx=(0, 12), pady=(4, 6), sticky="w")
+        self.empty = ctk.CTkLabel(self.list_box, text="Nothing blocked yet - use + Add.", text_color=MUTED)
+        self.rows: list[dict] = []
+        self.live_rules: list[tuple] = []    # (label, rule) - texts updated in place every 2 s
+        self.live_status: list[tuple] = []   # (label, item)
 
     # ---------- emergency unlock ----------
 
@@ -206,6 +217,69 @@ class OverviewTab(ctk.CTkScrollableFrame):
             return sorted(items, key=lambda i: (times[i["id"]] == datetime.min, times[i["id"]]))
         return sorted(items, key=lambda i: (times[i["id"]] != datetime.min, i["display_name"].lower()))
 
+    def _make_row(self) -> dict:
+        """One table row's widgets, made once (see self.table). Filled in by refresh()."""
+        t = self.table
+        r = {"sep": ctk.CTkFrame(t, height=1, fg_color=theme.BORDER), "badge_kind": None, "chips": []}
+        cell = r["cell"] = ctk.CTkFrame(t, fg_color="transparent")
+        r["icon"] = ctk.CTkLabel(cell, text="", width=28)
+        r["icon"].pack(side="left", anchor="n")
+        texts = ctk.CTkFrame(cell, fg_color="transparent")
+        texts.pack(side="left", padx=(6, 0))
+        name_row = r["name_row"] = ctk.CTkFrame(texts, fg_color="transparent")
+        name_row.pack(anchor="w")
+        r["name"] = ctk.CTkLabel(name_row, text="", font=theme.semi(13), height=18, anchor="w")
+        r["name"].pack(side="left")
+        r["targets"] = ctk.CTkLabel(texts, text="", text_color=MUTED, font=theme.body(10), height=14,
+                                    wraplength=COLS[0] - 44, justify="left", anchor="w")
+        r["targets"].pack(anchor="w")
+        r["rules_box"] = ctk.CTkFrame(t, fg_color="transparent")
+        r["status"] = ctk.CTkLabel(t, text="", justify="left", font=theme.body(12))
+        r["alerts"] = ctk.CTkOptionMenu(t, values=list(ALERTS), width=86, height=28)
+        r["edit"] = ctk.CTkButton(t, text="Edit", width=66, height=28, **theme.SECONDARY)
+        r["remove"] = ConfirmButton(t, lambda: None, width=76, height=28, **theme.SECONDARY)
+        return r
+
+    def _fill_row(self, r: dict, item: dict, row: int, groups: list, now, usage):
+        r["sep"].grid(row=row, column=0, columnspan=6, sticky="ew")
+        row += 1
+        r["cell"].grid(row=row, column=0, pady=10, padx=(0, 12), sticky="w")
+        r["icon"].configure(image=icons.for_item(item, 22))
+        r["name"].configure(text=item["display_name"])
+        if r["badge_kind"] != item["item_type"]:   # (only when it changes: the badge is a little frame)
+            if r["badge_kind"] is not None:
+                r["badge"].destroy()
+            r["badge"] = type_badge(r["name_row"], item["item_type"])
+            r["badge"].pack(side="left", padx=(7, 0))
+            r["badge_kind"] = item["item_type"]
+        r["targets"].configure(text=targets_text(item))
+        r["rules_box"].grid(row=row, column=1, pady=8, padx=(0, 12), sticky="w")
+        rules = effective_rules(item, groups)
+        while len(r["chips"]) < len(rules):
+            r["chips"].append(rule_chip(r["rules_box"], "", wraplength=COLS[1] - 20))
+        for chip, rule in zip(r["chips"], rules):
+            fg, bg = CHIP_STYLES[chip_kind(rule)]
+            chip.configure(text=f" {rule_text(rule, now, usage)} ", text_color=fg, fg_color=bg)
+            chip.pack(anchor="w", pady=2)
+            self.live_rules.append((chip, rule))
+        for chip in r["chips"][len(rules):]:
+            chip.pack_forget()
+        r["status"].configure(**status_of(self.page, item, now, usage))
+        r["status"].grid(row=row, column=2, padx=(0, 12), sticky="w")
+        self.live_status.append((r["status"], item))
+        r["alerts"].configure(command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
+        r["alerts"].set(next(k for k, v in ALERTS.items() if v == item["notify"]))
+        r["alerts"].grid(row=row, column=3, padx=(0, 10))
+        choices = [("Edit its blockers", lambda i=item["id"]: self.page.edit_item(i))]
+        choices += [(f"Edit group {g['name']}", lambda g=g["id"]: self.page.edit_group(g))
+                    for g in self.draft.groups_of(item["id"])]
+        r["edit"].configure(text="Edit ▾" if len(choices) > 1 else "Edit",
+                            command=lambda b=r["edit"], c=choices: self._edit(b, c))
+        r["edit"].grid(row=row, column=4, padx=4)
+        r["remove"]._disarm()   # a reused row must never keep "Confirm" armed for the item that was here before
+        r["remove"]._on_confirm = lambda i=item["id"]: self.draft.remove_item(i)
+        r["remove"].grid(row=row, column=5, padx=(4, 0))
+
     def refresh(self, now, usage):
         if emergency.get(self.page.app.db, "emergency.enabled") == "1":
             self.unlock_btn.pack(side="left", padx=16)
@@ -214,58 +288,22 @@ class OverviewTab(ctk.CTkScrollableFrame):
             self.unlock_panel.pack_forget()
         items = self._sorted(self.draft.sorted_items(), now, usage)
         self.title.configure(text=f"Everything blocked ({len(items)})")
-        for w in self.list_box.winfo_children():
-            w.destroy()
-        self.live_rules: list[tuple] = []    # (label, rule) - texts updated in place every 2 s
-        self.live_status: list[tuple] = []   # (label, item)
-        if not items:
-            ctk.CTkLabel(self.list_box, text="Nothing blocked yet - use + Add.", text_color=MUTED).pack(
-                anchor="w", pady=12)
-            return
-        table = ctk.CTkFrame(self.list_box, fg_color="transparent")
-        table.pack(fill="x")
-        table.grid_columnconfigure(1, weight=1)
-        for col, title in enumerate(["Item", "Rules", "Status", "Alerts"]):
-            eyebrow(table, title).grid(row=0, column=col, padx=(0, 12), pady=(4, 6), sticky="w")
+        self.live_rules, self.live_status = [], []
+        if items:
+            self.empty.pack_forget()
+            self.table.pack(fill="x")
+        else:
+            self.table.pack_forget()
+            self.empty.pack(anchor="w", pady=12)
+        while len(self.rows) < len(items):
+            self.rows.append(self._make_row())
         groups = list(self.draft.groups.values())
-        for n, item in enumerate(items):
-            r = 2 * n + 1
-            ctk.CTkFrame(table, height=1, fg_color=theme.BORDER).grid(row=r, column=0, columnspan=6, sticky="ew")
-            r += 1
-            cell = ctk.CTkFrame(table, fg_color="transparent")
-            cell.grid(row=r, column=0, pady=10, padx=(0, 12), sticky="w")
-            ctk.CTkLabel(cell, text="", image=icons.for_item(item, 22), width=28).pack(side="left", anchor="n")
-            texts = ctk.CTkFrame(cell, fg_color="transparent")
-            texts.pack(side="left", padx=(6, 0))
-            name_row = ctk.CTkFrame(texts, fg_color="transparent")
-            name_row.pack(anchor="w")
-            ctk.CTkLabel(name_row, text=item["display_name"], font=theme.semi(13), height=18, anchor="w").pack(
-                side="left")
-            type_badge(name_row, item["item_type"]).pack(side="left", padx=(7, 0))
-            ctk.CTkLabel(texts, text=targets_text(item), text_color=MUTED, font=theme.body(10), height=14,
-                         wraplength=COLS[0] - 44, justify="left", anchor="w").pack(anchor="w")
-            rules_box = ctk.CTkFrame(table, fg_color="transparent")
-            rules_box.grid(row=r, column=1, pady=8, padx=(0, 12), sticky="w")
-            for rule in effective_rules(item, groups):
-                chip = rule_chip(rules_box, rule_text(rule, now, usage), chip_kind(rule), COLS[1] - 20)
-                chip.pack(anchor="w", pady=2)
-                self.live_rules.append((chip, rule))
-            status = ctk.CTkLabel(table, **status_of(self.page, item, now, usage), justify="left", font=theme.body(12))
-            status.grid(row=r, column=2, padx=(0, 12), sticky="w")
-            self.live_status.append((status, item))
-            alerts = ctk.CTkOptionMenu(table, values=list(ALERTS), width=86, height=28,
-                                       command=lambda v, i=item["id"]: self.draft.set_notify(i, ALERTS[v]))
-            alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
-            alerts.grid(row=r, column=3, padx=(0, 10))
-            choices = [("Edit its blockers", lambda i=item["id"]: self.page.edit_item(i))]
-            choices += [(f"Edit group {g['name']}", lambda g=g["id"]: self.page.edit_group(g))
-                        for g in self.draft.groups_of(item["id"])]
-            edit_btn = ctk.CTkButton(table, text="Edit ▾" if len(choices) > 1 else "Edit", width=66, height=28,
-                                     **theme.SECONDARY)
-            edit_btn.configure(command=lambda b=edit_btn, c=choices: self._edit(b, c))
-            edit_btn.grid(row=r, column=4, padx=4)
-            ConfirmButton(table, lambda i=item["id"]: self.draft.remove_item(i), width=76, height=28,
-                          **theme.SECONDARY).grid(row=r, column=5, padx=(4, 0))
+        for n, r in enumerate(self.rows):
+            if n < len(items):
+                self._fill_row(r, items[n], 2 * n + 1, groups, now, usage)
+            else:   # a spare row from a longer list: keep it, just don't show it
+                for key in ("sep", "cell", "rules_box", "status", "alerts", "edit", "remove"):
+                    r[key].grid_forget()
 
     def update_live(self, now, usage):
         """Refresh counters, countdowns and statuses without rebuilding the list."""

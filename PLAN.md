@@ -1397,6 +1397,14 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
   card sized to its content, an icon per mode on the Modes cards.
 - [ ] Idea 1 (not picked): the Dashboard "Last 7 days" bars are grey while nothing is categorised - they could
   use the accent colour instead.
+- [x] Tab / page switching flashed and felt like it was "loading" (user, 2026-09-20) - 0.55.0: the curtain's
+  60 ms timer was the flash (now opens on idle, before Tk paints), charts drew 40 ms late (first draw is now in
+  the same pass), and Blocking > Overview rebuilt every row on each visit (rows are pooled now).
+- [ ] Still slowish when first opened (built once, then cached): Site protection ~1.6 s, Blocking > Calendar
+  ~1.3 s, and Calendar re-renders its strips on every visit (~0.6 s on the test desktop). Pool the Strip charts
+  / skip the re-render when the range and data haven't changed.
+- [ ] The background pre-build (a page every 0.5 s after start) freezes the window for as long as each page
+  takes to build. Worth spreading out or doing lazily if the first few seconds feel stuttery.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed
   challenge's hours emphasised (600 weight) and the next chance with a "— in N h M m" countdown.
 All batches done in 0.43.0 - 0.52.0 (2026-09-20 01:50); installer built as build\LockdownSetup.exe.

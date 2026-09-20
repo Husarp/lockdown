@@ -298,9 +298,15 @@ def help_icon(parent, text: str) -> ctk.CTkLabel:
 
 
 class Curtain:
-    """Covers an area for a moment while its content is swapped (another page / tab), so the new content appears at
-    once instead of being drawn piece by piece in front of you. cover(over) - `over` must be inside `master`."""
-    HOLD_MS = 60
+    """Covers an area while its content is swapped (another page / tab), so the new content appears at once instead
+    of being drawn piece by piece in front of you. cover(over) - `over` must be inside `master`.
+
+    It opens on the next idle moment, never on a timer. Tk only paints when it goes idle, and this frame is taken
+    away first (its callback is queued before the new content's), so in the normal case - the swap finishing in one
+    go - the curtain is never painted at all and the page just appears. A timer instead (what this used to do) put
+    a flat rectangle on screen for its whole duration whenever the swap was quicker than the timer: the flash on
+    every tab switch. While a swap really is slow, Tk shows the page you came from until the new one is ready,
+    which beats staring at an empty rectangle."""
 
     def __init__(self, master):
         self.frame = ctk.CTkFrame(master, fg_color=theme.BG, corner_radius=0)
@@ -311,8 +317,7 @@ class Curtain:
         self.frame.lift()
         if self.job:
             self.frame.after_cancel(self.job)
-        # open once the new content had time to lay out and draw (and Tk is idle again)
-        self.job = self.frame.after(self.HOLD_MS, lambda: self.frame.after_idle(self._open))
+        self.job = self.frame.after_idle(self._open)
 
     def _open(self):
         self.job = None

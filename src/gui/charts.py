@@ -36,7 +36,9 @@ class Chart(tk.Canvas):
     def _schedule(self):
         if self._job:
             self.after_cancel(self._job)
-        self._job = self.after(REDRAW_DELAY_MS, self.redraw)
+        # first drawing: with the rest of the page, so a tab never shows up with empty chart boxes that fill in a
+        # moment later. Later ones wait out the delay (a window resize sends a burst of <Configure> events).
+        self._job = self.after_idle(self.redraw) if self._photo is None else self.after(REDRAW_DELAY_MS, self.redraw)
 
     def redraw(self):
         self._job = None
