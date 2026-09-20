@@ -1406,6 +1406,8 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [x] Widgets looked cheap up close (user, 2026-09-20): switch knobs pixelated, the small segmented tabs a
   square chip in a rounded track, the Dashboard gear too small - 0.56.0. Root cause of the first two was Tk
   drawing shapes without anti-aliasing; `gui/paint.py` (Pillow at 4x) is now the place for hand-drawn widgets.
+- [ ] Segmented tabs: the user may want them tighter still (track 24 / chip 18) or the outlined-group style
+  (1px border + dividers instead of a filled track) in some places - both mocked up, waiting on a preference.
 - [ ] The background pre-build (a page every 0.5 s after start) freezes the window for as long as each page
   takes to build. Worth spreading out or doing lazily if the first few seconds feel stuttery.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed

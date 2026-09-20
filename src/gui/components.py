@@ -167,19 +167,23 @@ class Segmented(ctk.CTkFrame):
     Same use as CTkSegmentedButton: values, command(value), set(), get().
 
     Drawn with Pillow onto a canvas (gui.paint) rather than out of CTk buttons: Tk rounds corners without
-    anti-aliasing, so at this size the chips came out as hard little blocks inside the track. Sizes follow the
-    design - a 3px track padding, 2px between chips, 14px either side of the label, radius 3 / 2."""
+    anti-aliasing, so at this size the chips came out as hard little blocks inside the track.
 
-    PAD, GAP, SIDE = 3, 2, 14
-    TRACK_R, CHIP_R = 3, 2
+    The chip hugs its label: 11px either side and 3px of track around it. Bigger than that (the design's own
+    numbers) leaves a band of colour above and below the text, which is what made these look cheap."""
 
-    def __init__(self, master, values: list[str], command=None, height: int = 30, **_ignored):
+    PAD, GAP, SIDE = 3, 2, 11
+    TRACK_R, CHIP_R = 5, 3
+    MIN = 34          # so a short label ("All", "Both") still gets a chip worth looking at
+
+    def __init__(self, master, values: list[str], command=None, height: int = 26, **_ignored):
         super().__init__(master, fg_color="transparent", corner_radius=0)
         self.command, self.value, self.values = command, None, list(values)
         self._hover = None
         s = self._scale = ctk.ScalingTracker.get_widget_scaling(self)
         self._font = tkfont.Font(family=theme.BODY_SEMI, size=round(12 * s))
-        self._seg = [self._font.measure(v) + round(self.SIDE * 2 * s) for v in self.values]
+        self._seg = [max(round(self.MIN * s), self._font.measure(v) + round(self.SIDE * 2 * s))
+                     for v in self.values]
         w = round(self.PAD * 2 * s) + sum(self._seg) + round(self.GAP * s) * max(0, len(self._seg) - 1)
         self._size = (w, round(height * s))
         self.canvas = tk.Canvas(self, width=self._size[0], height=self._size[1], highlightthickness=0, bd=0,

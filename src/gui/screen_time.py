@@ -511,9 +511,9 @@ class ScreenTimePage(ctk.CTkFrame):
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=30, pady=(0, 10))
         self.range_bar = Segmented(bar, values=list(stats.RANGES), command=lambda v: self.refresh())
-        self.range_bar.pack(side="right")
+        self.range_bar.pack(side="left")
         from gui.display_settings import ST_RANGE_KEY, ST_TAB_KEY, gear_button
-        gear_button(bar, app).pack(side="right", padx=(8, 0), before=self.range_bar)
+        gear_button(bar, app).pack(side="right")
         self.range_bar.set(self.db.get_setting(ST_RANGE_KEY, "Today"))   # (as chosen in the ⚙ Display settings)
         start_tab = self.db.get_setting(ST_TAB_KEY, "Overview")
         self.holder = ctk.CTkFrame(self, fg_color="transparent")
@@ -542,7 +542,7 @@ class ScreenTimePage(ctk.CTkFrame):
         if tab == "Calendar":   # (a month at a time: the range buttons don't apply)
             self.range_bar.pack_forget()
         elif not self.range_bar.winfo_manager():
-            self.range_bar.pack(side="right")
+            self.range_bar.pack(side="left")
         self.refresh()
 
     def on_show(self):

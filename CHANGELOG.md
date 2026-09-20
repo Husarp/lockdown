@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.56.1 - 2026-09-20 15:33
+- The segmented tabs were still too big: the chip left a band of colour above and below its label, which is what
+  made them look cheap. The chip hugs its text now - track 30 -> 26 px, 14 -> 11 px either side, rounder corners
+  (5 / 3). A short label like "All" keeps a minimum chip width so it doesn't shrink to nothing.
+- **Screen Time**: the range switcher (Today / Yesterday / 7 days / 30 days) moved to the left of its row, where
+  it belongs now that the page tabs sit up on the title row; the gear stays on the right. It had been right-
+  aligned since the first design, when that row still held the tab group on its left.
+
 ## 0.56.0 - 2026-09-20 15:09
 - **The switches are no longer pixelated.** Tk draws circles and rounded corners without anti-aliasing, so every
   knob had stair-stepped edges. Anything we draw ourselves now goes through `gui/paint.py`, which renders it with
