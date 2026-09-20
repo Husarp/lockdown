@@ -64,8 +64,8 @@ class TargetPicker(ctk.CTkFrame):
         self.buttons = ctk.CTkFrame(row, fg_color="transparent", width=1, height=1)
         self.buttons.pack(side="left")
         self.block_row = ctk.CTkFrame(self, fg_color="transparent")
-        ctk.CTkLabel(self.block_row, text="When blocked (tick one or more; Close and Minimize exclude each other):").pack(
-            anchor="w")
+        self.block_label = ctk.CTkLabel(self.block_row, text="")
+        self.block_label.pack(anchor="w")
         self.flag_boxes = {}
         for flag, (label, note) in ACTIONS.items():
             line = ctk.CTkFrame(self.block_row, fg_color="transparent")
@@ -131,8 +131,15 @@ class TargetPicker(ctk.CTkFrame):
     def _is_app(self) -> bool:
         return not self.category and (bool(self.app) or self.entry.get().strip().lower().endswith(".exe"))
 
+    def _wants_block_row(self) -> bool:
+        """Apps - and a category, whose apps get closed / minimised the same way."""
+        return self._is_app() or bool(self.category)
+
     def _update_block_row(self):
-        if self._is_app():
+        if self._wants_block_row():
+            self.block_label.configure(text="When blocked, its apps (tick one or more; Close and Minimize exclude "
+                                            "each other):" if self.category else
+                                            "When blocked (tick one or more; Close and Minimize exclude each other):")
             self.block_row.pack(anchor="w", pady=(8, 0))
         else:
             self.block_row.pack_forget()
@@ -200,7 +207,7 @@ class TargetPicker(ctk.CTkFrame):
         name = self.name.get().strip()
         if self.category:
             return {"kind": "category", "targets": [self.category], "name": name or text,
-                    "source": "category", "block_type": None, "app_path": None}
+                    "source": "category", "block_type": self.selected_block_type(), "app_path": None}
         if self._is_app():
             exe = (self.app["exe"] if self.app else text).lower()
             if exe in PROTECTED:

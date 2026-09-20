@@ -13,8 +13,8 @@ import stats
 from gui import app_browser, appinfo, categories, icons, theme
 from gui.charts import DayBars, TimelineBar
 from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow, page_head
-from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, effective_rules, item_block,
-                   limits, next_block, opening_bucket, time_bucket)
+from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left,
+                   effective_rules, item_block, limits, next_block, opening_bucket, time_bucket)
 from trusted_time import now_from_db
 
 REFRESH_MS = 30_000
@@ -338,6 +338,15 @@ class DashboardPage(ctk.CTkFrame):
         seen, entries = set(), []
         for item in items:
             for r in effective_rules(item, groups):
+                spent = allowance_left(r, now, usage)   # "N min allowed during blocked hours", while inside them
+                if spent and (r["usage_owner"], "allowance") not in seen:
+                    seen.add((r["usage_owner"], "allowance"))
+                    used, allowed, until = spent
+                    name = f"{r['group']['name']} (group)" if r["usage_owner"].startswith("group:") \
+                        else item["display_name"]
+                    icon = icons.get(r["group"]["name"], 16) if r.get("group") else icons.for_item(item, 16)
+                    entries.append((f"{name} - allowance", icon, "allowance", used / max(allowed, 1), until,
+                                    used, allowed))
                 if r["rule_type"] not in ("time_limit", "switch_limit") or (r["usage_owner"], r["rule_type"]) in seen:
                     continue
                 seen.add((r["usage_owner"], r["rule_type"]))
@@ -353,14 +362,18 @@ class DashboardPage(ctk.CTkFrame):
                 if best:
                     name = f"{r['group']['name']} (group)" if group else item["display_name"]
                     icon = icons.get(r["group"]["name"], 16) if group else icons.for_item(item, 16)
-                    entries.append((name, icon, is_time, *best))
+                    entries.append((name, icon, "time" if is_time else "opens", *best))
         self.limits.note.configure(text=f"{len(entries)} active")
         entries.sort(key=lambda e: -e[3])
-        for row, (name, icon, is_time, frac, period, used, limit) in zip(self.limit_rows.take(len(entries)),
-                                                                           entries):
+        for row, (name, icon, kind, frac, period, used, limit) in zip(self.limit_rows.take(len(entries)),
+                                                                      entries):
             color = theme.SUCCESS if frac < 0.6 else theme.WARNING if frac < 0.85 else theme.DANGER
-            when = "" if period == "day" else f" {PERIOD_WORDS[period]}"
-            if is_time:
+            if kind == "allowance":   # here period is the end of the blocked stretch, and limit is in seconds
+                left = limit - used
+                text = f"{stats.hm(used)} of {stats.hm(limit)} allowed during blocked hours (until {period:%H:%M})"
+                left_text = f"{stats.hm(left)} left" if left > 0 else "used up"
+            elif kind == "time":
+                when = "" if period == "day" else f" {PERIOD_WORDS[period]}"
                 text, left = f"{stats.hm(used)} of {stats.hm(limit * 60)}{when}", limit * 60 - used
                 left_text = f"{stats.hm(left)} left" if left > 0 else "limit reached"
             else:

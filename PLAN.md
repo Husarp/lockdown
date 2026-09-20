@@ -1434,6 +1434,7 @@ one shared pot for the whole category.
       only - say the word if a group should be able to hold a category too.
 - [x] C. Showing it: the Overview row and the calendar show the category's colour and a CATEGORY badge (0.58.0).
 - [ ] C2. The blocked-visit alert could say which category blocked a site ("blocked - it's Distracting").
+- [x] E. "When blocked" (close / minimize / block internet) for a category, applied to its apps - 0.61.0.
 - [x] D. Backup / import keeps category items - they are ordinary rows and nothing filters by item_type.
 
 - [x] Resizing and tab switching were heavy (user, 2026-09-20) - 0.59.0: only the visible page is laid out,
@@ -1443,6 +1444,8 @@ one shared pot for the whole category.
 - [x] No way to categorise an app without using it first (user, 2026-09-20) - 0.60.0: a right-click menu on
   apps and websites (category / block / add to group / show in Explorer) and "Browse all apps..." on Screen
   Time > Apps. gui/app_actions.py holds the menu so every list can use the same one.
+- [x] No way to see how much of the "N min allowed during blocked hours" was left (user, 2026-09-20) -
+  0.61.0: Dashboard > Limits today, the Overview rule chip and an alert, all from `rules.allowance_left()`.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

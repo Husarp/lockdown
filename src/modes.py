@@ -162,7 +162,7 @@ def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[
 
 
 def category_members(cats: set[str], items: list[dict], categories: dict[tuple[str, str], str],
-                     blocklist: bool = True) -> list[dict]:
+                     blocklist: bool = True, block_type: str | None = None) -> list[dict]:
     """Everything in `cats`: the sites and apps you put in that category on Screen Time (made-up items, id None)
     and - with blocklist=True - the things on your blocklist that count as being in it. A category means the
     same for a mode and for a blocker on the category itself."""
@@ -181,7 +181,8 @@ def category_members(cats: set[str], items: list[dict], categories: dict[tuple[s
     for (kind, name), cat in categories.items():
         if cat in cats:
             add({"id": None, "display_name": name, "target": name, "item_type": kind,
-                 "block_type": "close" if kind == "app" else None, "app_path": None, "notify": None})
+                 "block_type": (block_type or "close") if kind == "app" else None,
+                 "app_path": None, "notify": None})
     return out
 
 

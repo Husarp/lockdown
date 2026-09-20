@@ -310,7 +310,9 @@ class Database:
             categories = self.categories()
             done = {(b["item"]["item_type"], b["item"]["target"].lower()) for b in out}
             for b in cats:
-                for member in modes.category_members({b["item"]["target"]}, items, categories):
+                # the apps it covers are closed / minimised / cut off the internet the way the category says
+                for member in modes.category_members({b["item"]["target"]}, items, categories,
+                                                     block_type=b["item"].get("block_type")):
                     key = (member["item_type"], member["target"].lower())
                     if key not in done:
                         done.add(key)

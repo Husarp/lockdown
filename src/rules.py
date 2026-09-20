@@ -404,6 +404,18 @@ def duration_text(seconds: float) -> str:
     return f"{h}h {m:02d}m" if h else f"{m}m"
 
 
+def allowance_left(rule: dict, now: datetime, usage=no_usage):
+    """(used seconds, allowed seconds, end of this blocked stretch) for "N minutes allowed during blocked hours",
+    while you are inside such a stretch - None otherwise. The dashboard, the rule chips and the alerts all read
+    the allowance through this, so they can't disagree about how much is left."""
+    if rule["rule_type"] != "scheduled" or not rule.get("allowance_min"):
+        return None
+    until = schedule_until(rule["schedule"], now)
+    if not until:
+        return None   # not inside a blocked stretch right now
+    return usage(_item_owner(rule), allowance_bucket(rule, until)), rule["allowance_min"] * 60, until
+
+
 def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
     kind = rule["rule_type"]
     if kind == "permanent":
@@ -414,6 +426,12 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
         text = f"{label}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
         if rule.get("allowance_min"):
             text += f"\n+ {rule['allowance_min']} min allowed during blocked hours"
+            spent = allowance_left(rule, now, usage)
+            if spent:   # inside those hours: say how much of it is still there
+                used, allowed, until = spent
+                left = max(0, allowed - used)
+                text += (f" ({duration_text(left)} left until {until:%H:%M})" if left
+                         else " (used up until " + f"{until:%H:%M})")
         return text
     if kind == "temporary":
         if rule.get("temp_until"):

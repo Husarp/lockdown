@@ -3,7 +3,7 @@ import math
 from datetime import datetime
 
 from blocker.protection import LISTS
-from rules import DAY_NAMES, TIME_FMT, effective_rules, item_block, next_block
+from rules import DAY_NAMES, TIME_FMT, allowance_left, effective_rules, item_block, next_block
 
 REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
@@ -128,6 +128,7 @@ class BlockWatcher:
             entry["in_use"] |= item["id"] in in_use
 
         if warn_on:
+            messages += self._allowance_notices(items, groups, usage, now, in_use)
             for key, e in upcoming.items():
                 last = self.warned.get(key)
                 if last is None or (e["in_use"] and repeat_sec and (now - last).total_seconds() >= repeat_sec):
@@ -145,6 +146,33 @@ class BlockWatcher:
             messages += [self._started(e, now) for e in started.values()]
         self.prev_blocked = set(blocked)
         return messages
+
+    def _allowance_notices(self, items: list[dict], groups: list[dict], usage, now: datetime,
+                           in_use: set[int]) -> list[str]:
+        """You opened something inside its blocked hours and it has "N minutes allowed" left: say so once per
+        stretch, so you know you are spending the allowance rather than wondering why it isn't blocked."""
+        out, seen = [], set()
+        for item in items:
+            if item["id"] not in in_use:
+                continue
+            for rule in effective_rules(item, groups):
+                spent = allowance_left(rule, now, usage)
+                if not spent:
+                    continue
+                used, allowed, until = spent
+                left = allowed - used
+                if left <= 0:
+                    continue
+                key = (rule.get("usage_owner"), "allowance", until)
+                if key in self.warned or key in seen:
+                    continue
+                seen.add(key)
+                self.warned[key] = now
+                name = f"{rule['group']['name']} ({item['display_name']})" if rule.get("group") \
+                    else item["display_name"]
+                out.append(f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
+                           f"allowance left (until {until:%H:%M}).")
+        return out
 
     @staticmethod
     def _warning(e: dict, now: datetime) -> str:

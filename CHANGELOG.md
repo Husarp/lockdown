@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.61.0 - 2026-09-20 21:37
+- **You can see how much of your "N minutes allowed during blocked hours" is left**, instead of guessing.
+  - **Dashboard > Limits today** now lists the allowance while you are inside the blocked stretch:
+    "6 m of 15 m allowed during blocked hours (until 00:34)" with a bar and "9 m left".
+  - **The rule chip** on Blocking > Overview says the same thing: "+ 15 min allowed during blocked hours
+    (9m left until 00:34)", or "(used up until 00:34)" once it is gone.
+  - **An alert** when you open the thing inside its blocked hours: "Discord is blocked now - you have 13 min of
+    your allowance left (until 07:00)." Said once per blocked stretch, not on every check.
+  - All three read the same `rules.allowance_left()`, so they cannot disagree about what is left.
+- **"When blocked" is back for a category.** Picking a category on Blocking > Add now offers Close app /
+  Minimize / Block internet the same way an app does, and its apps are closed, minimised or cut off the way you
+  chose. (It never went away for apps - the row appears once the target is an app, and a category had no row
+  at all.)
+
 ## 0.60.0 - 2026-09-20 21:17
 - **You can set an app's category without opening it first.** Until now a category could only be set from the
   chip on a Screen Time row, and an app only appears there once you have actually used it - so there was no way
