@@ -1458,6 +1458,9 @@ one shared pot for the whole category.
   items and groups, Disable / Enable in both editors, a Disabled card at the bottom of Overview, and the
   Anti-Bypass challenge on the way out (not on the way back in).
 - [x] The allowance alert now names the whole allowance as well as what is left (user, 2026-09-20) - 0.63.0.
+- [x] The setup offered to "update" to the version already installed (user, 2026-09-20) - 0.63.1: it says the
+  version matches, the button reads Reinstall, and it asks before doing anything. A setup OLDER than what is
+  installed still says "updates it to <older>" - worth the same treatment if it ever bites.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

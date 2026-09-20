@@ -20,7 +20,7 @@ import tkinter as tk
 import winreg
 import zipfile
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from version import VERSION   # (src/version.py - the build adds src to the path)
 
@@ -218,9 +218,14 @@ class SetupWindow(tk.Tk):
         box = ttk.Frame(self, padding=18)
         box.pack(fill="both", expand=True)
         current = installed_version()
+        self.same = bool(current) and current == VERSION   # the version installed is the one in this setup
         if uninstalling:
             intro = ("This removes Lockdown: blocking stops, network settings and browser policies go back to how "
                      "they were. (If Anti-Bypass is on, you'll be asked for the challenge first.)")
+        elif self.same:
+            intro = (f"Lockdown {VERSION} is already installed - this setup has the same version.\n"
+                     "Installing it again is safe (your settings, blocks and history are kept) and repairs a "
+                     "broken install.")
         elif current:
             intro = (f"Lockdown {current} is installed. This updates it to {VERSION}.\n"
                      "Your settings, blocks and history are kept.")
@@ -242,7 +247,8 @@ class SetupWindow(tk.Tk):
         self.buttons = ttk.Frame(box)
         self.buttons.pack(fill="x")
         self.go = ttk.Button(self.buttons,
-                             text="Uninstall" if uninstalling else ("Update" if current else "Install"),
+                             text="Uninstall" if uninstalling else
+                             ("Reinstall" if self.same else "Update" if current else "Install"),
                              command=self._start)
         self.go.pack(side="right")
         self.close = ttk.Button(self.buttons, text="Cancel", command=self._close)
@@ -260,6 +266,11 @@ class SetupWindow(tk.Tk):
         self.log_box.configure(state="disabled")
 
     def _start(self):
+        # the same version again is usually a double-click on the wrong file, so ask before touching anything
+        if self.same and not messagebox.askyesno(
+                "Lockdown Setup", f"Lockdown {VERSION} is already installed.\n\nInstall the same version again?",
+                parent=self):
+            return
         self.go.configure(state="disabled")
         self.close.configure(state="disabled")
         threading.Thread(target=self._work, daemon=True).start()

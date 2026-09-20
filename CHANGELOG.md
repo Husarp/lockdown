@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.63.1 - 2026-09-20 23:18
+- **The setup notices when you are installing the version you already have.** It says so ("Lockdown 0.63.1 is
+  already installed - this setup has the same version"), the button reads **Reinstall** instead of Update, and
+  clicking it asks "Install the same version again?" first. Saying no leaves everything untouched; saying yes
+  reinstalls as before, which is still the way to repair a broken install.
+
 ## 0.63.0 - 2026-09-20 22:22
 - **Disable instead of remove.** A group you want to pause for a while no longer has to be deleted and built
   again from scratch.
