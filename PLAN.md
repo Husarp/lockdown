@@ -1415,6 +1415,27 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [x] Setting a time limit on an app hung the window (user, 2026-09-20) - 0.57.2. A <Configure> handler that
   re-wrapped a label fed the scrollbar show/hide loop. Never measure a widget's own panel and resize it in
   response; pass the width in instead (LimitEditor takes `shared`).
+### Block a whole category (user, 2026-09-20)
+Pick a **category** (Distracting, Productive, your own) anywhere you can pick a site or an app, and put any
+blocker on it - hours, a time limit, an opening limit, permanent, temporary. It covers **everything** in that
+category, whether or not it is on the blocklist (the way modes already treat categories), and a time limit is
+one shared pot for the whole category.
+
+- [x] A. Engine: `item_type = "category"`, `target` = the category key. (0.58.0)
+  - [x] `modes.category_members(cats, items, categories)` - pulled out of `modes.targets`, so a category means
+        the same thing for a mode and for a blocker (blocklist items count as Distracting unless set otherwise).
+  - [x] `db.blocks()` expands a blocked category item into the real sites / apps it covers, keeping its reason
+        and rule, and never overriding an item that is blocked in its own right.
+  - [x] Usage: `items_in_use` counts a category item while the app / site in front belongs to it, so a shared
+        time limit adds up across everything in the category.
+  - [x] Tests: expansion, the shared limit, a category item with no members, and a member that is also blocked
+        on its own.
+- [x] B. The picker: a "Category..." button on the Add tab (0.58.0). Group members still take sites / apps
+      only - say the word if a group should be able to hold a category too.
+- [x] C. Showing it: the Overview row and the calendar show the category's colour and a CATEGORY badge (0.58.0).
+- [ ] C2. The blocked-visit alert could say which category blocked a site ("blocked - it's Distracting").
+- [x] D. Backup / import keeps category items - they are ordinary rows and nothing filters by item_type.
+
 - [ ] The background pre-build (a page every 0.5 s after start) freezes the window for as long as each page
   takes to build. Worth spreading out or doing lazily if the first few seconds feel stuttery.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed

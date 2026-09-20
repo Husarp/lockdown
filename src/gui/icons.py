@@ -150,7 +150,23 @@ def get_app(exe: str, path: str | None, size: int = 20) -> ctk.CTkImage:
     return _memory[key]
 
 
-def for_item(item: dict, size: int = 20) -> ctk.CTkImage:
+def swatch(color, size: int = 20) -> ctk.CTkImage:
+    """A rounded square in a category's colour, used where a site would show its favicon."""
+    from gui import theme
+    fill = theme.pick(color)
+    key = (f"swatch:{fill}", size)
+    if key not in _memory:
+        big = size * 4
+        img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rounded_rectangle([0, 0, big - 1, big - 1], radius=big * 0.28, fill=fill)
+        _memory[key] = ctk.CTkImage(img.resize((size, size), Image.LANCZOS), size=(size, size))
+    return _memory[key]
+
+
+def for_item(item: dict, size: int = 20, color=None) -> ctk.CTkImage:
+    if item.get("item_type") == "category":
+        from gui import theme
+        return swatch(color or theme.MUTED, size)
     if item.get("item_type") == "app":
         return get_app(item["target"].lower(), item.get("app_path"), size)
     return get(item["target"].split()[0], size)

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.58.0 - 2026-09-20 19:28
+- **Block a whole category.** On Blocking > Add there is now a **Category...** button next to Browse apps: pick
+  Distracting (or any category of your own) instead of one site or app, and put any blocker on it - hours, a
+  time limit, an opening limit, permanent, temporary.
+  - It covers **everything** in that category, whether or not it is on your blocklist. Mark something
+    Distracting on Screen Time and it is covered from then on, with nothing else to do.
+  - A time limit on a category is **one shared pot**: 40 minutes of Discord and 20 of Reddit use up an hour of
+    "Distracting: 1 h a day" between them.
+  - A category means the same thing here as it does for a mode, so Work and a category blocker agree on what
+    counts as Distracting (things on your blocklist count as Distracting unless you said otherwise).
+  - Anything blocked in its own right keeps its own rule - the category never overrides it.
+  - The row shows the category's colour and a CATEGORY badge.
+
 ## 0.57.2 - 2026-09-20 17:52
 - **Setting a time limit on an app froze the window.** The note under the limit boxes measured the panel it was
   in and re-wrapped itself to fit. Re-wrapping made it taller, that flipped the page's scrollbar on, the

@@ -60,7 +60,8 @@ def page_head(parent, text: str) -> ctk.CTkFrame:
     return row
 
 
-_BADGE = {"site": ("MUTED", "BORDER"), "app": ("INFO", "INFO"), "group": ("WARNING", "WARNING")}
+_BADGE = {"site": ("MUTED", "BORDER"), "app": ("INFO", "INFO"), "group": ("WARNING", "WARNING"),
+          "category": ("ACCENT", "ACCENT")}
 
 
 def type_badge(parent, kind: str) -> ctk.CTkFrame:

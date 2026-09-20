@@ -272,7 +272,7 @@ class CalendarTab(ctk.CTkScrollableFrame):
                 shown.append((item, days))
 
         for row, (item, days) in zip(self.rows.take(len(shown)), shown):
-            row.icon.configure(image=icons.for_item(item, 20))
+            row.icon.configure(image=icons.for_item(item, 20, colors.get(item["target"])))
             row.name.configure(text=item["display_name"])
             for w in row.badge.winfo_children():
                 w.destroy()

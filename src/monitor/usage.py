@@ -8,6 +8,7 @@
 import logging
 import threading
 
+import modes
 from blocker.apps import list_processes
 from blocker.hosts import normalize_host
 from db import Database
@@ -31,9 +32,11 @@ def match_item(host: str, items: list[dict]) -> dict | None:
     return None
 
 
-def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict]) -> list[dict]:
+def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict],
+                 categories: dict[tuple[str, str], str] | None = None) -> list[dict]:
     """Items being used: the foreground app (games count even without keyboard/mouse input), and the site
-    open in the foreground browser tab (only while you're not away)."""
+    open in the foreground browser tab (only while you're not away). A blocker on a whole category counts as
+    in use whenever one of its members is, so its time limit is one pot for everything in the category."""
     used = [i for i in items if i["item_type"] == "app" and exe and i["target"].lower() == exe]
     if url and not idle:
         try:
@@ -42,7 +45,30 @@ def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict]
             site = None
         if site:
             used.append(site)
+    cat_items = [i for i in items if i["item_type"] == "category"]
+    if cat_items:
+        cats = used_categories(exe, url, idle, used, categories or {})
+        used += [i for i in cat_items if i["target"] in cats]
     return used
+
+
+def used_categories(exe: str | None, url: str | None, idle: bool, used: list[dict],
+                    categories: dict[tuple[str, str], str]) -> set[str]:
+    """The categories the thing in front belongs to - what you set on Screen Time for this exe / site, and the
+    category of any blocklist item it matched (those count as Distracting unless you said otherwise)."""
+    out = {modes.item_category(i, categories) for i in used}
+    if exe:
+        out.add(categories.get(("app", exe.lower()), ""))
+    if url and not idle:
+        try:
+            host = normalize_host(url)
+        except ValueError:
+            host = None
+        if host:
+            for (kind, name), cat in categories.items():
+                if kind == "site" and (name == host or host.endswith("." + name)):
+                    out.add(cat)
+    return out - {""}
 
 
 def sense_desktop():
@@ -89,7 +115,7 @@ class UsageTracker(threading.Thread):
         self.running = running
         switched = self.record_activity(db, exe, site_of(url), idle_sec, now)
         items = db.list_items()
-        used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, items)
+        used = items_in_use(exe, url, idle_sec > IDLE_LIMIT_SEC, items, db.categories())
         used_ids = {i["id"] for i in used}
         groups = db.list_groups()
         clock = db.limit_clock()

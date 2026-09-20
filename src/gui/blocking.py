@@ -67,6 +67,8 @@ def status_of(page, item: dict, now, usage) -> dict:
 
 
 def targets_text(item: dict) -> str:
+    if item["item_type"] == "category":
+        return "everything in this category - on your list or not"
     if item["item_type"] == "app":
         flags = block_flags(item.get("block_type"))
         words = (("close", "closes"), ("background", "background processes"), ("minimize", "minimises"),
@@ -244,7 +246,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         r["sep"].grid(row=row, column=0, columnspan=6, sticky="ew")
         row += 1
         r["cell"].grid(row=row, column=0, pady=10, padx=(0, 12), sticky="w")
-        r["icon"].configure(image=icons.for_item(item, 22))
+        r["icon"].configure(image=icons.for_item(item, 22, self.colors.get(item["target"])))
         r["name"].configure(text=item["display_name"])
         if r["badge_kind"] != item["item_type"]:   # (only when it changes: the badge is a little frame)
             if r["badge_kind"] is not None:
@@ -287,6 +289,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
             self.unlock_btn.pack_forget()
             self.unlock_panel.pack_forget()
         items = self._sorted(self.draft.sorted_items(), now, usage)
+        from gui import categories
+        self.colors = categories.colors_of(categories.load(self.page.app.db))   # for the category rows' swatch
         self.title.configure(text=f"Everything blocked ({len(items)})")
         self.live_rules, self.live_status = [], []
         if items:
@@ -391,7 +395,7 @@ class AddTab(ctk.CTkScrollableFrame):
 
     def reset(self):
         self.edit_id = None
-        self.title.configure(text="Add a site or app")
+        self.title.configure(text="Add a site, app or category")
         self.submit_btn.configure(text="+ Add")
         self.picker.reset()
         self.info.configure(text="")

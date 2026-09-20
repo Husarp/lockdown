@@ -303,6 +303,18 @@ class Database:
             block = item_block(effective_rules(item, groups), now, usage)
             if block:
                 out.append({"item": item, "reason": block[0], "until": block[1], "rule": block[2]})
+        # a blocked category stands for everything in it: put the real sites and apps in the list, keeping the
+        # category's own reason. Anything already blocked in its own right keeps that block.
+        cats = [b for b in out if b["item"]["item_type"] == "category"]
+        if cats:
+            categories = self.categories()
+            done = {(b["item"]["item_type"], b["item"]["target"].lower()) for b in out}
+            for b in cats:
+                for member in modes.category_members({b["item"]["target"]}, items, categories):
+                    key = (member["item_type"], member["target"].lower())
+                    if key not in done:
+                        done.add(key)
+                        out.append({**b, "item": member})
         state = modes.active(self, now)
         if modes.blocking(state):
             done = {b["item"]["id"] for b in out}

@@ -120,8 +120,10 @@ def stop(db, now: datetime, force: bool = False):
 
 # ---------- what it blocks ----------
 
-def _item_category(item: dict, categories: dict[tuple[str, str], str]) -> str:
+def item_category(item: dict, categories: dict[tuple[str, str], str]) -> str:
     """A blocklist item's category: chosen for its exe / one of its sites (or a subdomain), else Distracting."""
+    if item["item_type"] == "category":
+        return item["target"]
     if item["item_type"] == "app":
         return categories.get(("app", item["target"].lower()), "distracting")
     hosts = item["target"].lower().split()
@@ -145,19 +147,41 @@ def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[
             out.append(item)
 
     for item in items:
-        in_cat = _item_category(item, categories) in cats
+        in_cat = item_category(item, categories) in cats
         in_groups = any(item["id"] in g["members"] for g in groups if g["id"] in mode.get("groups", []))
         if in_cat or item["id"] in mode.get("items", []) or in_groups:
             add(item)
-    for (kind, name), cat in categories.items():
-        if cat in cats:
-            add({"id": None, "display_name": name, "target": name, "item_type": kind,
-                 "block_type": "close" if kind == "app" else None, "app_path": None, "notify": None})
+    for item in category_members(cats, items, categories, blocklist=False):
+        add(item)
     for extra in mode.get("extra", []):
         add({"id": None, "display_name": extra["name"], "target": " ".join(extra["targets"]),
              "item_type": extra["kind"], "block_type": extra.get("block_type") or ("close" if extra["kind"] == "app"
                                                                                   else None),
              "app_path": extra.get("app_path"), "notify": None})
+    return out
+
+
+def category_members(cats: set[str], items: list[dict], categories: dict[tuple[str, str], str],
+                     blocklist: bool = True) -> list[dict]:
+    """Everything in `cats`: the sites and apps you put in that category on Screen Time (made-up items, id None)
+    and - with blocklist=True - the things on your blocklist that count as being in it. A category means the
+    same for a mode and for a blocker on the category itself."""
+    out, seen = [], set()
+
+    def add(item):
+        key = (item["item_type"], item["target"].lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+
+    if blocklist:
+        for item in items:
+            if item["item_type"] != "category" and item_category(item, categories) in cats:
+                add(item)
+    for (kind, name), cat in categories.items():
+        if cat in cats:
+            add({"id": None, "display_name": name, "target": name, "item_type": kind,
+                 "block_type": "close" if kind == "app" else None, "app_path": None, "notify": None})
     return out
 
 

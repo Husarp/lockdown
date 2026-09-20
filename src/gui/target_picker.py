@@ -1,4 +1,6 @@
-"""'What to block' input shared by the rule tabs and the group editor: a site or an app."""
+"""'What to block' input shared by the rule tabs and the group editor: a site, an app or a whole category."""
+import tkinter as tk
+
 import customtkinter as ctk
 
 from gui import theme
@@ -40,7 +42,9 @@ class TargetPicker(ctk.CTkFrame):
 
     def __init__(self, master, db, **kw):
         super().__init__(master, fg_color="transparent", **kw)
+        self.db = db
         self.app: dict | None = None      # picked app {name, exe, path}
+        self.category: str | None = None  # picked category (blocks everything in it)
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(anchor="w")
         self.entry = SiteEntry(row, db, self._fill_site, self._fill_app, width=240,
@@ -54,6 +58,8 @@ class TargetPicker(ctk.CTkFrame):
         ctk.CTkButton(self.pickers, text="Browse apps", width=110, **theme.OUTLINE,
                       command=lambda: once("apps", lambda: AppBrowser(self, self._fill_app))).pack(
             side="left", padx=4)
+        ctk.CTkButton(self.pickers, text="Category...", width=100, **theme.OUTLINE,
+                      command=self._pick_category).pack(side="left", padx=(0, 4))
         # optional slot for Add/Update buttons; tiny when empty (an empty frame would default to 200x200)
         self.buttons = ctk.CTkFrame(row, fg_color="transparent", width=1, height=1)
         self.buttons.pack(side="left")
@@ -72,14 +78,40 @@ class TargetPicker(ctk.CTkFrame):
 
     # ---------- filling ----------
 
+    def _pick_category(self):
+        """Block a whole category instead of one site or app - everything in it, on the blocklist or not."""
+        from gui import categories
+        menu = tk.Menu(self, tearoff=False)
+        images = []
+        for c in categories.load(self.db):
+            img = categories._swatch(c["color"])
+            images.append(img)
+            menu.add_command(label=f"  {c['name']}", image=img, compound="left",
+                             command=lambda c=c: self._fill_category(c["key"], c["name"]))
+        self._category_images = images   # Tk shows nothing if the images are garbage-collected
+        menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
+
+    def _fill_category(self, key: str, name: str):
+        self.app = None
+        self.category = key
+        self.entry.configure(state="normal")
+        self._set(self.entry, f"category \u00b7 {name}")
+        self.entry.configure(state="disabled")   # a category isn't typed, it's chosen
+        self._set(self.name, name)
+        self._update_block_row()
+
     def _fill_site(self, name: str, host: str):
         self.app = None
+        self.category = None
+        self.entry.configure(state="normal")
         self._set(self.entry, host)
         self._set(self.name, name)
         self._update_block_row()
 
     def _fill_app(self, app: dict):
         self.app = app
+        self.category = None
+        self.entry.configure(state="normal")
         self._set(self.entry, app["exe"])
         self._set(self.name, app["name"])
         if app.get("steam"):   # a game can run from several exes / a launcher: close everything in its folder
@@ -97,7 +129,7 @@ class TargetPicker(ctk.CTkFrame):
         entry.insert(0, text)
 
     def _is_app(self) -> bool:
-        return bool(self.app) or self.entry.get().strip().lower().endswith(".exe")
+        return not self.category and (bool(self.app) or self.entry.get().strip().lower().endswith(".exe"))
 
     def _update_block_row(self):
         if self._is_app():
@@ -109,6 +141,7 @@ class TargetPicker(ctk.CTkFrame):
 
     def reset(self):
         self.app = None
+        self.category = None
         self.entry.configure(state="normal")
         clear_entry(self.entry)
         clear_entry(self.name)
@@ -120,6 +153,15 @@ class TargetPicker(ctk.CTkFrame):
         """Edit mode: show the item; its site/app can't be changed, name and block type can."""
         self.app = {"exe": item["target"], "path": item.get("app_path"), "name": item["display_name"]} \
             if item["item_type"] == "app" else None
+        self.category = item["target"] if item["item_type"] == "category" else None
+        if self.category:
+            self.entry.configure(state="normal")
+            self._set(self.entry, f"category \u00b7 {item['display_name']}")
+            self.entry.configure(state="disabled")
+            self._set(self.name, item["display_name"])
+            self.pickers.pack_forget()
+            self._update_block_row()
+            return
         self.entry.configure(state="normal")
         self._set(self.entry, item["target"].split()[0])
         self.entry.configure(state="disabled")
@@ -156,6 +198,9 @@ class TargetPicker(ctk.CTkFrame):
         """{kind, targets, name, source, block_type, app_path}. Raises ValueError with a user-facing message."""
         text = self.entry.get().strip()
         name = self.name.get().strip()
+        if self.category:
+            return {"kind": "category", "targets": [self.category], "name": name or text,
+                    "source": "category", "block_type": None, "app_path": None}
         if self._is_app():
             exe = (self.app["exe"] if self.app else text).lower()
             if exe in PROTECTED:
