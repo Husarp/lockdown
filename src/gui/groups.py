@@ -99,6 +99,9 @@ class GroupEditor(ctk.CTkFrame):
             side="right", padx=6)
         self.remove_btn = ConfirmButton(head, self._remove, text="Remove group", confirm_text="Confirm remove",
                                         width=120)
+        # pausing a group instead of removing it: the rules stay, they just stop applying
+        self.disable_btn = ctk.CTkButton(head, text="Disable", width=90, **theme.SECONDARY,
+                                         command=self._toggle_disabled)
         name_row = ctk.CTkFrame(self, fg_color="transparent")
         name_row.pack(fill="x", padx=16)
         ctk.CTkLabel(name_row, text="Name", width=60, anchor="w").pack(side="left")
@@ -127,8 +130,11 @@ class GroupEditor(ctk.CTkFrame):
         self.title.configure(text="Edit group" if group else "New group")
         if group:
             self.remove_btn.pack(side="right")
+            self.disable_btn.configure(text="Enable" if group.get("disabled") else "Disable")
+            self.disable_btn.pack(side="right", padx=6)
         else:
             self.remove_btn.pack_forget()
+            self.disable_btn.pack_forget()
         clear_entry(self.name)
         if group:
             self.name.insert(0, group["name"])
@@ -208,6 +214,16 @@ class GroupEditor(ctk.CTkFrame):
     def _remove_member(self, member):
         self.members.remove(member)
         self._render_members()
+
+    def _toggle_disabled(self):
+        """Disabled groups keep everything and move to Overview > Disabled; enabling them again is one click."""
+        if self.group_id is None:
+            return
+        group = self.draft.groups[self.group_id]
+        name, off = group["name"], not group.get("disabled")
+        self.tab.close_editor()
+        self.draft.set_group_disabled(self.group_id, off)
+        self.tab.page.confirm(f"Group {name} {'disabled' if off else 'enabled'}")
 
     def _remove(self):
         if self.group_id is not None:
@@ -338,6 +354,8 @@ class GroupsTab(ctk.CTkFrame):
                                .replace(":\n", " ").replace("\n", " · ") for r in g["rules"])
             if self.draft.is_group_unsaved(g["id"]):
                 status, color = "Not applied (unsaved)", ORANGE
+            elif g.get("disabled"):
+                status, color = "Disabled - nothing is enforced", MUTED
             else:
                 blocked = sum(1 for i in g["members"] if i in self.draft.saved_items and item_block(
                     effective_rules(self.draft.saved_items[i], saved_groups), now, usage))

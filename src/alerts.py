@@ -175,7 +175,7 @@ class BlockWatcher:
                 self.warned[key] = now
                 name = rule["group"]["name"] if pot.startswith("group:") else item["display_name"]
                 out.append(f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
-                           f"allowance left (until {until:%H:%M}).")
+                           f"{allowed // 60} min allowance left (until {until:%H:%M}).")
         return out
 
     @staticmethod

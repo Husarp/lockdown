@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.63.0 - 2026-09-20 22:22
+- **Disable instead of remove.** A group you want to pause for a while no longer has to be deleted and built
+  again from scratch.
+  - **Groups > Edit group** has a **Disable** button next to Remove group, and **Blocking > Edit** has one for
+    a single site or app. Everything is kept - rules, members, customisations - it just stops being enforced.
+  - Disabled things leave the list and appear in a **Disabled** card at the bottom of Blocking > Overview,
+    with an Edit button that takes you back in (where the button now says Enable).
+  - An item whose group is paused shows a grey "→ Good Night · disabled" chip, so it doesn't look as if it
+    lost its blockers.
+  - Disabling stops a block, so Anti-Bypass asks for the challenge first ("Disable Good Night"). Enabling it
+    again is free.
+- **The allowance alert says what you started with**: "you have 5 min of your 15 min allowance left (until
+  05:00)" instead of only the minutes remaining. The figure was already live - this just shows both numbers.
+- The rule chips in Blocking > Overview have shown the allowance left since 0.61.0 ("+ 15 min allowed during
+  blocked hours (6m left until 01:20)"), and since 0.62.0 that is the group's shared pot.
+
 ## 0.62.0 - 2026-09-20 21:59
 - **A group's "N minutes allowed during blocked hours" is now one pot shared by every member.** Before, each
   member had its own 15 minutes, so a group of three quietly granted 45. Whichever member you use spends the

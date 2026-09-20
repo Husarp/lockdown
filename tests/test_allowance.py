@@ -65,7 +65,7 @@ def test_you_are_told_when_you_start_spending_it():
     watcher = alerts.BlockWatcher()
     watcher.prev_blocked = set()
     messages = watcher.check([item], [], _spent(item, 2 * 60), NOW, {1}, SETTINGS)
-    assert any("blocked now" in m and "13 min of your allowance left" in m for m in messages), messages
+    assert any("blocked now" in m and "13 min of your 15 min allowance left" in m for m in messages), messages
 
     again = watcher.check([item], [], _spent(item, 3 * 60), NOW, {1}, SETTINGS)
     assert not any("allowance left" in m for m in again)      # said once per blocked stretch, not every tick

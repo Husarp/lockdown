@@ -130,6 +130,10 @@ class OverviewTab(ctk.CTkScrollableFrame):
         for col, name in enumerate(["Item", "Rules", "Status", "Alerts"]):
             eyebrow(self.table, name).grid(row=0, column=col, padx=(0, 12), pady=(4, 6), sticky="w")
         self.empty = ctk.CTkLabel(self.list_box, text="Nothing blocked yet - use + Add.", text_color=MUTED)
+        # paused items and groups live in their own card under the list, so the list above is what is enforced
+        self.off_card = ctk.CTkFrame(self, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
+        self.off_box = ctk.CTkFrame(self.off_card, fg_color="transparent")
+        self.off_box.pack(fill="x", padx=15, pady=10)
         self.rows: list[dict] = []
         self.live_rules: list[tuple] = []    # (label, rule) - texts updated in place every 2 s
         self.live_status: list[tuple] = []   # (label, item)
@@ -265,14 +269,20 @@ class OverviewTab(ctk.CTkScrollableFrame):
         r["targets"].configure(text=targets_text(item))
         r["rules_box"].grid(row=row, column=1, pady=8, padx=(0, 12), sticky="w")
         rules = effective_rules(item, groups)
-        while len(r["chips"]) < len(rules):
+        # a paused group: say so, or the item looks like it has no blockers at all
+        off = [g for g in groups if g.get("disabled") and item["id"] in g["members"]]
+        while len(r["chips"]) < len(rules) + len(off):
             r["chips"].append(rule_chip(r["rules_box"], "", wraplength=COLS[1] - 20))
         for chip, rule in zip(r["chips"], rules):
             fg, bg = CHIP_STYLES[chip_kind(rule)]
             chip.configure(text=f" {rule_text(rule, now, usage)} ", text_color=fg, fg_color=bg)
             chip.pack(anchor="w", pady=2)
             self.live_rules.append((chip, rule))
-        for chip in r["chips"][len(rules):]:
+        for chip, g in zip(r["chips"][len(rules):], off):
+            fg, bg = CHIP_STYLES["neutral"]
+            chip.configure(text=f" → {g['name']} · disabled ", text_color=fg, fg_color=bg)
+            chip.pack(anchor="w", pady=2)
+        for chip in r["chips"][len(rules) + len(off):]:
             chip.pack_forget()
         r["status"].configure(**status_of(self.page, item, now, usage))
         r["status"].grid(row=row, column=2, padx=(0, 12), sticky="w")
@@ -296,7 +306,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
         else:
             self.unlock_btn.pack_forget()
             self.unlock_panel.pack_forget()
-        items = self._sorted(self.draft.sorted_items(), now, usage)
+        items = self._sorted([i for i in self.draft.sorted_items() if not i.get("disabled")], now, usage)
+        self._fill_disabled()
         from gui import categories
         self.colors = categories.colors_of(categories.load(self.page.app.db))   # for the category rows' swatch
         self.title.configure(text=f"Everything blocked ({len(items)})")
@@ -316,6 +327,36 @@ class OverviewTab(ctk.CTkScrollableFrame):
             else:   # a spare row from a longer list: keep it, just don't show it
                 for key in ("sep", "cell", "rules_box", "status", "alerts", "edit", "remove"):
                     r[key].grid_forget()
+
+    def _fill_disabled(self):
+        """Disabled items and groups: kept with their blockers, enforcing nothing, out of the list above.
+        The card is only there when something is disabled."""
+        for w in self.off_box.winfo_children():
+            w.destroy()
+        items = [i for i in self.draft.sorted_items() if i.get("disabled")]
+        groups = [g for g in self.draft.sorted_groups() if g.get("disabled")]
+        if not items and not groups:
+            self.off_card.pack_forget()
+            return
+        self.off_card.pack(fill="x", pady=(12, 0))
+        eyebrow(self.off_box, f"Disabled ({len(items) + len(groups)})").pack(anchor="w")
+        ctk.CTkLabel(self.off_box, text="Kept with their blockers, but nothing is enforced. Edit one to turn it "
+                                        "back on.", text_color=MUTED, font=theme.body(11)).pack(anchor="w",
+                                                                                                pady=(0, 4))
+        for item in items:
+            self._off_row(item["display_name"], icons.for_item(item, 18),
+                          lambda i=item["id"]: self.page.edit_item(i))
+        for g in groups:
+            self._off_row(f"{g['name']} (group)", icons.get(g["name"], 18),
+                          lambda i=g["id"]: self.page.edit_group(i))
+
+    def _off_row(self, text: str, icon, on_edit):
+        line = ctk.CTkFrame(self.off_box, fg_color="transparent")
+        line.pack(fill="x", pady=2)
+        ctk.CTkLabel(line, text=f"  {text}", image=icon, compound="left", font=theme.semi(12),
+                     text_color=MUTED).pack(side="left")
+        ctk.CTkButton(line, text="Edit", width=66, height=26, **theme.SECONDARY,
+                      command=on_edit).pack(side="right")
 
     def update_live(self, now, usage):
         """Refresh counters, countdowns and statuses without rebuilding the list."""
@@ -353,6 +394,9 @@ class AddTab(ctk.CTkScrollableFrame):
         ctk.CTkFrame(head, width=3, height=24, corner_radius=0, fg_color=theme.ACCENT).pack(side="left", padx=(0, 10))
         self.title = ctk.CTkLabel(head, font=theme.body(18, "bold"))
         self.title.pack(side="left")
+        # pausing an item instead of removing it: the blockers stay, they just stop applying
+        self.disable_btn = ctk.CTkButton(head, text="Disable", width=90, height=28, **theme.SECONDARY,
+                                         command=self._toggle_disabled)
         self.picker = TargetPicker(box, page.app.db)
         self.picker.pack(anchor="w", padx=16, pady=(0, 4))
         self.picker.entry.bind("<Return>", lambda e: self._submit(), add="+")
@@ -408,6 +452,7 @@ class AddTab(ctk.CTkScrollableFrame):
         self.picker.reset()
         self.info.configure(text="")
         self.error.configure(text="")
+        self.disable_btn.pack_forget()
         self._load_rules([])
 
     def cancel(self):
@@ -425,8 +470,19 @@ class AddTab(ctk.CTkScrollableFrame):
         groups = ", ".join(g["name"] for g in self.draft.groups_of(item_id))
         self.info.configure(text=f"Also in groups: {groups} (edit those in the Groups tab)" if groups else "")
         self.error.configure(text="")
+        self.disable_btn.configure(text="Enable" if item.get("disabled") else "Disable")
+        self.disable_btn.pack(side="right")
         self._load_rules(item["rules"])
         self._parent_canvas.yview_moveto(0)
+
+    def _toggle_disabled(self):
+        """Disabled items keep their blockers and move to Overview > Disabled; Edit there brings them back."""
+        item = self.draft.items[self.edit_id]
+        name, off = item["display_name"], not item.get("disabled")
+        self.reset()
+        self.draft.set_disabled(item["id"], off)
+        self.page.confirm(f"{name} {'disabled' if off else 'enabled'}")
+        self.page.show_tab("Overview")
 
     def _rules(self) -> list[dict]:
         return self.blockers.rules()

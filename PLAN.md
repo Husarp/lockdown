@@ -1454,6 +1454,10 @@ one shared pot for the whole category.
   they are merged into the existing item (same kind replaces, the rest is kept).
 - [x] A block starting sent a popup per item (user, 2026-09-20) - 0.62.0: one summarized line per group and
   one for everything else; individual alerts stay for what you actually open.
+- [x] No way to pause a group / item without deleting it (user, 2026-09-20) - 0.63.0: a `disabled` flag on
+  items and groups, Disable / Enable in both editors, a Disabled card at the bottom of Overview, and the
+  Anti-Bypass challenge on the way out (not on the way back in).
+- [x] The allowance alert now names the whole allowance as well as what is left (user, 2026-09-20) - 0.63.0.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

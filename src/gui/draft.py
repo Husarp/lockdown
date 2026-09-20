@@ -32,13 +32,13 @@ def _rules_key(rules: list[dict]) -> tuple:
 
 def _item_key(item: dict) -> tuple:
     return (item["display_name"], item["target"], item["notify"], item.get("block_type"), item.get("app_path"),
-            _rules_key(item["rules"]))
+            bool(item.get("disabled")), _rules_key(item["rules"]))
 
 
 def _group_key(group: dict) -> tuple:
     members = tuple(sorted((i, json.dumps({t: _rule_key(r) for t, r in (o or {}).items()}, sort_keys=True))
                            for i, o in group["members"].items()))
-    return group["name"], _rules_key(group["rules"]), members
+    return group["name"], bool(group.get("disabled")), _rules_key(group["rules"]), members
 
 
 def _finalize(rule: dict, now) -> dict:
@@ -139,7 +139,7 @@ class Draft:
                  block_type: str | None = None, app_path: str | None = None) -> dict:
         item = {"id": self._new_id(), "display_name": display_name, "target": " ".join(targets),
                 "item_type": item_type, "source": source, "notify": None, "block_type": block_type,
-                "app_path": app_path, "rules": []}
+                "app_path": app_path, "disabled": 0, "rules": []}
         self.items[item["id"]] = item
         return item
 
@@ -182,6 +182,15 @@ class Draft:
             g["members"].pop(item_id, None)
         self._changed()
 
+    def set_disabled(self, item_id: int, disabled: bool):
+        """Pause an item: it keeps its blockers but none of them apply (and it moves to Overview > Disabled)."""
+        self.items[item_id]["disabled"] = int(disabled)
+        self._changed()
+
+    def set_group_disabled(self, group_id: int, disabled: bool):
+        self.groups[group_id]["disabled"] = int(disabled)
+        self._changed()
+
     def set_notify(self, item_id: int, notify: str | None):
         self.items[item_id]["notify"] = notify
         self._changed()
@@ -194,7 +203,9 @@ class Draft:
         """Create (group_id None) or replace a group. Members: {item_id: {rule_type: customized rule}}."""
         if group_id is None:
             group_id = self._new_id()
-        self.groups[group_id] = {"id": group_id, "name": name, "rules": rules, "members": members}
+        was = self.groups.get(group_id, {}).get("disabled", 0)
+        self.groups[group_id] = {"id": group_id, "name": name, "rules": rules, "members": members,
+                                 "disabled": was}
         self._drop_orphans()
         self._changed()
         return group_id
@@ -238,7 +249,7 @@ class Draft:
                     self.db.add_history(item["target"].split()[0], item["display_name"])
             elif item_id in existing and self.is_unsaved(item_id):
                 self.db.update_item(item_id, *args, item["notify"], rules, item.get("block_type"),
-                                    item.get("app_path"))
+                                    item.get("app_path"), bool(item.get("disabled")))
         for item_id in set(self.saved_items) - set(self.items):
             self.db.remove_item(item_id)
 
@@ -252,7 +263,7 @@ class Draft:
             if group_id < 0:
                 self.db.add_group(g["name"], rules, members)
             elif group_id in saved_group_ids and self.is_group_unsaved(group_id):
-                self.db.update_group(group_id, g["name"], rules, members)
+                self.db.update_group(group_id, g["name"], rules, members, bool(g.get("disabled")))
         for group_id in set(self.saved_groups) - set(self.groups):
             self.db.remove_group(group_id)
 

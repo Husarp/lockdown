@@ -252,11 +252,13 @@ def allowance_owner(rule: dict) -> str:
 def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
     """The item's own rules + the rules of every group it's in (with per-member customizations applied).
     Each rule gets: usage_owner (whose time counts), item_owner, rule_key (stable id), group (None or {id, name})."""
+    if item.get("disabled"):
+        return []      # paused: its own rules and its groups' rules all stop applying
     me = f"item:{item['id']}"
     out = [{**r, "usage_owner": me, "item_owner": me, "rule_key": f"i{item['id']}{r['rule_type']}", "group": None}
            for r in item["rules"]]
     for g in groups:
-        if item["id"] not in g["members"]:
+        if item["id"] not in g["members"] or g.get("disabled"):
             continue
         custom = g["members"][item["id"]] or {}
         for r in g["rules"]:

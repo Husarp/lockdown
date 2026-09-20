@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS blocked_items (
     display_name TEXT NOT NULL,   -- friendly name: "Reddit", "Discord"
     target TEXT NOT NULL,         -- sites: space-separated hostnames ("x.com twitter.com"); apps: exe name ("discord.exe")
     item_type TEXT NOT NULL,      -- "site" or "app"
-    block_type TEXT,              -- apps: kill, firewall, both
+    block_type TEXT,
+    disabled INTEGER,             -- 1 = paused: kept with its rules, but nothing is enforced              -- apps: kill, firewall, both
     note TEXT,
     source TEXT,                  -- manual, popular, app-browser
     notify TEXT,                  -- blocked-visit alerts override: NULL = default, 'on', 'off'
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS block_rules (
 CREATE TABLE IF NOT EXISTS block_groups (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
+    disabled INTEGER,             -- 1 = paused: its rules stop applying to every member
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -166,7 +168,8 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("block_rules", "allowance_min", "INTEGER"), ("group_rules", "daily_switch_limit", "INTEGER"),
               ("block_rules", "switch_mode", "TEXT"), ("block_rules", "visit_gap_min", "INTEGER"),
               ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER"),
-              ("block_rules", "allowance_shared", "INTEGER"), ("group_rules", "allowance_shared", "INTEGER")]
+              ("block_rules", "allowance_shared", "INTEGER"), ("group_rules", "allowance_shared", "INTEGER"),
+              ("blocked_items", "disabled", "INTEGER"), ("block_groups", "disabled", "INTEGER")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
                for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
 RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "allowance_shared",
@@ -224,12 +227,14 @@ class Database:
                 (owner_id, *(r.get(c) for c in RULE_COLUMNS)))
 
     def update_item(self, item_id: int, display_name: str, targets: list[str], notify: str | None,
-                    rules: list[dict], block_type: str | None = None, app_path: str | None = None):
+                    rules: list[dict], block_type: str | None = None, app_path: str | None = None,
+                    disabled: bool = False):
         """Replace an item's fields and own rules."""
         with self.conn:
             self.conn.execute("UPDATE blocked_items SET display_name = ?, target = ?, notify = ?, block_type = ?, "
-                              "app_path = ? WHERE id = ?",
-                              (display_name, " ".join(targets), notify, block_type, app_path, item_id))
+                              "app_path = ?, disabled = ? WHERE id = ?",
+                              (display_name, " ".join(targets), notify, block_type, app_path,
+                               int(bool(disabled)), item_id))
             self.conn.execute("DELETE FROM block_rules WHERE item_id = ?", (item_id,))
             self._insert_rules("block_rules", "item_id", item_id, rules)
 
@@ -273,9 +278,11 @@ class Database:
             self._write_group(cur.lastrowid, rules, members or {})
         return cur.lastrowid
 
-    def update_group(self, group_id: int, name: str, rules: list[dict], members: dict[int, dict]):
+    def update_group(self, group_id: int, name: str, rules: list[dict], members: dict[int, dict],
+                     disabled: bool = False):
         with self.conn:
-            self.conn.execute("UPDATE block_groups SET name = ? WHERE id = ?", (name, group_id))
+            self.conn.execute("UPDATE block_groups SET name = ?, disabled = ? WHERE id = ?",
+                              (name, int(bool(disabled)), group_id))
             self.conn.execute("DELETE FROM group_rules WHERE group_id = ?", (group_id,))
             self.conn.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
             self._write_group(group_id, rules, members)
@@ -301,7 +308,7 @@ class Database:
         now = now or datetime.now()
         usage = self.usage_lookup(now)
         groups = self.list_groups()
-        items = self.list_items()
+        items = [i for i in self.list_items() if not i["disabled"]]   # disabled = paused, nothing applies
         out = []
         for item in items:
             block = item_block(effective_rules(item, groups), now, usage)

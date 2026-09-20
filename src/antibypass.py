@@ -138,13 +138,21 @@ def _strength(block_type: str | None) -> set[str]:
 def item_looser(old: dict, new: dict | None, now: datetime) -> bool:
     if new is None:
         return True
-    return (not set(old["target"].split()) <= set(new["target"].split())
+    return (newly_disabled(old, new)
+            or not set(old["target"].split()) <= set(new["target"].split())
             or (old["item_type"] == "app" and not _strength(old.get("block_type")) <= _strength(new.get("block_type")))
             or rules_looser(old["rules"], new["rules"], now))
 
 
+def newly_disabled(old: dict, new: dict) -> bool:
+    """Pausing something stops its rules applying, so it goes through the challenge like removing it."""
+    return bool(new.get("disabled")) and not old.get("disabled")
+
+
 def group_looser(old: dict, new: dict | None, now: datetime) -> bool:
     if new is None:
+        return True
+    if newly_disabled(old, new):
         return True
     if rules_looser(old["rules"], new["rules"], now) or not set(old["members"]) <= set(new["members"]):
         return True
@@ -162,11 +170,13 @@ def draft_changes(saved_items: dict, items: dict, saved_groups: dict, groups: di
     for item_id, old in saved_items.items():
         new = items.get(item_id)
         if item_looser(old, new, now):
-            out.append(f"Remove {old['display_name']}" if new is None else f"Loosen {old['display_name']}")
+            what = "Remove" if new is None else "Disable" if newly_disabled(old, new) else "Loosen"
+            out.append(f"{what} {old['display_name']}")
     for group_id, old in saved_groups.items():
         new = groups.get(group_id)
         if group_looser(old, new, now):
-            out.append(f"Remove group {old['name']}" if new is None else f"Loosen group {old['name']}")
+            what = "Remove" if new is None else "Disable" if newly_disabled(old, new) else "Loosen"
+            out.append(f"{what} group {old['name']}")
     return out
 
 
