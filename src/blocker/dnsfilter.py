@@ -24,7 +24,7 @@ SAVED_KEY = "dns_filter.saved"   # JSON {adapter guid: {"v4": original static DN
 LISTEN = [("127.0.0.1", socket.AF_INET), ("::1", socket.AF_INET6)]
 FILTER_V4, FILTER_V6 = "127.0.0.1", "::1"
 UPSTREAM_TIMEOUT = 2.0
-BLOCK_TTL = 60
+BLOCK_TTL = 10   # seconds a client may cache "this is blocked" - short, so allowing a site takes effect at once
 TYPE_A, TYPE_AAAA = 1, 28
 _IFACES = {False: r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces",
            True: r"SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces"}

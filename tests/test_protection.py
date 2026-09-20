@@ -65,8 +65,8 @@ def test_update_lists_exceptions_and_which(tmp_path, monkeypatch):
     assert p.which("adult.example") == p.which("a.b.adult.example") == "adult"     # "*." entry: subdomains too
     assert p.which("ok.example") is None and p.which("example") is None
     assert not p.refresh(cfg)                                                        # nothing changed
-    cfg["allowed"] = ["adult.example"]                                               # allowed: applies at once
-    assert not p.refresh(cfg)
+    cfg["allowed"] = ["adult.example"]              # applies at once - and counts as a change, so the service
+    assert p.refresh(cfg)                           # flushes the DNS cache instead of leaving it blocked there
     assert p.which("a.b.adult.example") is None
     cfg["enabled"] = ["scam"]
     assert p.refresh(cfg) and p.count() == 2
@@ -128,3 +128,25 @@ def test_update_interval_and_automatic_updates_off():
     assert not protection.due(cfg, "scam", NOW + timedelta(days=30))
     cfg["update_now"] = (NOW + timedelta(days=30)).isoformat()
     assert protection.due(cfg, "scam", NOW + timedelta(days=30, minutes=1))
+
+
+def test_allowing_a_site_is_reported_so_the_service_can_flush_dns(tmp_path):
+    """Allowing a site has to make refresh() say "something changed" - the service flushes the DNS cache on that,
+    and without it a site you just allowed stays blocked for as long as clients cache the old answer."""
+    (tmp_path / "adult.txt").write_text("badsite.com\n*.tracker.net\n", encoding="utf-8")
+    p = protection.Protection(tmp_path)
+    cfg = {"enabled": ["adult"], "allowed": [], "manual": [], "custom": []}
+    assert p.refresh(cfg) is True                  # first load
+    assert p.refresh(cfg) is False                 # nothing changed since
+    assert p.which("badsite.com") == "adult"
+
+    cfg["allowed"] = ["badsite.com"]
+    assert p.refresh(cfg) is True                  # the allow list changed
+    assert p.which("badsite.com") is None
+    assert p.which("www.badsite.com") is None      # and its subdomains
+    assert p.which("deep.badsite.com") is None
+    assert p.which("x.tracker.net") == "adult"     # everything else stays blocked
+
+    cfg["allowed"] = []                            # taking it back is a change too
+    assert p.refresh(cfg) is True
+    assert p.which("badsite.com") == "adult"

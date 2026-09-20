@@ -328,6 +328,7 @@ def dns_loop(enforcer: Enforcer):
             cfg = protection.settings(db)
             if enforcer.protection.refresh(cfg):
                 log.info("Protection lists loaded: %d domains", enforcer.protection.count())
+                hosts.flush_dns()   # a site you just allowed would otherwise stay blocked in the DNS cache
             kw = keywords.settings(db)
             safe["search"], safe["youtube"] = kw["safesearch"], kw["youtube"]
             if time.monotonic() - last_adapters >= DNS_ADAPTER_CHECK_SEC:

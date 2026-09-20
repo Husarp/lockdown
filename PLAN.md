@@ -1410,6 +1410,8 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
   (1px border + dividers instead of a filled track) in some places - both mocked up, waiting on a preference.
 - [x] Spam-clicking a control that needs the challenge opened a pile of windows (user, 2026-09-20) - 0.57.0.
   It was every pop-up, not just the challenge: `widgets.once()` / `widgets.modal()` now cover all of them.
+- [x] "Allowed anyway" didn't actually unblock (user, 2026-09-20) - 0.57.1. The lookup was right; the stale
+  DNS answer was never flushed because refresh() didn't report an allow-list change. Pinned by a test.
 - [ ] The background pre-build (a page every 0.5 s after start) freezes the window for as long as each page
   takes to build. Worth spreading out or doing lazily if the first few seconds feel stuttery.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed

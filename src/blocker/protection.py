@@ -223,8 +223,12 @@ class Protection:
         self.allowed: frozenset[str] = frozenset()
 
     def refresh(self, cfg: dict) -> bool:
-        """Load changed / newly enabled lists, drop disabled ones. Returns True when the lists changed."""
-        self.allowed = frozenset(cfg["allowed"])
+        """Load changed / newly enabled lists, drop disabled ones. Returns True when anything a lookup depends on
+        changed - the lists themselves or "allowed anyway" (the caller flushes the DNS cache on that, or a site you
+        just allowed would stay blocked until the answer it already handed out expires)."""
+        allowed = frozenset(cfg["allowed"])
+        changed_allowed = allowed != self.allowed
+        self.allowed = allowed
         made = manual_lists(cfg)
         tables, changed = {}, False
         for key in (k for k in all_lists(cfg) if k in cfg["enabled"]):   # (list order: the first one names it)
@@ -254,7 +258,7 @@ class Protection:
             tables[key], changed = (stamp, _table(exact), _table(wild)), True
         changed |= tables.keys() != self.tables.keys()
         self.tables = tables
-        return changed
+        return changed or changed_allowed
 
     def which(self, host: str) -> str | None:
         """The list a host is on (exact name, without www., or a listed parent domain for "*." entries), else

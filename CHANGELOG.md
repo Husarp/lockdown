@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.57.1 - 2026-09-20 16:02
+- **A site you put on "Allowed anyway" stayed blocked.** The lookup itself was right - it let the site and its
+  subdomains through straight away - but the answer already handed out to Windows said "this is 127.0.0.1" and
+  was allowed to sit in the DNS cache. Nothing flushed it, because the service only reacted when a *list*
+  changed and adding a site to "allowed" didn't count as a change. Three fixes:
+  - `Protection.refresh()` reports an "allowed anyway" change, not just a change of lists.
+  - the service flushes the DNS cache when the protection state changes.
+  - a blocked DNS answer may now be cached for 10 seconds instead of 60, so nothing lingers either way.
+- This only covers sites blocked by a protection list or one of your own blocking lists. A site you blocked
+  yourself on Blocking > Overview is a different thing - remove the block there, or use the emergency unlock.
+
 ## 0.57.0 - 2026-09-20 15:47
 - **Clicking a button twice no longer opens the window twice.** A window only takes the click grab once it is
   actually on screen, and every pop-up waited a fixed 50 ms before even trying - so a fast double-click, or
