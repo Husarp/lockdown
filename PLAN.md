@@ -1440,6 +1440,9 @@ one shared pot for the whole category.
   charts hold still during a drag, and a chart handed unchanged data does not redraw.
 - [x] Option switches were too wide to fit a window that isn't maximised (user, 2026-09-20) - 0.59.1: smaller
   control and shorter labels. If any are still too wide, the next step is a dropdown for the longest sets.
+- [x] No way to categorise an app without using it first (user, 2026-09-20) - 0.60.0: a right-click menu on
+  apps and websites (category / block / add to group / show in Explorer) and "Browse all apps..." on Screen
+  Time > Apps. gui/app_actions.py holds the menu so every list can use the same one.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

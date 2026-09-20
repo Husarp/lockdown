@@ -9,10 +9,11 @@ from datetime import date, datetime, timedelta
 import customtkinter as ctk
 
 import stats
-from gui import app_browser, appinfo, categories, theme
+from gui import app_actions, app_browser, appinfo, categories, theme
 from gui.charts import DayBars, Donut, Heatmap, HourBars, MonthCalendar, TimelineBar, TrendLine
 from gui.components import Curtain, Card, Chip, Rows, Segmented, TabBar, StatCard, help_icon, page_head
 from gui.dashboard import goal_seconds
+from gui.widgets import once
 from rules import DAY_NAMES
 from trusted_time import now_from_db
 
@@ -260,6 +261,10 @@ class TableRow:
         self.chip = Chip(self.frame, "", theme.MUTED, width=100)
         self.chip.grid(row=0, column=4, sticky="e", padx=(8, 0))
 
+    def parts(self):
+        """The row's widgets - a right-click has to be bound on each, they cover the whole row."""
+        return (self.frame, self.icon, self.name, self.sub, self.time, self.count)
+
     def show(self, on: bool):
         if on:
             self.sep.pack(fill="x")
@@ -287,6 +292,14 @@ class TableView(ctk.CTkScrollableFrame):
         self.box.pack(fill="x")
         self.empty = ctk.CTkLabel(card.body, text="Nothing recorded for this period yet.", text_color=theme.MUTED)
         self.rows: list[TableRow] = []
+        foot = ctk.CTkFrame(card.body, fg_color="transparent")
+        foot.pack(fill="x", pady=(8, 0))
+        ctk.CTkLabel(foot, text="Right-click a row to set its category, block it or add it to a group.",
+                     text_color=theme.MUTED, font=theme.body(11)).pack(side="left")
+        self.browse = None
+        if kind == "app":   # apps you have never opened are not in this list at all - this is the way to them
+            self.browse = ctk.CTkButton(foot, text="Browse all apps...", width=150, height=26, **theme.OUTLINE)
+            self.browse.pack(side="right")
 
     def update_view(self, c: Context):
         if self.kind == "app":
@@ -298,6 +311,9 @@ class TableView(ctk.CTkScrollableFrame):
             self.empty.pack_forget()
         else:
             self.empty.pack(anchor="w", pady=12)
+        if self.browse is not None:
+            self.browse.configure(command=lambda: once("apps", lambda: app_browser.AppBrowser(
+                self, None, c.page.app)))
         top = ranked[0][1] if ranked else 1
         while len(self.rows) < len(ranked):
             self.rows.append(TableRow(self.box, self.WIDTHS))
@@ -314,6 +330,11 @@ class TableView(ctk.CTkScrollableFrame):
             row.chip.configure(text=f"{c.names[cat]}  ▾", border_color=color, text_color=color,
                                command=lambda chip=row.chip, n=name, k=cat: categories.open_menu(
                                    chip, c.db, self.kind, n, k, c.page.refresh, c.page.app.guard))
+            display = appinfo.name_of(self.kind, name, c.items)
+            path = appinfo.app_name_path(name, c.items)[1] if self.kind == "app" else None
+            for w in row.parts():
+                w.bind("<Button-3>", lambda e, n=name, d=display, p=path: app_actions.open_menu(
+                    self, c.page.app, self.kind, n, d, p, c.page.refresh))
             row.show(True)
         for row in self.rows[len(ranked):]:
             row.show(False)

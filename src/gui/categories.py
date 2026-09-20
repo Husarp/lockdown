@@ -89,8 +89,9 @@ def _guarded(guard, changes, proceed):
         proceed()
 
 
-def open_menu(widget, db, kind: str, name: str, current: str, on_done, guard=None):
-    """Small menu under `widget`: pick a category for (kind, name), add a new one, or edit colours.
+def build_menu(widget, db, kind: str, name: str, current: str, on_done, guard=None):
+    """(menu, swatch images) for picking a category for (kind, name) - used on its own and as a submenu of the
+    right-click menu. The caller has to keep the images, or Tk shows nothing next to the names.
     `guard` (app.guard) gates changing / adding a category behind the Anti-Bypass challenge when it's locked."""
     menu = tk.Menu(widget, tearoff=False)
     images = []
@@ -106,6 +107,12 @@ def open_menu(widget, db, kind: str, name: str, current: str, on_done, guard=Non
     menu.add_command(label="  New category...", command=lambda: _new(widget, db, kind, name, on_done, guard))
     menu.add_command(label="  Edit categories...",
                      command=lambda: once("categories", lambda: CategoryEditor(widget, db, on_done, guard)))
+    return menu, images
+
+
+def open_menu(widget, db, kind: str, name: str, current: str, on_done, guard=None):
+    """Small menu under `widget`: pick a category for (kind, name), add a new one, or edit colours."""
+    menu, images = build_menu(widget, db, kind, name, current, on_done, guard)
     widget._category_images = images   # Tk shows nothing if the images are garbage-collected
     menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
 

@@ -1,2 +1,2 @@
 """Lockdown's version (shown in Settings, used by the installer). Keep in step with CHANGELOG.md."""
-VERSION = "0.59.1"
+VERSION = "0.60.0"

@@ -46,12 +46,15 @@ def matches(apps: list[dict], text: str) -> list[dict]:
 
 
 class AppBrowser(ctk.CTkToplevel):
-    """on_pick(app) with app = {name, exe, path, steam}."""
+    """Every installed app and Steam game, searchable. on_pick(app) picks one (the Add tab uses that); with
+    on_pick None it is just a browser - right-click an app to set its category, block it or add it to a group.
+    `app_window` is the LockdownApp, needed for the right-click menu."""
 
-    def __init__(self, master, on_pick):
+    def __init__(self, master, on_pick=None, app_window=None):
         super().__init__(master)
         self.on_pick = on_pick
-        self.title("Browse apps")
+        self.app_window = app_window or master.winfo_toplevel()
+        self.title("Browse apps" if on_pick else "Apps")
         self.geometry("560x600")
         self.configure(fg_color=theme.BG)
         self.transient(master.winfo_toplevel())
@@ -77,8 +80,11 @@ class AppBrowser(ctk.CTkToplevel):
         self.rows = Rows(self.body, self._make_row, "No apps found.", {"fill": "x"})
         foot = ctk.CTkFrame(self, fg_color="transparent")
         foot.pack(fill="x", padx=13, pady=(10, 13))
-        ctk.CTkButton(foot, text="Cancel", width=90, **theme.OUTLINE, command=self._cancel).pack(side="right")
-        ctk.CTkLabel(foot, text="Click an app to pick it", text_color=MUTED, font=theme.body(11)).pack(side="left")
+        ctk.CTkButton(foot, text="Close" if not self.on_pick else "Cancel", width=90, **theme.OUTLINE,
+                      command=self._cancel).pack(side="right")
+        ctk.CTkLabel(foot, text=("Click an app to pick it · right-click for more" if self.on_pick else
+                                 "Right-click an app to set its category, block it or add it to a group"),
+                     text_color=MUTED, font=theme.body(11)).pack(side="left")
         self.apps: list[dict] | None = None
         self._pending = None
         preload()
@@ -104,6 +110,10 @@ class AppBrowser(ctk.CTkToplevel):
             w.bind("<Enter>", lambda e, r=row: r.line.configure(fg_color=theme.SURFACE2))
             w.bind("<Leave>", lambda e, r=row: r.line.configure(fg_color="transparent"))
         return row
+
+    def _menu(self, a: dict):
+        from gui import app_actions
+        app_actions.open_menu(self, self.app_window, "app", a["exe"], a["name"], a.get("path"), self._render)
 
     def _wait_for_list(self):
         """Poll from the Tk thread (Tk must not be called from the loader thread)."""
@@ -134,6 +144,7 @@ class AppBrowser(ctk.CTkToplevel):
             row.running.configure(text="RUNNING" if a["running"] else "")
             for w in (row.line, row.icon, row.name, row.exe, row.running):
                 w.bind("<Button-1>", lambda e, a=a: self._pick(a))
+                w.bind("<Button-3>", lambda e, a=a: self._menu(a))
         more = len(found) - len(shown)
         count = f"{len(found)} app{'s' * (len(found) != 1)}"
         self.status.configure(text=count + (f" · first {len(shown)} shown - type to narrow down" if more else ""))
@@ -151,6 +162,8 @@ class AppBrowser(ctk.CTkToplevel):
         self.destroy()
 
     def _pick(self, app: dict):
+        if self.on_pick is None:   # browsing, not picking: the right-click menu is what acts on a row
+            return
         self.grab_release()
         self.destroy()
         self.on_pick(app)

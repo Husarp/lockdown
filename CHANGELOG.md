@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.60.0 - 2026-09-20 21:17
+- **You can set an app's category without opening it first.** Until now a category could only be set from the
+  chip on a Screen Time row, and an app only appears there once you have actually used it - so there was no way
+  to say "Discord is Distracting" before ever running it.
+  - **Right-click an app or a website**, in Browse apps or on the Screen Time lists: **Category** (the same
+    picker as the chip), **Block it...** (opens Blocking > Add with it filled in), **Add to group** (puts it on
+    the blocklist and into that group, so the group's shared rules cover it) and, for an app, **Show in
+    Explorer**. Something that is part of Windows says so instead of offering to block it.
+  - **Browse apps** works as a browser on its own, not only as a picker for the Add tab: **Screen Time > Apps**
+    has a "Browse all apps..." button that opens it. It lists every installed app and Steam game.
+  - Websites stay out of the app search, as they are not installed apps - right-click them on Screen Time >
+    Websites instead.
+
 ## 0.59.1 - 2026-09-20 21:02
 - **The option switches are smaller again**, and the long ones are much shorter. They sit in rows next to other
   controls, so a window that wasn't maximised ran out of room for them.
