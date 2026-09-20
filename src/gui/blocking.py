@@ -66,6 +66,14 @@ def status_of(page, item: dict, now, usage) -> dict:
     return {"text": "● Blocked now", "text_color": RED}
 
 
+def _merge_rules(old: list[dict], new: list[dict]) -> list[dict]:
+    """Adding something that is already on the list: keep the blockers it has, and let the ones just ticked
+    replace those of the same kind (an item can only have one rule per kind)."""
+    merged = {r["rule_type"]: r for r in old}
+    merged.update({r["rule_type"]: r for r in new})
+    return list(merged.values())
+
+
 def targets_text(item: dict) -> str:
     if item["item_type"] == "category":
         return "everything in this category - on your list or not"
@@ -436,10 +444,15 @@ class AddTab(ctk.CTkScrollableFrame):
             return
         if target:
             existing = self.draft.find_item(target["targets"][0])
-            if existing:   # already in the list: load it for editing instead of adding a duplicate
-                self.edit(existing["id"])
-                self.info.configure(text=f"{existing['display_name']} is already in the list - its blockers are "
-                                         "loaded, change them and Save.")
+            if existing:   # already in the list: merge the blockers into it instead of adding a duplicate
+                if not rules:
+                    self.edit(existing["id"])
+                    self.info.configure(text=f"{existing['display_name']} is already in the list - its blockers "
+                                             "are loaded, change them and Save.")
+                    return
+                self.draft.set_rules(existing["id"], _merge_rules(existing["rules"], rules))
+                self.reset()
+                self.page.confirm(f"{existing['display_name']} was already on the list - blockers merged")
                 return
             if not rules:
                 self.error.configure(text="Tick at least one blocker.")

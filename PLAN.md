@@ -1446,6 +1446,14 @@ one shared pot for the whole category.
   Time > Apps. gui/app_actions.py holds the menu so every list can use the same one.
 - [x] No way to see how much of the "N min allowed during blocked hours" was left (user, 2026-09-20) -
   0.61.0: Dashboard > Limits today, the Overview rule chip and an alert, all from `rules.allowance_left()`.
+- [x] The group allowance was per member, not per group (user, 2026-09-20) - 0.62.0: one shared pot by
+  default, with "One pot shared by every member" in the group's By time editor to turn it off.
+  Checked against the live database first: tracking and the trusted clock were both correct - YouTube really
+  had only spent 98 s and Twitch 402 s of their own 15 minutes.
+- [x] Adding something already on the list wiped the blockers you had ticked (user, 2026-09-20) - 0.62.0:
+  they are merged into the existing item (same kind replaces, the rest is kept).
+- [x] A block starting sent a popup per item (user, 2026-09-20) - 0.62.0: one summarized line per group and
+  one for everything else; individual alerts stay for what you actually open.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

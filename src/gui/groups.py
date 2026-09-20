@@ -8,7 +8,7 @@ import customtkinter as ctk
 
 from gui import icons, theme
 from gui.components import BlockerRail, eyebrow
-from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, LimitEditor, SwitchEditor, summary
+from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, HoursEditor, LimitEditor, SwitchEditor, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton, clear_entry, once
 from rules import describe_rule, effective_rules, item_block
@@ -20,7 +20,8 @@ CUSTOMIZABLE = ("scheduled", "time_limit", "switch_limit", "temporary")
 
 
 def _make_editor(parent, rule_type: str):
-    shared = {"time_limit": LimitEditor, "switch_limit": SwitchEditor}   # group limits are one shared total
+    # group limits - and the allowance in blocked hours - are one shared total
+    shared = {"time_limit": LimitEditor, "switch_limit": SwitchEditor, "scheduled": HoursEditor}
     return shared[rule_type](parent, shared=True) if rule_type in shared else EDITORS[rule_type](parent)
 
 

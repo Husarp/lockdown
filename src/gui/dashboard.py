@@ -13,7 +13,7 @@ import stats
 from gui import app_browser, appinfo, categories, icons, theme
 from gui.charts import DayBars, TimelineBar
 from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow, page_head
-from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left,
+from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left, allowance_owner,
                    effective_rules, item_block, limits, next_block, opening_bucket, time_bucket)
 from trusted_time import now_from_db
 
@@ -339,10 +339,11 @@ class DashboardPage(ctk.CTkFrame):
         for item in items:
             for r in effective_rules(item, groups):
                 spent = allowance_left(r, now, usage)   # "N min allowed during blocked hours", while inside them
-                if spent and (r["usage_owner"], "allowance") not in seen:
-                    seen.add((r["usage_owner"], "allowance"))
+                pot = allowance_owner(r)    # a group's allowance is one pot, so it is one row
+                if spent and (pot, "allowance") not in seen:
+                    seen.add((pot, "allowance"))
                     used, allowed, until = spent
-                    name = f"{r['group']['name']} (group)" if r["usage_owner"].startswith("group:") \
+                    name = f"{r['group']['name']} (group)" if pot.startswith("group:") \
                         else item["display_name"]
                     icon = icons.get(r["group"]["name"], 16) if r.get("group") else icons.for_item(item, 16)
                     entries.append((f"{name} - allowance", icon, "allowance", used / max(allowed, 1), until,

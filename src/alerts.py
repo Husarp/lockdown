@@ -3,7 +3,8 @@ import math
 from datetime import datetime
 
 from blocker.protection import LISTS
-from rules import DAY_NAMES, TIME_FMT, allowance_left, effective_rules, item_block, next_block
+from rules import (DAY_NAMES, TIME_FMT, allowance_left, allowance_owner, effective_rules, item_block,
+                   next_block)
 
 REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
@@ -140,9 +141,12 @@ class BlockWatcher:
             for item_id, (item, (reason, until, rule)) in blocked.items():
                 if item_id in self.prev_blocked:
                     continue
-                source = ("group", rule["group"]["id"]) if rule.get("group") else ("item", item_id)
+                # one line per group, and one for everything blocked by its own rules
+                source = ("group", rule["group"]["id"]) if rule.get("group") else ("item",)
                 entry = started.setdefault(source, {"rule": rule, "reason": reason, "until": until, "names": []})
                 entry["names"].append(item["display_name"])
+                if entry["until"] != until or entry["reason"] != reason:
+                    entry["until"], entry["reason"] = None, ""   # they don't share an end: keep the line short
             messages += [self._started(e, now) for e in started.values()]
         self.prev_blocked = set(blocked)
         return messages
@@ -163,13 +167,13 @@ class BlockWatcher:
                 left = allowed - used
                 if left <= 0:
                     continue
-                key = (rule.get("usage_owner"), "allowance", until)
+                pot = allowance_owner(rule)   # a shared group allowance is one notice, not one per member
+                key = (pot, "allowance", until)
                 if key in self.warned or key in seen:
                     continue
                 seen.add(key)
                 self.warned[key] = now
-                name = f"{rule['group']['name']} ({item['display_name']})" if rule.get("group") \
-                    else item["display_name"]
+                name = rule["group"]["name"] if pot.startswith("group:") else item["display_name"]
                 out.append(f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
                            f"allowance left (until {until:%H:%M}).")
         return out
@@ -191,9 +195,17 @@ class BlockWatcher:
 
     @staticmethod
     def _started(e: dict, now: datetime) -> str:
+        """Summarized on purpose: a block starting is not something you did, so it is one line for the group
+        (and one for everything else), not a popup per site and app. What you actually try to open still gets
+        its own alert, from the service."""
         until = f" until {_when_text(e['until'], now)}" if e["until"] else ""
         why = {"limit": " - time limit reached", "switches": " - opened too many times",
                "temporary": " (temporary block)"}.get(e["reason"], "")
+        names = _names(e["names"])
+        count = len(set(e["names"]))
         if e["rule"].get("group"):
-            return f"{e['rule']['group']['name']} started: {_names(e['names'])} blocked{until}{why}."
-        return f"{_names(e['names'])} is now blocked{until}{why}."
+            return (f"{e['rule']['group']['name']} started - "
+                    f"{names if count == 1 else f'{count} things'} blocked{until}{why}.")
+        if count == 1:
+            return f"{names} is now blocked{until}{why}."
+        return f"{count} things are now blocked{until}{why}."

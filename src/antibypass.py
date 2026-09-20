@@ -11,7 +11,8 @@ import string
 from datetime import datetime, timedelta
 
 from blocker.apps import block_flags
-from rules import OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, next_window_start, window_until
+from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, next_window_start,
+                   window_until)
 
 SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": bool, "windows": [...],
 #                                     "unlocked_until": "YYYY-mm-dd HH:MM:SS"}
@@ -110,7 +111,9 @@ def rule_looser(old: dict, new: dict | None, now: datetime) -> bool:
     if kind == "temporary":
         return _temp_end(new, now) < _temp_end(old, now) - timedelta(minutes=1)
     if kind == "scheduled":
-        return new.get("schedule") != old.get("schedule") or (new.get("allowance_min") or 0) > (old.get("allowance_min") or 0)
+        return (new.get("schedule") != old.get("schedule")
+                or (new.get("allowance_min") or 0) > (old.get("allowance_min") or 0)
+                or (allowance_shared(old) and not allowance_shared(new)))
     if kind in ("time_limit", "switch_limit"):
         fields = TIME_LIMIT_FIELDS if kind == "time_limit" else OPEN_LIMIT_FIELDS
         for field in fields.values():

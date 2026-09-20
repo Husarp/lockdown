@@ -8,7 +8,8 @@ import customtkinter as ctk
 from gui import theme
 from gui.components import Segmented, help_icon
 from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS, SWITCH, TIME_FMT,
-                   TIME_LIMIT_FIELDS, VISIT, days_text, duration_text, load_schedule, make_schedule)
+                   TIME_LIMIT_FIELDS, VISIT, allowance_shared, days_text, duration_text, load_schedule,
+                   make_schedule)
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
@@ -115,8 +116,9 @@ class WindowRow(ctk.CTkFrame):
 
 
 class HoursEditor(ctk.CTkFrame):
-    def __init__(self, master):
+    def __init__(self, master, shared: bool = False):
         super().__init__(master, fg_color="transparent")
+        self.shared = shared
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(anchor="w")
         self.mode = Segmented(top, values=list(MODES))
@@ -136,6 +138,17 @@ class HoursEditor(ctk.CTkFrame):
         ctk.CTkLabel(allowance, text="minutes").pack(side="left")
         help_icon(allowance, "0 = fully blocked. Otherwise you can still use it this many minutes in each blocked "
                              "period; they start again in the next one.").pack(side="left", padx=8)
+        self.pot = None
+        if shared:   # a group: one pot for everything in it, or that many minutes each
+            pot_row = ctk.CTkFrame(self, fg_color="transparent")
+            pot_row.pack(anchor="w", pady=(6, 0))
+            self.pot = ctk.CTkCheckBox(pot_row, text="One pot shared by every member", checkbox_width=18,
+                                       checkbox_height=18)
+            self.pot.select()
+            self.pot.pack(side="left")
+            help_icon(pot_row, "On: the minutes are spent by whichever member you use, and run out for all of "
+                               "them together.\nOff: every member gets this many minutes of its own.").pack(
+                side="left", padx=8)
         self.rows: list[WindowRow] = []
         self.load(None)
 
@@ -154,6 +167,8 @@ class HoursEditor(ctk.CTkFrame):
         self.rows = []
         self.allowance.delete(0, "end")
         self.allowance.insert(0, str((rule or {}).get("allowance_min") or 0))
+        if self.pot is not None:
+            self.pot.select() if allowance_shared(rule or {}) else self.pot.deselect()
         if rule and rule.get("schedule"):
             s = load_schedule(rule["schedule"])
             self.mode.set(next(k for k, v in MODES.items() if v == s["mode"]))
@@ -169,7 +184,8 @@ class HoursEditor(ctk.CTkFrame):
         if not windows:
             raise ValueError("Add a time window (with at least one day on).")
         return {"rule_type": "scheduled", "schedule": make_schedule(MODES[self.mode.get()], windows),
-                "allowance_min": allowance or None}
+                "allowance_min": allowance or None,
+                "allowance_shared": None if self.pot is None else int(bool(self.pot.get()))}
 
 
 def _period_entries(parent, label: str, width: int) -> dict:
@@ -379,7 +395,9 @@ def summary(rule_type: str, editor) -> str:
                 f"{days_text(first['days'])}")
         if len(sched["windows"]) > 1:
             text += f" +{len(sched['windows']) - 1} more"
-        return text + (f" · +{rule['allowance_min']} min" if rule.get("allowance_min") else "")
+        if rule.get("allowance_min"):
+            text += f" · +{rule['allowance_min']} min" + ("" if allowance_shared(rule) else " each")
+        return text
     if rule_type == "time_limit":
         return " · ".join(f"{format_duration(rule[f])} {PERIOD_LABELS[p]}" for p, f in TIME_LIMIT_FIELDS.items()
                           if rule.get(f))

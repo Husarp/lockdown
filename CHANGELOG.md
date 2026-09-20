@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.62.0 - 2026-09-20 21:59
+- **A group's "N minutes allowed during blocked hours" is now one pot shared by every member.** Before, each
+  member had its own 15 minutes, so a group of three quietly granted 45. Whichever member you use spends the
+  same minutes, and when they run out everything in the group is blocked.
+  - **Groups > By time** has a tick, **"One pot shared by every member"**, on by default. Turn it off and each
+    member gets that many minutes of its own (the old behaviour). Turning it off is a weakening change, so
+    Anti-Bypass asks for the challenge.
+  - The Dashboard row and the alert are one per pot and carry the group's name, instead of one per member.
+- **Adding something that is already on your list merges the blockers into it** instead of throwing them away.
+  Adding YouTube with a time limit when YouTube is already blocked by hours now leaves it with both, and says
+  "YouTube was already on the list - blockers merged". (It used to flip the form into Edit mode, drop what you
+  had ticked, and grey out the address box - which looked like the page had frozen.)
+- **A block starting no longer sends a popup for every site and app.** It is one line for the group ("Good
+  Night started - 3 things blocked until 05:00.") and one for everything blocked by its own rules. What you
+  actually try to open still gets its own alert, as before.
+
 ## 0.61.0 - 2026-09-20 21:37
 - **You can see how much of your "N minutes allowed during blocked hours" is left**, instead of guessing.
   - **Dashboard > Limits today** now lists the allowance while you are inside the blocked stretch:

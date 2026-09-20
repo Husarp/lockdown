@@ -239,6 +239,16 @@ def _item_owner(rule: dict) -> str:
     return rule.get("item_owner", _owner(rule))
 
 
+def allowance_shared(rule: dict) -> bool:
+    """A group's "N minutes allowed during blocked hours" is one pot for all its members unless you untick it."""
+    return (rule.get("allowance_shared") if rule.get("allowance_shared") is not None else 1) == 1
+
+
+def allowance_owner(rule: dict) -> str:
+    """Whose allowance is being spent: the group (shared pot) or the item itself."""
+    return rule.get("allowance_owner") or _item_owner(rule)
+
+
 def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
     """The item's own rules + the rules of every group it's in (with per-member customizations applied).
     Each rule gets: usage_owner (whose time counts), item_owner, rule_key (stable id), group (None or {id, name})."""
@@ -253,9 +263,12 @@ def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
             t = r["rule_type"]
             if t in custom:   # customized for this member: counted for the member alone
                 rule = {**custom[t], "rule_type": t, "usage_owner": me}
+                pot = me
             else:             # inherited: a group daily (time or switch) limit is one shared total
                 rule = {**r, "usage_owner": f"group:{g['id']}" if t in ("time_limit", "switch_limit") else me}
-            out.append({**rule, "item_owner": me, "rule_key": f"g{g['id']}{t}",
+                # so is the allowance in its blocked hours, unless the group says each member has its own
+                pot = f"group:{g['id']}" if t == "scheduled" and allowance_shared(r) else me
+            out.append({**rule, "item_owner": me, "allowance_owner": pot, "rule_key": f"g{g['id']}{t}",
                         "group": {"id": g["id"], "name": g["name"]}})
     return out
 
@@ -274,7 +287,7 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
         if until is None:
             return None
         allowance = rule.get("allowance_min") or 0
-        if allowance and usage(_item_owner(rule), allowance_bucket(rule, until)) < allowance * 60:
+        if allowance and usage(allowance_owner(rule), allowance_bucket(rule, until)) < allowance * 60:
             return None   # still has allowance left in this blocked stretch
         return "schedule", (None if until == datetime.max else until)
     clock = _clock(usage)
@@ -311,7 +324,7 @@ def usage_targets(rules: list[dict], item_id: int, now: datetime,
         elif r["rule_type"] == "scheduled" and r.get("allowance_min"):
             until = schedule_until(r["schedule"], now)
             if until:
-                targets.add((me, allowance_bucket(r, until)))
+                targets.add((allowance_owner(r), allowance_bucket(r, until)))
     return targets
 
 
@@ -374,7 +387,7 @@ def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = 
                 if start:
                     found.append((start, r))
             elif in_use and r.get("allowance_min"):   # inside the stretch, using the allowance
-                left = r["allowance_min"] * 60 - usage(_item_owner(r), allowance_bucket(r, until))
+                left = r["allowance_min"] * 60 - usage(allowance_owner(r), allowance_bucket(r, until))
                 found.append((now + timedelta(seconds=max(0, left)), r))
         elif kind == "time_limit" and in_use and (lims := limits(r, TIME_LIMIT_FIELDS)):
             left = min(limit * 60 - usage(_owner(r), time_bucket(p, now, _clock(usage))) for p, limit in lims.items())
@@ -413,7 +426,7 @@ def allowance_left(rule: dict, now: datetime, usage=no_usage):
     until = schedule_until(rule["schedule"], now)
     if not until:
         return None   # not inside a blocked stretch right now
-    return usage(_item_owner(rule), allowance_bucket(rule, until)), rule["allowance_min"] * 60, until
+    return usage(allowance_owner(rule), allowance_bucket(rule, until)), rule["allowance_min"] * 60, until
 
 
 def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:

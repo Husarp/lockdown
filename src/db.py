@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS block_rules (
     schedule TEXT,                -- JSON {"mode": "allow"|"block", "windows": [{"days", "start", "end"}]}
     temp_until DATETIME,          -- local time, "YYYY-MM-DD HH:MM:SS"
     allowance_min INTEGER,        -- scheduled: minutes allowed during blocked hours
+    allowance_shared INTEGER,     -- group rule: 0 = each member gets its own allowance (default: one shared pot)
     switch_mode TEXT,             -- switch_limit: "visit" (launches / new visits, default) or "switch" (every switch)
     visit_gap_min INTEGER,        -- switch_limit, visit mode: minutes away before a site visit counts as new
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS group_rules (
     schedule TEXT,
     temp_until DATETIME,
     allowance_min INTEGER,
+    allowance_shared INTEGER,
     daily_switch_limit INTEGER,   -- a group opening limit is one shared total
     switch_mode TEXT,
     visit_gap_min INTEGER,
@@ -163,10 +165,12 @@ CREATE TABLE IF NOT EXISTS site_history (
 MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path", "TEXT"),
               ("block_rules", "allowance_min", "INTEGER"), ("group_rules", "daily_switch_limit", "INTEGER"),
               ("block_rules", "switch_mode", "TEXT"), ("block_rules", "visit_gap_min", "INTEGER"),
-              ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER")]
+              ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER"),
+              ("block_rules", "allowance_shared", "INTEGER"), ("group_rules", "allowance_shared", "INTEGER")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
                for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
-RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "daily_switch_limit",
+RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "allowance_shared",
+                "daily_switch_limit",
                 "switch_mode", "visit_gap_min", "weekly_limit_min", "monthly_limit_min", "weekly_switch_limit",
                 "monthly_switch_limit")
 USAGE_DAYS_LOADED = 40   # monthly limits (+ a long day after a reset-time change)

@@ -17,6 +17,7 @@ from trusted_time import now_from_db
 
 AUTOSAVE_KEY = "ui.autosave"
 RULE_FIELDS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "duration_min", "allowance_min",
+               "allowance_shared",
                "daily_switch_limit", "switch_mode", "visit_gap_min", "weekly_limit_min", "monthly_limit_min",
                "weekly_switch_limit", "monthly_switch_limit")
 

@@ -76,7 +76,8 @@ def test_block_started_and_disabled_warnings():
     s = settings(warn_enabled="0")
     assert w.check(ITEMS, GROUP, no_usage, datetime(2026, 9, 14, 20, 58), set(), s) == []
     msgs = w.check(ITEMS, GROUP, no_usage, datetime(2026, 9, 14, 21, 0), set(), s)
-    assert msgs == ["Night schedule started: Discord, Steam blocked until Tuesday 07:00."]
+    # summarized: one line for the group, not one per member (you didn't open any of them)
+    assert msgs == ["Night schedule started - 2 things blocked until Tuesday 07:00."]
 
 
 def test_limit_warning_while_in_use():
