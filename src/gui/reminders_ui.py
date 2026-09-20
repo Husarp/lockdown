@@ -8,7 +8,7 @@ import customtkinter as ctk
 import modes
 import reminders
 from gui import theme
-from gui.components import Card, Rows, Segmented, eyebrow, page_head
+from gui.components import Card, Rows, Segmented, eyebrow, hairline, page_head
 from gui.rule_editors import DayToggle
 from gui.widgets import ConfirmButton
 from rules import DAY_NAMES, parse_hhmm
@@ -148,10 +148,16 @@ def _reminder_row(parent):
     return f
 
 
-def _option(parent, label: str, values: list[str], after: str = "") -> ctk.CTkOptionMenu:
+LABEL_W = 104   # Sleep / Breaks: muted labels in one column, controls lined up after it (like Settings)
+
+
+def _option(parent, label: str, values: list[str], after: str = "", label_w: int = 0) -> ctk.CTkOptionMenu:
     line = ctk.CTkFrame(parent, fg_color="transparent")
-    line.pack(anchor="w", pady=3)
-    ctk.CTkLabel(line, text=label).pack(side="left", padx=(0, 8))
+    line.pack(anchor="w", pady=3 if not label_w else 5)
+    if label_w:
+        ctk.CTkLabel(line, text=label, width=label_w, anchor="w", text_color=MUTED).pack(side="left", padx=(0, 12))
+    else:
+        ctk.CTkLabel(line, text=label).pack(side="left", padx=(0, 8))
     menu = ctk.CTkOptionMenu(line, values=values, width=100)
     menu.pack(side="left")
     if after:
@@ -164,51 +170,69 @@ class RemindersView(ctk.CTkScrollableFrame):
         super().__init__(master, fg_color="transparent")
         self.page, self.db = page, page.db
 
-        sleep = Card(self, "Sleep")
-        sleep.pack(fill="x", pady=(0, 12))
+        # Sleep and Breaks side by side (the page used to be one long stack of ragged lines)
+        cols = ctk.CTkFrame(self, fg_color="transparent")
+        cols.pack(fill="x", pady=(0, 12))
+        cols.grid_columnconfigure((0, 1), weight=1, uniform="r")
+        cols.grid_rowconfigure(0, weight=1)
+
+        def note(parent, text):
+            ctk.CTkLabel(parent, text=text, text_color=MUTED, font=theme.body(11), wraplength=440, justify="left",
+                         anchor="w").pack(anchor="w", padx=(42, 0), pady=(0, 6))   # under the switch's text
+
+        sleep = Card(cols, "Sleep")
+        sleep.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         b = sleep.body
-        self.sleep_on = ctk.CTkSwitch(b, text="Remind me to go to bed", command=self._save_sleep)
-        self.sleep_on.pack(anchor="w", pady=(0, 4))
+        self.sleep_on = ctk.CTkSwitch(b, text="Remind me to go to bed", font=theme.semi(13), command=self._save_sleep)
+        self.sleep_on.pack(anchor="w", pady=(4, 8))
         line = ctk.CTkFrame(b, fg_color="transparent")
-        line.pack(anchor="w", pady=3)
-        ctk.CTkLabel(line, text="Bedtime").pack(side="left", padx=(0, 8))
+        line.pack(anchor="w", pady=5)
+        ctk.CTkLabel(line, text="Bedtime", width=LABEL_W, anchor="w", text_color=MUTED).pack(side="left", padx=(0, 12))
         self.bedtime = ctk.CTkEntry(line, width=64, justify="center")
         self.bedtime.pack(side="left")
-        ctk.CTkLabel(line, text="Wake up").pack(side="left", padx=(16, 8))
+        ctk.CTkLabel(line, text="Wake up", text_color=MUTED).pack(side="left", padx=(16, 8))
         self.wake = ctk.CTkEntry(line, width=64, justify="center")
         self.wake.pack(side="left")
-        ctk.CTkButton(line, text="Save times", width=90, **theme.OUTLINE, command=self._save_sleep).pack(side="left",
-                                                                                                       padx=12)
-        self.before = _option(b, "Heads-up", ["Off", "10 min", "15 min", "30 min", "60 min"], "before bedtime")
-        self.repeat = _option(b, "After bedtime, show it again every", ["5 min", "10 min", "15 min", "30 min"])
-        self.sleep_mode = _option(b, "At bedtime, turn on", ["No mode"], "until wake-up time")
+        ctk.CTkButton(line, text="Save times", width=90, height=28, **theme.OUTLINE, command=self._save_sleep).pack(
+            side="left", padx=12)
+        self.before = _option(b, "Heads-up", ["Off", "10 min", "15 min", "30 min", "60 min"], "before bedtime",
+                              LABEL_W)
+        self.repeat = _option(b, "Repeat every", ["5 min", "10 min", "15 min", "30 min"], "once it's past bedtime",
+                              LABEL_W)
+        self.sleep_mode = _option(b, "Turn on", ["No mode"], "at bedtime, until wake-up time", LABEL_W)
         for menu in (self.before, self.repeat, self.sleep_mode):
             menu.configure(command=lambda v: self._save_sleep())
-        ctk.CTkLabel(b, text="At bedtime the screen dims with a \"Time for bed\" message (also over games).",
-                     text_color=MUTED, font=theme.body(11)).pack(anchor="w", pady=(4, 0))
-        self.sleep_error = ctk.CTkLabel(b, text="", text_color=theme.DANGER, height=16)
-        self.sleep_error.pack(anchor="w")
+        self.sleep_error = ctk.CTkLabel(b, text="", text_color=theme.DANGER, height=16)   # packed while it says something
+        tip = ctk.CTkFrame(b, fg_color=theme.BG, border_width=1, border_color=theme.BORDER, corner_radius=3)
+        tip.pack(side="bottom", fill="x", pady=(10, 0))
+        ctk.CTkLabel(tip, text="At bedtime the screen dims with a \"Time for bed\" message (also over games).",
+                     text_color=MUTED, font=theme.body(11), wraplength=500, justify="left").pack(
+            anchor="w", padx=12, pady=8)
 
-        brk = Card(self, "Breaks")
-        brk.pack(fill="x", pady=(0, 12))
+        brk = Card(cols, "Breaks")
+        brk.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
         b = brk.body
-        self.break_on = ctk.CTkSwitch(b, text="Remind me to take breaks", command=self._save_break)
-        self.break_on.pack(anchor="w", pady=(0, 4))
-        self.every = _option(b, "After", ["20 min", "30 min", "45 min", "60 min", "90 min"], "of use without a break")
-        self.length = _option(b, "Break length", ["2 min", "5 min", "10 min", "15 min"])
-        self.snooze = _option(b, "Snooze", ["5 min", "10 min", "15 min", "20 min"], "each time")
+        self.break_on = ctk.CTkSwitch(b, text="Remind me to take breaks", font=theme.semi(13),
+                                      command=self._save_break)
+        self.break_on.pack(anchor="w", pady=(4, 8))
+        self.every = _option(b, "After", ["20 min", "30 min", "45 min", "60 min", "90 min"], "of use without a break",
+                             LABEL_W)
+        self.length = _option(b, "Break length", ["2 min", "5 min", "10 min", "15 min"], label_w=LABEL_W)
+        self.snooze = _option(b, "Snooze", ["5 min", "10 min", "15 min", "20 min"], "each time", LABEL_W)
         for menu in (self.every, self.length, self.snooze):
             menu.configure(command=lambda v: self._save_break())
-        self.strict = ctk.CTkSwitch(b, text="Strict break: minimise everything until it's over (you can't just "
-                                    "dismiss it)", command=self._save_break)
-        self.strict.pack(anchor="w", pady=3)
-        self.max_snooze = _option(b, "In a strict break, snoozes before it starts on its own", ["1", "2", "3", "5"])
+        hairline(b).pack(fill="x", pady=(8, 10))
+        self.strict = ctk.CTkSwitch(b, text="Strict break", font=theme.semi(13), command=self._save_break)
+        self.strict.pack(anchor="w")
+        note(b, "Minimises everything until the break is over - you can't just dismiss it.")
+        self.max_snooze = _option(b, "Snoozes first", ["1", "2", "3", "5"], "before a strict break starts on its own",
+                                  LABEL_W)
         self.max_snooze.configure(command=lambda v: self._save_break())
-        self.twenty = ctk.CTkSwitch(b, text="20-20-20: every 20 min, look 20 feet (6 m) away for 20 seconds",
-                                    command=self._save_break)
-        self.twenty.pack(anchor="w", pady=3)
-        self.break_stats = ctk.CTkLabel(b, text="", text_color=MUTED, font=theme.body(11))
-        self.break_stats.pack(anchor="w", pady=(4, 0))
+        self.twenty = ctk.CTkSwitch(b, text="20-20-20", font=theme.semi(13), command=self._save_break)
+        self.twenty.pack(anchor="w", pady=(8, 0))
+        note(b, "Every 20 min, look 20 feet (6 m) away for 20 seconds.")
+        self.break_stats = ctk.CTkLabel(brk.title.master, text="", text_color=MUTED, font=theme.body(11), height=20)
+        self.break_stats.pack(side="right")
 
         own = self.own = Card(self, "Your reminders")
         own.pack(fill="x", pady=(0, 12))
@@ -265,8 +289,9 @@ class RemindersView(ctk.CTkScrollableFrame):
             bedtime, wake = parse_hhmm(self.bedtime.get()), parse_hhmm(self.wake.get())
         except ValueError:
             self.sleep_error.configure(text="Write times like 23:00.")
+            self.sleep_error.pack(anchor="w")
             return
-        self.sleep_error.configure(text="")
+        self.sleep_error.pack_forget()
         before = self.before.get()
         reminders.save(self.db, reminders.SLEEP_KEY, {
             "on": bool(self.sleep_on.get()), "bedtime": f"{bedtime:%H:%M}", "wake": f"{wake:%H:%M}",

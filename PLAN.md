@@ -1388,8 +1388,13 @@ adjust -> only then the next batch. Reference lines are in the Round 3 file.
 - [x] B12 (0.51.0, verified). Strict break must NEVER minimise Lockdown itself: `win.minimize_all` /
   `minimize_foreground` skip Lockdown's own pid (popups and overlays are in-process, so they're covered);
   pinned by tests/test_strict_break.py.
-- [ ] Follow-up from the B9 review: the trend chart's first / last x-axis date labels are clipped at the plot
-  edges ("22" -> "?2"). Small chart fix in gui/charts.py TrendLine.
+- [x] Follow-up from the B9 review: the trend chart's first / last x-axis date labels are clipped at the plot
+  edges ("22" -> "?2"). Fixed in 0.53.0 (labels hang inwards).
+- [x] Look-and-feel pass (user, 2026-09-20: "go through the app and make some things prettier") - 0.53.0:
+  Reminders two columns, Overview one-line statuses + wide group chips, Groups empty state, trend labels,
+  rail count alignment. Taste-dependent ideas left for the user to pick (not done): coloured Last-7-days bars
+  when nothing is categorised, tighter "Coming up" rows on the Dashboard, a shorter Groups list panel,
+  Modes cards with an icon / accent per mode.
 - [ ] Follow-ups from the B7 review (cosmetic): popup's trailing "Resets at …" sentence muted; the closed
   challenge's hours emphasised (600 weight) and the next chance with a "— in N h M m" countdown.
 All batches done in 0.43.0 - 0.52.0 (2026-09-20 01:50); installer built as build\LockdownSetup.exe.

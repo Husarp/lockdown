@@ -266,8 +266,9 @@ class TrendLine(Chart):
                 r = self.px(4)
                 self.pen.ellipse([(x - r) * SS, (y - r) * SS, (x + r) * SS, (y + r) * SS], fill=self.bg,
                                  outline=theme.pick(theme.INFO), width=max(1, int(self.s * SS)))
-            if i == 0 or i == n - 1 or i % 7 == 0:
-                self.text(x, bottom + self.px(4), label)
+            if i == 0 or i == n - 1 or (i % 7 == 0 and n - 1 - i > 2):   # (no label right next to the last one)
+                # the first / last labels hang inwards - centred on the plot edge they were cut in half
+                self.text(x, bottom + self.px(4), label, anchor="nw" if i == 0 else "ne" if i == n - 1 else "n")
             self.hit(xs[i] - (right - left) / (2 * n), 0, xs[i] + (right - left) / (2 * n), h, tip)
         self.points = pts   # for the hover marker (canvas px, same frame as the tooltip hit boxes)
 

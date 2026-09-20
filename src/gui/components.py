@@ -409,7 +409,7 @@ class BlockerRail(ctk.CTkFrame):
         head.pack(fill="x", pady=(0, 6))
         eyebrow(head, "Blockers · tick any number" if rail_width >= 300 else "Blockers").pack(side="left")
         self.count = ctk.CTkLabel(head, text="", text_color=theme.MUTED, font=theme.body(11))
-        self.count.pack(side="right")
+        self.count.pack(side="right", padx=(0, 6))   # (lines up with the rows' right edge)
         self.rows = {t: self._row(rail, t) for t in names}
         tint = CHIP_STYLES["group"][1]
         edge = (theme._mix(theme.ACCENT[0], theme.BG[0], 0.55), theme._mix(theme.ACCENT[1], theme.BG[1], 0.55))

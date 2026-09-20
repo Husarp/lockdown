@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.53.0 - 2026-09-20 03:53
+- **Look-and-feel pass** (every page captured with realistic data and gone through):
+  - Reminders: Sleep and Breaks sit side by side; labels in one muted column with the controls lined up after
+    them; "Strict break" and "20-20-20" are short switches with a muted explanation underneath; the bedtime tip
+    is a quiet note at the card's foot; "Breaks today" moved to the card header.
+  - Blocking > Overview: statuses stay on one line ("Pending · service off", "Unlocked · 12 m left"), group rule
+    chips use the spare width instead of wrapping ("→ School nights · Blocked: …").
+  - Blocking > Groups: a proper empty-state card ("No group open" + New group) instead of a bare line of text.
+  - Screen Time trend: the first / last date labels are no longer cut in half at the plot edges.
+  - Add / group editor: the "0 of 5 on" count lines up with the rail instead of touching its edge.
+
 ## 0.52.0 - 2026-09-20 01:50
 - **Blocking > Calendar rebuilt to design 4a / 4b**: one row per blocked item (icon, name, SITE / APP badge), a
   24 h track with the blocked stretches as bars (no text inside), "Blocked today" in its own column, a legend

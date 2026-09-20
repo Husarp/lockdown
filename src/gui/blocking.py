@@ -39,7 +39,7 @@ SUMMARY_MS = 1_000    # blocker card summaries follow what's typed
 MUTED = theme.MUTED
 ERROR = theme.DANGER
 GREEN, ORANGE, RED, BLUE = theme.ALLOWED, theme.PENDING, theme.BLOCKED, theme.INFO
-COLS = [230, 250]   # wrap widths: item text, rule chips
+COLS = [230, 470]   # wrap widths: item text, rule chips (the rules column takes the spare width)
 
 
 # ---------------------------------------------------------------- shared helpers
@@ -55,15 +55,14 @@ def saved_block(draft, item: dict, now, usage):
 def status_of(page, item: dict, now, usage) -> dict:
     draft = page.draft
     if draft.item_not_applied(item["id"]):
-        return {"text": "● Not applied\n(unsaved)", "text_color": ORANGE}
+        return {"text": "● Not applied (unsaved)", "text_color": ORANGE}
     unlocked = getattr(usage, "unlocks", {}).get(f"item:{item['id']}")
     if unlocked and now < unlocked:
-        return {"text": f"● Emergency unlock\n{duration_text((unlocked - now).total_seconds())} left",
-                "text_color": BLUE}
+        return {"text": f"● Unlocked · {duration_text((unlocked - now).total_seconds())} left", "text_color": BLUE}
     if not saved_block(draft, item, now, usage):
         return {"text": "● Allowed now", "text_color": GREEN}
     if not page.app.service_running:
-        return {"text": "● Pending - service\nnot running", "text_color": ORANGE}
+        return {"text": "● Pending · service off", "text_color": ORANGE}
     return {"text": "● Blocked now", "text_color": RED}
 
 
@@ -79,7 +78,7 @@ def targets_text(item: dict) -> str:
 
 def rule_text(rule, now, usage) -> str:
     text = describe_rule(rule, now, usage).replace(":\n", ": ").replace("\n", " · ")
-    return f"→ {rule['group']['name']}  {text}" if rule["group"] else text
+    return f"→ {rule['group']['name']} · {text}" if rule["group"] else text
 
 
 def chip_kind(rule) -> str:

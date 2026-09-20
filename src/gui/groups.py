@@ -264,9 +264,15 @@ class GroupsTab(ctk.CTkFrame):
         self.list_box.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         self.right = ctk.CTkScrollableFrame(cols, fg_color="transparent")
         self.right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        self.placeholder = ctk.CTkLabel(self.right, text="Pick a group on the left, or create a new one.",
-                                        text_color=MUTED)
-        self.placeholder.pack(anchor="w", pady=20, padx=10)
+        # empty state: a quiet card instead of a bare line of text floating in the corner
+        self.placeholder = ctk.CTkFrame(self.right, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER,
+                                        corner_radius=4)
+        ctk.CTkLabel(self.placeholder, text="No group open", font=theme.card_title()).pack(pady=(44, 4))
+        ctk.CTkLabel(self.placeholder, text="Pick a group on the left to edit its rules and members,\n"
+                                            "or make a new one.", text_color=MUTED, justify="center").pack()
+        ctk.CTkButton(self.placeholder, text="+ New group", width=120, **theme.OUTLINE,
+                      command=lambda: self.open_editor(None)).pack(pady=(14, 44))
+        self.placeholder.pack(fill="x")
         self.editor = GroupEditor(self.right, self)
         self.last = (None, None)
 
@@ -284,7 +290,7 @@ class GroupsTab(ctk.CTkFrame):
     def close_editor(self):
         self.selected = None
         self.editor.pack_forget()
-        self.placeholder.pack(anchor="w", pady=20, padx=10)
+        self.placeholder.pack(fill="x")
 
     def refresh(self, now, usage):
         if now is None:
