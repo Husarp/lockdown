@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.70.1 - 2026-09-21 10:37
+- **The Polish letter that now reaches the box is the right one.** 0.65.0 got AltGr keys through Tk's
+  "Control + a key does nothing" rule, but the wrong letter arrived: "pamietaj" came out as "pami<e-circumflex>taj".
+  Tk hands the character over as one byte in the keyboard's codepage (cp1250 here) and tkinter reads that byte
+  as Western European (cp1252), so e-ogonek became a circumflex e, z-dot an inverted question mark, l-stroke a
+  superscript 3 and s-acute an oe ligature. The byte is now read back through the codepage Windows actually
+  uses. Every box in the app is covered - it is one rule on the Entry and Text classes.
+- A Western (cp1252) Windows is untouched, and a character that can't have come from this mix-up is left alone.
+
 ## 0.70.0 - 2026-09-21 10:26
 - **A wait between passing the challenge and being able to change anything** (Anti-Bypass > "Then wait ...
   before it actually unlocks"). Type any time - `10`, `1h`, `45s`, or `Off` for none, as with the reminders.

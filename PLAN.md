@@ -1486,6 +1486,9 @@ one shared pot for the whole category.
 - [x] A cooling-off period before the bypass opens (user, 2026-09-21) - 0.70.0: antibypass "wait_min",
   `unlocked_from` next to `unlocked_until`, a "waiting" status, and the countdown in the banner and in the
   challenge window.
+- [x] AltGr letters arrived as the wrong letter (user's screenshot, 2026-09-21) - 0.70.1: tkinter reads Tk's
+  single byte as cp1252; `gui/shortcuts.character()` puts it back through the system codepage (GetACP).
+  Text typed BEFORE this fix stays mangled where it was saved - retype it.
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting
