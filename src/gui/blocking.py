@@ -26,8 +26,8 @@ from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import (DAY_NAMES, allowance_note, describe_rule, duration_text, effective_rules, item_block,
-                   next_block, rule_state)
+from rules import (DAY_NAMES, allowance_left, allowance_note, describe_rule, duration_text, effective_rules,
+                   item_block, next_block, rule_state)
 from trusted_time import now_from_db
 
 TABS = ["Overview", "Groups", "Add", "Site protection", "Calendar"]
@@ -54,6 +54,19 @@ def saved_block(draft, item: dict, now, usage):
     return item_block(effective_rules(saved, list(draft.saved_groups.values())), now, usage)
 
 
+def allowance_running(draft, item: dict, now, usage):
+    """Seconds left of the allowance it is being used on right now, or None. This is why something can say
+    "allowed" while its hours are on: the hours block, the allowance is the way out of them."""
+    saved = draft.saved_items.get(item["id"])
+    if saved is None:
+        return None
+    for rule in effective_rules(saved, list(draft.saved_groups.values())):
+        spent = allowance_left(rule, now, usage)
+        if spent and spent[0] < spent[1]:
+            return spent[1] - spent[0]
+    return None
+
+
 def status_of(page, item: dict, now, usage) -> dict:
     draft = page.draft
     if draft.item_not_applied(item["id"]):
@@ -64,6 +77,9 @@ def status_of(page, item: dict, now, usage) -> dict:
     if unlocked and now < unlocked:
         return {"text": f"● Unlocked · {duration_text((unlocked - now).total_seconds())} left", "text_color": BLUE}
     if not saved_block(draft, item, now, usage):
+        left = allowance_running(draft, item, now, usage)   # inside its blocked hours, on the allowance
+        if left is not None:
+            return {"text": f"● On the allowance · {duration_text(left)} left", "text_color": theme.SPECIAL}
         return {"text": "● Allowed now", "text_color": GREEN}
     if not page.app.service_running:
         return {"text": "● Pending · service off", "text_color": ORANGE}
@@ -138,9 +154,13 @@ def chip_kind(rule, now, usage) -> str:
     return CHIP_STATES[rule_state(rule, now, usage)]
 
 
-def _paint_chip(chip, rule, now, usage, allowance: bool = False):
-    fg, bg = CHIP_STYLES["allowance" if allowance else chip_kind(rule, now, usage)]
+def _paint_chip(chip, rule, now, usage, allowance: bool = False, siblings=None):
+    """siblings: the other rules on the same thing. While any of them is blocking, what this one still allows
+    is of no use - so it goes red with the rest, instead of offering time you can't spend."""
+    inert = bool(siblings) and bool(item_block(siblings, now, usage))
+    kind = "allowance" if allowance else "danger" if inert else chip_kind(rule, now, usage)
     text = allowance_note(rule, now, usage) if allowance else rule_text(rule, now, usage)
+    fg, bg = CHIP_STYLES[kind]
     chip.configure(text=f" {text} ", text_color=fg, fg_color=bg)
 
 
@@ -338,10 +358,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
         off = [g for g in groups if g.get("disabled") and item["id"] in g["members"]]
         while len(r["chips"]) < len(chips) + len(off):
             r["chips"].append(rule_chip(r["rules_box"], "", wraplength=COLS[1] - 20))
+        siblings = effective_rules(item, groups)
         for chip, (rule, allowance) in zip(r["chips"], chips):
-            _paint_chip(chip, rule, now, usage, allowance)
+            _paint_chip(chip, rule, now, usage, allowance, siblings)
             chip.pack(anchor="w", pady=2)
-            self.live_rules.append((chip, rule, allowance))
+            self.live_rules.append((chip, rule, allowance, siblings))
         for chip, g in zip(r["chips"][len(chips):], off):
             fg, bg = CHIP_STYLES["neutral"]
             chip.configure(text=f" → {g['name']} · disabled ", text_color=fg, fg_color=bg)
@@ -421,13 +442,14 @@ class OverviewTab(ctk.CTkScrollableFrame):
         c["remove"]._disarm()
         c["remove"]._on_confirm = lambda g=group["id"]: self.draft.remove_group(g)
 
-        rules = rule_chips([group_rule(group, r) for r in group["rules"]], now, usage)
+        own_rules = [group_rule(group, r) for r in group["rules"]]
+        rules = rule_chips(own_rules, now, usage)
         while len(c["chips"]) < len(rules):
             c["chips"].append(rule_chip(c["rules_box"], "", wraplength=760))
         for chip, (rule, allowance) in zip(c["chips"], rules):
-            _paint_chip(chip, rule, now, usage, allowance)
+            _paint_chip(chip, rule, now, usage, allowance, own_rules)
             chip.pack(anchor="w", pady=2)
-            self.live_rules.append((chip, rule, allowance))
+            self.live_rules.append((chip, rule, allowance, own_rules))
         for chip in c["chips"][len(rules):]:
             chip.pack_forget()
 
@@ -453,10 +475,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
         custom = [] if item.get("disabled") else [t for t in (group["members"].get(item["id"]) or {})]
         while len(m["chips"]) < len(own) + bool(custom):
             m["chips"].append(rule_chip(m["own"], "", wraplength=440))
+        siblings = [] if item.get("disabled") else effective_rules(item, [group])
         for chip, (rule, allowance) in zip(m["chips"], own):
-            _paint_chip(chip, rule, now, usage, allowance)
+            _paint_chip(chip, rule, now, usage, allowance, siblings)
             chip.pack(anchor="w", pady=1)
-            self.live_rules.append((chip, rule, allowance))
+            self.live_rules.append((chip, rule, allowance, siblings))
         extra = m["chips"][len(own):]
         if custom:
             fg, bg = CHIP_STYLES["neutral"]
@@ -540,9 +563,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
     def update_live(self, now, usage):
         """Refresh counters, countdowns, colours and statuses without rebuilding the list."""
-        for label, rule, allowance in getattr(self, "live_rules", []):
+        for label, rule, allowance, siblings in getattr(self, "live_rules", []):
             if label.winfo_exists():
-                _paint_chip(label, rule, now, usage, allowance)
+                _paint_chip(label, rule, now, usage, allowance, siblings)
         for label, item in getattr(self, "live_status", []):
             if label.winfo_exists():
                 label.configure(**status_of(self.page, item, now, usage))

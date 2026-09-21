@@ -1,8 +1,9 @@
 """Keyboard shortcuts for the whole app (installed once on the Tk root, so every window and text box gets them):
 Esc closes a pop-up window (like its X; the bedtime / forced-break screens set `escape_closes = False`),
 and in any text box: Ctrl+Z / Ctrl+Y undo / redo, Ctrl+Backspace / Ctrl+Delete delete a word, Ctrl+A selects all."""
-import ctypes
 import re
+
+import mojibake
 
 MAX_UNDO = 100
 _undo: dict[str, list[str]] = {}   # text box -> its earlier values (last = current)
@@ -38,28 +39,20 @@ def _altgr(event):
     return "break"
 
 
-def _ansi_codepage() -> str:
-    """The codepage Windows uses for single-byte text here - cp1250 on a Polish system, cp1252 on a Western one."""
-    try:
-        return f"cp{ctypes.windll.kernel32.GetACP()}"
-    except Exception:
-        return "cp1252"
-
-
-ANSI = _ansi_codepage()
-
-
 def character(event) -> str:
     """The character a key really produced. Tk hands it over as one byte in the keyboard's codepage, and
-    tkinter reads that byte as Western European (cp1252): on a Polish system e-ogonek (0xEA in cp1250) arrives
+    tkinter reads that byte as Western European (cp1252): with a Polish layout e-ogonek (0xEA in cp1250) arrives
     as a circumflex e, z-dot as an inverted question mark, l-stroke as a superscript 3, s-acute as an oe
     ligature. Anything that still fits in one cp1252 byte is put back through the real codepage; a character
     that doesn't fit can't have come from this mix-up, so it is left alone."""
     char = event.char
-    if not char or char.isascii() or ANSI == "cp1252":
+    if not char or char.isascii():
+        return char
+    ansi = mojibake.keyboard_codepage()   # the layout you are typing with right now, not the system's
+    if ansi == "cp1252":
         return char
     try:
-        return char.encode("cp1252").decode(ANSI)
+        return char.encode("cp1252").decode(ansi)
     except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
         return char
 

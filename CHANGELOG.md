@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.74.0 - 2026-09-21 21:15
+- **Polish letters, properly this time.** 0.70.1 asked Windows for the *system* codepage; on an English
+  Windows that is cp1252, so the conversion did nothing and the letters still arrived wrong. What matters is
+  the codepage of the **keyboard layout you are typing with** - the Polish one is cp1250 even on an English
+  system. That is what is used now, read at each keypress, so switching layouts switches with you.
+- **Text saved before this is put back, once.** The bedtime message, reminder texts, item and group names and
+  the Anti-Bypass phrase are read back through that codepage the first time Lockdown starts - but only when
+  they carry a character that practically cannot be typed on purpose (a superscript 3, an oe ligature, an
+  inverted question mark), which is what makes the mix-up recognisable. Anything else is left alone.
+- **Resizing the window is instant again.** 0.73.0 re-scaled every widget whenever the window settled, and
+  customtkinter does that by walking every widget it has ever made - about 8 seconds once every page is
+  built. That is gone. The size is decided **once, at startup**, from what your screen can show, and
+  **Settings > Interface size** (Auto / 100% / 90% / 80% / 70%) overrides it from the next start.
+- **"On the allowance" instead of "Allowed now".** While the hours are blocking and you are spending the
+  minutes they allow, it says so, with what is left - that is why something can look allowed at 21:30 when
+  its block starts at 21:00.
+- **A rule that can no longer be used goes red.** While anything is blocking a site, app or group, its other
+  rules turn red with it: a shared limit saying "34m of 2h today" in green was offering time you cannot spend.
+- **The clock** is at the foot of the sidebar - Lockdown's own trusted time, the one the blocks go by.
+
 ## 0.73.0 - 2026-09-21 18:51
 - **A window that isn't maximised now shrinks everything to fit** instead of cutting cards off at the edge.
   The pages are laid out for 1280x780 of their own units; a smaller window draws every one of those units

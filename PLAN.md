@@ -1501,6 +1501,13 @@ one shared pot for the whole category.
       Needs `REPO = "owner/name"` in src/version.py before the two buttons appear.
 - [ ] A fuller step-by-step tutorial (offered, not built): the About list is one line per feature. Ask the
       user whether they want a walk-through instead.
+- [x] Polish letters: the keyboard LAYOUT's codepage, not the system's (user, 2026-09-21) - 0.74.0. On an
+  English Windows GetACP() is 1252 while the Polish layout still produces cp1250 bytes, which is why 0.70.1
+  changed nothing. mojibake.keyboard_codepage / typing_codepage, plus a one-off repair of saved text.
+- [x] Resizing stalled for ~8 s (user, 2026-09-21) - 0.74.0: ctk.set_widget_scaling walks every widget
+  (~4 ms each, 2166 widgets). Scaling is chosen once at startup; Settings > Interface size overrides it.
+- [x] "On the allowance" status and red chips for rules that can't be used (user, 2026-09-21) - 0.74.0.
+- [x] A clock in the sidebar (user, 2026-09-21) - 0.74.0.
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting

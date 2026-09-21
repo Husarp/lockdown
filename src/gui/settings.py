@@ -17,6 +17,7 @@ from trusted_time import now_from_db
 MUTED = theme.MUTED
 ERROR = theme.DANGER
 PER_LABELS = {"per day": "day", "per week": "week"}
+SIZES = {"Auto": "auto", "100%": "100", "90%": "90", "80%": "80", "70%": "70"}
 GOAL_OPTIONS = ["Off"] + [f"{h} h" for h in range(1, 13)]
 RIGHT_W = 400
 LABEL_W = 104
@@ -124,6 +125,22 @@ class SettingsPage(ctk.CTkFrame):
             side="left", padx=10)
         self._show_accent()
 
+        line = self._row(box, "Interface size")
+        self.size = ctk.CTkOptionMenu(line, width=90, values=list(SIZES), command=self._size_changed)
+        self.size.pack(side="left")
+        chosen = self.db.get_setting(theme.SIZE_KEY, "auto")
+        self.size.set(next((k for k, v in SIZES.items() if v == chosen), "Auto"))
+        ctk.CTkLabel(line, text="how big everything is drawn", text_color=MUTED,
+                     font=theme.body(12)).pack(side="left", padx=10)
+        help_icon(line, "Auto fits the pages to your screen. Everything is drawn at this size from the next "
+                        "start - changing it while the app runs would mean laying out every page again, which "
+                        "takes seconds.").pack(side="left")
+        self.size_line = ctk.CTkFrame(box, fg_color="transparent")
+        ctk.CTkLabel(self.size_line, text="Restart Lockdown to use the new size.",
+                     text_color=theme.WARNING).pack(side="left")
+        ctk.CTkButton(self.size_line, text="Restart now", width=110, command=self.app.restart).pack(
+            side="left", padx=10)
+
         line = self._row(box, "Daily goal")
         self.goal = ctk.CTkOptionMenu(line, width=90, values=GOAL_OPTIONS, command=self._goal_changed)
         self.goal.pack(side="left")
@@ -174,6 +191,10 @@ class SettingsPage(ctk.CTkFrame):
             self.restart_line.pack(anchor="w", pady=(0, 10))
         else:
             self.restart_line.pack_forget()
+
+    def _size_changed(self, label: str):
+        self.db.set_setting(theme.SIZE_KEY, SIZES[label])
+        self.size_line.pack(anchor="w", padx=(LABEL_W + 12, 0), pady=(0, 8))
 
     def _goal_changed(self, value: str):
         self.db.set_setting(GOAL_KEY, "0" if value == "Off" else value.split()[0])

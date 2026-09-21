@@ -193,6 +193,8 @@ class Database:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         from importer.popular import add_media_hosts
         add_media_hosts(self)   # one-off: youtube.com also covers googlevideo.com now (the video itself)
+        import mojibake
+        mojibake.repair_saved(self)   # one-off: text typed before 0.70.1, when AltGr letters arrived wrong
         if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'site_usage'").fetchone():  # 0.3.x table
             self.conn.execute("INSERT OR IGNORE INTO usage (owner, bucket, seconds, day) "
                               "SELECT 'item:' || item_id, 'day:' || date, seconds, date FROM site_usage")

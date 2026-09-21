@@ -72,6 +72,8 @@ if ACCENT_HEX != ACCENTS["Orange"] and len(ACCENT_HEX) == 7:   # (orange keeps t
 
 # Status (blocked = red, allowed = green - the user's choice over the design's green "blocked")
 BLOCKED, ALLOWED, PENDING = DANGER, SUCCESS, WARNING
+SPECIAL = ("#6B46C1", "#A78BFA")     # the allowance during blocked hours: not blocked, not simply allowed
+SIZE_KEY = "ui.scale"                # "auto", or how big everything is drawn as a percentage ("80")
 CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": DANGER}
 
 # Secondary buttons: a light-grey fill in light mode (so they don't vanish on white cards - fix 7b), a plain
