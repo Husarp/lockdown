@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.72.2 - 2026-09-21 12:48
+- **A disabled member says so in its group's box**: "● Disabled" on its line, and its blockers are not listed,
+  since none of them apply. Before, it sat there looking like an ordinary allowed member.
+- **What is left of the allowance is in brackets after it**: "+ 15 min allowed during blocked hours
+  (15m left until 05:00)", or "(used up until 05:00)" once it is gone.
+
 ## 0.72.1 - 2026-09-21 12:10
 - **The allowance during blocked hours is its own purple chip.** The hours themselves are red while they are
   on - they are blocking, and the allowance is the way out of them, not a reprieve - and next to them a purple

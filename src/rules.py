@@ -495,8 +495,8 @@ def allowance_note(rule: dict, now: datetime, usage=no_usage) -> str | None:
     if spent:   # inside those hours: say how much of it is still there
         used, allowed, until = spent
         left = max(0, allowed - used)
-        text += (f" · {duration_text(left)} left until {until:%H:%M}" if left
-                 else f" · used up until {until:%H:%M}")
+        text += (f" ({duration_text(left)} left until {until:%H:%M})" if left
+                 else f" (used up until {until:%H:%M})")
     return text
 
 

@@ -58,6 +58,8 @@ def status_of(page, item: dict, now, usage) -> dict:
     draft = page.draft
     if draft.item_not_applied(item["id"]):
         return {"text": "● Not applied (unsaved)", "text_color": ORANGE}
+    if item.get("disabled"):
+        return {"text": "● Disabled", "text_color": MUTED}
     unlocked = getattr(usage, "unlocks", {}).get(f"item:{item['id']}")
     if unlocked and now < unlocked:
         return {"text": f"● Unlocked · {duration_text((unlocked - now).total_seconds())} left", "text_color": BLUE}
@@ -445,8 +447,10 @@ class OverviewTab(ctk.CTkScrollableFrame):
         for w in (m["line"], m["icon"], m["name"]):
             w.bind("<Button-1>", lambda e, i=item["id"]: self.page.edit_item(i))
         # its own blockers, and anything customised for it in the group - what it has on top of the box's rules
-        own = rule_chips(effective_rules({**item, "rules": item["rules"]}, []), now, usage)
-        custom = [t for t in (group["members"].get(item["id"]) or {})]
+        # a disabled member keeps its blockers but none of them apply, so its line doesn't list them
+        own = [] if item.get("disabled") else rule_chips(effective_rules({**item, "rules": item["rules"]}, []),
+                                                         now, usage)
+        custom = [] if item.get("disabled") else [t for t in (group["members"].get(item["id"]) or {})]
         while len(m["chips"]) < len(own) + bool(custom):
             m["chips"].append(rule_chip(m["own"], "", wraplength=440))
         for chip, (rule, allowance) in zip(m["chips"], own):
