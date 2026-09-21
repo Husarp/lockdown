@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.70.0 - 2026-09-21 10:26
+- **A wait between passing the challenge and being able to change anything** (Anti-Bypass > "Then wait ...
+  before it actually unlocks"). Type any time - `10`, `1h`, `45s`, or `Off` for none, as with the reminders.
+  - Passing the challenge starts the wait instead of unlocking: nothing changes yet, and the window says when
+    it opens ("possible from 10:36 - about 10 min from now - and then for 5 minutes").
+  - Trying again while the wait runs shows the countdown, **not the phrase again** - typing it a second time
+    would only start the wait over.
+  - The Anti-Bypass banner counts it down, with a bar that fills.
+  - It is a time kept in the database, so quitting Lockdown, killing the tray agent or restarting the PC
+    doesn't skip it. Shortening or removing the wait is a weakening change, so it needs the challenge itself.
+  - An easy phrase plus a long wait is often the stronger setting: impatience beats difficulty.
+
 ## 0.69.0 - 2026-09-21 10:10
 - **Moving the limit reset earlier now asks which way you want it.** A small window offers both:
   - **Start now** - the limit day you are in ends at once and a fresh one begins, so today's limits start

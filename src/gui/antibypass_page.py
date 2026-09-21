@@ -5,6 +5,7 @@ from datetime import datetime
 import customtkinter as ctk
 
 import antibypass
+import reminders   # (parse_minutes / minutes_text: the same "45s", "10", "1h30" boxes)
 from gui import theme
 from gui.components import Card, Segmented, help_icon, page_head
 from gui.word_grid import WordGrid, block_paste
@@ -71,20 +72,24 @@ class ChallengeWindow(ctk.CTkToplevel):
             ctk.CTkLabel(row, text=c, text_color=MUTED, justify="left", wraplength=496, anchor="w").pack(side="left")
         buttons = ctk.CTkFrame(box, fg_color="transparent")
         self.phrase = None
-        if antibypass.status(cfg, now) == "closed":
+        waiting = antibypass.waiting_until(cfg, now)
+        if waiting:
+            # the challenge is already passed and the wait is running: show it, never the phrase again (typing
+            # it a second time would start the wait from the beginning)
+            title.configure(text="  Waiting", image=theme.icon("shield-check", theme.PENDING, 19), compound="left")
+            minutes = max(1, int((waiting - now).total_seconds() // 60) + 1)
+            self._note(box, theme.PENDING,
+                       f"You passed the challenge. Changes like this are possible from {waiting:%H:%M} "
+                       f"- about {minutes} min from now - and then for {antibypass.UNLOCK_MIN} minutes.")
+            buttons.pack(fill="x", pady=(16, 0))
+            ctk.CTkButton(buttons, text="OK", width=90, command=self._cancel).pack(side="right")
+        elif antibypass.status(cfg, now) == "closed":
             # design 3l: "Closed right now" + a red-tinted note with the hours and the next chance
             title.configure(text="  Closed right now", image=theme.icon("shield-check", theme.DANGER, 19),
                             compound="left")
             nxt = antibypass.next_hours(cfg, now)
-            c = theme.DANGER
-            note = ctk.CTkFrame(box, corner_radius=3, border_width=1, border_color=c,
-                                fg_color=(theme._mix(c[0], theme.BG[0], 0.9), theme._mix(c[1], theme.BG[1], 0.9)))
-            note.pack(fill="x")
-            tk.Frame(note, width=3, bg=theme.pick(c), bd=0, highlightthickness=0).pack(side="left", fill="y",
-                                                                                     padx=(1, 0), pady=1)
-            ctk.CTkLabel(note, text=f"Changes like this are only possible {hours_text(cfg)}."
-                                    + (f"\nNext chance: {when(nxt, now)}." if nxt else ""),
-                         justify="left", wraplength=470, font=theme.body(12)).pack(anchor="w", padx=12, pady=10)
+            self._note(box, theme.DANGER, f"Changes like this are only possible {hours_text(cfg)}."
+                       + (f"\nNext chance: {when(nxt, now)}." if nxt else ""))
             buttons.pack(fill="x", pady=(16, 0))
             ctk.CTkButton(buttons, text="OK", width=90, command=self._cancel).pack(side="right")
         else:
@@ -139,6 +144,18 @@ class ChallengeWindow(ctk.CTkToplevel):
                 self.after(100, self.entry.focus_force)
         modal(self, app)   # (no transient when shown alone, e.g. by the uninstaller)
 
+    @staticmethod
+    def _note(box, color, text: str):
+        """The tinted note under the title (design 3l), with a coloured edge down its left side."""
+        note = ctk.CTkFrame(box, corner_radius=3, border_width=1, border_color=color,
+                            fg_color=(theme._mix(color[0], theme.BG[0], 0.9),
+                                      theme._mix(color[1], theme.BG[1], 0.9)))
+        note.pack(fill="x")
+        tk.Frame(note, width=3, bg=theme.pick(color), bd=0, highlightthickness=0).pack(side="left", fill="y",
+                                                                                       padx=(1, 0), pady=1)
+        ctk.CTkLabel(note, text=text, justify="left", wraplength=470, font=theme.body(12)).pack(
+            anchor="w", padx=12, pady=10)
+
     def _enable_go(self, enabled: bool):
         faded = (theme._mix(theme.ACCENT[0], theme.BG[0], 0.6), theme._mix(theme.ACCENT[1], theme.BG[1], 0.6))
         self.go.configure(state="normal" if enabled else "disabled", fg_color=theme.ACCENT if enabled else faded)
@@ -162,9 +179,17 @@ class ChallengeWindow(ctk.CTkToplevel):
     def _pass(self):
         if not (self.grid.done if self.grid else self.entry.get() == self.phrase):
             return
-        antibypass.unlock(self.db, now_from_db(self.db))
+        waiting = antibypass.unlock(self.db, now_from_db(self.db))
         self.destroy()
-        self.on_pass()
+        if waiting:   # a cooling-off period is set: come back when it ends and do it then
+            self.on_cancel()
+            once("waited", lambda: ConfirmDialog(
+                self.app, "Passed - now the wait",
+                f"You can loosen a block from {waiting:%H:%M}, for {antibypass.UNLOCK_MIN} minutes.\n\n"
+                f"Nothing has changed yet - come back then and make the change.",
+                on_yes=lambda: None, yes_text="OK"))
+        else:
+            self.on_pass()
         if hasattr(self.app, "refresh_antibypass"):
             self.app.refresh_antibypass()
 
@@ -244,6 +269,18 @@ class AntiBypassPage(ctk.CTkFrame):
         help_icon(custom, "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - "
                           "no pasting. With the 3×3 grid it's split into words by the spaces. While a custom phrase "
                           "is set, the length and the numbers/capitals option don't apply.").pack(side="left", padx=4)
+        wait_line = ctk.CTkFrame(challenges.body, fg_color="transparent")
+        wait_line.pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(wait_line, text="Then wait").pack(side="left", padx=(0, 8))
+        self.wait_entry = ctk.CTkEntry(wait_line, width=72, justify="center")
+        self.wait_entry.pack(side="left")
+        self.wait_entry.bind("<Return>", lambda e: self._apply())
+        self.wait_entry.bind("<FocusOut>", lambda e: self._apply())
+        ctk.CTkLabel(wait_line, text="before it actually unlocks", text_color=MUTED).pack(side="left", padx=8)
+        help_icon(wait_line, "\"Off\", or a time like 10 or 1h. Passing the challenge starts the wait instead of "
+                             "unlocking at once, and you come back when it ends - an easy phrase plus a long wait "
+                             "stops more than a hard phrase does.\nThe wait is kept in the database, so closing "
+                             "Lockdown or restarting the PC doesn't skip it.").pack(side="left", padx=4)
         hours_line = ctk.CTkFrame(challenges.body, fg_color="transparent")
         hours_line.pack(anchor="w")
         self.hours_sw = ctk.CTkSwitch(hours_line, text="Only during these hours", font=theme.semi(13),
@@ -312,6 +349,9 @@ class AntiBypassPage(ctk.CTkFrame):
             self.custom_entry.delete(0, "end")
             self.custom_entry.insert(0, cfg.get("custom_phrase") or "")
         self.hours_sw.select() if cfg["hours"] else self.hours_sw.deselect()
+        if self.wait_entry.get() != reminders.minutes_text(cfg.get("wait_min") or 0):
+            self.wait_entry.delete(0, "end")
+            self.wait_entry.insert(0, reminders.minutes_text(cfg.get("wait_min") or 0))
         for row in self.rows:
             row.destroy()
         self.rows = []
@@ -341,6 +381,9 @@ class AntiBypassPage(ctk.CTkFrame):
             self._banner(theme.SUCCESS, "", "Changes that loosen your blocks are allowed until the timer runs out.")
             self.lock_btn.pack(side="right")
             self._tick_unlock()   # live mm:ss countdown + a draining bar
+        elif status == "waiting":
+            self._banner(theme.PENDING, "Passed - waiting", "The unlock opens when the wait ends.")
+            self._tick_wait()
         elif status == "phrase":
             self._banner(theme.DANGER, "Locked", describe(cfg))
             self.unlock_btn.pack(side="right")
@@ -387,12 +430,30 @@ class AntiBypassPage(ctk.CTkFrame):
         self.unlock_bar.set(max(0.0, min(1.0, left / (antibypass.UNLOCK_MIN * 60))))
         self._unlock_job = self.after(1000, self._tick_unlock)
 
+    def _tick_wait(self):
+        """The cooling-off period between passing the challenge and being able to change anything."""
+        if not self.winfo_exists():
+            return
+        now = now_from_db(self.db)
+        cfg = antibypass.settings(self.db)
+        start = antibypass.waiting_until(cfg, now)
+        if not start:
+            self._set_banner()
+            return
+        m, s = divmod(max(0, int((start - now).total_seconds())), 60)
+        self.banner_title.configure(text=f"Passed - unlocks in {m}:{s:02d} (at {start:%H:%M})")
+        total = max(1.0, (cfg.get("wait_min") or 0) * 60)
+        self.unlock_bar.pack(fill="x", side="bottom")
+        self.unlock_bar.set(max(0.0, min(1.0, 1 - (start - now).total_seconds() / total)))
+        self._unlock_job = self.after(1000, self._tick_wait)
+
     def _read(self) -> dict:
         cfg = antibypass.settings(self.db)
         windows = [w for w in (r.value() for r in self.rows) if w[0]]
         if self.hours_sw.get() and not windows:
             raise ValueError("Turn on at least one day.")
-        return {**cfg, "phrase": bool(self.phrase_sw.get()), "length": antibypass.LENGTHS[self.length.get()],
+        return {**cfg, "wait_min": reminders.parse_minutes(self.wait_entry.get(), least=1),
+                "phrase": bool(self.phrase_sw.get()), "length": antibypass.LENGTHS[self.length.get()],
                 "grid": bool(self.grid_box.get()), "complex": bool(self.complex_box.get()),
                 "custom_phrase": " ".join(self.custom_entry.get().split()),
                 "hours": bool(self.hours_sw.get()),
@@ -424,7 +485,7 @@ class AntiBypassPage(ctk.CTkFrame):
 
     def _challenge_changed(self, old: dict, new: dict) -> bool:
         return any(old.get(k) != new.get(k) for k in ("phrase", "length", "grid", "complex", "custom_phrase",
-                                                       "hours", "windows"))
+                                                       "hours", "windows", "wait_min"))
 
     def _lock(self):
         antibypass.lock(self.db)

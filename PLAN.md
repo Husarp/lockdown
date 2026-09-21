@@ -1483,6 +1483,13 @@ one shared pot for the whole category.
 - [x] Moving the reset earlier: choose "Start now" (challenge) or "from the end of this day" (free) -
   0.69.0. The user's point: once you can pass the challenge you could turn everything off anyway, so waiting
   for the next day should be a choice, not the only option.
+- [x] A cooling-off period before the bypass opens (user, 2026-09-21) - 0.70.0: antibypass "wait_min",
+  `unlocked_from` next to `unlocked_until`, a "waiting" status, and the countdown in the banner and in the
+  challenge window.
+- [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
+  webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
+  an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting
+  for the user to pick one.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

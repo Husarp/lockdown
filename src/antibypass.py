@@ -4,6 +4,8 @@ Challenges (any combination, both off = Anti-Bypass off):
 - phrase: type a random phrase (no pasting). Passing it unlocks loosening changes for UNLOCK_MIN minutes.
   Optional "3×3 grid" (off by default): one word at a time into a box picked at random (you have to click it).
 - hours: loosening changes only during the chosen time windows (e.g. Sunday 18:00-20:00).
+- wait: passing the challenge doesn't open at once - the unlock starts this many minutes later (a cooling-off
+  period; the wait runs in the database, so closing Lockdown or rebooting doesn't skip it).
 The emergency unlock stays outside (it has its own weekly limit). UI-free, so it can be tested."""
 import json
 import random
@@ -16,12 +18,13 @@ from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_sha
                    window_until)
 
 SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": bool, "windows": [...],
-#                                     "unlocked_until": "YYYY-mm-dd HH:MM:SS"}
+#                                     "wait_min": minutes, "unlocked_from"/"unlocked_until": "Y-m-d H:M:S"}
 UNLOCK_MIN = 5
 EXITED_KEY = "agent.exited"   # "1" after tray Exit: the watchdog doesn't bring the tray app back until next login
 LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
 DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
-            "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "unlocked_until": None}
+            "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "wait_min": 0,
+            "unlocked_from": None, "unlocked_until": None}
 
 
 def settings(db) -> dict:
@@ -48,10 +51,25 @@ def next_hours(cfg: dict, now: datetime) -> datetime | None:
     return next_window_start(cfg["windows"], now)
 
 
-def unlocked_until(cfg: dict, now: datetime) -> datetime | None:
-    until = cfg.get("unlocked_until")
-    until = datetime.strptime(until, TIME_FMT) if until else None
-    return until if until and now < until else None
+def _at(cfg: dict, key: str) -> datetime | None:
+    value = cfg.get(key)
+    return datetime.strptime(value, TIME_FMT) if value else None
+
+
+def waiting_until(cfg: dict, now: datetime) -> datetime | None:
+    """The challenge is passed but the wait hasn't run out yet: when it does."""
+    start = _at(cfg, "unlocked_from")
+    return start if start and now < start and unlocked_until(cfg, now, waiting=True) else None
+
+
+def unlocked_until(cfg: dict, now: datetime, waiting: bool = False) -> datetime | None:
+    """When the unlock runs out, or None if you aren't unlocked. During the wait this is None (nothing is
+    allowed yet) unless the caller is asking about the wait itself."""
+    until = _at(cfg, "unlocked_until")
+    if not until or now >= until:
+        return None
+    start = _at(cfg, "unlocked_from")
+    return until if waiting or not start or now >= start else None
 
 
 def status(cfg: dict, now: datetime) -> str:
@@ -60,20 +78,26 @@ def status(cfg: dict, now: datetime) -> str:
         return "free"
     if cfg["hours"] and not in_hours(cfg, now):
         return "closed"
+    if waiting_until(cfg, now):
+        return "waiting"
     if cfg["phrase"] and not unlocked_until(cfg, now):
         return "phrase"
     return "free"
 
 
-def unlock(db, now: datetime):
+def unlock(db, now: datetime) -> datetime | None:
+    """The challenge was passed: open the unlock, after the wait if one is set. Returns when the wait ends."""
     cfg = settings(db)
-    cfg["unlocked_until"] = (now + timedelta(minutes=UNLOCK_MIN)).strftime(TIME_FMT)
+    start = now + timedelta(minutes=cfg.get("wait_min") or 0)
+    cfg["unlocked_from"] = start.strftime(TIME_FMT)
+    cfg["unlocked_until"] = (start + timedelta(minutes=UNLOCK_MIN)).strftime(TIME_FMT)
     save(db, cfg)
+    return start if start > now else None
 
 
 def lock(db):
     cfg = settings(db)
-    cfg["unlocked_until"] = None
+    cfg["unlocked_from"] = cfg["unlocked_until"] = None
     save(db, cfg)
 
 
@@ -202,8 +226,10 @@ def protection_looser(old: dict, new: dict) -> bool:
 
 
 def settings_looser(old: dict, new: dict) -> bool:
-    """Anti-Bypass itself: a challenge switched off, a shorter / simpler phrase, the grid dropped, other hours."""
-    return ((old["phrase"] and (not new["phrase"] or _phrase_strength(new) < _phrase_strength(old)
+    """Anti-Bypass itself: a challenge switched off, a shorter / simpler phrase, the grid dropped, other hours,
+    or less waiting before the unlock opens."""
+    return (((new.get("wait_min") or 0) < (old.get("wait_min") or 0))
+            or (old["phrase"] and (not new["phrase"] or _phrase_strength(new) < _phrase_strength(old)
                                 or (old["grid"] and not new["grid"])
                                 or (old.get("complex") and not new.get("complex"))))
             or (old["hours"] and (not new["hours"] or new["windows"] != old["windows"])))
