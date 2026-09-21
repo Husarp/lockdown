@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.72.1 - 2026-09-21 12:10
+- **The allowance during blocked hours is its own purple chip.** The hours themselves are red while they are
+  on - they are blocking, and the allowance is the way out of them, not a reprieve - and next to them a purple
+  "+ 15 min allowed during blocked hours · 15m left until 05:00" says how much of that way out is left.
+  It reads as what it is: time to use if you have to, rather than time you are meant to spend.
+
 ## 0.72.0 - 2026-09-21 11:49
 - **A group is one box on Blocking > Overview.** Its rules are written once at the top, its members sit
   underneath - instead of the group's rules being copied onto every member's row.

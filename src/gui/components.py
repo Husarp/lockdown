@@ -446,6 +446,8 @@ CHIP_STYLES = {   # kind -> (text colour, background)
     "danger": (theme.DANGER, ("#FBE5E3", "#2A1A19")),
     "ok": (theme.SUCCESS, ("#E3F3E9", "#16241C")),
     "neutral": (theme.MUTED, ("#EFF1F3", "#1F252D")),
+    # the allowance during blocked hours: not "allowed", not "blocked" - time to use if you have to
+    "allowance": (("#6B46C1", "#A78BFA"), ("#F1EBFC", "#221A33")),
 }
 
 

@@ -26,8 +26,8 @@ from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import (DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block,
-                   rule_state)
+from rules import (DAY_NAMES, allowance_note, describe_rule, duration_text, effective_rules, item_block,
+                   next_block, rule_state)
 from trusted_time import now_from_db
 
 TABS = ["Overview", "Groups", "Add", "Site protection", "Calendar"]
@@ -113,8 +113,18 @@ def group_rule(group: dict, rule: dict) -> dict:
 
 
 def rule_text(rule, now, usage) -> str:
-    text = describe_rule(rule, now, usage).replace(":\n", ": ").replace("\n", " · ")
+    text = describe_rule(rule, now, usage, allowance=False).replace(":\n", ": ").replace("\n", " · ")
     return f"→ {rule['group']['name']} · {text}" if rule["group"] else text
+
+
+def rule_chips(rules: list[dict], now, usage) -> list[tuple]:
+    """(rule, is the allowance?) for every chip a list of rules needs - a rule with an allowance gets two."""
+    out = []
+    for rule in rules:
+        out.append((rule, False))
+        if allowance_note(rule, now, usage):
+            out.append((rule, True))
+    return out
 
 
 # red while a rule is blocking, orange while it is about to, green while it is not: the colour says what is
@@ -126,9 +136,10 @@ def chip_kind(rule, now, usage) -> str:
     return CHIP_STATES[rule_state(rule, now, usage)]
 
 
-def _paint_chip(chip, rule, now, usage):
-    fg, bg = CHIP_STYLES[chip_kind(rule, now, usage)]
-    chip.configure(text=f" {rule_text(rule, now, usage)} ", text_color=fg, fg_color=bg)
+def _paint_chip(chip, rule, now, usage, allowance: bool = False):
+    fg, bg = CHIP_STYLES["allowance" if allowance else chip_kind(rule, now, usage)]
+    text = allowance_note(rule, now, usage) if allowance else rule_text(rule, now, usage)
+    chip.configure(text=f" {text} ", text_color=fg, fg_color=bg)
 
 
 # ---------------------------------------------------------------- Overview
@@ -320,20 +331,20 @@ class OverviewTab(ctk.CTkScrollableFrame):
             r["badge_kind"] = item["item_type"]
         r["targets"].configure(text=targets_text(item))
         r["rules_box"].grid(row=row, column=1, pady=8, padx=(0, 12), sticky="w")
-        rules = effective_rules(item, groups)
+        chips = rule_chips(effective_rules(item, groups), now, usage)
         # a paused group: say so, or the item looks like it has no blockers at all
         off = [g for g in groups if g.get("disabled") and item["id"] in g["members"]]
-        while len(r["chips"]) < len(rules) + len(off):
+        while len(r["chips"]) < len(chips) + len(off):
             r["chips"].append(rule_chip(r["rules_box"], "", wraplength=COLS[1] - 20))
-        for chip, rule in zip(r["chips"], rules):
-            _paint_chip(chip, rule, now, usage)
+        for chip, (rule, allowance) in zip(r["chips"], chips):
+            _paint_chip(chip, rule, now, usage, allowance)
             chip.pack(anchor="w", pady=2)
-            self.live_rules.append((chip, rule))
-        for chip, g in zip(r["chips"][len(rules):], off):
+            self.live_rules.append((chip, rule, allowance))
+        for chip, g in zip(r["chips"][len(chips):], off):
             fg, bg = CHIP_STYLES["neutral"]
             chip.configure(text=f" → {g['name']} · disabled ", text_color=fg, fg_color=bg)
             chip.pack(anchor="w", pady=2)
-        for chip in r["chips"][len(rules) + len(off):]:
+        for chip in r["chips"][len(chips) + len(off):]:
             chip.pack_forget()
         r["status"].configure(**status_of(self.page, item, now, usage))
         r["status"].grid(row=row, column=2, padx=(0, 12), sticky="w")
@@ -408,13 +419,13 @@ class OverviewTab(ctk.CTkScrollableFrame):
         c["remove"]._disarm()
         c["remove"]._on_confirm = lambda g=group["id"]: self.draft.remove_group(g)
 
-        rules = [group_rule(group, r) for r in group["rules"]]
+        rules = rule_chips([group_rule(group, r) for r in group["rules"]], now, usage)
         while len(c["chips"]) < len(rules):
             c["chips"].append(rule_chip(c["rules_box"], "", wraplength=760))
-        for chip, rule in zip(c["chips"], rules):
-            _paint_chip(chip, rule, now, usage)
+        for chip, (rule, allowance) in zip(c["chips"], rules):
+            _paint_chip(chip, rule, now, usage, allowance)
             chip.pack(anchor="w", pady=2)
-            self.live_rules.append((chip, rule))
+            self.live_rules.append((chip, rule, allowance))
         for chip in c["chips"][len(rules):]:
             chip.pack_forget()
 
@@ -434,14 +445,14 @@ class OverviewTab(ctk.CTkScrollableFrame):
         for w in (m["line"], m["icon"], m["name"]):
             w.bind("<Button-1>", lambda e, i=item["id"]: self.page.edit_item(i))
         # its own blockers, and anything customised for it in the group - what it has on top of the box's rules
-        own = effective_rules({**item, "rules": item["rules"]}, [])
+        own = rule_chips(effective_rules({**item, "rules": item["rules"]}, []), now, usage)
         custom = [t for t in (group["members"].get(item["id"]) or {})]
         while len(m["chips"]) < len(own) + bool(custom):
             m["chips"].append(rule_chip(m["own"], "", wraplength=440))
-        for chip, rule in zip(m["chips"], own):
-            _paint_chip(chip, rule, now, usage)
+        for chip, (rule, allowance) in zip(m["chips"], own):
+            _paint_chip(chip, rule, now, usage, allowance)
             chip.pack(anchor="w", pady=1)
-            self.live_rules.append((chip, rule))
+            self.live_rules.append((chip, rule, allowance))
         extra = m["chips"][len(own):]
         if custom:
             fg, bg = CHIP_STYLES["neutral"]
@@ -525,9 +536,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
     def update_live(self, now, usage):
         """Refresh counters, countdowns, colours and statuses without rebuilding the list."""
-        for label, rule in getattr(self, "live_rules", []):
+        for label, rule, allowance in getattr(self, "live_rules", []):
             if label.winfo_exists():
-                _paint_chip(label, rule, now, usage)
+                _paint_chip(label, rule, now, usage, allowance)
         for label, item in getattr(self, "live_status", []):
             if label.winfo_exists():
                 label.configure(**status_of(self.page, item, now, usage))

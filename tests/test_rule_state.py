@@ -44,14 +44,19 @@ def test_a_limit_nearly_used_up_is_orange():
     assert rule_state(rule, NOW, usage) == "blocked"      # used up: it is blocking
 
 
-def test_an_allowance_nearly_spent_is_orange():
-    """Inside its blocked hours the rule isn't blocking yet - it is letting you spend the allowance."""
+def test_hours_with_an_allowance_left_are_still_red():
+    """The hours are on - the allowance is the way out of them, not a reprieve - so the rule stays red and
+    what is left of the allowance is a chip of its own (purple)."""
     rule = _hours("11:00", "15:00", allowance_min=20)
-    from rules import allowance_bucket, schedule_until
+    from rules import allowance_bucket, allowance_note, schedule_until
     bucket = allowance_bucket(rule, schedule_until(rule["schedule"], NOW))
-    assert rule_state(rule, NOW, Usage({("item:1", bucket): 5 * 60})) == "allowed"
-    assert rule_state(rule, NOW, Usage({("item:1", bucket): 19 * 60})) == "soon"
-    assert rule_state(rule, NOW, Usage({("item:1", bucket): 20 * 60})) == "blocked"
+    for spent in (0, 5, 19, 20):
+        assert rule_state(rule, NOW, Usage({("item:1", bucket): spent * 60})) == "blocked"
+    assert allowance_note(rule, NOW, Usage({("item:1", bucket): 5 * 60})) == \
+        "+ 20 min allowed during blocked hours · 15m left until 15:00"
+    assert allowance_note(rule, NOW, Usage({("item:1", bucket): 20 * 60})) == \
+        "+ 20 min allowed during blocked hours · used up until 15:00"
+    assert allowance_note(_hours("11:00", "15:00"), NOW) is None   # no allowance: no second chip
 
 
 @pytest.mark.parametrize("state, kind", [("blocked", "danger"), ("soon", "warn"), ("allowed", "ok")])

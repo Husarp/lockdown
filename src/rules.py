@@ -349,9 +349,8 @@ def rule_state(rule: dict, now: datetime, usage=no_usage) -> str:
                 for p, limit in limits(rule, fields).items()]
         return "soon" if used and max(used) >= NEARLY else "allowed"
     if kind == "scheduled" and rule.get("schedule"):
-        spent = allowance_left(rule, now, usage)
-        if spent:                       # inside its blocked hours, on the allowance
-            return "soon" if spent[0] >= spent[1] * NEARLY else "allowed"
+        if allowance_left(rule, now, usage):   # its hours are on; the allowance is the way out, not a reprieve
+            return "blocked"
         start = _schedule_next_start(rule["schedule"], now)
         if start and start - now <= timedelta(minutes=SOON_MIN):
             return "soon"
@@ -485,7 +484,24 @@ def allowance_left(rule: dict, now: datetime, usage=no_usage):
     return usage(allowance_owner(rule), allowance_bucket(rule, until)), rule["allowance_min"] * 60, until
 
 
-def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
+def allowance_note(rule: dict, now: datetime, usage=no_usage) -> str | None:
+    """"N minutes allowed during blocked hours" and, while you are inside them, what is left of it - or None
+    for a rule that has no allowance. The blocked hours and this are two different things (the hours are on,
+    the allowance is the way out), so the Blocking list shows them as two chips of its own colours."""
+    if not rule.get("allowance_min"):
+        return None
+    text = f"+ {rule['allowance_min']} min allowed during blocked hours"
+    spent = allowance_left(rule, now, usage)
+    if spent:   # inside those hours: say how much of it is still there
+        used, allowed, until = spent
+        left = max(0, allowed - used)
+        text += (f" · {duration_text(left)} left until {until:%H:%M}" if left
+                 else f" · used up until {until:%H:%M}")
+    return text
+
+
+def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = True) -> str:
+    """allowance=False leaves out the "N min allowed..." clause, for a caller that shows it separately."""
     kind = rule["rule_type"]
     if kind == "permanent":
         return "Permanent"
@@ -493,15 +509,8 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage) -> str:
         s = load_schedule(rule["schedule"])
         label = "Allowed only" if s["mode"] == ALLOW else "Blocked"
         text = f"{label}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
-        if rule.get("allowance_min"):
-            text += f"\n+ {rule['allowance_min']} min allowed during blocked hours"
-            spent = allowance_left(rule, now, usage)
-            if spent:   # inside those hours: say how much of it is still there
-                used, allowed, until = spent
-                left = max(0, allowed - used)
-                text += (f" ({duration_text(left)} left until {until:%H:%M})" if left
-                         else " (used up until " + f"{until:%H:%M})")
-        return text
+        note = allowance_note(rule, now, usage) if allowance else None
+        return f"{text}\n{note}" if note else text
     if kind == "temporary":
         if rule.get("temp_until"):
             left = datetime.strptime(rule["temp_until"], TIME_FMT) - now
