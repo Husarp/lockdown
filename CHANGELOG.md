@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.71.0 - 2026-09-21 10:42
+- **Your games are in Games now.** 0.64.0 added the category, but nothing moved into it: every Steam game had
+  already been written down as Distracting (that is what Lockdown did before Games existed), and a category
+  that is already set is never overwritten.
+  - **Steam games move to Games** - the ones Lockdown itself had marked Distracting and you never changed.
+    One you put somewhere else yourself stays where you put it.
+  - **The starter list knows the difference too**: CS2, Dota 2, GTA V, Rocket League, Overwatch, Genshin,
+    Apex, Rainbow Six, Valorant, Fortnite, Roblox, Minecraft, League, osu! and the browser-game sites (poki,
+    crazygames, miniclip, y8, friv, roblox.com) are Games; **stores, launchers and streaming stay
+    Distracting** - Steam, Epic, Battle.net, EA, Ubisoft, GOG, Netflix, Twitch and so on. They are not the game.
+- **No more second "Games" in the menu.** A category of your own made before the built-in one has the same key,
+  so it was the same category listed twice. It appears once now, and keeps the colour you gave it.
+
 ## 0.70.1 - 2026-09-21 10:37
 - **The Polish letter that now reaches the box is the right one.** 0.65.0 got AltGr keys through Tk's
   "Control + a key does nothing" rule, but the wrong letter arrived: "pamietaj" came out as "pami<e-circumflex>taj".

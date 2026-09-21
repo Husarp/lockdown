@@ -145,7 +145,8 @@ def test_distracting_by_default(tmp_path):
     from importer import distracting
     db = Database(tmp_path / "a.db")
     db.set_category("site", "twitch.tv", "productive")             # your own choice stays
-    assert distracting.seed(db) == len(distracting.SITES) + len(distracting.APPS) - 1
+    everything = (distracting.SITES + distracting.APPS + distracting.GAME_SITES + distracting.GAME_APPS)
+    assert distracting.seed(db) == len(everything) - 1
     cats = db.categories()
     assert cats[("site", "tiktok.com")] == "distracting" and cats[("app", "steam.exe")] == "distracting"
     assert cats[("site", "twitch.tv")] == "productive" and ("site", "youtube.com") not in cats

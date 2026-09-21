@@ -34,28 +34,8 @@ def _load() -> list[dict]:
             except Exception:
                 apps = []
             icons.cache_app_icons(apps)   # (first search of a broad word would otherwise extract dozens at once)
-            _tag_steam_games(apps)
             _cache = apps
         return _cache
-
-
-def _tag_steam_games(apps: list[dict]):
-    """Installed Steam games go into the Games category, unless you have already put one somewhere else.
-    Its own connection: this runs on the background thread that builds the app list."""
-    from db import Database
-    try:
-        db = Database()
-    except Exception:
-        return
-    try:
-        known = db.categories()
-        for a in apps:
-            if a.get("steam") and ("app", a["exe"]) not in known:
-                db.set_category("app", a["exe"], "games")
-    except Exception:
-        pass
-    finally:
-        db.close()
 
 
 def matches(apps: list[dict], text: str) -> list[dict]:

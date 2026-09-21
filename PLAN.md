@@ -1489,6 +1489,10 @@ one shared pot for the whole category.
 - [x] AltGr letters arrived as the wrong letter (user's screenshot, 2026-09-21) - 0.70.1: tkinter reads Tk's
   single byte as cp1252; `gui/shortcuts.character()` puts it back through the system codepage (GetACP).
   Text typed BEFORE this fix stays mangled where it was saved - retype it.
+- [x] Steam games were still Distracting and "Games" appeared twice (user, 2026-09-21) - 0.71.0. The cause:
+  `distracting.seed_games` wrote every Steam game as Distracting before the category existed, and a set
+  category is never overwritten; the duplicate came from a custom category whose key ("games") collided with
+  the new built-in one. Both fixed, with a one-off move of the entries Lockdown itself had set.
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting

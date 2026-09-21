@@ -26,12 +26,15 @@ def _config(db) -> dict:
 
 
 def load(db) -> list[dict]:
-    """[{key, name, color, builtin}] - colour is a (light, dark) pair or one "#rrggbb" for both."""
+    """[{key, name, color, builtin}] - colour is a (light, dark) pair or one "#rrggbb" for both.
+    One of your own with the same key as a built-in one (a "Games" made before Games existed) is the same
+    category, not a second one: it is left out, and anything tagged with that key keeps working."""
     cfg = _config(db)
     colors = cfg.get("colors", {})
     out = [{"key": k, "name": n, "color": colors.get(k, c), "builtin": True} for k, n, c in BUILTIN]
+    taken = {k for k, _n, _c in BUILTIN}
     out += [{"key": c["key"], "name": c["name"], "color": colors.get(c["key"], c["color"]), "builtin": False}
-            for c in cfg.get("custom", [])]
+            for c in cfg.get("custom", []) if c["key"] not in taken]
     return out
 
 
