@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.68.0 - 2026-09-21 09:57
+- **Changing when limits reset works properly again.** Changing it twice stacked: each change stretched the
+  day that was running, so a day could become 45 hours long and end at a time that had nothing to do with the
+  reset time. That is what left "resets at 03:00" showing "current limit day ends 00:00" for days.
+  - **An earlier time no longer stretches the day at all.** 03:00 -> 00:00 leaves the running day ending at
+    03:00 and applies 00:00 from then on, so the day *after* it is the shorter one. It used to push the
+    running day out by another whole day.
+  - **A later time stretches the running day once**, to the new time (a day of at most 27-28 h), and a second
+    change can't stretch it again: a running day never lasts more than two days from its start.
+  - **Moving the reset earlier now asks for the Anti-Bypass challenge**, because one day then ends sooner than
+    it would have. Moving it later is free.
+  - **A day stretched twice by an older version is repaired** when the clock is read, which puts your limit
+    day back on the real boundary.
+
 ## 0.67.0 - 2026-09-21 08:56
 - **A blocked video no longer keeps downloading to the end.** The page and the video are different domains:
   youtube.com serves the page, but the video itself comes from a random host under **googlevideo.com**, which

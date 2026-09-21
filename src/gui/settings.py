@@ -8,7 +8,7 @@ from gui import theme
 import antibypass
 import backup
 import emergency
-from rules import DAY_NAMES, RESET_KEY, change_reset
+from rules import DAY_NAMES, RESET_KEY, change_reset, reset_is_looser
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton, once
 from gui.components import Card, Segmented, accent_bar, hairline, help_icon, page_head, LockedStrip
@@ -182,16 +182,24 @@ class SettingsPage(ctk.CTkFrame):
         now = now_from_db(self.db)
         clock = self.db.limit_clock()
         text = self.reset_entry.get().strip()
+        saved = self.db.get_setting(RESET_KEY)
         try:
             if text == f"{clock.time:%H:%M}":
                 raise ValueError("That's already the reset time.")
-            value = change_reset(self.db.get_setting(RESET_KEY), text, now)
+            value = change_reset(saved, text, now)
         except ValueError as e:
             self.reset_error.configure(text=str(e))
             self.reset_error.pack(anchor="w", pady=(4, 0))
             return
-        self.db.set_setting(RESET_KEY, value)
-        self.load()
+
+        def save():
+            self.db.set_setting(RESET_KEY, value)
+            self.load()
+
+        if reset_is_looser(saved, text, now):   # an earlier time: one day ends sooner than it would have
+            self.app.guard([f"Move the daily limit reset to {text} (one day ends sooner)"], save, self.load)
+        else:
+            save()
 
     # ---------- emergency unlock ----------
 
@@ -330,9 +338,9 @@ class SettingsPage(ctk.CTkFrame):
         _start, end = clock.day(now)
         self.reset_info.configure(text=f"current limit day ends {short_when(end)}")
         if clock.carry_until and now < clock.carry_until:
-            self.reset_note.configure(text="It's running a bit longer than usual because you changed the reset time - "
-                                           "the change never resets a limit early, and never stretches the day past "
-                                           "the end of the next day.")
+            self.reset_note.configure(text=f"It runs to {short_when(clock.carry_until)} because you changed the reset "
+                                           f"time - a change never ends the day you are in early, and never stretches "
+                                           f"it twice. {f'{clock.time:%H:%M}'} applies from then on.")
             self.reset_note.pack(anchor="w", pady=(6, 0))
         else:
             self.reset_note.pack_forget()

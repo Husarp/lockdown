@@ -100,15 +100,18 @@ class LimitClock:
     on Monday and a month on the 1st, at that time (with a reset at 12:00 or later, the evening before: a day
     belongs to the date most of it falls on). Screen-time stats keep normal calendar days.
 
-    After the reset time is changed, the day that was running goes on until the new time comes round after its
-    normal end: that day is longer, never shorter. The running week and month are held the same way (they don't
-    end before they would have). So changing the time - any number of times - never resets limits early."""
+    Changing the reset time never cuts the running day short. A later time (00:00 -> 03:00) keeps it running
+    to that time; an earlier one (03:00 -> 00:00) leaves it alone and counts from the new time afterwards, so
+    the day after it is the shorter one. Either way the running day is stretched at most once - never past
+    two days from its start - and the running week and month don't end before they would have."""
 
     def __init__(self, config: str | None = None):
         c = json.loads(config) if config else {}
         self.time = parse_hhmm(c.get("time", "00:00"))
         self.carry_start = _parse_dt(c.get("day_start"))   # the day running when the time was changed ...
         self.carry_until = _parse_dt(c.get("switch"))      # ... lasts until here
+        if self.carry_start and self.carry_until:          # (repairs a day stretched twice by 0.5-0.67)
+            self.carry_until = min(self.carry_until, self.carry_start + timedelta(days=2))
         self.holds = {k: (key, _parse_dt(until)) for k, (key, until) in c.get("hold", {}).items()}
 
     def day(self, now: datetime) -> tuple[datetime, datetime]:
@@ -149,11 +152,22 @@ class LimitClock:
 DEFAULT_CLOCK = LimitClock()
 
 
+def reset_is_looser(config: str | None, new_time: str, now: datetime) -> bool:
+    """An earlier reset time makes the day after the running one end sooner than it would have - a way to get
+    limits back early, so it goes through Anti-Bypass. A later one only makes a day longer."""
+    try:
+        return parse_hhmm(new_time) < LimitClock(config).time
+    except ValueError:
+        return False
+
+
 def change_reset(config: str | None, new_time: str, now: datetime) -> str:
     """New RESET_KEY value for a changed reset time. Raises ValueError for a badly written time.
 
-    A change never ends the running day early, but it also never stacks: the running day is capped so it can't
-    run past the end of the next day, no matter how many times the reset time is toggled."""
+    The running day is never cut short and never stretched twice:
+    - a later time keeps it running to that time (at most 24 h past its own end);
+    - an earlier time leaves it alone, and the new time takes over when it ends - so the day after it is the
+      shorter one, which is why changing to an earlier time asks Anti-Bypass first."""
     clock = LimitClock(config)
     try:
         new = parse_hhmm(new_time)
@@ -161,11 +175,8 @@ def change_reset(config: str | None, new_time: str, now: datetime) -> str:
         raise ValueError("The time must look like 04:00.") from None
     start, end = clock.day(now)
     switch = datetime.combine(end.date(), new)
-    if switch < end:
-        switch += timedelta(days=1)
-    natural = LimitClock(json.dumps({"time": f"{clock.time:%H:%M}"}))   # the day as it would run with no carry
-    cap = natural.day(now)[1] + timedelta(days=1)                       # never past the end of the next day
-    switch = min(switch, cap)
+    # never before the end it already has, never more than two days from its start (a second change can't stack)
+    switch = max(end, min(switch, start + timedelta(days=2)))
     hold = {}
     for kind in ("week", "month"):
         key, until = clock.period(kind, now)

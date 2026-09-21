@@ -7,7 +7,7 @@ import pytest
 import emergency
 from db import Database
 from rules import (LimitClock, Usage, change_reset, describe_rule, effective_rules, item_block, next_block,
-                   rule_block, usage_targets)
+                   reset_is_looser, rule_block, usage_targets)
 
 
 def at(day, hh, mm=0):   # 2026-09-14 is a Monday
@@ -49,10 +49,20 @@ def test_change_never_shortens_the_day():
     assert LimitClock(cfg).day(at(1, 1)) == (at(0, 0), at(1, 4))  # day runs to 04:00 tomorrow (28 h)
 
 
-def test_repeated_changes_only_make_the_day_longer():
-    cfg = change_reset(None, "04:00", at(0, 22))     # Monday 22:00: day now runs to Tue 04:00
-    cfg = change_reset(cfg, "01:00", at(0, 23))       # can't pull it back: runs to Wed 01:00
-    assert LimitClock(cfg).day(at(1, 12)) == (at(0, 0), at(2, 1))
+def test_an_earlier_time_leaves_the_running_day_alone():
+    """Moving the reset back doesn't cut the day you are in short - and doesn't stretch it either: it simply
+    takes over when that day ends, so the day AFTER it is the shorter one."""
+    cfg = change_reset(None, "04:00", at(0, 22))      # Monday 22:00: the day now runs to Tue 04:00
+    cfg = change_reset(cfg, "01:00", at(0, 23))       # back to 01:00: Monday still ends Tue 04:00 ...
+    assert LimitClock(cfg).day(at(1, 3)) == (at(0, 0), at(1, 4))
+    assert LimitClock(cfg).day(at(1, 12)) == (at(1, 1), at(2, 1))   # ... and 01:00 applies from then on
+
+
+def test_a_later_time_stretches_the_running_day_once():
+    cfg = change_reset(None, "04:00", at(0, 22))      # Monday 22:00 -> the day runs to Tue 04:00 (28 h)
+    assert LimitClock(cfg).day(at(1, 1)) == (at(0, 0), at(1, 4))
+    cfg = change_reset(cfg, "06:00", at(1, 1))        # again, while it is still running: not stretched twice
+    assert LimitClock(cfg).day(at(1, 1))[1] <= at(1, 4) + timedelta(days=1)
 
 
 def test_toggling_the_reset_time_cannot_stack_past_the_next_day():
@@ -122,3 +132,19 @@ def test_emergency_uses(tmp_path):
     db.set_setting("emergency.uses", "1")
     assert emergency.uses_left(db, at(2, 18))[0] == 0
     assert emergency.uses_left(db, at(3, 1))[0] == 1
+
+
+def test_a_day_stretched_twice_by_an_older_version_is_repaired():
+    """0.5-0.67 could stack changes into a 45-hour day whose end no longer matched the reset time: the clock
+    now caps a carried day at two days from its start, which puts it back on the real boundary."""
+    cfg = json.dumps({"time": "03:00", "day_start": "2026-09-19 00:00:00", "switch": "2026-09-22 00:00:00",
+                      "hold": {}})
+    assert LimitClock(cfg).day(datetime(2026, 9, 21, 8, 56)) == (datetime(2026, 9, 21, 3, 0),
+                                                                 datetime(2026, 9, 22, 3, 0))
+
+
+def test_only_an_earlier_reset_time_asks_anti_bypass():
+    cfg = json.dumps({"time": "03:00"})
+    assert reset_is_looser(cfg, "00:00", at(0, 22))       # a day ends sooner than it would have
+    assert not reset_is_looser(cfg, "05:00", at(0, 22))   # a day only gets longer
+    assert not reset_is_looser(cfg, "nonsense", at(0, 22))
