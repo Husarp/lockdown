@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.75.0 - 2026-09-22 01:00
+- **Reminders respect Windows' Do not disturb.** Lockdown never asked Windows about it, so the "Time for bed"
+  screen came up over a film with everything else silenced. It now waits - and appears as soon as you turn
+  Do not disturb off, as long as it is still night. So it can't be used to skip bedtime by switching quiet on
+  at five to nine, and it isn't lost either.
+  - The same goes for break and 20-20-20 reminders, and for a mode of your own that mutes notifications.
+  - Presentation mode counts as Do not disturb too (Windows reports them the same way).
+  - A full-screen game still gets the bedtime screen over it - that is the one thing it is for.
+
 ## 0.74.2 - 2026-09-21 21:40
 - **Polish letters: the other half of the path.** An AltGr key reaches Tk in one of two ways - as a Control
   key (Tk swallows it, so Lockdown types it in) or as an ordinary one (Tk types it in itself). Every fix so

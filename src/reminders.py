@@ -4,6 +4,8 @@ The engine only decides; a `ui` object shows things: popup(key, title, text, but
 overlay(key, title, text, until, buttons), toast(text), start_mode(mode_id, until). Buttons are (label, action)
 and the UI calls answer(key, action) back. While a full-screen app (a game) is in front, popups wait and a
 Windows notification is shown instead; sleep and forced-break overlays still appear - that's their point.
+With Do not disturb on, everything waits, the bedtime screen included: you asked for quiet, so it holds until
+that is over rather than being skipped.
 """
 import json
 import random
@@ -136,6 +138,7 @@ class Engine:
         self.db, self.ui, self.rng = db, ui, rng or random.Random()
         self.now = datetime.now()
         self.fullscreen = False
+        self.quiet = False          # Windows' Do not disturb (or a mode that mutes): everything waits
         self.open: set[str] = set()          # popups / overlays on screen
         self.waiting: dict[str, tuple] = {}  # popups held back while a full-screen app is in front
         self.continuous = 0.0                # seconds of use since the last break
@@ -165,6 +168,8 @@ class Engine:
         self.ui.popup(key, title, text, buttons)
 
     def _overlay(self, key: str, title: str, text: str, until: datetime | None, buttons: list[tuple[str, str]]):
+        if self.quiet:
+            return   # Do not disturb: it comes up on the tick after that ends (while it is still due)
         if key not in self.open:
             self.open.add(key)
             self.ui.overlay(key, title, text, until, buttons)
@@ -177,8 +182,12 @@ class Engine:
 
     # ---------- tick ----------
 
-    def tick(self, now: datetime, idle_sec: float, fullscreen: bool, dt: float = TICK_SEC):
-        self.now, self.fullscreen = now, fullscreen
+    def tick(self, now: datetime, idle_sec: float, fullscreen: bool, dt: float = TICK_SEC,
+             quiet: bool = False):
+        """quiet: you told Windows (or a mode) not to disturb you - popups queue as they do over a game, and
+        the bedtime screen holds too, which it doesn't do for a game."""
+        self.now, self.quiet = now, quiet
+        self.fullscreen = fullscreen = fullscreen or quiet
         using = idle_sec < USING_IDLE_SEC
         self._breaks(now, idle_sec, using, dt)
         self._sleep(now)

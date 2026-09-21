@@ -505,12 +505,13 @@ class LockdownApp(ctk.CTk):
             self.after(WATCH_MS, self._poll_watcher)
 
     def _poll_reminders(self):
-        """Sleep / break / your reminders. Popups wait while a full-screen app (a game) is in front."""
+        """Sleep / break / your reminders. Popups wait while a full-screen app (a game) is in front, and
+        everything waits - the bedtime screen too - while Do not disturb is on."""
         try:
             now = now_from_db(self.db)
             state = modes.active(self.db, now)
-            quiet = bool(state and state["mode"].get("mute"))   # Do Not Disturb: hold popups like in a game
-            self.reminders.tick(now, win.idle_seconds(), win.is_fullscreen() or quiet)
+            quiet = bool(state and state["mode"].get("mute")) or win.do_not_disturb()
+            self.reminders.tick(now, win.idle_seconds(), win.is_fullscreen(), quiet=quiet)
         finally:
             self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
 

@@ -54,6 +54,22 @@ _user32.MonitorFromWindow.restype = wintypes.HANDLE   # a 64-bit handle: don't l
 _user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
 
 
+# SHQueryUserNotificationState: what Windows itself tells an app about interrupting right now.
+QUNS_PRESENTATION_MODE, QUNS_QUIET_TIME = 4, 6
+
+
+def do_not_disturb() -> bool:
+    """Is Windows' Do not disturb (focus assist / quiet hours) on, or is a presentation running? Both mean you
+    asked not to be interrupted, so Lockdown's reminders wait for it to be over."""
+    state = ctypes.c_int()
+    try:
+        if ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) != 0:
+            return False
+    except Exception:
+        return False
+    return state.value in (QUNS_PRESENTATION_MODE, QUNS_QUIET_TIME)
+
+
 def is_fullscreen() -> bool:
     """Is a full-screen app (a game, a video) in front? Not the desktop, not Lockdown itself."""
     hwnd = _user32.GetForegroundWindow()

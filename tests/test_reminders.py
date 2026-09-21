@@ -116,3 +116,27 @@ def test_random_time_once_a_day(tmp_path):
                                               "window": ["09:00", "09:20"]}])
     run(e, NOW, 40)
     assert [s[1] for s in ui.shown].count("custom:r") == 1
+
+
+def test_do_not_disturb_holds_everything_until_it_is_over(tmp_path):
+    """You asked Windows for quiet: the bedtime screen waits for it to end instead of being skipped - unlike
+    a full-screen game, which it comes up over on purpose."""
+    db, ui, e = setup(tmp_path)
+    reminders.save(db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "bedtime": "23:00",
+                                             "wake": "07:00"})
+    t = NOW.replace(hour=23)
+    for _ in range(12):                                  # a minute of ticks with Do not disturb on
+        e.tick(t, 0, False, quiet=True)
+        t += timedelta(seconds=reminders.TICK_SEC)
+    assert not [s for s in ui.shown if s[1] == "sleep"]
+
+    e.tick(t, 0, False, quiet=False)                     # you turn it off: it is still night, so up it comes
+    assert ui.shown[-1][:2] == ("overlay", "sleep")
+
+
+def test_a_game_does_not_hold_the_bedtime_screen(tmp_path):
+    db, ui, e = setup(tmp_path)
+    reminders.save(db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "bedtime": "23:00",
+                                             "wake": "07:00"})
+    e.tick(NOW.replace(hour=23), 0, True)                # full screen: the overlay still appears
+    assert ui.shown[-1][:2] == ("overlay", "sleep")
