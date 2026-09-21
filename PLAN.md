@@ -1470,6 +1470,9 @@ one shared pot for the whole category.
   `gui/shortcuts._altgr` types them in; a control character (a real Ctrl shortcut) still falls through.
 - [x] Editable text for the sleep / break / 20-20-20 reminders (user, 2026-09-21) - 0.65.0.
 - [x] The .exe files show their version in Explorer (user, 2026-09-21) - 0.65.0, installer/version_res.py.
+- [x] Websites had no "When blocked" choice (user, 2026-09-21) - 0.66.0: blocker/site_block.py holds the flags
+  (dns / close / back), the service keeps non-dns sites out of the hosts file, and the tab guard closes or
+  goes back. Only whole hostnames - a single page or subreddit is still not something Lockdown can tell apart.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

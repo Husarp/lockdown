@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 import customtkinter as ctk
 
 import emergency
+from blocker import site_block
 from blocker.apps import block_flags
 from gui import app_browser, icons, theme
 from gui.block_calendar import CalendarTab
@@ -83,7 +84,7 @@ def targets_text(item: dict) -> str:
                  ("internet", "internet blocked"))
         how = " + ".join(w for f, w in words if f in flags)
         return f"app · {item['target']} · {how}"
-    return " · ".join(item["target"].split())
+    return " · ".join(item["target"].split()) + " · " + site_block.text(item.get("block_type"))
 
 
 def rule_text(rule, now, usage) -> str:
@@ -520,14 +521,20 @@ class AddTab(ctk.CTkScrollableFrame):
             self.page.confirm(f"{target['name']} blocker added")
             return
         item = self.draft.items[self.edit_id]
-        if item["item_type"] == "app" and self.picker.selected_block_type() is None:
+        is_app = item["item_type"] == "app"
+        block_type = self.picker.selected_block_type() if is_app else \
+            self.picker.selected_site_block_type() if item["item_type"] == "site" else item.get("block_type")
+        if is_app and block_type is None:
             self.error.configure(text="Tick at least one of Close app / Minimize / Block internet.")
+            return
+        if item["item_type"] == "site" and block_type is None:
+            self.error.configure(text="Tick at least one of Can't load it / Close the tab / Go back.")
             return
         if not rules and not self.draft.groups_of(self.edit_id):
             self.error.configure(text="Tick at least one blocker (or remove it in Overview).")
             return
         name = self.picker.name.get().strip() or item["display_name"]
-        self.draft.set_rules(self.edit_id, rules, name, self.picker.selected_block_type())
+        self.draft.set_rules(self.edit_id, rules, name, block_type)
         self.reset()
         self.page.show_tab("Overview")
         self.page.confirm(f"{name} saved")

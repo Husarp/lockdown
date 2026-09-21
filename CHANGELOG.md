@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.66.0 - 2026-09-21 07:42
+- **A website now has its own "When blocked" options**, the way an app does. Pick a site on Blocking > Add
+  (or Edit one) and tick any of:
+  - **Can't load it** - the address goes nowhere, in every browser. This is what Lockdown has always done, and
+    it stays ticked by default.
+  - **Close the tab** - if you open it anyway, the tab is closed (a browser with a single tab gets a fresh tab
+    first, so the window doesn't close).
+  - **Go back** - the browser goes back instead; if that doesn't leave the page, the tab is closed.
+  Close the tab and Go back exclude each other; the tray agent does them twice a second, the same check the
+  bad-word list uses. A site that is only set to close the tab is deliberately left out of the hosts file.
+- The Blocking list says how each site is blocked, next to its address: "youtube.com · can't load + closes the
+  tab" - it only said this for apps before.
+- Unticking an option is a weaker block, so Anti-Bypass asks for the challenge, as it does for apps.
+
 ## 0.65.0 - 2026-09-21 02:14
 - **Polish letters can be typed again - everywhere in the app.** Windows sends AltGr as Ctrl+Alt, and Tk's own
   "Control + a key does nothing" rule swallowed the keypress, so a, c, e, l, n, o, s, z with their accents

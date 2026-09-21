@@ -8,6 +8,7 @@ from gui import theme
 from gui.components import help_icon
 
 from blocker.apps import PROTECTED, block_flags, make_block_type
+from blocker.site_block import make_site_block_type, site_flags
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
 from gui.site_picker import SiteEntry
@@ -20,6 +21,13 @@ ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then for
                                                                    "runs from its install folder"),
            "minimize": ("Minimize", "keeps it running (e.g. a browser with many tabs) but minimizes it whenever it's opened"),
            "internet": ("Block internet", "it can't connect to the internet")}
+# the same idea for a website: it can be sent nowhere, and / or its tab dealt with when you open it anyway
+SITE_ACTIONS = {"dns": ("Can't load it", "the address goes nowhere, in every browser - what Lockdown has "
+                                         "always done"),
+                "close": ("Close the tab", "if you open it anyway, the tab is closed (a browser with one tab "
+                                           "gets a fresh tab first)"),
+                "back": ("Go back", "the browser goes back instead; if that doesn't leave the page, the tab is "
+                                    "closed")}
 MUTED = theme.MUTED
 
 
@@ -66,15 +74,23 @@ class TargetPicker(ctk.CTkFrame):
         self.block_row = ctk.CTkFrame(self, fg_color="transparent")
         self.block_label = ctk.CTkLabel(self.block_row, text="")
         self.block_label.pack(anchor="w")
-        self.flag_boxes = {}
-        for flag, (label, note) in ACTIONS.items():
-            line = ctk.CTkFrame(self.block_row, fg_color="transparent")
+        self.app_box = ctk.CTkFrame(self.block_row, fg_color="transparent")
+        self.site_box = ctk.CTkFrame(self.block_row, fg_color="transparent")
+        self.flag_boxes = self._boxes(self.app_box, ACTIONS, self._flag_ticked)
+        self.site_boxes = self._boxes(self.site_box, SITE_ACTIONS, self._site_flag_ticked)
+        self.reset()
+
+    @staticmethod
+    def _boxes(parent, actions: dict, on_tick) -> dict:
+        boxes = {}
+        for flag, (label, note) in actions.items():
+            line = ctk.CTkFrame(parent, fg_color="transparent")
             line.pack(anchor="w", pady=1, padx=(28 if flag == "background" else 0, 0))   # goes with Close app
-            box = ctk.CTkCheckBox(line, text=label, command=lambda f=flag: self._flag_ticked(f))
+            box = ctk.CTkCheckBox(line, text=label, command=lambda f=flag: on_tick(f))
             box.pack(side="left")
             help_icon(line, note[0].upper() + note[1:] + ".").pack(side="left", padx=(4, 0))
-            self.flag_boxes[flag] = box
-        self.reset()
+            boxes[flag] = box
+        return boxes
 
     # ---------- filling ----------
 
@@ -135,11 +151,23 @@ class TargetPicker(ctk.CTkFrame):
         """Apps - and a category, whose apps get closed / minimised the same way."""
         return self._is_app() or bool(self.category)
 
+    def _is_site(self) -> bool:
+        """A site, once there is something in the box (an empty box is neither a site nor an app yet)."""
+        return not self.category and not self._is_app() and bool(self.entry.get().strip())
+
     def _update_block_row(self):
+        for box in (self.app_box, self.site_box):
+            box.pack_forget()
         if self._wants_block_row():
             self.block_label.configure(text="When blocked, its apps (tick one or more; Close and Minimize exclude "
                                             "each other):" if self.category else
                                             "When blocked (tick one or more; Close and Minimize exclude each other):")
+            self.app_box.pack(anchor="w")
+            self.block_row.pack(anchor="w", pady=(8, 0))
+        elif self._is_site():
+            self.block_label.configure(text="When blocked (tick one or more; Close the tab and Go back exclude "
+                                            "each other):")
+            self.site_box.pack(anchor="w")
             self.block_row.pack(anchor="w", pady=(8, 0))
         else:
             self.block_row.pack_forget()
@@ -153,6 +181,7 @@ class TargetPicker(ctk.CTkFrame):
         clear_entry(self.entry)
         clear_entry(self.name)
         self._set_block_type("kill")
+        self._set_site_block_type(None)
         self.pickers.pack(side="left", before=self.buttons)
         self._update_block_row()
 
@@ -173,7 +202,10 @@ class TargetPicker(ctk.CTkFrame):
         self._set(self.entry, item["target"].split()[0])
         self.entry.configure(state="disabled")
         self._set(self.name, item["display_name"])
-        self._set_block_type(item.get("block_type"))
+        if item["item_type"] == "app":
+            self._set_block_type(item.get("block_type"))
+        else:
+            self._set_site_block_type(item.get("block_type"))
         self.pickers.pack_forget()
         self._update_block_row()
 
@@ -182,6 +214,16 @@ class TargetPicker(ctk.CTkFrame):
         for flag, box in self.flag_boxes.items():
             box.select() if flag in flags else box.deselect()
         self._update_background()
+
+    def _set_site_block_type(self, block_type: str | None):
+        flags = site_flags(block_type)
+        for flag, box in self.site_boxes.items():
+            box.select() if flag in flags else box.deselect()
+
+    def _site_flag_ticked(self, flag: str):
+        other = {"close": "back", "back": "close"}.get(flag)
+        if other and self.site_boxes[flag].get():
+            self.site_boxes[other].deselect()   # closing the tab and going back are two ways of doing one thing
 
     def _flag_ticked(self, flag: str):
         other = {"close": "minimize", "minimize": "close"}.get(flag)
@@ -201,6 +243,11 @@ class TargetPicker(ctk.CTkFrame):
         flags = [f for f, box in self.flag_boxes.items() if box.get()]
         return make_block_type(flags) if set(flags) - {"background"} else None
 
+    def selected_site_block_type(self) -> str | None:
+        """None if nothing is ticked (the caller then says so)."""
+        flags = [f for f, box in self.site_boxes.items() if box.get()]
+        return make_site_block_type(flags) if flags else None
+
     def get(self) -> dict:
         """{kind, targets, name, source, block_type, app_path}. Raises ValueError with a user-facing message."""
         text = self.entry.get().strip()
@@ -219,5 +266,8 @@ class TargetPicker(ctk.CTkFrame):
                     "app_path": (self.app or {}).get("path")}
         host = normalize_host(text)
         entry = popular_hosts(host)   # known site: block all of its hostnames
+        if self.selected_site_block_type() is None:
+            raise ValueError("Tick at least one of Can't load it / Close the tab / Go back.")
         return {"kind": "site", "targets": entry[1] if entry else [host], "name": name or guess_name(host),
-                "source": "popular" if entry else "manual", "block_type": None, "app_path": None}
+                "source": "popular" if entry else "manual",
+                "block_type": self.selected_site_block_type(), "app_path": None}

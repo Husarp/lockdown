@@ -11,6 +11,7 @@ import string
 from datetime import datetime, timedelta
 
 from blocker.apps import block_flags
+from blocker.site_block import site_flags
 from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, next_window_start,
                    window_until)
 
@@ -141,6 +142,8 @@ def item_looser(old: dict, new: dict | None, now: datetime) -> bool:
     return (newly_disabled(old, new)
             or not set(old["target"].split()) <= set(new["target"].split())
             or (old["item_type"] == "app" and not _strength(old.get("block_type")) <= _strength(new.get("block_type")))
+            or (old["item_type"] == "site"
+                and not site_flags(old.get("block_type")) <= site_flags(new.get("block_type")))
             or rules_looser(old["rules"], new["rules"], now))
 
 

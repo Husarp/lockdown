@@ -27,7 +27,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
-from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection
+from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection, site_block
 import keywords
 from blocker.listener import BlockListener
 from db import Database
@@ -72,6 +72,7 @@ class Enforcer:
         self.clock = TrustedClock(float(last) if last else None)
         self.last_offset: float | None = None
         self.blocks: dict[str, dict] = {}       # current active blocks, read by the listener
+        self.dns_blocks: dict[str, dict] = {}   # those of them that are sent nowhere (hosts file / DNS filter)
         self.closing: dict[str, datetime] = {}  # ip -> keep closing connections until
         self.visit_db = None                    # separate connection for listener threads
         self.visit_lock = threading.Lock()
@@ -113,16 +114,19 @@ class Enforcer:
         if self.db.delete_expired_temporary(now):
             log.info("Removed expired temporary blocks")
         all_blocks = self.db.blocks(now)
-        blocks = {}
+        blocks, dns_blocks = {}, {}
         for b in all_blocks:
             if b["item"]["item_type"] == "site":
                 for h in b["item"]["target"].split():
                     blocks.setdefault(h, b)
+                    # a site set to "close the tab" only is not sent nowhere - the tray agent acts instead
+                    if site_block.blocks_dns(b["item"].get("block_type")):
+                        dns_blocks.setdefault(h, b)
         self.app_blocks = {b["item"]["target"].lower(): b for b in all_blocks
                            if b["item"]["item_type"] == "app" and b["item"]["target"].lower() not in apps.PROTECTED}
         self.update_firewall()
 
-        newly_blocked = sorted(set(blocks) - set(self.blocks))
+        newly_blocked = sorted(set(dns_blocks) - set(self.dns_blocks))
         if newly_blocked:
             # resolve before the hosts file points them at 127.0.0.1
             for ip in connections.resolve(hosts.expand(newly_blocked)):
@@ -130,10 +134,10 @@ class Enforcer:
 
         # (the protection lists are not in the hosts file: Windows' DNS client hangs on huge hosts files - they're
         # blocked by the DNS filter, see dns_loop)
-        if hosts.apply(sorted(blocks)):
+        if hosts.apply(sorted(dns_blocks)):
             hosts.flush_dns()
-            log.info("Hosts file updated: %d hostnames blocked", len(blocks))
-        self.blocks = blocks
+            log.info("Hosts file updated: %d hostnames blocked", len(dns_blocks))
+        self.blocks, self.dns_blocks = blocks, dns_blocks
 
         kw = keywords.settings(self.db)
         if browser_policy.apply(safe_search=kw["safesearch"], youtube=kw["youtube"]):
