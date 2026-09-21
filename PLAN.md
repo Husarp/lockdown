@@ -1493,6 +1493,9 @@ one shared pot for the whole category.
   `distracting.seed_games` wrote every Steam game as Distracting before the category existed, and a set
   category is never overwritten; the duplicate came from a custom category whose key ("games") collided with
   the new built-in one. Both fixed, with a one-off move of the entries Lockdown itself had set.
+- [x] Overview redesign (user, 2026-09-21) - 0.72.0: a group is one box with its rules at the top and its
+  members inside; adding still merges, so nothing appears twice. Rule chips are coloured by state
+  (`rules.rule_state`), not by rule type.
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting

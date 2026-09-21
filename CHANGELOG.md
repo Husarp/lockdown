@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.72.0 - 2026-09-21 11:49
+- **A group is one box on Blocking > Overview.** Its rules are written once at the top, its members sit
+  underneath - instead of the group's rules being copied onto every member's row.
+  - The header has the group's name, how many members it has, how it stands ("2 of 3 blocked now") and
+    **Edit / Disable / Remove**. Edit opens it in Groups, where per-member versions of its rules live.
+  - A member is one line: what it is, how it stands, and only what it has **on top of** the group - its own
+    blockers, or "its own by time in this group" when you customised the group's rule for it. Click the line
+    to open its own blockers.
+  - This is also the answer to "shared with what?": a shared limit now sits above the list of members sharing it.
+  - Anything that is in no group stays a row of its own below, exactly as before.
+  - **Sorting sorts the boxes** along with the rows: a group counts as blocked as soon as one member is, and
+    its next block is the soonest of its members'.
+- **A rule's colour says what it is doing, not what kind it is.** Red while it is blocking right now, orange
+  while it is about to (90% of a limit or an allowance used, or its hours starting within 10 minutes), green
+  while it is not. The colours update in place every 2 seconds, as the countdowns do.
+- The per-item **Alerts** setting moved from the list to the item's own editor (Blocking > Edit), since
+  members have no controls of their own.
+
 ## 0.71.0 - 2026-09-21 10:42
 - **Your games are in Games now.** 0.64.0 added the category, but nothing moved into it: every Steam game had
   already been written down as Distracting (that is what Lockdown did before Games existed), and a category

@@ -329,6 +329,35 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
     return None
 
 
+NEARLY = 0.9              # this much of a limit used = nearly blocked
+SOON_MIN = 10             # a blocked stretch starting within this many minutes = nearly blocked
+
+
+def rule_state(rule: dict, now: datetime, usage=no_usage) -> str:
+    """"blocked" - this rule is blocking right now; "soon" - it still allows, but barely (nearly out of time,
+    or its hours start in a few minutes); "allowed" - nothing to worry about. What the colour of a rule on the
+    Blocking list means."""
+    if rule_block(rule, now, usage):
+        return "blocked"
+    kind = rule["rule_type"]
+    if kind in ("time_limit", "switch_limit"):
+        clock = _clock(usage)
+        time_based = kind == "time_limit"
+        fields = TIME_LIMIT_FIELDS if time_based else OPEN_LIMIT_FIELDS
+        used = [usage(_owner(rule), time_bucket(p, now, clock)) / max(limit * 60, 1) if time_based
+                else usage(_owner(rule), opening_bucket(rule, p, now, clock)) / max(limit, 1)
+                for p, limit in limits(rule, fields).items()]
+        return "soon" if used and max(used) >= NEARLY else "allowed"
+    if kind == "scheduled" and rule.get("schedule"):
+        spent = allowance_left(rule, now, usage)
+        if spent:                       # inside its blocked hours, on the allowance
+            return "soon" if spent[0] >= spent[1] * NEARLY else "allowed"
+        start = _schedule_next_start(rule["schedule"], now)
+        if start and start - now <= timedelta(minutes=SOON_MIN):
+            return "soon"
+    return "allowed"
+
+
 def item_block(rules: list[dict], now: datetime, usage=no_usage) -> tuple[str, datetime | None, dict] | None:
     """(reason, until, rule) for the rule that blocks the item now (most important reason first), else None.
     Nothing blocks during an emergency unlock."""

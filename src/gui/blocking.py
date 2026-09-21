@@ -19,14 +19,15 @@ from blocker.apps import block_flags
 from gui import app_browser, icons, theme
 from gui.block_calendar import CalendarTab
 from gui.components import (CHIP_STYLES, Curtain, Card, BlockerRail, LockedStrip, Segmented, TabBar, eyebrow,
-                            rule_chip, help_icon, page_head, type_badge)
+                            hairline, rule_chip, help_icon, page_head, type_badge)
 from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block
+from rules import (DAY_NAMES, describe_rule, duration_text, effective_rules, item_block, next_block,
+                   rule_state)
 from trusted_time import now_from_db
 
 TABS = ["Overview", "Groups", "Add", "Site protection", "Calendar"]
@@ -87,15 +88,47 @@ def targets_text(item: dict) -> str:
     return " · ".join(item["target"].split()) + " · " + site_block.text(item.get("block_type"))
 
 
+def group_status(page, group: dict, now, usage) -> dict:
+    """The one line at the top of a group's box: how many of its members are blocked right now."""
+    draft = page.draft
+    if draft.is_group_unsaved(group["id"]):
+        return {"text": "● Not applied (unsaved)", "text_color": ORANGE}
+    members = [draft.items[i] for i in group["members"] if i in draft.items]
+    if not members:
+        return {"text": "● No members yet", "text_color": MUTED}
+    blocked = sum(1 for m in members if saved_block(draft, m, now, usage))
+    if not blocked:
+        return {"text": "● Allowed now", "text_color": GREEN}
+    if not page.app.service_running:
+        return {"text": "● Pending · service off", "text_color": ORANGE}
+    return {"text": f"● {blocked} of {len(members)} blocked now", "text_color": RED}
+
+
+def group_rule(group: dict, rule: dict) -> dict:
+    """A group's own rule as the chips want it: counted against the group, under the key its usage is stored
+    at, and with no "-> group" prefix (the box already says whose rule it is)."""
+    owner = f"group:{group['id']}"
+    return {**rule, "usage_owner": owner, "item_owner": owner, "group": None,
+            "rule_key": f"g{group['id']}{rule['rule_type']}"}
+
+
 def rule_text(rule, now, usage) -> str:
     text = describe_rule(rule, now, usage).replace(":\n", ": ").replace("\n", " · ")
     return f"→ {rule['group']['name']} · {text}" if rule["group"] else text
 
 
-def chip_kind(rule) -> str:
-    if rule["group"]:
-        return "group"
-    return {"permanent": "danger", "temporary": "warn", "time_limit": "warn"}.get(rule["rule_type"], "neutral")
+# red while a rule is blocking, orange while it is about to, green while it is not: the colour says what is
+# happening now, which is what you look at the list for (the kind of rule is already written on the chip).
+CHIP_STATES = {"blocked": "danger", "soon": "warn", "allowed": "ok"}
+
+
+def chip_kind(rule, now, usage) -> str:
+    return CHIP_STATES[rule_state(rule, now, usage)]
+
+
+def _paint_chip(chip, rule, now, usage):
+    fg, bg = CHIP_STYLES[chip_kind(rule, now, usage)]
+    chip.configure(text=f" {rule_text(rule, now, usage)} ", text_color=fg, fg_color=bg)
 
 
 # ---------------------------------------------------------------- Overview
@@ -121,7 +154,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.list_box = ctk.CTkFrame(self.list_card, fg_color="transparent")
         self.list_box.pack(fill="x", padx=15, pady=(8, 4))
         self.list_box.pack_configure(pady=(8, 10))
-        help_icon(top, "Rules from a group are marked with → and can only be changed in Groups.").pack(
+        help_icon(top, "A group is one box: its rules at the top, its members underneath - click a member to "
+                       "open its own blockers, or Edit to change the group.\nA rule is red while it is "
+                       "blocking, orange while it is about to, green while it isn't.").pack(
             side="left", padx=8, after=self.title)
         # the table is made once and its rows are reused on every refresh - building them from scratch each time
         # is what made opening this tab take a moment (see components.Rows for the same idea)
@@ -135,9 +170,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.off_card = ctk.CTkFrame(self, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER)
         self.off_box = ctk.CTkFrame(self.off_card, fg_color="transparent")
         self.off_box.pack(fill="x", padx=15, pady=10)
-        self.rows: list[dict] = []
+        self.rows: list[dict] = []           # loose items: one table row each
+        self.cards: list[dict] = []          # groups: one box each, with their members inside
         self.live_rules: list[tuple] = []    # (label, rule) - texts updated in place every 2 s
         self.live_status: list[tuple] = []   # (label, item)
+        self.live_groups: list[tuple] = []   # (label, group)
 
     # ---------- emergency unlock ----------
 
@@ -212,12 +249,19 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.page.app.db.set_setting(SORT_KEY, value)
         self.page.refresh()
 
-    def _sorted(self, items: list[dict], now, usage) -> list[dict]:
+    def _sorted(self, entries: list[tuple], now, usage) -> list[tuple]:
+        """The boxes and the loose rows in one order: ("group", group) / ("item", item). A group counts as
+        blocked as soon as one of its members is, and its next block is the soonest of theirs."""
         how = self.sort.get()
+
+        def name(entry) -> str:
+            kind, thing = entry
+            return (thing["name"] if kind == "group" else thing["display_name"]).lower()
+
         if how == "Name":
-            return sorted(items, key=lambda i: i["display_name"].lower())
+            return sorted(entries, key=name)
         if how == "Date added":   # newest first; unsaved ones on top
-            return sorted(items, key=lambda i: i.get("created_at") or "~", reverse=True)
+            return sorted(entries, key=lambda e: e[1].get("created_at") or "~", reverse=True)
         groups = list(self.draft.saved_groups.values())
 
         def next_time(item) -> datetime:
@@ -227,10 +271,17 @@ class OverviewTab(ctk.CTkScrollableFrame):
             saved = self.draft.saved_items.get(item["id"])
             nb = next_block(effective_rules(saved, groups), now, usage) if saved else None
             return nb[0] if nb else datetime.max
-        times = {i["id"]: next_time(i) for i in items}
+
+        def time_of(entry) -> datetime:
+            kind, thing = entry
+            if kind == "item":
+                return next_time(thing)
+            return min((next_time(self.draft.items[i]) for i in thing["members"] if i in self.draft.items),
+                       default=datetime.max)
+        times = {id(e[1]): time_of(e) for e in entries}
         if how == "Next block":   # soonest first, the ones blocked already after them
-            return sorted(items, key=lambda i: (times[i["id"]] == datetime.min, times[i["id"]]))
-        return sorted(items, key=lambda i: (times[i["id"]] != datetime.min, i["display_name"].lower()))
+            return sorted(entries, key=lambda e: (times[id(e[1])] == datetime.min, times[id(e[1])], name(e)))
+        return sorted(entries, key=lambda e: (times[id(e[1])] != datetime.min, name(e)))
 
     def _make_row(self) -> dict:
         """One table row's widgets, made once (see self.table). Filled in by refresh()."""
@@ -275,8 +326,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         while len(r["chips"]) < len(rules) + len(off):
             r["chips"].append(rule_chip(r["rules_box"], "", wraplength=COLS[1] - 20))
         for chip, rule in zip(r["chips"], rules):
-            fg, bg = CHIP_STYLES[chip_kind(rule)]
-            chip.configure(text=f" {rule_text(rule, now, usage)} ", text_color=fg, fg_color=bg)
+            _paint_chip(chip, rule, now, usage)
             chip.pack(anchor="w", pady=2)
             self.live_rules.append((chip, rule))
         for chip, g in zip(r["chips"][len(rules):], off):
@@ -301,33 +351,147 @@ class OverviewTab(ctk.CTkScrollableFrame):
         r["remove"]._on_confirm = lambda i=item["id"]: self.draft.remove_item(i)
         r["remove"].grid(row=row, column=5, padx=(4, 0))
 
+    def _make_card(self) -> dict:
+        """A group's box: its rules once at the top, then its members. Made once and refilled, like the rows."""
+        c = {"chips": [], "lines": []}
+        box = c["box"] = ctk.CTkFrame(self.table, fg_color=theme.SURFACE2, corner_radius=4,
+                                      border_width=1, border_color=theme.BORDER)
+        head = ctk.CTkFrame(box, fg_color="transparent")
+        head.pack(fill="x", padx=12, pady=(9, 2))
+        ctk.CTkFrame(head, width=3, height=18, corner_radius=0, fg_color=theme.ACCENT).pack(side="left", padx=(0, 9))
+        c["name"] = ctk.CTkLabel(head, text="", font=theme.semi(13))
+        c["name"].pack(side="left")
+        c["count"] = ctk.CTkLabel(head, text="", font=theme.body(11), text_color=MUTED)
+        c["count"].pack(side="left", padx=8)
+        c["remove"] = ConfirmButton(head, lambda: None, text="Remove", confirm_text="Confirm", width=82, height=26,
+                                    **theme.SECONDARY)
+        c["remove"].pack(side="right")
+        c["disable"] = ctk.CTkButton(head, text="Disable", width=72, height=26, **theme.SECONDARY)
+        c["disable"].pack(side="right", padx=6)
+        c["edit"] = ctk.CTkButton(head, text="Edit", width=60, height=26, **theme.SECONDARY)
+        c["edit"].pack(side="right")
+        c["status"] = ctk.CTkLabel(head, text="", font=theme.body(12))
+        c["status"].pack(side="right", padx=14)
+        c["rules_box"] = ctk.CTkFrame(box, fg_color="transparent")
+        c["rules_box"].pack(fill="x", padx=12, pady=(2, 8))
+        c["line"] = hairline(box)
+        c["line"].pack(fill="x", padx=12)
+        c["members"] = ctk.CTkFrame(box, fg_color="transparent")
+        c["members"].pack(fill="x", padx=12, pady=(6, 10))
+        return c
+
+    def _make_line(self, parent) -> dict:
+        """One member inside a box: what it is, how it stands, and anything it has on top of the group."""
+        line = ctk.CTkFrame(parent, fg_color="transparent", cursor="hand2")
+        m = {"line": line, "chips": [], "badge_kind": None}
+        m["icon"] = ctk.CTkLabel(line, text="", width=24)
+        m["icon"].pack(side="left", anchor="n")
+        m["name"] = ctk.CTkLabel(line, text="", font=theme.body(12), width=186, anchor="w")
+        m["name"].pack(side="left", padx=(2, 8), anchor="n")
+        m["status"] = ctk.CTkLabel(line, text="", font=theme.body(11), width=132, anchor="w")
+        m["status"].pack(side="left", anchor="n")
+        # width/height 1: an empty CTkFrame would otherwise sit there 200 px tall (a member with no own rules)
+        m["own"] = ctk.CTkFrame(line, fg_color="transparent", width=1, height=1)
+        m["own"].pack(side="left", anchor="n")
+        return m
+
+    def _fill_card(self, c: dict, group: dict, row: int, now, usage):
+        c["box"].grid(row=row, column=0, columnspan=6, sticky="ew", pady=(7, 3))
+        members = [self.draft.items[i] for i in group["members"] if i in self.draft.items]
+        members.sort(key=lambda i: i["display_name"].lower())
+        c["name"].configure(text=group["name"])
+        c["count"].configure(text=f"group · {len(members)} member{'s' * (len(members) != 1)}")
+        c["status"].configure(**group_status(self.page, group, now, usage))
+        self.live_groups.append((c["status"], group))
+        c["edit"].configure(command=lambda g=group["id"]: self.page.edit_group(g))
+        c["disable"].configure(command=lambda g=group["id"]: self.draft.set_group_disabled(g, True))
+        c["remove"]._disarm()
+        c["remove"]._on_confirm = lambda g=group["id"]: self.draft.remove_group(g)
+
+        rules = [group_rule(group, r) for r in group["rules"]]
+        while len(c["chips"]) < len(rules):
+            c["chips"].append(rule_chip(c["rules_box"], "", wraplength=760))
+        for chip, rule in zip(c["chips"], rules):
+            _paint_chip(chip, rule, now, usage)
+            chip.pack(anchor="w", pady=2)
+            self.live_rules.append((chip, rule))
+        for chip in c["chips"][len(rules):]:
+            chip.pack_forget()
+
+        while len(c["lines"]) < len(members):
+            c["lines"].append(self._make_line(c["members"]))
+        for m, item in zip(c["lines"], members):
+            self._fill_line(m, item, group, now, usage)
+        for m in c["lines"][len(members):]:
+            m["line"].pack_forget()
+
+    def _fill_line(self, m: dict, item: dict, group: dict, now, usage):
+        m["line"].pack(fill="x", pady=1)
+        m["icon"].configure(image=icons.for_item(item, 18, self.colors.get(item["target"])))
+        m["name"].configure(text=item["display_name"])
+        m["status"].configure(**status_of(self.page, item, now, usage))
+        self.live_status.append((m["status"], item))
+        for w in (m["line"], m["icon"], m["name"]):
+            w.bind("<Button-1>", lambda e, i=item["id"]: self.page.edit_item(i))
+        # its own blockers, and anything customised for it in the group - what it has on top of the box's rules
+        own = effective_rules({**item, "rules": item["rules"]}, [])
+        custom = [t for t in (group["members"].get(item["id"]) or {})]
+        while len(m["chips"]) < len(own) + bool(custom):
+            m["chips"].append(rule_chip(m["own"], "", wraplength=440))
+        for chip, rule in zip(m["chips"], own):
+            _paint_chip(chip, rule, now, usage)
+            chip.pack(anchor="w", pady=1)
+            self.live_rules.append((chip, rule))
+        extra = m["chips"][len(own):]
+        if custom:
+            fg, bg = CHIP_STYLES["neutral"]
+            names = ", ".join(RULE_NAMES[t].lower() for t in custom if t in RULE_NAMES)
+            extra[0].configure(text=f" its own {names} in this group ", text_color=fg, fg_color=bg)
+            extra[0].pack(anchor="w", pady=1)
+            extra = extra[1:]
+        for chip in extra:
+            chip.pack_forget()
+
     def refresh(self, now, usage):
         if emergency.get(self.page.app.db, "emergency.enabled") == "1":
             self.unlock_btn.pack(side="left", padx=16)
         else:
             self.unlock_btn.pack_forget()
             self.unlock_panel.pack_forget()
-        items = self._sorted([i for i in self.draft.sorted_items() if not i.get("disabled")], now, usage)
         self._fill_disabled()
         from gui import categories
         self.colors = categories.colors_of(categories.load(self.page.app.db))   # for the category rows' swatch
-        self.title.configure(text=f"Everything blocked ({len(items)})")
-        self.live_rules, self.live_status = [], []
-        if items:
+        # a group is one box with its members inside it; everything else is a row of its own underneath
+        groups = [g for g in self.draft.sorted_groups() if not g.get("disabled")]
+        in_group = {i for g in groups for i in g["members"] if i in self.draft.items}
+        loose = [i for i in self.draft.sorted_items() if not i.get("disabled") and i["id"] not in in_group]
+        entries = self._sorted([("group", g) for g in groups] + [("item", i) for i in loose], now, usage)
+        self.title.configure(text=f"Everything blocked ({len(in_group) + len(loose)})")
+        self.live_rules, self.live_status, self.live_groups = [], [], []
+        if entries:
             self.empty.pack_forget()
             self.table.pack(fill="x")
         else:
             self.table.pack_forget()
             self.empty.pack(anchor="w", pady=12)
-        while len(self.rows) < len(items):
-            self.rows.append(self._make_row())
-        groups = list(self.draft.groups.values())
-        for n, r in enumerate(self.rows):
-            if n < len(items):
-                self._fill_row(r, items[n], 2 * n + 1, groups, now, usage)
-            else:   # a spare row from a longer list: keep it, just don't show it
-                for key in ("sep", "cell", "rules_box", "status", "alerts", "edit", "remove"):
-                    r[key].grid_forget()
+        all_groups = list(self.draft.groups.values())
+        used_rows = used_cards = 0
+        for n, (kind, thing) in enumerate(entries):
+            if kind == "group":
+                while len(self.cards) <= used_cards:
+                    self.cards.append(self._make_card())
+                self._fill_card(self.cards[used_cards], thing, 2 * n + 1, now, usage)
+                used_cards += 1
+            else:
+                while len(self.rows) <= used_rows:
+                    self.rows.append(self._make_row())
+                self._fill_row(self.rows[used_rows], thing, 2 * n + 1, all_groups, now, usage)
+                used_rows += 1
+        for r in self.rows[used_rows:]:   # spares from a longer list: kept, just not shown
+            for key in ("sep", "cell", "rules_box", "status", "alerts", "edit", "remove"):
+                r[key].grid_forget()
+        for c in self.cards[used_cards:]:
+            c["box"].grid_forget()
 
     def _fill_disabled(self):
         """Disabled items and groups: kept with their blockers, enforcing nothing, out of the list above.
@@ -360,13 +524,16 @@ class OverviewTab(ctk.CTkScrollableFrame):
                       command=on_edit).pack(side="right")
 
     def update_live(self, now, usage):
-        """Refresh counters, countdowns and statuses without rebuilding the list."""
+        """Refresh counters, countdowns, colours and statuses without rebuilding the list."""
         for label, rule in getattr(self, "live_rules", []):
             if label.winfo_exists():
-                label.configure(text=f" {rule_text(rule, now, usage)} ")
+                _paint_chip(label, rule, now, usage)
         for label, item in getattr(self, "live_status", []):
             if label.winfo_exists():
                 label.configure(**status_of(self.page, item, now, usage))
+        for label, group in getattr(self, "live_groups", []):
+            if label.winfo_exists():
+                label.configure(**group_status(self.page, group, now, usage))
 
     def _edit(self, button, choices):
         """One choice: do it. Several: ask which one with a small menu under the button."""
@@ -398,6 +565,9 @@ class AddTab(ctk.CTkScrollableFrame):
         # pausing an item instead of removing it: the blockers stay, they just stop applying
         self.disable_btn = ctk.CTkButton(head, text="Disable", width=90, height=28, **theme.SECONDARY,
                                          command=self._toggle_disabled)
+        self.alerts = ctk.CTkOptionMenu(head, values=list(ALERTS), width=96, height=28,
+                                        command=self._alerts_changed)
+        self.alerts_label = ctk.CTkLabel(head, text="Alerts", text_color=MUTED)
         self.picker = TargetPicker(box, page.app.db)
         self.picker.pack(anchor="w", padx=16, pady=(0, 4))
         self.picker.entry.bind("<Return>", lambda e: self._submit(), add="+")
@@ -454,6 +624,8 @@ class AddTab(ctk.CTkScrollableFrame):
         self.info.configure(text="")
         self.error.configure(text="")
         self.disable_btn.pack_forget()
+        self.alerts.pack_forget()
+        self.alerts_label.pack_forget()
         self._load_rules([])
 
     def cancel(self):
@@ -473,8 +645,15 @@ class AddTab(ctk.CTkScrollableFrame):
         self.error.configure(text="")
         self.disable_btn.configure(text="Enable" if item.get("disabled") else "Disable")
         self.disable_btn.pack(side="right")
+        self.alerts.set(next(k for k, v in ALERTS.items() if v == item["notify"]))
+        self.alerts.pack(side="right", padx=(0, 10))
+        self.alerts_label.pack(side="right", padx=(0, 6))
         self._load_rules(item["rules"])
         self._parent_canvas.yview_moveto(0)
+
+    def _alerts_changed(self, value: str):
+        if self.edit_id is not None:
+            self.draft.set_notify(self.edit_id, ALERTS[value])
 
     def _toggle_disabled(self):
         """Disabled items keep their blockers and move to Overview > Disabled; Edit there brings them back."""
