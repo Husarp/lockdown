@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.69.0 - 2026-09-21 10:10
+- **Moving the limit reset earlier now asks which way you want it.** A small window offers both:
+  - **Start now** - the limit day you are in ends at once and a fresh one begins, so today's limits start
+    over. This is the one that needs the Anti-Bypass challenge.
+  - **From <when the day ends>** - the new time takes over when the running day ends and nothing starts over.
+    No challenge, because nothing comes back early.
+  Moving it later still applies straight away without asking - a longer day never gives anything back.
+- A held week or month no longer ends early either, even while its key is unchanged (starting a fresh day
+  doesn't drag the week's end back with it).
+
 ## 0.68.0 - 2026-09-21 09:57
 - **Changing when limits reset works properly again.** Changing it twice stacked: each change stretched the
   day that was running, so a day could become 45 hours long and end at a time that had nothing to do with the

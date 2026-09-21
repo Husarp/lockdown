@@ -1480,6 +1480,9 @@ one shared pot for the whole category.
   too, the stream stops by itself, and reloading would lose your place in the video. Not worth it.
 - [x] Changing the limit reset time stacked into a 45-hour day (user, 2026-09-21) - 0.68.0: an earlier time
   leaves the running day alone, a later one stretches it once, and old broken configs are repaired on load.
+- [x] Moving the reset earlier: choose "Start now" (challenge) or "from the end of this day" (free) -
+  0.69.0. The user's point: once you can pass the challenge you could turn everything off anyway, so waiting
+  for the next day should be a choice, not the only option.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

@@ -8,9 +8,9 @@ from gui import theme
 import antibypass
 import backup
 import emergency
-from rules import DAY_NAMES, RESET_KEY, change_reset, reset_is_looser
+from rules import DAY_NAMES, RESET_KEY, apply_reset_now, change_reset, reset_is_looser
 from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
-from gui.widgets import ConfirmButton, once
+from gui.widgets import ConfirmButton, ConfirmDialog, once
 from gui.components import Card, Segmented, accent_bar, hairline, help_icon, page_head, LockedStrip
 from trusted_time import now_from_db
 
@@ -192,14 +192,26 @@ class SettingsPage(ctk.CTkFrame):
             self.reset_error.pack(anchor="w", pady=(4, 0))
             return
 
-        def save():
-            self.db.set_setting(RESET_KEY, value)
+        def save(new_value=value):
+            self.db.set_setting(RESET_KEY, new_value)
             self.load()
 
-        if reset_is_looser(saved, text, now):   # an earlier time: one day ends sooner than it would have
-            self.app.guard([f"Move the daily limit reset to {text} (one day ends sooner)"], save, self.load)
-        else:
+        if not reset_is_looser(saved, text, now):
             save()
+            return
+        # an earlier time means a limit day ends sooner than it would have: start it now (Anti-Bypass first,
+        # because the limits start over at once) or let it take over when the day you are in ends (free)
+        end = clock.day(now)[1]
+        now_value = apply_reset_now(saved, text, now)
+        once("reset", lambda: ConfirmDialog(
+            self.app, f"Move the reset back to {text}",
+            f"The limit day you are in runs until {short_when(end)}.\n\n"
+            f"Start now: it ends at once and today's limits start over - Anti-Bypass asks first.\n"
+            f"From {short_when(end)}: {text} takes over when it ends, and nothing starts over.",
+            on_yes=lambda: self.app.guard([f"Start a fresh limit day now ({text} reset)"],
+                                          lambda: save(now_value), self.load),
+            yes_text="Start now",
+            alt_text=f"From {short_when(end)}", on_alt=lambda: save(value), on_no=self.load))
 
     # ---------- emergency unlock ----------
 
@@ -306,7 +318,6 @@ class SettingsPage(ctk.CTkFrame):
             self._backup_msg(f"Imported {len(data['items'])} blocked sites / apps and your settings. "
                              "Restart Lockdown to see a different theme or colour.", theme.ALLOWED)
         from pathlib import Path
-        from gui.widgets import ConfirmDialog
         # show a review of what changes first, then the Anti-Bypass challenge, then apply
         once("confirm", lambda: ConfirmDialog(
             self.app, "Import these settings?",

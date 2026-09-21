@@ -97,9 +97,11 @@ class ConfirmDialog(ctk.CTkToplevel):
     """A small modal yes/no. `lines` are shown as → bullets; on_no runs on Cancel / closing the window."""
 
     def __init__(self, app, title: str, message: str, on_yes, yes_text: str = "Continue", danger: bool = False,
-                 lines: list[str] | None = None, on_no=lambda: None):
+                 lines: list[str] | None = None, on_no=lambda: None, alt_text: str | None = None,
+                 on_alt=lambda: None):
         super().__init__(app)
         self.on_yes, self.on_no, self._answered = on_yes, on_no, False
+        self.on_alt = on_alt
         self.title(title)
         self.resizable(False, False)
         self.configure(fg_color=theme.BG)
@@ -125,6 +127,9 @@ class ConfirmDialog(ctk.CTkToplevel):
         buttons.pack(fill="x", pady=(16, 0))
         extra = {"fg_color": theme.DANGER, "hover_color": theme.DANGER} if danger else {}
         ctk.CTkButton(buttons, text=yes_text, width=120, command=self._yes, **extra).pack(side="right")
+        if alt_text:   # a second way out that isn't "no" (e.g. "do it, but not until tomorrow")
+            ctk.CTkButton(buttons, text=alt_text, width=150, **theme.OUTLINE, command=self._alt).pack(
+                side="right", padx=8)
         ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self._no).pack(side="right", padx=8)
         modal(self, app)
 
@@ -132,6 +137,11 @@ class ConfirmDialog(ctk.CTkToplevel):
         self._answered = True
         self.destroy()
         self.on_yes()
+
+    def _alt(self):
+        self._answered = True
+        self.destroy()
+        self.on_alt()
 
     def _no(self):
         if self._answered:

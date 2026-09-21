@@ -6,8 +6,8 @@ import pytest
 
 import emergency
 from db import Database
-from rules import (LimitClock, Usage, change_reset, describe_rule, effective_rules, item_block, next_block,
-                   reset_is_looser, rule_block, usage_targets)
+from rules import (LimitClock, Usage, apply_reset_now, change_reset, describe_rule, effective_rules,
+                   item_block, next_block, reset_is_looser, rule_block, usage_targets)
 
 
 def at(day, hh, mm=0):   # 2026-09-14 is a Monday
@@ -148,3 +148,14 @@ def test_only_an_earlier_reset_time_asks_anti_bypass():
     assert reset_is_looser(cfg, "00:00", at(0, 22))       # a day ends sooner than it would have
     assert not reset_is_looser(cfg, "05:00", at(0, 22))   # a day only gets longer
     assert not reset_is_looser(cfg, "nonsense", at(0, 22))
+
+
+def test_starting_the_new_reset_time_at_once():
+    """Behind the challenge: the day you are in ends now, a fresh one starts - but the week doesn't end early."""
+    cfg = json.dumps({"time": "03:00"})
+    now = at(1, 12)                                   # Tuesday 12:00, the limit day started Tue 03:00
+    fresh = apply_reset_now(cfg, "01:00", now)
+    c = LimitClock(fresh)
+    assert c.day(now) == (at(1, 1), at(2, 1))         # counted from 01:00 today: a different day key
+    assert c.period("day", now)[0] != LimitClock(cfg).period("day", now)[0]
+    assert c.period("week", now) == LimitClock(cfg).period("week", now)   # the week is held where it was

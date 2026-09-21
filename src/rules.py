@@ -128,8 +128,8 @@ class LimitClock:
         key, end = self._natural_period(kind, now)
         if kind in self.holds:   # the week / month running when the time was changed doesn't end early
             hold_key, until = self.holds[kind]
-            if now < until and key != hold_key:
-                return hold_key, until
+            if now < until:
+                return (hold_key, until) if key != hold_key else (key, max(end, until))
         return key, end
 
     def _natural_period(self, kind: str, now: datetime) -> tuple[str, datetime]:
@@ -159,6 +159,20 @@ def reset_is_looser(config: str | None, new_time: str, now: datetime) -> bool:
         return parse_hhmm(new_time) < LimitClock(config).time
     except ValueError:
         return False
+
+
+def apply_reset_now(config: str | None, new_time: str, now: datetime) -> str:
+    """The new reset time from this moment: the limit day you are in ends now and a fresh one starts, so its
+    limits start over. Only offered behind the Anti-Bypass challenge. The running week and month are still
+    held, so they don't end early as well."""
+    clock = LimitClock(config)
+    try:
+        new = parse_hhmm(new_time)
+    except ValueError:
+        raise ValueError("The time must look like 04:00.") from None
+    hold = {kind: [key, until.strftime(TIME_FMT)]
+            for kind in ("week", "month") for key, until in [clock.period(kind, now)]}
+    return json.dumps({"time": f"{new:%H:%M}", "hold": hold})
 
 
 def change_reset(config: str | None, new_time: str, now: datetime) -> str:
