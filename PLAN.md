@@ -1473,6 +1473,12 @@ one shared pot for the whole category.
 - [x] Websites had no "When blocked" choice (user, 2026-09-21) - 0.66.0: blocker/site_block.py holds the flags
   (dns / close / back), the service keeps non-dns sites out of the hosts file, and the tab guard closes or
   goes back. Only whole hostnames - a single page or subreddit is still not something Lockdown can tell apart.
+- [x] A blocked video kept downloading to the end (user, 2026-09-21) - 0.67.0: the media domains are part of
+  the known sites, the DNS filter answers for blocked sites with suffix matching, and live connections are cut
+  by looked-up name. Found from the user's own network log: rr1---sn-u2oxu-f5fed.googlevideo.com.
+- [ ] Idea (user, 2026-09-21): "Reload the tab" as a fourth site action when a limit runs out. Detecting that
+  it is already blocked is the hard part - the URL doesn't change, so it would reload once per (window, URL)
+  and not touch it again until the address changes.
 - [ ] If any single page still feels slow to open, the next step is a static "Loading..." painted before the
   build starts. A *spinning* one is not possible without chopping the page build into chunks with after(),
   because Tk draws on the same thread that builds the widgets.

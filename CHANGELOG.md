@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.67.0 - 2026-09-21 08:56
+- **A blocked video no longer keeps downloading to the end.** The page and the video are different domains:
+  youtube.com serves the page, but the video itself comes from a random host under **googlevideo.com**, which
+  was never blocked - so an open player finished the video however long the block had been on.
+  - **Known sites now carry the domain their media comes from**: YouTube + googlevideo.com, Twitch + ttvnw.net,
+    Netflix + nflxvideo.net, TikTok + tiktokcdn.com / tiktokv.com, Instagram + cdninstagram.com, Facebook +
+    fbcdn.net. Sites you blocked earlier get them once, automatically; take one off yourself and it stays off.
+  - **Everything under a blocked name is blocked too.** The hosts file has no wildcards, so this is done by
+    Lockdown's own DNS filter, which until now only answered for the protection lists. googlevideo.com
+    therefore covers rr1---sn-u2oxu-f5fed.googlevideo.com.
+  - **Connections already open to a blocked name are cut**, by the name the browser actually looked up (from
+    the Windows DNS cache), not only by the addresses resolved when the block began. This is what stops a
+    transfer that is already running. IPv4 only - Windows has no way to close an IPv6 connection.
+
 ## 0.66.0 - 2026-09-21 07:42
 - **A website now has its own "When blocked" options**, the way an app does. Pick a site on Blocking > Add
   (or Edit one) and tick any of:

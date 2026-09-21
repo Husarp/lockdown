@@ -143,6 +143,7 @@ class Enforcer:
         if browser_policy.apply(safe_search=kw["safesearch"], youtube=kw["youtube"]):
             log.info("Browser policies (re)applied")
 
+        self.cut_live_connections(now)
         self.closing = {ip: until for ip, until in self.closing.items() if until > now}
         if self.closing:
             closed = connections.close_to(set(self.closing))
@@ -150,6 +151,32 @@ class Enforcer:
                 log.info("Closed %d open connections to blocked sites", closed)
 
         self.db.set_setting(HEARTBEAT_KEY, str(time.time()))
+
+    def blocked_name(self, host: str) -> str | None:
+        """What the DNS filter asks about every lookup: a site you blocked - the name itself or anything under
+        it, which is how googlevideo.com covers rr1---sn-xxxx.googlevideo.com - or a protection list.
+        Called from the filter's threads; self.dns_blocks is replaced whole, never edited in place."""
+        host = host.lower().rstrip(".").removeprefix("www.")
+        blocks = self.dns_blocks
+        if blocks:
+            parts = host.split(".")
+            for i in range(len(parts) - 1):
+                if ".".join(parts[i:]) in blocks:
+                    return "blocked"
+        return self.protection.which(host)
+
+    def cut_live_connections(self, now: datetime):
+        """A page that is already open keeps streaming over the connection it has, whatever the hosts file
+        says. Anything open to a blocked name (by the name the app actually looked up) gets cut."""
+        if not self.dns_blocks:
+            return
+        try:
+            names = netlog.dns_names()
+        except OSError:
+            return
+        for ip, name in names.items():
+            if self.blocked_name(name):
+                self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
 
     def on_visit(self, hostname: str):
         """Called by listener threads when a browser tries to open a blocked hostname."""
@@ -318,7 +345,7 @@ def dns_loop(enforcer: Enforcer):
     2-second loop) and the network adapters pointed at the filter; restore them if every list is off."""
     db = Database()
     safe = {"search": False, "youtube": False}   # forced SafeSearch / YouTube Restricted (Protection tab), read every 2 s
-    server = dnsfilter.Server(enforcer.protection.which, log,
+    server = dnsfilter.Server(enforcer.blocked_name, log,
                               safe=lambda name: keywords.safe_target(name, safe["search"], safe["youtube"]))
     try:
         server.start()
