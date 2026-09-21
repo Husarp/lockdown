@@ -43,3 +43,54 @@ def test_a_western_windows_is_unaffected(monkeypatch):
     monkeypatch.setattr(shortcuts.mojibake, "keyboard_codepage", lambda: "cp1252")
     for char in ("é", "ü", "ñ", "ç"):
         assert shortcuts.character(Event(char)) == char
+
+
+class FakeEntry:
+    """Just enough of a tk.Entry for the after-the-fact fix."""
+
+    def __init__(self, text=""):
+        self.text, self.cursor = text, len(text)
+
+    def index(self, _where):
+        return self.cursor
+
+    def get(self):
+        return self.text
+
+    def delete(self, first, last):
+        self.text = self.text[:first] + self.text[last:]
+        self.cursor = first
+
+    def insert(self, at, char):
+        self.text = self.text[:at] + char + self.text[at:]
+        self.cursor = at + len(char)
+
+    def icursor(self, at):
+        self.cursor = at
+
+
+class TypedEvent:
+    def __init__(self, char, widget):
+        self.char, self.widget = char, widget
+
+
+def test_a_letter_tk_typed_in_itself_is_swapped(monkeypatch):
+    """Whichever path put it there - Tk's own insert, or ours - the right letter ends up in the box."""
+    monkeypatch.setattr(shortcuts.mojibake, "keyboard_codepage", lambda: "cp1250")
+    entry = FakeEntry("pami" + "ê")            # what Tk inserted
+    shortcuts._fix_typed(TypedEvent("ê", entry))
+    assert entry.text == "pamię" and entry.cursor == 5
+
+
+def test_it_does_nothing_when_the_letter_is_already_right(monkeypatch):
+    monkeypatch.setattr(shortcuts.mojibake, "keyboard_codepage", lambda: "cp1250")
+    entry = FakeEntry("pamię")                 # our own handler already fixed it
+    shortcuts._fix_typed(TypedEvent("ê", entry))
+    assert entry.text == "pamię"
+
+
+def test_plain_typing_is_untouched(monkeypatch):
+    monkeypatch.setattr(shortcuts.mojibake, "keyboard_codepage", lambda: "cp1250")
+    entry = FakeEntry("hello")
+    shortcuts._fix_typed(TypedEvent("o", entry))
+    assert entry.text == "hello"

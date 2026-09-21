@@ -15,6 +15,7 @@ def install(root):
     root.bind_class("Entry", "<Control-Key>", _altgr, add="+")
     root.bind_class("Text", "<Control-Key>", _altgr, add="+")
     root.bind_class("Entry", "<FocusIn>", _remember, add="+")
+    root.bind_class("Entry", "<KeyRelease>", _fix_typed, add="+")
     root.bind_class("Entry", "<KeyRelease>", _remember, add="+")
     for seq, fn in (("<Control-z>", _undo_step), ("<Control-Z>", _undo_step), ("<Control-y>", _redo_step),
                     ("<Control-Y>", _redo_step), ("<Control-BackSpace>", _delete_word_left),
@@ -37,6 +38,28 @@ def _altgr(event):
     except Exception:
         return None
     return "break"
+
+
+def _fix_typed(event):
+    """The belt to _altgr's braces. Depending on the Tk build, an AltGr key arrives either as a Control one
+    (swallowed, so _altgr types it in) or as an ordinary one (Tk types it in itself) - and in that second case
+    nothing we do to the Control path can help. So after any key, if what landed in the box is the character
+    Tk mis-read, swap it for the right one. Does nothing when the right one is already there."""
+    typed = event.char
+    if not typed or typed.isascii():
+        return
+    fixed = character(event)
+    if fixed == typed:
+        return
+    entry = event.widget
+    try:
+        at = entry.index("insert")
+        if at and entry.get()[at - 1] == typed:
+            entry.delete(at - 1, at)
+            entry.insert(at - 1, fixed)
+            entry.icursor(at)
+    except Exception:
+        pass
 
 
 def character(event) -> str:

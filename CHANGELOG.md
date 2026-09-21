@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.74.2 - 2026-09-21 21:40
+- **Polish letters: the other half of the path.** An AltGr key reaches Tk in one of two ways - as a Control
+  key (Tk swallows it, so Lockdown types it in) or as an ordinary one (Tk types it in itself). Every fix so
+  far only touched the first; if this Tk build takes the second road, nothing we did to the first could ever
+  have helped. Now the letter is corrected after any keypress, whichever of the two put it there, and does
+  nothing when the right letter is already in the box.
+- **scripts/keycheck.py**: run it, type the letters that come out wrong, and it writes exactly what Tk reports
+  for each key (keysym, character, modifiers, active layout) to build/keycheck.log - so this stops being a
+  matter of guessing.
+
 ## 0.74.1 - 2026-09-21 21:24
 - **Lockdown's own popups no longer cover each other.** A blocked-site notice and a reminder (or two
   reminders - they are separate windows, one per reminder, so several can be waiting at once) all put
