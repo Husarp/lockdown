@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.65.0 - 2026-09-21 02:14
+- **Polish letters can be typed again - everywhere in the app.** Windows sends AltGr as Ctrl+Alt, and Tk's own
+  "Control + a key does nothing" rule swallowed the keypress, so a, c, e, l, n, o, s, z with their accents
+  never reached any box (you hit it on the Anti-Bypass phrase, but it was every box: names, groups, reminders,
+  search). They are typed in now, and real shortcuts (Ctrl+C / Ctrl+V / Ctrl+A / Ctrl+Z) are untouched -
+  including the no-pasting rule in the challenge.
+- **Every reminder can say what you want it to.** Sleep has "Heads-up says" and "Bedtime says", Breaks has
+  "It says", and 20-20-20 has its own. Leave a box empty and it says what it always said. `{bedtime}`,
+  `{wake}`, `{time}` (sleep) and `{every}`, `{length}` (breaks) are filled in; anything else you type is left
+  alone rather than breaking the reminder.
+- **The built .exe files carry their version.** Explorer's Details tab (and the tooltip, and the UAC prompt)
+  shows it for LockdownSetup.exe, Lockdown.exe and LockdownService.exe, so you can tell two downloaded setups
+  apart without running them. The build prints it too.
+
 ## 0.64.0 - 2026-09-21 01:56
 - **Games is a category now**, next to Productive / Neutral / Distracting - purple, and available everywhere a
   category is (the right-click menu, Screen Time, the timeline, and as a block target of its own).

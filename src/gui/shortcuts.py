@@ -10,12 +10,31 @@ _redo: dict[str, list[str]] = {}
 
 def install(root):
     root.bind_all("<Escape>", lambda e: _escape(root, e), add="+")
+    root.bind_class("Entry", "<Control-Key>", _altgr, add="+")
+    root.bind_class("Text", "<Control-Key>", _altgr, add="+")
     root.bind_class("Entry", "<FocusIn>", _remember, add="+")
     root.bind_class("Entry", "<KeyRelease>", _remember, add="+")
     for seq, fn in (("<Control-z>", _undo_step), ("<Control-Z>", _undo_step), ("<Control-y>", _redo_step),
                     ("<Control-Y>", _redo_step), ("<Control-BackSpace>", _delete_word_left),
                     ("<Control-Delete>", _delete_word_right), ("<Control-a>", _select_all), ("<Control-A>", _select_all)):
         root.bind_class("Entry", seq, fn)
+
+
+def _altgr(event):
+    """Windows sends AltGr as Ctrl+Alt, and Tk's own "<Control-Key> does nothing" rule then swallows the key -
+    so ą ć ę ł ń ó ś ź ż (and other AltGr letters) never reached any box. Type them in instead.
+    A real Ctrl shortcut carries a control character ("\\x16" for Ctrl+V), never a printable one, so this
+    can't swallow Ctrl+C / Ctrl+V / Ctrl+A."""
+    if not event.char or not event.char.isprintable():
+        return None
+    widget = event.widget
+    try:
+        if widget.tag_ranges("sel") if hasattr(widget, "tag_ranges") else widget.selection_present():
+            widget.delete("sel.first", "sel.last")
+        widget.insert("insert", event.char)
+    except Exception:
+        return None
+    return "break"
 
 
 def _escape(root, event):

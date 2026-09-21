@@ -178,6 +178,18 @@ def _duration(parent, label: str, after: str, label_w: int, on_save) -> ctk.CTkE
     return entry
 
 
+def _message(parent, label: str, default: str, label_w: int, on_save) -> ctk.CTkEntry:
+    """"Message [ ....... ]" - leave it empty and the reminder says what it always said."""
+    line = ctk.CTkFrame(parent, fg_color="transparent")
+    line.pack(anchor="w", fill="x", pady=5)
+    ctk.CTkLabel(line, text=label, width=label_w, anchor="w", text_color=MUTED).pack(side="left", padx=(0, 12))
+    entry = ctk.CTkEntry(line, placeholder_text=default)
+    entry.pack(side="left", fill="x", expand=True)
+    entry.bind("<Return>", lambda e: on_save())
+    entry.bind("<FocusOut>", lambda e: on_save())
+    return entry
+
+
 class RemindersView(ctk.CTkScrollableFrame):
     def __init__(self, master, page):
         super().__init__(master, fg_color="transparent")
@@ -214,6 +226,11 @@ class RemindersView(ctk.CTkScrollableFrame):
                                 self._save_sleep)
         self.sleep_mode = _option(b, "Turn on", ["No mode"], "at bedtime, until wake-up time", LABEL_W)
         self.sleep_mode.configure(command=lambda v: self._save_sleep())
+        self.sleep_warn_text = _message(b, "Heads-up says", reminders.SLEEP_WARN_TEXT, LABEL_W, self._save_sleep)
+        self.sleep_text = _message(b, "Bedtime says", reminders.SLEEP_TEXT, LABEL_W, self._save_sleep)
+        ctk.CTkLabel(b, text="Your own words, or leave empty for these. {bedtime}, {wake} and {time} are filled "
+                             "in.", text_color=MUTED, font=theme.body(11), wraplength=330, justify="left").pack(
+            anchor="w", padx=(LABEL_W + 12, 0))
         self.sleep_error = ctk.CTkLabel(b, text="", text_color=theme.DANGER, height=16)   # packed while it says something
         tip = ctk.CTkFrame(b, fg_color=theme.BG, border_width=1, border_color=theme.BORDER, corner_radius=3)
         tip.pack(side="bottom", fill="x", pady=(10, 0))
@@ -233,6 +250,10 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.snooze = _option(b, "Snooze", ["5 min", "10 min", "15 min", "20 min"], "each time", LABEL_W)
         for menu in (self.every, self.length, self.snooze):
             menu.configure(command=lambda v: self._save_break())
+        self.break_text = _message(b, "It says", reminders.BREAK_TEXT, LABEL_W, self._save_break)
+        ctk.CTkLabel(b, text="Your own words, or leave empty for this one. {every} and {length} are filled in.",
+                     text_color=MUTED, font=theme.body(11), wraplength=330, justify="left").pack(
+            anchor="w", padx=(LABEL_W + 12, 0))
         hairline(b).pack(fill="x", pady=(8, 10))
         self.strict = ctk.CTkSwitch(b, text="Strict break", font=theme.semi(13), command=self._save_break)
         self.strict.pack(anchor="w")
@@ -243,6 +264,7 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.twenty = ctk.CTkSwitch(b, text="20-20-20", font=theme.semi(13), command=self._save_break)
         self.twenty.pack(anchor="w", pady=(8, 0))
         note(b, "Every 20 min, look 20 feet (6 m) away for 20 seconds.")
+        self.twenty_text = _message(b, "It says", reminders.TWENTY_TEXT, LABEL_W, self._save_break)
         self.break_stats = ctk.CTkLabel(brk.title.master, text="", text_color=MUTED, font=theme.body(11), height=20)
         self.break_stats.pack(side="right")
 
@@ -266,6 +288,10 @@ class RemindersView(ctk.CTkScrollableFrame):
         for entry, value in ((self.before, s["before"]), (self.repeat, s["repeat"])):
             entry.delete(0, "end")
             entry.insert(0, reminders.minutes_text(value))
+        for entry, value in ((self.sleep_warn_text, s.get("warn_text")), (self.sleep_text, s.get("text"))):
+            if entry.get() != (value or ""):
+                entry.delete(0, "end")
+                entry.insert(0, value or "")
         all_modes = modes.load(self.db)
         self.mode_ids = {"No mode": ""} | {m["name"]: m["id"] for m in all_modes}
         self.sleep_mode.configure(values=list(self.mode_ids))
@@ -278,6 +304,10 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.strict.select() if b.get("strict") else self.strict.deselect()
         self.max_snooze.set(str(b.get("max_snooze", 2)))
         self.twenty.select() if b["twenty"] else self.twenty.deselect()
+        for entry, value in ((self.break_text, b.get("text")), (self.twenty_text, b.get("twenty_text"))):
+            if entry.get() != (value or ""):
+                entry.delete(0, "end")
+                entry.insert(0, value or "")
         today = datetime.combine(now_from_db(self.db).date(), datetime.min.time())
         c = reminders.counts(self.db, "break", today)
         self.break_stats.configure(text=f"Breaks today: {c.get('taken', 0) + c.get('away', 0)}")
@@ -312,7 +342,8 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.sleep_error.pack_forget()
         reminders.save(self.db, reminders.SLEEP_KEY, {
             "on": bool(self.sleep_on.get()), "bedtime": f"{bedtime:%H:%M}", "wake": f"{wake:%H:%M}",
-            "before": before, "repeat": repeat,
+            "before": before, "repeat": repeat, "warn_text": self.sleep_warn_text.get().strip(),
+            "text": self.sleep_text.get().strip(),
             "mode": self.mode_ids.get(self.sleep_mode.get(), "")})
 
     def _sleep_says(self, text: str):
@@ -324,7 +355,8 @@ class RemindersView(ctk.CTkScrollableFrame):
             "on": bool(self.break_on.get()), "every": int(self.every.get().split()[0]),
             "length": int(self.length.get().split()[0]), "strict": bool(self.strict.get()),
             "snooze": int(self.snooze.get().split()[0]), "max_snooze": int(self.max_snooze.get()),
-            "twenty": bool(self.twenty.get())})
+            "twenty": bool(self.twenty.get()), "text": self.break_text.get().strip(),
+            "twenty_text": self.twenty_text.get().strip()})
 
     # ---------- your reminders ----------
 

@@ -19,9 +19,16 @@ TWENTY_SEC = 20 * 60
 LATE_FIRE_MIN = 30             # a set-time reminder still fires up to 30 min late (PC was asleep etc.)
 
 SLEEP_KEY, BREAK_KEY, CUSTOM_KEY = "reminders.sleep", "reminders.break", "reminders.custom"
-DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat": 5, "mode": ""}
+# What each reminder says when you haven't written your own. {placeholders} are filled in; anything else you
+# type is left as it is.
+SLEEP_WARN_TEXT = "Bedtime is at {bedtime} - time to wrap up."
+SLEEP_TEXT = "It's {time}. Sleep well - the screen can wait until tomorrow."
+BREAK_TEXT = "You've been at the PC for {every} min. Take {length} min away from the screen."
+TWENTY_TEXT = "20-20-20: look at something 20 feet (6 m) away for 20 seconds."
+DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat": 5, "mode": "",
+                 "warn_text": "", "text": ""}
 DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "strict": False, "snooze": 5, "max_snooze": 2,
-                 "twenty": False}
+                 "twenty": False, "text": "", "twenty_text": ""}
 DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
                   "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
                   "check": 0, "packs": [], "quotes": ""}
@@ -75,6 +82,16 @@ def minutes_text(minutes: float) -> str:
         h, m = divmod(whole, 60)
         return f"{h}h{m:02d}" if m else f"{h}h"
     return f"{whole} min"
+
+
+def message(custom: str, default: str, **values) -> str:
+    """What a reminder says: your own wording if you wrote any, otherwise the standard one. A {placeholder}
+    that doesn't exist leaves the text as you typed it rather than breaking the reminder."""
+    text = (custom or "").strip() or default
+    try:
+        return text.format(**values)
+    except (KeyError, IndexError, ValueError):
+        return text
 
 
 def load(db, key: str, default):
@@ -196,7 +213,7 @@ class Engine:
                 self.twenty += dt
                 if self.twenty >= TWENTY_SEC:
                     self.twenty = 0
-                    self.ui.toast("20-20-20: look at something 20 feet (6 m) away for 20 seconds.")
+                    self.ui.toast(message(b.get("twenty_text"), TWENTY_TEXT))
         if now < self.snoozed.get("break", now):
             return
         if self.continuous >= b["every"] * 60 and "break" not in self.open:
@@ -209,7 +226,7 @@ class Engine:
             if not strict or snoozes_left:
                 buttons.append((f"Snooze {b.get('snooze', 5)} min", "snooze"))
             self._popup("break", "Time for a break",
-                        f"You've been at the PC for {b['every']} min. Take {b['length']} min away from the screen."
+                        message(b.get("text"), BREAK_TEXT, every=b["every"], length=b["length"])
                         + (f"\n\nStrict break: {b.get('max_snooze', 2) - self.break_snoozes} snooze"
                            f"{'s' * (b.get('max_snooze', 2) - self.break_snoozes != 1)} left, then it starts on its "
                            "own." if strict else ""), buttons)
@@ -247,7 +264,9 @@ class Engine:
         if now < bed:
             if ("warn", key) not in self.fired:
                 self.fired.add(("warn", key))
-                self._popup("sleep-warn", "Bedtime soon", f"Bedtime is at {bed:%H:%M} - time to wrap up.",
+                self._popup("sleep-warn", "Bedtime soon",
+                            message(s.get("warn_text"), SLEEP_WARN_TEXT, bedtime=f"{bed:%H:%M}",
+                                    wake=f"{wake:%H:%M}", time=f"{now:%H:%M}"),
                             [("OK", "ok")])
             return
         if ("bed", key) not in self.fired:
@@ -256,9 +275,10 @@ class Engine:
             if s["mode"]:
                 self.ui.start_mode(s["mode"], wake)
         if now >= self.sleep_next.get(key, now) and "sleep" not in self.open:
-            self._overlay("sleep", "Time for bed", f"It's {now:%H:%M}. Sleep well - the screen can wait until "
-                                                   "tomorrow.", None, [("Going to bed", "bed"),
-                                                                      ("5 more minutes", "more")])
+            self._overlay("sleep", "Time for bed",
+                          message(s.get("text"), SLEEP_TEXT, time=f"{now:%H:%M}", bedtime=f"{bed:%H:%M}",
+                                  wake=f"{wake:%H:%M}"),
+                          None, [("Going to bed", "bed"), ("5 more minutes", "more")])
 
     # ---------- your reminders ----------
 

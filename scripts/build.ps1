@@ -11,6 +11,10 @@ $Py = "$Root\.venv\Scripts\python.exe"
 $Build = "$Root\build"
 Set-Location $Root
 
+New-Item -ItemType Directory -Force $Build | Out-Null
+& $Py "$Root\installer\version_res.py" $Build | Out-Null   # the version Explorer shows on the .exe files
+if ($LASTEXITCODE) { throw "Writing the version resource failed" }
+
 & $Py -m PyInstaller --noconfirm --log-level WARN --distpath "$Build\dist" --workpath "$Build\work" installer\lockdown.spec
 if ($LASTEXITCODE) { throw "Building the program failed" }
 
@@ -28,9 +32,10 @@ Remove-Item $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path "$Build\dist\Lockdown\*" -DestinationPath $zip -CompressionLevel Optimal -ErrorAction Stop
 
 & $Py -m PyInstaller --noconfirm --log-level WARN --onefile --noconsole --uac-admin --name LockdownSetup `
-    --icon "$Root\assets\lockdown.ico" --paths "$Root\src" `
+    --icon "$Root\assets\lockdown.ico" --paths "$Root\src" --version-file "$Build\version_LockdownSetup.txt" `
     --add-data "$zip;." --add-data "$Root\assets\lockdown.ico;." `
     --distpath $Build --workpath "$Build\work-setup" --specpath "$Build\work-setup" installer\setup.py
 if ($LASTEXITCODE) { throw "Building the installer failed" }
-$size = "{0:N0}" -f ((Get-Item "$Build\LockdownSetup.exe").Length / 1MB)
-Write-Output "Built $Build\LockdownSetup.exe ($size MB)"
+$setup = Get-Item "$Build\LockdownSetup.exe"
+$size = "{0:N0}" -f ($setup.Length / 1MB)
+Write-Output "Built $Build\LockdownSetup.exe ($size MB, version $($setup.VersionInfo.FileVersion))"
