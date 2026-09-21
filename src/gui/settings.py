@@ -347,7 +347,7 @@ class SettingsPage(ctk.CTkFrame):
         self.reset_entry.delete(0, "end")
         self.reset_entry.insert(0, f"{clock.time:%H:%M}")
         _start, end = clock.day(now)
-        self.reset_info.configure(text=f"current limit day ends {short_when(end)}")
+        self.reset_info.configure(text=f"ends {short_when(end)}")
         if clock.carry_until and now < clock.carry_until:
             self.reset_note.configure(text=f"It runs to {short_when(clock.carry_until)} because you changed the reset "
                                            f"time - a change never ends the day you are in early, and never stretches "

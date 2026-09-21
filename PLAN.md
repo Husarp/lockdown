@@ -1496,6 +1496,11 @@ one shared pot for the whole category.
 - [x] Overview redesign (user, 2026-09-21) - 0.72.0: a group is one box with its rules at the top and its
   members inside; adding still merges, so nothing appears twice. Rule chips are coloured by state
   (`rules.rule_state`), not by rule type.
+- [x] The window shrinks its contents instead of clipping them (user, 2026-09-21) - 0.73.0, app._rescale.
+- [x] About page: version, release date, update check, GitHub link, feature list (user, 2026-09-21) - 0.73.0.
+      Needs `REPO = "owner/name"` in src/version.py before the two buttons appear.
+- [ ] A fuller step-by-step tutorial (offered, not built): the About list is one line per feature. Ask the
+      user whether they want a walk-through instead.
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting

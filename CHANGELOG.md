@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.73.0 - 2026-09-21 18:51
+- **A window that isn't maximised now shrinks everything to fit** instead of cutting cards off at the edge.
+  The pages are laid out for 1280x780 of their own units; a smaller window draws every one of those units
+  smaller, down to 62%, and you can see at a glance that the window wants to be bigger. It re-scales a quarter
+  of a second after you stop dragging, not during - laying every widget out again is the expensive part.
+  - This is what was cutting "System" off the theme picker and "Custom..." off the accent row: at 150% Windows
+    scaling every control is half as big again, and the card ran out of room.
+  - The minimum window size is smaller now (560x420), since the contents follow it down.
+- **The option switches are tighter**: 6px either side of a label instead of 8, 1px between chips, 22px tall.
+  They also re-measure themselves when the scale changes, being drawn by hand rather than out of CTk buttons.
+- **A new About page** (last in the sidebar):
+  - the version and the date it was released;
+  - **Check for updates** and **Open the GitHub page** - both appear once a repository is set in version.py.
+    The check asks GitHub for the latest release and says whether it is newer. Nothing is sent but the
+    request, and only when you press the button;
+  - **What Lockdown can do** - every feature in one list, as a tour of the app;
+  - where your data, the program and the log are, with a button to open the folders.
+
 ## 0.72.2 - 2026-09-21 12:48
 - **A disabled member says so in its group's box**: "● Disabled" on its line, and its blockers are not listed,
   since none of them apply. Before, it sat there looking like an ordinary allowed member.

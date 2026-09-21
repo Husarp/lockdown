@@ -173,22 +173,17 @@ class Segmented(ctk.CTkFrame):
     The chip hugs its label: 8px either side and 2px of track around it. These sit in rows next to other
     controls, so every pixel of width counts - a window that isn't maximised ran out of room for them."""
 
-    PAD, GAP, SIDE = 2, 2, 8
+    PAD, GAP, SIDE = 2, 1, 6
     TRACK_R, CHIP_R = 4, 3
-    MIN = 30          # so a short label ("All", "Both") still gets a chip worth looking at
+    MIN = 26          # so a short label ("All", "Both") still gets a chip worth looking at
 
-    def __init__(self, master, values: list[str], command=None, height: int = 24, **_ignored):
+    def __init__(self, master, values: list[str], command=None, height: int = 22, **_ignored):
         super().__init__(master, fg_color="transparent", corner_radius=0)
         self.command, self.value, self.values = command, None, list(values)
         self._hover = None
-        s = self._scale = ctk.ScalingTracker.get_widget_scaling(self)
-        self._font = tkfont.Font(family=theme.BODY_SEMI, size=round(11 * s))
-        self._seg = [max(round(self.MIN * s), self._font.measure(v) + round(self.SIDE * 2 * s))
-                     for v in self.values]
-        w = round(self.PAD * 2 * s) + sum(self._seg) + round(self.GAP * s) * max(0, len(self._seg) - 1)
-        self._size = (w, round(height * s))
-        self.canvas = tk.Canvas(self, width=self._size[0], height=self._size[1], highlightthickness=0, bd=0,
-                                cursor="hand2")
+        self._height = height
+        self.canvas = tk.Canvas(self, highlightthickness=0, bd=0, cursor="hand2")
+        self._measure()
         self.canvas.pack()
         self.canvas.bind("<Button-1>", self._click)
         self.canvas.bind("<Motion>", lambda e: self._set_hover(self._at(e.x)))
@@ -232,6 +227,22 @@ class Segmented(ctk.CTkFrame):
             self._paint()
 
     def _mode_changed(self, _mode=None):
+        self._paint()
+
+    def _measure(self):
+        """Work out the chips for the scale we are drawn at (it changes when the window is resized)."""
+        s = self._scale = ctk.ScalingTracker.get_widget_scaling(self)
+        self._font = tkfont.Font(family=theme.BODY_SEMI, size=max(8, round(11 * s)))
+        self._seg = [max(round(self.MIN * s), self._font.measure(v) + round(self.SIDE * 2 * s))
+                     for v in self.values]
+        w = round(self.PAD * 2 * s) + sum(self._seg) + round(self.GAP * s) * max(0, len(self._seg) - 1)
+        self._size = (w, round(self._height * s))
+        self.canvas.configure(width=self._size[0], height=self._size[1])
+
+    def _set_scaling(self, new_widget_scaling, new_window_scaling):
+        """CTk tells every widget when the scaling changes; ours is drawn by hand, so it re-measures itself."""
+        super()._set_scaling(new_widget_scaling, new_window_scaling)
+        self._measure()
         self._paint()
 
     # ---------- drawing ----------

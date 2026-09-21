@@ -20,6 +20,7 @@ from blocker import protection
 from blocker.apps import minimizes
 from db import Database
 from gui import shortcuts, theme
+from gui.about_page import AboutPage
 from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
 from gui.components import Curtain, page_head, PulseDot
@@ -50,8 +51,15 @@ PAGES = [
     ("Reminders", RemindersPage, "hourglass"),
     ("Notifications", NotificationsPage, "bell"),
     ("Settings", SettingsPage, "settings"),
+    ("About", AboutPage, "book-open"),
 ]
 APPEARANCE_KEY = "ui.appearance"   # customtkinter mode (dark / light / system); the theme itself: theme.THEME_KEY
+# The pages are laid out for a window this wide at 100%; a narrower one (or a high-DPI screen, where Windows
+# makes every widget bigger) shrinks everything to fit instead of cutting cards off at the edge.
+LAYOUT_W, LAYOUT_H = 1280, 780
+MIN_SCALE = 0.62        # below this it would be unreadable: it stays this small and you scroll
+SCALE_STEP = 0.04       # only re-scale when it would make a visible difference (re-scaling relays out everything)
+SCALE_SETTLE_MS = 250   # ... and only once you stop dragging
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
 WATCH_MS = 5000
@@ -79,7 +87,11 @@ class LockdownApp(ctk.CTk):
         self.iconbitmap(default=str(theme.APP_ICON))   # (default=: every Lockdown window gets the logo)
         shortcuts.install(self)   # Esc closes pop-ups; Ctrl+Z / Ctrl+Backspace / ... in text boxes
         self.geometry("1100x720")
-        self.minsize(900, 560)
+        self.minsize(560, 420)
+        self.base_scaling = ctk.ScalingTracker.get_widget_scaling(self)   # what Windows' own DPI asks for
+        self.scaling = 1.0    # the fraction of it we are drawing at (1.0 = the window has all the room it wants)
+        self._scale_job = None
+        self.bind("<Configure>", self._window_resized, add="+")
         if start_hidden:
             self.withdraw()
 
@@ -157,6 +169,27 @@ class LockdownApp(ctk.CTk):
             if grab.winfo_exists():
                 grab.grab_set()
                 grab.lift()
+
+    def _window_resized(self, event):
+        """Everything gets smaller when the window does, so a card is never cut off - and you can see that you
+        want the window bigger. Re-scaling lays every widget out again, so it waits until you stop dragging."""
+        if event.widget is not self:
+            return
+        if self._scale_job:
+            self.after_cancel(self._scale_job)
+        self._scale_job = self.after(SCALE_SETTLE_MS, self._rescale)
+
+    def _rescale(self):
+        """The layout needs LAYOUT_W x LAYOUT_H of its own units, each drawn `base_scaling` pixels wide (what
+        Windows' DPI asks for). Anything smaller than that is drawn at a fraction of it."""
+        self._scale_job = None
+        room = (self.winfo_width() / (LAYOUT_W * self.base_scaling),
+                self.winfo_height() / (LAYOUT_H * self.base_scaling))
+        want = max(MIN_SCALE, min(1.0, *room))
+        if abs(want - self.scaling) < SCALE_STEP:
+            return
+        self.scaling = want
+        ctk.set_widget_scaling(want)
 
     def _collect_garbage(self):
         gc.collect()

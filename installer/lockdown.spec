@@ -20,7 +20,7 @@ SVC_RES = version_res.write(os.path.join(RES, "version_LockdownService.txt"), VE
 
 gui = Analysis([os.path.join(SRC, "main.py")], pathex=[SRC],
                datas=[(os.path.join(ROOT, "assets"), "assets")],
-               hiddenimports=["gui.antibypass_page", "gui.display_settings", "comtypes.stream"],
+               hiddenimports=["gui.about_page", "gui.antibypass_page", "gui.display_settings", "comtypes.stream"],
                excludes=["pytest"])
 svc = Analysis([os.path.join(SRC, "service_win.py")], pathex=[SRC],
                hiddenimports=["win32timezone"], excludes=["pytest", "customtkinter", "PIL", "pystray", "uiautomation"])
