@@ -4,6 +4,7 @@ import customtkinter as ctk
 
 from gui import theme
 from gui.components import Collapsible, Segmented, help_icon, page_head, accent_bar
+from gui.widgets import Corner
 
 import alerts
 import digest
@@ -213,7 +214,7 @@ class Popup(ctk.CTkToplevel):
         self.w, self.h = 400, 136 if (on_open or on_mute) else 96
         self.x = self.winfo_screenwidth() - self.w - 16
         self.target_y = self.winfo_screenheight() - self.h - 64
-        self.geometry(f"{self.w}x{self.h}+{self.x}+{self.target_y + 14}")
+        self.arrived = False
         frame = ctk.CTkFrame(self, border_width=1, corner_radius=4)
         frame.pack(fill="both", expand=True)
         ctk.CTkFrame(frame, width=3, height=1, fg_color=theme.ACCENT, corner_radius=0).pack(side="left", fill="y")
@@ -239,15 +240,23 @@ class Popup(ctk.CTkToplevel):
             if on_mute:
                 ctk.CTkButton(buttons, text="Mute 1 h", width=80, height=28, **{**theme.OUTLINE, "text_color": MUTED},
                               command=lambda: (self.close(), on_mute())).pack(side="left")
+        Corner.add(self, self.w, self.h)   # stacked above the ones already there, never on top of them
         self.bind("<Enter>", lambda e: setattr(self, "hovered", True))
         self.bind("<Leave>", lambda e: (setattr(self, "hovered", False), self.after(POPUP_MS, self._maybe_close)))
         self._animate(0)
         self.after(POPUP_MS, self._maybe_close)
 
+    def corner_place(self, x: int, y: int):
+        """Where the stack wants it. While it is still sliding in, the animation takes it from here."""
+        self.x, self.target_y = x, y
+        if self.arrived:
+            self.geometry(f"{self.w}x{self.h}+{x}+{y}")
+
     def _animate(self, step: int):
         if not self.winfo_exists():
             return
         frac = min(1.0, step / 6)
+        self.arrived = frac >= 1.0
         self.geometry(f"{self.w}x{self.h}+{self.x}+{int(self.target_y + 14 * (1 - frac))}")
         try:
             self.attributes("-alpha", frac)

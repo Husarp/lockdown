@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.74.1 - 2026-09-21 21:24
+- **Lockdown's own popups no longer cover each other.** A blocked-site notice and a reminder (or two
+  reminders - they are separate windows, one per reminder, so several can be waiting at once) all put
+  themselves in the bottom-right corner and landed on top of one another. They are one stack now: the newest
+  sits in the corner, the ones before it are pushed up with a gap, and when one goes the rest slide back down.
+  If they ever filled the screen the topmost stays where it is rather than sliding off it.
+
 ## 0.74.0 - 2026-09-21 21:15
 - **Polish letters, properly this time.** 0.70.1 asked Windows for the *system* codepage; on an English
   Windows that is cp1252, so the conversion did nothing and the letters still arrived wrong. What matters is

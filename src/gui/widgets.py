@@ -158,3 +158,43 @@ def clear_entry(entry: ctk.CTkEntry):
     focus = entry.focus_get()
     if not (focus and str(focus).startswith(str(entry))):
         entry.configure(placeholder_text=entry.cget("placeholder_text"))   # re-shows it when empty
+
+
+# ---------------------------------------------------------------- the bottom-right corner
+
+class Corner:
+    """Every little window that lives in the bottom-right corner - a notification, a reminder - in one stack,
+    so they never cover each other. The newest sits in the corner and the ones before it are pushed up; when
+    one goes, the rest slide back down. If they ever fill the screen the topmost stays put rather than
+    disappearing off it."""
+
+    GAP, MARGIN_X, MARGIN_Y, TOP = 10, 16, 64, 8
+    _live: list[tuple] = []
+
+    @classmethod
+    def add(cls, window, width: int, height: int):
+        cls._live = [e for e in cls._live if e[0].winfo_exists()]
+        cls._live.append((window, width, height))
+        window.bind("<Destroy>", lambda e, w=window: cls.remove(w) if e.widget is w else None, add="+")
+        cls.arrange()
+
+    @classmethod
+    def remove(cls, window):
+        cls._live = [e for e in cls._live if e[0] is not window and e[0].winfo_exists()]
+        cls.arrange()
+
+    @classmethod
+    def arrange(cls):
+        if not cls._live:
+            return
+        screen = cls._live[-1][0]
+        bottom = screen.winfo_screenheight() - cls.MARGIN_Y
+        right = screen.winfo_screenwidth() - cls.MARGIN_X
+        y = bottom
+        for window, width, height in reversed(cls._live):   # newest last in the list = lowest on the screen
+            y = max(cls.TOP, y - height)
+            try:
+                window.corner_place(right - width, y)
+            except Exception:
+                pass
+            y -= cls.GAP

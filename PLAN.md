@@ -1508,6 +1508,7 @@ one shared pot for the whole category.
   (~4 ms each, 2166 widgets). Scaling is chosen once at startup; Settings > Interface size overrides it.
 - [x] "On the allowance" status and red chips for rules that can't be used (user, 2026-09-21) - 0.74.0.
 - [x] A clock in the sidebar (user, 2026-09-21) - 0.74.0.
+- [x] Popups covered each other (user, 2026-09-21) - 0.74.1: gui.widgets.Corner holds them in one stack.
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting

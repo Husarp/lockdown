@@ -10,7 +10,7 @@ import reminders
 from gui import theme
 from gui.components import Card, Rows, Segmented, eyebrow, hairline, page_head
 from gui.rule_editors import DayToggle
-from gui.widgets import ConfirmButton
+from gui.widgets import ConfirmButton, Corner
 from rules import DAY_NAMES, parse_hhmm
 from trusted_time import now_from_db
 
@@ -41,8 +41,10 @@ class ReminderPopup(ctk.CTkToplevel):
             ctk.CTkButton(row, text=label, width=110, **style,
                           command=lambda a=action: (on_answer(a), self.destroy())).pack(side="left", padx=4)
         self.update_idletasks()
-        w, h = self.winfo_reqwidth(), self.winfo_reqheight()
-        self.geometry(f"+{self.winfo_screenwidth() - w - 16}+{self.winfo_screenheight() - h - 64}")
+        Corner.add(self, self.winfo_reqwidth(), self.winfo_reqheight())
+
+    def corner_place(self, x: int, y: int):
+        self.geometry(f"+{x}+{y}")
 
 
 class Overlay(ctk.CTkToplevel):
