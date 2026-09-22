@@ -1,7 +1,21 @@
 # Changelog
 
+## 0.77.0 - 2026-09-22 13:26
+- **Every reminder has a way out that isn't a lie.** A small dark **X** now sits beside Done and Snooze.
+  Until now a reminder that had used up its snoozes (or was set to none) could only be cleared with **Done** -
+  which counts towards the daily limit and starts the "did you actually do it?" check. So the only way to get a
+  popup off your screen was to claim you had done something you hadn't. The X closes it, counts nothing, and
+  the reminder comes back at its normal time: an "every 45 min of use" one after another 45 minutes, an
+  "at 09:00" one tomorrow. It is written to the log as **dismissed**, so your statistics stay honest.
+- **Gentle break prompts can be skipped the same way.** Strict breaks cannot - they exist to be hard to wave
+  away, and a one-click exit would be a bypass with no friction. The bedtime screen is unchanged for the same
+  reason.
+- **The build now stamps what it made.** A successful build writes `build\BUILT.json` with the version and the
+  time, so a dashboard can tell *which* version the files in `build\` came from rather than only when they
+  were made. It is written last, after the installer exists, so a failed build never leaves a stamp behind.
+
 ## 0.76.1 - 2026-09-22 12:17
-- **Moved to a new GitHub account.** The repository is now `Husarp/lockdown` (private), and the About page's
+- **Moved to a new GitHub account.** The repository is now `Husarp/lockdown`, and the About page's
   **Check for updates** and **Open the project page** follow it there. Every commit is attributed to a GitHub
   noreply address rather than a real one, so the history carries no personal e-mail.
 

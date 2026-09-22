@@ -17,6 +17,9 @@ from trusted_time import now_from_db
 MUTED = theme.MUTED
 KINDS = {"Every X min of use": "interval", "At set times": "times", "Random time": "random"}
 SNOOZES = [1, 5, 10, 15, 30]
+# the dismiss button: darker than Snooze and a third of the width, so "skip it" never reads as the answer
+DISMISS = {"fg_color": ("#E4E7EC", "#161B21"), "hover_color": ("#D2D7DE", "#222A33"),
+           "border_width": 1, "border_color": ("#C4CBD4", "#2B333D"), "text_color": MUTED}
 CHECKS = {"Off": 0, "5 min": 5, "10 min": 10, "15 min": 15, "30 min": 30}
 
 
@@ -37,6 +40,10 @@ class ReminderPopup(ctk.CTkToplevel):
         row = ctk.CTkFrame(frame, fg_color="transparent")
         row.pack(anchor="e", padx=12, pady=(0, 12))
         for i, (label, action) in enumerate(buttons):
+            if action == "dismiss":      # small and dark on purpose: a way out, not an answer
+                ctk.CTkButton(row, text=label, width=34, **DISMISS,
+                              command=lambda a=action: (on_answer(a), self.destroy())).pack(side="left", padx=4)
+                continue
             style = {} if i == 0 else theme.OUTLINE
             ctk.CTkButton(row, text=label, width=110, **style,
                           command=lambda a=action: (on_answer(a), self.destroy())).pack(side="left", padx=4)

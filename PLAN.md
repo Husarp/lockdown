@@ -129,6 +129,11 @@
   - **Double-check verification** — after you click "Done", the app checks back after a configurable delay (e.g. 10 min) asking "Did you actually do it?"
     - If you click "No" or ignore it, the original reminder fires again
     - Tracks completion honesty over time in stats
+  - **Dismiss (X)** — DONE: a small dark X on every reminder closes it without claiming you did it
+    - Needed because Done is counted (daily limit + "did you actually do it?"), so clearing a popup you
+      cannot act on right now would otherwise mean lying to your own statistics
+    - Skips this one only: the next comes at its normal time. Logged as "dismissed", never as "done"
+    - On gentle break prompts too; deliberately NOT on strict breaks or the bedtime overlay
   - **Snooze** — dismiss a reminder temporarily
     - Snooze duration configurable in settings (default: 5 min, options: 1/5/10/15/30 min)
     - Max snoozes per reminder configurable (e.g. max 3 snoozes, then it stays on screen)

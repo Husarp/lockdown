@@ -37,6 +37,7 @@ DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "time
                   "hours": False,      # only between window[0] and window[1] (every kind, not just random)
                   "per_day": 0}        # stop for the day after this many Done (0 = no limit)
 GROUP_MIN = 5          # a reminder due within this many minutes of one already on screen joins it
+DISMISS_MARK = "✕"    # the X button: closes it without claiming you did it
 
 # Short public-domain quotes
 PACKS = {
@@ -247,6 +248,8 @@ class Engine:
             buttons = [("Start break", "start")]
             if not strict or snoozes_left:
                 buttons.append((f"Snooze {b.get('snooze', 5)} min", "snooze"))
+            if not strict:          # a strict break must not gain a one-click way out
+                buttons.append((DISMISS_MARK, "dismiss"))
             self._popup("break", "Time for a break",
                         message(b.get("text"), BREAK_TEXT, every=b["every"], length=b["length"])
                         + (f"\n\nStrict break: {b.get('max_snooze', 2) - self.break_snoozes} snooze"
@@ -388,6 +391,7 @@ class Engine:
         buttons = [("Done", "done")]
         if self.snoozes_used.get(key, 0) < r["max_snooze"]:
             buttons.append((f"Snooze {r['snooze']} min", "snooze"))
+        buttons.append((DISMISS_MARK, "dismiss"))
         self._popup(key, "Reminder", r["text"] + (f"\n\n{quote}" if quote else ""), buttons)
 
     def _regroup(self, key: str, now: datetime):
@@ -398,6 +402,7 @@ class Engine:
         buttons = [("Done", "done")]
         if all(self.snoozes_used.get(key, 0) < by_id[rid]["max_snooze"] for rid in wanted if rid in by_id):
             buttons.append((f"Snooze {by_id[wanted[0]]['snooze']} min", "snooze"))
+        buttons.append((DISMISS_MARK, "dismiss"))
         self._close(key)
         self.open.add(key)
         self.ui.popup(key, "Reminders" if len(lines) > 1 else "Reminder",
@@ -421,6 +426,10 @@ class Engine:
                 self.break_snoozes += 1
                 self.snoozed["break"] = now + timedelta(minutes=b.get("snooze", 5))
                 log(self.db, "break", "snoozed", now)
+            elif action == "dismiss":
+                self.continuous = 0     # skipped, not taken: it asks again after another full stretch of use
+                self.break_snoozes = 0
+                log(self.db, "break", "dismissed", now)
         elif key == "sleep":
             s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
             night = self._night(s, now)
@@ -445,6 +454,12 @@ class Engine:
                     self.snoozes_used[key] = self.snoozes_used.get(key, 0) + 1
                     self.snoozed[key] = now + timedelta(minutes=r["snooze"])
                     log(self.db, rid, "snoozed", now)
+                elif action == "dismiss":
+                    # Skip this one. Nothing counts as done, so the daily limit is untouched and no "did you
+                    # actually do it?" follows; the next one comes at its normal time, which the interval
+                    # counter (reset when it fired) and `fired` already arrange.
+                    self.snoozes_used.pop(key, None)
+                    log(self.db, rid, "dismissed", now)
         elif key.startswith("check:"):
             rid = key.split(":", 1)[1]
             log(self.db, rid, "really done" if action == "yes" else "not done", now)

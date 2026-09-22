@@ -83,10 +83,10 @@ def test_snooze_limit_and_double_check(tmp_path):
     reminders.save(db, reminders.CUSTOM_KEY, [{"id": "s", "text": "Stretch", "kind": "interval", "every": 10,
                                               "snooze": 5, "max_snooze": 1, "check": 10}])
     t = run(e, NOW, 11)
-    assert ui.shown[-1][4] == ["done", "snooze"]
+    assert ui.shown[-1][4] == ["done", "snooze", "dismiss"]
     e.answer("custom:s", "snooze")
     t = run(e, t, 6)
-    assert ui.shown[-1][1] == "custom:s" and ui.shown[-1][4] == ["done"]     # no snoozes left
+    assert ui.shown[-1][1] == "custom:s" and ui.shown[-1][4] == ["done", "dismiss"]   # no snoozes left
     e.answer("custom:s", "done")
     t = run(e, t, 11, idle=120)
     assert ui.shown[-1][1] == "check:s"

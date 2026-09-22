@@ -39,3 +39,16 @@ if ($LASTEXITCODE) { throw "Building the installer failed" }
 $setup = Get-Item "$Build\LockdownSetup.exe"
 $size = "{0:N0}" -f ($setup.Length / 1MB)
 Write-Output "Built $Build\LockdownSetup.exe ($size MB, version $($setup.VersionInfo.FileVersion))"
+
+# build\BUILT.json: which version the files in build\ were made from, for the dev-status dashboard.
+# Written only here, at the end - every failure above throws, so this line is reached only by a build that
+# produced a working installer. Never write it earlier, or the dashboard reports something that isn't there.
+$version = (Select-String -Path "$Root\src\version.py" -Pattern '^VERSION = "(.+)"').Matches[0].Groups[1].Value
+$built = [ordered]@{
+    version   = $version
+    builtAt   = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+    artifacts = @([ordered]@{ name = $setup.Name; kind = "Windows" })
+}
+$json = $built | ConvertTo-Json -Depth 4
+[System.IO.File]::WriteAllText("$Build\BUILT.json", $json, (New-Object System.Text.UTF8Encoding($false)))
+Write-Output "Wrote $Build\BUILT.json (version $version)"
