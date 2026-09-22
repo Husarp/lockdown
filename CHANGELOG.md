@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.75.1 - 2026-09-22 11:07
+- **About knows where Lockdown lives**: github.com/G4dam/lockdown. **Check for updates** and **Open the
+  GitHub page** are on the About page now - the check asks GitHub for the newest release and says whether it
+  is newer than the version you are running.
+
 ## 0.75.0 - 2026-09-22 01:00
 - **Reminders respect Windows' Do not disturb.** Lockdown never asked Windows about it, so the "Time for bed"
   screen came up over a film with everything else silenced. It now waits - and appears as soon as you turn
