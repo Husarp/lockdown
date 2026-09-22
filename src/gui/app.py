@@ -1,6 +1,7 @@
 """Main window (sidebar navigation + content area) and tray agent duties (blocked-visit notifications)."""
 import gc
 import queue
+import threading
 import time
 import traceback
 
@@ -16,6 +17,7 @@ import digest
 from importer import distracting
 import modes
 import reminders
+import updates
 from blocker import protection
 from blocker.apps import minimizes
 from db import Database
@@ -64,6 +66,8 @@ MIN_SCALE = 0.62        # below this it would be unreadable
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
 WATCH_MS = 5000
+UPDATE_FIRST_MS = 90_000      # let the app settle before touching the network
+UPDATE_POLL_MS = 3_600_000    # then look every hour whether a day has passed since the last check
 MINIMIZE_MS = 250
 GC_MS = 2000
 GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
@@ -154,6 +158,7 @@ class LockdownApp(ctk.CTk):
         self.after(PREBUILD_MS[0], self._prebuild)
         distracting.seed(self.db)          # games, streaming ... are Distracting by default
         self.after(5000, self._seed_games)
+        self.after(UPDATE_FIRST_MS, self._poll_updates)
 
     def _check_grab(self):
         """Minimized with a pop-up holding the focus: let go (else the taskbar / Alt+Tab can't restore the window);
@@ -514,6 +519,30 @@ class LockdownApp(ctk.CTk):
             self.reminders.tick(now, win.idle_seconds(), win.is_fullscreen(), quiet=quiet)
         finally:
             self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
+
+    def _poll_updates(self):
+        """Ask GitHub once a day whether there is a newer Lockdown, and say so once per version. Off entirely
+        when you untick it on the About page. The request goes out on its own thread - the network must never
+        hold up the window."""
+        try:
+            if updates.due(self.db, now_from_db(self.db)):
+                threading.Thread(target=self._ask_github, daemon=True).start()
+        finally:
+            self.after(UPDATE_POLL_MS, self._poll_updates)
+
+    def _ask_github(self):
+        found = updates.latest_release()
+        self.after(0, self._update_found, found)
+
+    def _update_found(self, found):
+        if found:                       # a failed check is not written down, so it tries again on the next poll
+            updates.checked(self.db, now_from_db(self.db))
+        if not updates.worth_saying(self.db, found):
+            return
+        updates.said(self.db, found["version"])
+        where = "About" if updates.can_install(found) else "the GitHub page"
+        self._show(f"Lockdown {found['version']} is out - open Lockdown and go to {where} to install it.",
+                   actions=False)      # "Mute 1 h" is not an answer to this, and it is not urgent either
 
     def _poll_minimize(self):
         """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front.

@@ -140,6 +140,13 @@
     - Snooze can be locked/limited with the same anti-bypass mechanisms as blocked apps (delay, challenge, specific hours, etc.)
   - Each reminder has its own toggle + lock settings (same lock options as everything else)
 
+### 1.5b Updating
+- **In-app update** — DONE: About downloads the installer from the GitHub release and runs it, rather than
+  sending you to a web page
+  - Daily automatic check (switch, on by default) + a notice per new version (its own switch)
+  - Never installs an older version: on a blocker that would be a way around your own rules
+  - Not done, and deliberately: code signing (≈$100-400/year) would remove the SmartScreen warning
+
 ### 1.6 Modes (Profiles)
 - **Work mode** — blocks social media, gaming, streaming; allows productivity tools
 - **Study mode** — blocks everything except educational sites + note-taking apps

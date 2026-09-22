@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.78.0 - 2026-09-22 14:02
+- **Updating without leaving Lockdown.** About used to find a new version and then send you to a web page to
+  fetch it yourself. Now it downloads the installer itself, with a progress bar, and starts it - Lockdown
+  closes so its own files can be replaced, and Windows asks for permission the way it does for any installer.
+  **Open the GitHub page** is still there if you would rather do it by hand.
+- **It looks by itself, once a day.** Two switches on the About page, both on: *Check for updates
+  automatically (once a day)* and *Tell me when a new version is found*. The check is one request to GitHub
+  with nothing about you in it, it runs on its own thread so the window never waits for the network, and you
+  are told once per version rather than once a day forever. Turning the notice off leaves the check running,
+  so About still shows what it found.
+- **It never installs an older version.** Lockdown is a blocker, and "update" to an earlier build would be a
+  way to drop the rules you set - so the button only ever goes forwards.
+
 ## 0.77.0 - 2026-09-22 13:26
 - **Every reminder has a way out that isn't a lie.** A small dark **X** now sits beside Done and Snooze.
   Until now a reminder that had used up its snoozes (or was set to none) could only be cleared with **Done** -

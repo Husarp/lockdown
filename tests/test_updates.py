@@ -28,7 +28,8 @@ def _release(tag="v0.80.0"):
 def test_the_answer_from_github(monkeypatch):
     monkeypatch.setattr(updates, "REPO", "someone/lockdown")
     found = updates.latest_release(fetch=lambda url: _release())
-    assert found == {"version": "0.80.0", "url": "https://github.com/x/y/releases/tag/v0.80.0", "newer": True}
+    assert found == {"version": "0.80.0", "url": "https://github.com/x/y/releases/tag/v0.80.0", "newer": True,
+                     "asset": None, "size": 0}        # this release has no installer attached
 
 
 def test_nothing_breaks_without_a_repository_or_a_network(monkeypatch):

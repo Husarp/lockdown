@@ -1,7 +1,9 @@
 """About: which version this is, where to get a newer one, what Lockdown can do, and where it keeps things."""
 import subprocess
+import tempfile
 import threading
 import webbrowser
+from pathlib import Path
 
 import customtkinter as ctk
 
@@ -9,6 +11,7 @@ import updates
 from gui import theme
 from gui.components import Card, hairline, page_head
 from paths import APP_DIR, DATA_DIR, LOG_PATH
+from trusted_time import now_from_db
 from version import RELEASED, VERSION
 
 MUTED = theme.MUTED
@@ -64,8 +67,24 @@ class AboutPage(ctk.CTkScrollableFrame):
         if updates.repo_page():
             self.check_btn = ctk.CTkButton(buttons, text="Check for updates", width=150, command=self._check)
             self.check_btn.pack(side="left", padx=(0, 8))
-            ctk.CTkButton(buttons, text="Open the GitHub page", width=170, **theme.OUTLINE,
-                          command=lambda: webbrowser.open(updates.repo_page())).pack(side="left")
+            # only appears once a newer version has actually been found (see _checked)
+            self.get_btn = ctk.CTkButton(buttons, text="Download and install", width=170, command=self._get)
+            self.page_btn = ctk.CTkButton(buttons, text="Open the GitHub page", width=170, **theme.OUTLINE,
+                                          command=lambda: webbrowser.open(updates.repo_page()))
+            self.page_btn.pack(side="left")
+            self.bar = ctk.CTkProgressBar(card.body, height=8)
+            self.bar.set(0)
+            self.found = None
+            auto = ctk.CTkCheckBox(card.body, text="Check for updates automatically (once a day)",
+                                   checkbox_width=18, checkbox_height=18,
+                                   command=lambda: self._set(updates.AUTO_KEY, auto.get()))
+            auto.pack(anchor="w", pady=(10, 0))
+            tell = ctk.CTkCheckBox(card.body, text="Tell me when a new version is found",
+                                   checkbox_width=18, checkbox_height=18,
+                                   command=lambda: self._set(updates.NOTIFY_KEY, tell.get()))
+            tell.pack(anchor="w", pady=(4, 0))
+            auto.select() if updates.auto_on(self.app.db) else auto.deselect()
+            tell.select() if updates.notify_on(self.app.db) else tell.deselect()
         else:
             ctk.CTkLabel(buttons, text="No repository set yet, so there is nowhere to check for updates.",
                          text_color=MUTED).pack(side="left")
@@ -113,15 +132,73 @@ class AboutPage(ctk.CTkScrollableFrame):
 
     def _checked(self, found):
         self.check_btn.configure(state="normal")
+        self.found = found
+        updates.checked(self.app.db, now_from_db(self.app.db))
         if not found:
             self.update_note.configure(text="Couldn't ask GitHub just now - no connection, or no release "
                                             "published yet.", text_color=theme.WARNING)
-        elif found["newer"]:
-            self.update_note.configure(text=f"Lockdown {found['version']} is out - click to download it.",
-                                       text_color=theme.ALLOWED, cursor="hand2")
-            self.update_note.bind("<Button-1>", lambda e, u=found["url"]: webbrowser.open(u))
+        elif updates.can_install(found):
+            updates.said(self.app.db, found["version"])   # you have seen it: no notice about this one again
+            size = f" ({found['size'] / 1048576:.0f} MB)" if found["size"] else ""
+            self.update_note.configure(text=f"Lockdown {found['version']} is out{size}.",
+                                       text_color=theme.ALLOWED)
+            self.get_btn.pack(side="left", padx=(0, 8), before=self.page_btn)   # the thing to do, first
+        elif found["newer"]:      # a release with no installer attached: the page is all we can offer
+            self.update_note.configure(text=f"Lockdown {found['version']} is out - open the GitHub page to "
+                                            "get it.", text_color=theme.ALLOWED)
         else:
             self.update_note.configure(text="This is the newest version.", text_color=theme.ALLOWED)
+
+    # ---------- downloading and installing it ----------
+
+    def _get(self):
+        if not updates.can_install(self.found):
+            return
+        self.get_btn.configure(state="disabled")
+        self.check_btn.configure(state="disabled")
+        self.bar.set(0)
+        self.bar.pack(fill="x", pady=(8, 0))
+        self.update_note.configure(text=f"Downloading Lockdown {self.found['version']}...",
+                                   text_color=MUTED)
+        threading.Thread(target=self._fetch, daemon=True).start()
+
+    def _fetch(self):
+        found = self.found
+        try:
+            dest = Path(tempfile.gettempdir()) / f"LockdownSetup-{found['version']}.exe"
+            updates.download(found["asset"], dest, progress=self._progress)
+        except Exception as error:
+            self.after(0, self._failed, error)
+            return
+        self.after(0, self._got, dest)
+
+    def _progress(self, done, total):
+        if total:
+            self.after(0, self.bar.set, done / total)
+
+    def _failed(self, error):
+        self.bar.pack_forget()
+        self.get_btn.configure(state="normal")
+        self.check_btn.configure(state="normal")
+        self.update_note.configure(text=f"The download didn't finish ({type(error).__name__}). You can get it "
+                                        "from the GitHub page instead.", text_color=theme.WARNING)
+
+    def _got(self, dest):
+        self.bar.set(1)
+        self.update_note.configure(text="Starting the installer - Lockdown will close. Windows will ask for "
+                                        "permission, and may warn that the installer is unsigned.",
+                                   text_color=MUTED)
+        updates.install(dest)
+        self.after(1500, self._close_for_update)
+
+    def _close_for_update(self):
+        """Not the tray's Exit: that one marks Lockdown as deliberately quit and keeps it off until you log in
+        again. An update is meant to come straight back, so only the window and the tray icon go."""
+        self.app.tray.stop()
+        self.app.destroy()
+
+    def _set(self, key, value):
+        self.app.db.set_setting(key, "1" if value else "0")
 
     @staticmethod
     def _open(path):
