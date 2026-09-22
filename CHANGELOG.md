@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.79.0 - 2026-09-23 01:46
+- **Turn Lockdown off entirely.** A new card on the Anti-Bypass page switches the whole thing off: no site or
+  app blocking, no time limits, no protection lists, no bedtime, breaks or reminders - as close to not having
+  it installed as it can be while still being there to switch back on. It stays off until you turn it back on;
+  nothing brings it back by itself.
+- **Switching off goes through the challenge, switching back on never does.** Turning it off is the biggest
+  loosening there is, so it asks for the typed phrase (and the wait, and the hours, if you set them) like
+  anything else that weakens a block. Coming back to your own rules is never worth standing in the way of.
+- **Off really means off, not paused.** The enforcer carries on running with an empty list of blocks rather
+  than skipping its work, so the hosts entries, firewall rules and app blocks are taken back down by the same
+  code that put them up. Stopping halfway would have left whatever was in place at that moment stuck there.
+- Turning it off is not the same as quitting from the tray: Lockdown still starts with Windows, so the button
+  that turns it back on is always reachable.
+
+## 0.78.2 - 2026-09-23 01:38
+- **Blocking a site was cutting every local connection on the machine.** The log repeated "Closed 10 open
+  connections to blocked sites" every two seconds forever, and anything using a loopback socket broke - a
+  Gradle build died with "client disconnection detected, canceling the build", and a local server on
+  127.0.0.1 could not be reached from the same PC. The hosts file points blocked domains at 127.0.0.1, and
+  Windows loads the hosts file into its DNS cache; the part that matches open connections to names reads that
+  cache back, so every blocked name answered "127.0.0.1" and loopback went onto the kill list.
+- **A connection to a loopback or unspecified address is now never closed**, whatever the addresses handed in
+  say - a hard filter in the sweep itself, not only where the list is built. The hosts entry already stops the
+  real traffic, so cutting a local socket achieves nothing even when the address really is blocked. An address
+  that cannot be parsed is left alone too.
+- **Blocked domains are resolved by asking the network's own DNS server** rather than the system resolver, so
+  the hosts file Lockdown writes can no longer feed its own answers back into the killer. The system resolver
+  is used only if the network has no usable DNS server.
+- **The log says what it closed** - every remote address and port, not just a count. The old message gave no
+  way to tell what was being killed.
+
 ## 0.78.1 - 2026-09-22 18:27
 - **Time was silently stopping being counted.** A 2-hour group limit read 39 minutes after a day of use, and
   the reason was not the counting: the usage tracker had been dead since 14:04 and nothing noticed. Only its

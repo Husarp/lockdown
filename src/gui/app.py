@@ -491,6 +491,12 @@ class LockdownApp(ctk.CTk):
     def _poll_watcher(self):
         """Warnings before blocks start, reminders while in use, "block started" notices."""
         try:
+            if antibypass.is_off(self.db):     # switched off: nothing to warn about, nothing to minimise
+                self.minimize_blocks = {}
+                # forget what was blocked, so switching back on takes a fresh baseline instead of
+                # announcing every rule you already had as if it had just started
+                self.watcher.prev_blocked = None
+                return
             now = now_from_db(self.db)
             settings = {k: alerts.get(self.db, k) for k in alerts.DEFAULTS}
             self._announce_phase(now)
@@ -513,6 +519,8 @@ class LockdownApp(ctk.CTk):
         """Sleep / break / your reminders. Popups wait while a full-screen app (a game) is in front, and
         everything waits - the bedtime screen too - while Do not disturb is on."""
         try:
+            if antibypass.is_off(self.db):     # switched off: bedtime, breaks and your reminders all stop
+                return
             now = now_from_db(self.db)
             state = modes.active(self.db, now)
             quiet = bool(state and state["mode"].get("mute")) or win.do_not_disturb()

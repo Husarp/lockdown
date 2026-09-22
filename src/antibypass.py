@@ -21,6 +21,9 @@ SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": 
 #                                     "wait_min": minutes, "unlocked_from"/"unlocked_until": "Y-m-d H:M:S"}
 UNLOCK_MIN = 5
 EXITED_KEY = "agent.exited"   # "1" after tray Exit: the watchdog doesn't bring the tray app back until next login
+OFF_KEY = "app.off"           # "" or when Lockdown was switched off entirely - nothing is enforced until you
+                              # switch it back on. Turning it off needs the challenge; turning it back on never
+                              # does (coming back to your rules is never the thing to stand in the way of).
 LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
 DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "wait_min": 0,
@@ -223,6 +226,23 @@ def protection_looser(old: dict, new: dict) -> bool:
     new_manual = {m["key"]: {e["host"] for e in m.get("entries", [])} for m in new.get("manual", [])}
     return any(key in old_manual and not old_manual[key] <= new_manual.get(key, set())
                for key in old["enabled"])   # a list still on lost some of its sites (or was deleted)
+
+
+def off_since(db) -> str:
+    """When Lockdown was switched off, or "" while it is running normally."""
+    return db.get_setting(OFF_KEY, "") or ""
+
+
+def is_off(db) -> bool:
+    return bool(off_since(db))
+
+
+def switch_off(db, now: datetime):
+    db.set_setting(OFF_KEY, now.strftime(TIME_FMT))
+
+
+def switch_on(db):
+    db.set_setting(OFF_KEY, "")
 
 
 def settings_looser(old: dict, new: dict) -> bool:

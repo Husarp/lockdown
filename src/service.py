@@ -27,6 +27,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
+import antibypass
 from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection, site_block
 import keywords
 from blocker.listener import BlockListener
@@ -66,6 +67,8 @@ def setup_logging():
 
 
 class Enforcer:
+    was_off = False        # switched off entirely (see enforce_once); a class default so that the DNS
+    # threads can read it before the first tick, and so a bare instance has it
     def __init__(self, db: Database):
         self.db = db
         last = db.get_setting(LAST_TRUSTED_KEY)
@@ -113,7 +116,14 @@ class Enforcer:
         now = self.update_clock()
         if self.db.delete_expired_temporary(now):
             log.info("Removed expired temporary blocks")
-        all_blocks = self.db.blocks(now)
+        # Switched off entirely: carry on with an empty list of blocks rather than skipping the work, so the
+        # hosts entries, firewall rules and app blocks are all taken back down by the same code that put them
+        # up. Stopping here would leave whatever was in place when you switched it off.
+        off = antibypass.is_off(self.db)
+        if off != self.was_off:
+            log.info("Lockdown switched %s", "off - nothing is enforced" if off else "back on")
+            self.was_off = off
+        all_blocks = [] if off else self.db.blocks(now)
         blocks, dns_blocks = {}, {}
         for b in all_blocks:
             if b["item"]["item_type"] == "site":
@@ -148,7 +158,8 @@ class Enforcer:
         if self.closing:
             closed = connections.close_to(set(self.closing))
             if closed:
-                log.info("Closed %d open connections to blocked sites", closed)
+                log.info("Closed %d open connection(s) to blocked sites: %s", len(closed),
+                         ", ".join(f"{ip}:{port}" for ip, port in sorted(closed)))
 
         self.db.set_setting(HEARTBEAT_KEY, str(time.time()))
 
@@ -156,6 +167,8 @@ class Enforcer:
         """What the DNS filter asks about every lookup: a site you blocked - the name itself or anything under
         it, which is how googlevideo.com covers rr1---sn-xxxx.googlevideo.com - or a protection list.
         Called from the filter's threads; self.dns_blocks is replaced whole, never edited in place."""
+        if self.was_off:      # switched off: the filter still runs, it just blocks nothing at all
+            return None
         host = host.lower().rstrip(".").removeprefix("www.")
         blocks = self.dns_blocks
         if blocks:
@@ -175,7 +188,10 @@ class Enforcer:
         except OSError:
             return
         for ip, name in names.items():
-            if self.blocked_name(name):
+            # Windows loads the hosts file into its DNS cache, and this reads that cache back - so every name
+            # we blocked answers 127.0.0.1 here. Taking that at face value put loopback on the kill list and
+            # cut every local socket on the machine every couple of seconds.
+            if self.blocked_name(name) and not connections.is_loopback(ip):
                 self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
 
     def on_visit(self, hostname: str):

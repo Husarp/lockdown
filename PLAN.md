@@ -140,9 +140,21 @@
     - Snooze can be locked/limited with the same anti-bypass mechanisms as blocked apps (delay, challenge, specific hours, etc.)
   - Each reminder has its own toggle + lock settings (same lock options as everything else)
 
+### 1.4b Turning Lockdown off altogether
+- **Bypass option: disable the whole app** — DONE (0.79.0): a card on the Anti-Bypass page switches
+  everything off - blocking, limits, protection lists, bedtime, breaks and reminders
+  - Off until you turn it back on; nothing brings it back by itself (your choice, 2026-09-23)
+  - Switching off needs the normal challenge; switching back on never does
+  - The enforcer runs on with an empty block list, so hosts entries and firewall rules come back down
+    instead of being frozen in place
+  - Not done: a use-count per week, or a "back on at 09:00" option - say if either is wanted
+
 ### 1.5a Counting time reliably
 - **The tracker restarts itself** — DONE (0.78.1): a failure while starting used to kill it silently and
   forever; use then went unrecorded until the app was restarted, with nothing in the log to show for it
+- **Never cut loopback connections** — DONE (0.78.2): the hosts file points blocked names at 127.0.0.1 and
+  Windows serves that from its DNS cache, so the connection killer was closing every local socket on the
+  machine every two seconds and breaking unrelated software
 - `last_tick` records when time was last counted, so a stall can be spotted rather than guessed at
 - Not done: showing a warning in the app when counting has stalled (the tracker now recovers on its own,
   so this would only ever be information)

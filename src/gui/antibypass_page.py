@@ -311,6 +311,18 @@ class AntiBypassPage(ctk.CTkFrame):
                                 "Stopping a locked mode always needs the phrase, even with no challenge turned on here.",
                      text_color=MUTED, wraplength=380, justify="left", anchor="w").pack(anchor="w", padx=12, pady=9)
 
+        off = Card(left, "Turn Lockdown off")
+        off.pack(fill="x", pady=(0, 12))
+        self.off_note = ctk.CTkLabel(off.body, text="", justify="left", anchor="w", wraplength=520)
+        self.off_note.pack(anchor="w")
+        self.off_btn = ctk.CTkButton(off.body, text="", width=200, command=self._toggle_off)
+        self.off_btn.pack(anchor="w", pady=(10, 2))
+        ctk.CTkLabel(off.body, text="Off means off: no site or app blocking, no time limits, no protection "
+                                    "lists, no bedtime, breaks or reminders - as if Lockdown weren't "
+                                    "installed. It stays off until you turn it back on. Turning it off needs "
+                                    "the challenge; turning it back on never does.",
+                     text_color=MUTED, wraplength=520, justify="left", anchor="w").pack(anchor="w", pady=(4, 0))
+
         itself = Card(left, "Keeping Lockdown running")
         itself.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(itself.body, text="\n".join([
@@ -320,6 +332,7 @@ class AntiBypassPage(ctk.CTkFrame):
             "•  Uninstalling Lockdown asks for the challenge too."]), justify="left", anchor="w",
             wraplength=520).pack(anchor="w")
         self._banner_sig = None
+        self._paint_off()
         self.refresh()
         self.after(LIVE_MS, self._live)
 
@@ -336,6 +349,29 @@ class AntiBypassPage(ctk.CTkFrame):
 
     def on_show(self):
         self.refresh()
+
+    def _paint_off(self):
+        since = antibypass.off_since(self.app.db)
+        if since:
+            self.off_note.configure(text=f"Lockdown is OFF - nothing has been enforced since {since}.",
+                                    text_color=theme.DANGER, font=theme.semi(13))
+            self.off_btn.configure(text="Turn Lockdown back on")
+        else:
+            self.off_note.configure(text="Lockdown is on and enforcing your rules.",
+                                    text_color=theme.ALLOWED, font=theme.semi(13))
+            self.off_btn.configure(text="Turn Lockdown off")
+
+    def _toggle_off(self):
+        if antibypass.is_off(self.app.db):
+            antibypass.switch_on(self.app.db)      # coming back to your rules never needs the challenge
+            self._paint_off()
+            return
+        self.app.guard(["Turn Lockdown off entirely (no blocking, no limits, no reminders, until you turn it "
+                        "back on)"], self._really_off, force=True)
+
+    def _really_off(self):
+        antibypass.switch_off(self.app.db, now_from_db(self.app.db))
+        self._paint_off()
 
     def refresh(self, *_):
         cfg = antibypass.settings(self.db)
