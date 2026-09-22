@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.76.0 - 2026-09-22 11:47
+- **The buttons fit what the reminder says.** "20-20-20: look 20 feet away" was offering *Open Lockdown* and
+  *Mute 1 h* - one has nothing to open, the other isn't an answer to it. Reminders shown as a notice now carry
+  no buttons at all: read it, click it away. The blocked-site notice keeps both, where they make sense.
+- **Every reminder can say which days and hours it may appear in.** The days used to apply only to "at set
+  times"; they now apply to all three kinds, and "every N minutes of use" has its own **Only between 08:00
+  and 20:00** - so nothing asks you for push-ups at 3 a.m. An overnight window (22:00-02:00) works.
+- **A daily limit counted in what you did, not what you saw.** "Stop for the day after 5 times DONE": drink
+  water five times and it leaves you alone until tomorrow. Snoozing or ignoring it doesn't count towards the
+  five, which is the point - the limit is on the doing, not on the asking.
+- **Two reminders due at once interrupt you once.** One already on screen takes the other in with it: one
+  popup, both lines, one Done that answers both. Rather than being stopped twice a minute apart for two things
+  you'd have done in one go.
+- **What you are using now gets through the quiet.** A warning that the app in front of you is about to be
+  blocked - or the notice that it just was - is shown even while a muting mode, Windows Do not disturb or
+  "Mute 1 h" is holding everything else back. That notice is directly about what you are doing; the rest can
+  wait.
+
 ## 0.75.1 - 2026-09-22 11:07
 - **About knows where Lockdown lives**: github.com/G4dam/lockdown. **Check for updates** and **Open the
   GitHub page** are on the About page now - the check asks GitHub for the newest release and says whether it

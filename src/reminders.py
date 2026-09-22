@@ -33,7 +33,10 @@ DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "strict": False, "snooze"
                  "twenty": False, "text": "", "twenty_text": ""}
 DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
                   "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
-                  "check": 0, "packs": [], "quotes": ""}
+                  "check": 0, "packs": [], "quotes": "",
+                  "hours": False,      # only between window[0] and window[1] (every kind, not just random)
+                  "per_day": 0}        # stop for the day after this many Done (0 = no limit)
+GROUP_MIN = 5          # a reminder due within this many minutes of one already on screen joins it
 
 # Short public-domain quotes
 PACKS = {
@@ -127,10 +130,18 @@ def counts(db, what: str, since: datetime) -> dict[str, int]:
 
 def schedule_text(r: dict) -> str:
     if r["kind"] == "interval":
-        return f"every {r['every']} min of use"
-    if r["kind"] == "times":
-        return f"{days_text(r['days'])} at {', '.join(r['times'])}"
-    return f"once a day, at a random time {r['window'][0]}-{r['window'][1]}"
+        text = f"every {r['every']} min of use"
+        if r.get("hours"):
+            text += f", {r['window'][0]}-{r['window'][1]}"
+    elif r["kind"] == "times":
+        text = f"{days_text(r['days'])} at {', '.join(r['times'])}"
+    else:
+        text = f"once a day, at a random time {r['window'][0]}-{r['window'][1]}"
+    if r["kind"] != "times" and r["days"] != list(range(7)):
+        text += f" · {days_text(r['days'])}"
+    if r.get("per_day"):
+        text += f" · stops after {r['per_day']}x done"
+    return text
 
 
 class Engine:
@@ -152,6 +163,8 @@ class Engine:
         self.random_at: dict[tuple, time] = {}               # (id, date) -> today's random time
         self.checks: dict[str, datetime] = {}                # reminder id -> ask "did you do it?" at
         self.sleep_next: dict[str, datetime] = {}            # night -> next bedtime overlay
+        self.done_today: dict[tuple, int] = {}               # (reminder, date) -> times done (the daily limit)
+        self.grouped: dict[str, list[str]] = {}              # popup key -> the reminders it is showing
 
     # ---------- showing ----------
 
@@ -291,10 +304,32 @@ class Engine:
 
     # ---------- your reminders ----------
 
+    def _allowed_now(self, r: dict, now: datetime) -> bool:
+        """The days you picked, the hours you picked, and whether you have already done it enough times today."""
+        if now.weekday() not in r["days"]:
+            return False
+        if r.get("hours") and r["kind"] != "times":   # "times" already says when: its own times are the hours
+            start, end = (parse_hhmm(x) for x in r["window"])
+            t = now.time()
+            inside = start <= t < end if start < end else (t >= start or t < end)   # overnight windows
+            if not inside:
+                return False
+        return not self._done_for_today(r, now)
+
+    def _done_for_today(self, r: dict, now: datetime) -> bool:
+        """The limit counts what you have DONE, not what you were shown: five glasses of water is five Done."""
+        if not r.get("per_day"):
+            return False
+        key = (r["id"], now.date())
+        if key not in self.done_today:
+            midnight = datetime.combine(now.date(), time(0))
+            self.done_today[key] = counts(self.db, r["id"], midnight).get("done", 0)
+        return self.done_today[key] >= r["per_day"]
+
     def _custom(self, now, using, dt):
         today = now.date()
         for r in custom_list(self.db):
-            if not r["on"] or not r["text"].strip():
+            if not r["on"] or not r["text"].strip() or not self._allowed_now(r, now):
                 continue
             key = f"custom:{r['id']}"
             if key in self.snoozed:
@@ -309,8 +344,6 @@ class Engine:
                     self.counters[r["id"]] = 0
                     self._fire(r, now)
             elif r["kind"] == "times":
-                if today.weekday() not in r["days"]:
-                    continue
                 for t in r["times"]:
                     at = datetime.combine(today, parse_hhmm(t))
                     if at <= now < at + timedelta(minutes=LATE_FIRE_MIN) and (r["id"], today, t) not in self.fired:
@@ -341,13 +374,34 @@ class Engine:
         return self.rng.choice(pool) if pool else ""
 
     def _fire(self, r: dict, now: datetime):
-        """Show a reminder; Snooze only while it has snoozes left (then it stays until Done)."""
+        """Show a reminder; Snooze only while it has snoozes left (then it stays until Done).
+        One already on screen takes this one in with it, so two things you could do in one go interrupt you
+        once instead of twice."""
+        open_key = next((k for k in self.open if k.startswith("custom:")), None)
+        if open_key and open_key != f"custom:{r['id']}" and r["id"] not in self.grouped.get(open_key, []):
+            self.grouped.setdefault(open_key, [open_key.split(":", 1)[1]]).append(r["id"])
+            self._regroup(open_key, now)
+            return
         key = f"custom:{r['id']}"
+        self.grouped[key] = [r["id"]]
         quote = self._quote(r)
         buttons = [("Done", "done")]
         if self.snoozes_used.get(key, 0) < r["max_snooze"]:
             buttons.append((f"Snooze {r['snooze']} min", "snooze"))
         self._popup(key, "Reminder", r["text"] + (f"\n\n{quote}" if quote else ""), buttons)
+
+    def _regroup(self, key: str, now: datetime):
+        """Re-show a popup that has taken in another reminder: both lines, one Done for the pair."""
+        wanted = self.grouped[key]
+        by_id = {x["id"]: x for x in custom_list(self.db)}
+        lines = [by_id[rid]["text"] for rid in wanted if rid in by_id]
+        buttons = [("Done", "done")]
+        if all(self.snoozes_used.get(key, 0) < by_id[rid]["max_snooze"] for rid in wanted if rid in by_id):
+            buttons.append((f"Snooze {by_id[wanted[0]]['snooze']} min", "snooze"))
+        self._close(key)
+        self.open.add(key)
+        self.ui.popup(key, "Reminders" if len(lines) > 1 else "Reminder",
+                      "\n".join(f"• {line}" for line in lines) if len(lines) > 1 else lines[0], buttons)
 
     # ---------- answers from the UI ----------
 
@@ -375,19 +429,22 @@ class Engine:
                 self.sleep_next[night[0].strftime(TIME_FMT)] = now + timedelta(minutes=wait)
             log(self.db, "sleep", action, now)
         elif key.startswith("custom:"):
-            rid = key.split(":", 1)[1]
-            r = next((x for x in custom_list(self.db) if x["id"] == rid), None)
-            if not r:
-                return
-            if action == "done":
-                self.snoozes_used.pop(key, None)
-                log(self.db, rid, "done", now)
-                if r["check"]:
-                    self.checks[rid] = now + timedelta(minutes=r["check"])
-            elif action == "snooze":
-                self.snoozes_used[key] = self.snoozes_used.get(key, 0) + 1
-                self.snoozed[key] = now + timedelta(minutes=r["snooze"])
-                log(self.db, rid, "snoozed", now)
+            by_id = {x["id"]: x for x in custom_list(self.db)}
+            for rid in self.grouped.pop(key, [key.split(":", 1)[1]]):   # one answer for everything it showed
+                r = by_id.get(rid)
+                if not r:
+                    continue
+                if action == "done":
+                    self.snoozes_used.pop(key, None)
+                    log(self.db, rid, "done", now)
+                    self.done_today[(rid, now.date())] = self.done_today.get((rid, now.date()), 0) + 1
+                    self.counters[rid] = 0
+                    if r["check"]:
+                        self.checks[rid] = now + timedelta(minutes=r["check"])
+                elif action == "snooze":
+                    self.snoozes_used[key] = self.snoozes_used.get(key, 0) + 1
+                    self.snoozed[key] = now + timedelta(minutes=r["snooze"])
+                    log(self.db, rid, "snoozed", now)
         elif key.startswith("check:"):
             rid = key.split(":", 1)[1]
             log(self.db, rid, "really done" if action == "yes" else "not done", now)

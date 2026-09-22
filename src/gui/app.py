@@ -491,7 +491,7 @@ class LockdownApp(ctk.CTk):
             self._announce_phase(now)
             for message in self.watcher.check(self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now),
                                               now, self.usage_tracker.in_use, settings):
-                self._show(message)
+                self._show(message, force=message in self.watcher.urgent)
             self.minimize_blocks = {b["item"]["target"].lower(): b for b in self.db.blocks(now)
                                     if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
             if digest.due(self.db, now):   # the weekly summary
@@ -605,8 +605,11 @@ class LockdownApp(ctk.CTk):
             self._show("Focus session done.", force=True)
         self.last_phase = phase
 
-    def _show(self, message: str, force: bool = False):
-        """Notification in the chosen format. Muted while a mode with "mute" is on (unless force)."""
+    def _show(self, message: str, force: bool = False, actions: bool = True):
+        """Notification in the chosen format. Muted while a mode with "mute" is on (unless force - what you
+        are using right now is about to be blocked, which is worth saying even in a game).
+        actions=False leaves off "Open Lockdown" / "Mute 1 h": a reminder telling you to look out of the
+        window has nothing to open, and muting Lockdown is not the answer to it."""
         if not force:
             if time.time() < self.muted_until:
                 return
@@ -618,9 +621,9 @@ class LockdownApp(ctk.CTk):
             self.tray.notify(message)
             self.after(TOAST_CLEAR_MS, self._clear_toast_history)   # don't let one-time alerts pile up as unread
         if fmt in ("inapp", "both"):
-            if self.popup:
-                self.popup.close()
-            self.popup = Popup(self, message, on_open=lambda: self.events.put("open"), on_mute=self._mute)
+            self.popup = Popup(self, message,
+                               on_open=(lambda: self.events.put("open")) if actions else None,
+                               on_mute=self._mute if actions else None)
 
     def _mute(self):
         self.muted_until = time.time() + MUTE_S

@@ -103,7 +103,7 @@ class ReminderUI:
             win.destroy()
 
     def toast(self, text):
-        self.app._show(text)
+        self.app._show(text, actions=False)   # nothing to open, and "Mute 1 h" is not the answer to it
 
     def break_start(self, until):
         """Strict break: minimise everything now; the app keeps windows down until `until` (see _poll_minimize)."""
@@ -372,22 +372,36 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.r_kind = Segmented(b, list(KINDS), command=lambda v: self._kind_changed())
         self.r_kind.pack(anchor="w")
         self.r_interval = ctk.CTkFrame(b, fg_color="transparent")
-        ctk.CTkLabel(self.r_interval, text="Every").pack(side="left")
-        self.r_every = ctk.CTkEntry(self.r_interval, width=56, justify="center")
+        every_row = ctk.CTkFrame(self.r_interval, fg_color="transparent")
+        every_row.pack(anchor="w")
+        ctk.CTkLabel(every_row, text="Every").pack(side="left")
+        self.r_every = ctk.CTkEntry(every_row, width=56, justify="center")
         self.r_every.pack(side="left", padx=8)
-        ctk.CTkLabel(self.r_interval, text="minutes of use (time away from the PC doesn't count)",
+        ctk.CTkLabel(every_row, text="minutes of use (time away from the PC doesn't count)",
                      text_color=MUTED).pack(side="left")
-        self.r_times = ctk.CTkFrame(b, fg_color="transparent")
-        days = ctk.CTkFrame(self.r_times, fg_color="transparent")
-        days.pack(anchor="w")
+        days = ctk.CTkFrame(b, fg_color="transparent")      # which days - for every kind of reminder
+        days.pack(anchor="w", pady=(8, 0))
+        ctk.CTkLabel(days, text="On", text_color=MUTED, width=28, anchor="w").pack(side="left")
         self.r_days = [DayToggle(days, d[:3], True) for d in DAY_NAMES]
         for d in self.r_days:
             d.pack(side="left", padx=(0, 4))
+        self.r_times = ctk.CTkFrame(b, fg_color="transparent")
         line = ctk.CTkFrame(self.r_times, fg_color="transparent")
-        line.pack(anchor="w", pady=(6, 0))
+        line.pack(anchor="w")
         ctk.CTkLabel(line, text="At").pack(side="left")
         self.r_at = ctk.CTkEntry(line, width=200, placeholder_text="09:00, 13:00, 21:00")
         self.r_at.pack(side="left", padx=8)
+        self.r_hours_row = ctk.CTkFrame(self.r_interval, fg_color="transparent")
+        self.r_hours = ctk.CTkCheckBox(self.r_hours_row, text="Only between", checkbox_width=18,
+                                       checkbox_height=18, width=120)
+        self.r_hours.pack(side="left")
+        self.r_hours_from = ctk.CTkEntry(self.r_hours_row, width=64, justify="center")
+        self.r_hours_from.pack(side="left", padx=8)
+        ctk.CTkLabel(self.r_hours_row, text="and").pack(side="left")
+        self.r_hours_to = ctk.CTkEntry(self.r_hours_row, width=64, justify="center")
+        self.r_hours_to.pack(side="left", padx=8)
+        ctk.CTkLabel(self.r_hours_row, text="(so it doesn't ask you to do push-ups at 3 a.m.)",
+                     text_color=MUTED).pack(side="left")
         self.r_random = ctk.CTkFrame(b, fg_color="transparent")
         ctk.CTkLabel(self.r_random, text="Once a day, at a random time between").pack(side="left")
         self.r_from = ctk.CTkEntry(self.r_random, width=64, justify="center")
@@ -401,6 +415,8 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.r_snooze = _option(b, "Snooze for", [f"{m} min" for m in SNOOZES])
         self.r_max = _option(b, "At most", [str(n) for n in range(0, 6)], "snoozes - then it stays until Done")
         self.r_check = _option(b, "Ask \"did you actually do it?\"", list(CHECKS), "after Done")
+        self.r_per_day = _option(b, "Stop for the day after", ["No limit"] + [str(n) for n in range(1, 13)],
+                                 "times DONE (not times shown: snoozing or ignoring it doesn't count)")
         eyebrow(b, "Quotes (a random one is shown with the reminder)").pack(anchor="w", pady=(12, 4))
         packs = ctk.CTkFrame(b, fg_color="transparent")
         packs.pack(anchor="w")
@@ -427,6 +443,8 @@ class RemindersView(ctk.CTkScrollableFrame):
                 frame.pack(anchor="w", pady=(8, 0), before=self.r_kind_after)
             else:
                 frame.pack_forget()
+        # "at 09:00" and "a random time between" already say which hours; only "every N minutes" needs it asked
+        self.r_hours_row.pack(anchor="w", pady=(6, 0)) if kind == "interval" else self.r_hours_row.pack_forget()
 
     def _edit(self, r: dict | None):
         self.editing = r
@@ -436,8 +454,11 @@ class RemindersView(ctk.CTkScrollableFrame):
         if r["text"]:
             self.r_text.insert(0, r["text"])
         self.r_kind.set(next(k for k, v in KINDS.items() if v == r["kind"]))
+        self.r_hours.select() if r.get("hours") else self.r_hours.deselect()
+        self.r_per_day.set(str(r.get("per_day") or "No limit"))
         for entry, value in ((self.r_every, str(r["every"])), (self.r_at, ", ".join(r["times"])),
-                             (self.r_from, r["window"][0]), (self.r_to, r["window"][1])):
+                             (self.r_from, r["window"][0]), (self.r_to, r["window"][1]),
+                             (self.r_hours_from, r["window"][0]), (self.r_hours_to, r["window"][1])):
             entry.delete(0, "end")
             entry.insert(0, value)
         for i, d in enumerate(self.r_days):
@@ -469,11 +490,16 @@ class RemindersView(ctk.CTkScrollableFrame):
             try:
                 times = [f"{parse_hhmm(t):%H:%M}" for t in self.r_at.get().replace(";", ",").split(",") if t.strip()]
                 window = [f"{parse_hhmm(self.r_from.get()):%H:%M}", f"{parse_hhmm(self.r_to.get()):%H:%M}"]
+                if kind == "interval":      # its own "only between" boxes hold the same window
+                    window = [f"{parse_hhmm(self.r_hours_from.get()):%H:%M}",
+                              f"{parse_hhmm(self.r_hours_to.get()):%H:%M}"]
             except ValueError:
                 raise ValueError("Write times like 09:00 (several: 09:00, 13:00).") from None
             days = [i for i, d in enumerate(self.r_days) if d.get()]
-            if kind == "times" and (not times or not days):
-                raise ValueError("Pick at least one day and one time.")
+            if not days:
+                raise ValueError("Pick at least one day.")
+            if kind == "times" and not times:
+                raise ValueError("Pick at least one time.")
             if kind == "random" and window[0] >= window[1]:
                 raise ValueError("The random window must start before it ends.")
         except ValueError as e:
@@ -484,7 +510,9 @@ class RemindersView(ctk.CTkScrollableFrame):
                "kind": kind, "every": every, "times": times or ["12:00"], "days": days, "window": window,
                "snooze": int(self.r_snooze.get().split()[0]), "max_snooze": int(self.r_max.get()),
                "check": CHECKS[self.r_check.get()], "packs": [n for n, b in self.r_packs.items() if b.get()],
-               "quotes": self.r_quotes.get("1.0", "end").strip()}
+               "quotes": self.r_quotes.get("1.0", "end").strip(),
+               "hours": bool(self.r_hours.get()) and kind == "interval",
+               "per_day": 0 if self.r_per_day.get() == "No limit" else int(self.r_per_day.get())}
         if self.editing:
             new["on"] = self.editing["on"]
             items = [new if x["id"] == new["id"] else x for x in items]

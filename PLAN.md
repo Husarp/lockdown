@@ -1512,6 +1512,10 @@ one shared pot for the whole category.
 - [x] Do not disturb didn't hold the bedtime screen (user, 2026-09-22) - 0.75.0: win.do_not_disturb()
   (SHQueryUserNotificationState) feeds reminders.tick(quiet=...); an overlay holds while quiet and comes up
   on the next tick after it ends.
+- [x] Reminder options (user, 2026-09-22) - 0.76.0: days + hours per reminder, a daily limit counted in Done,
+  two due at once shown as one popup, and the wrong buttons off the reminder notice.
+- [x] An alert about what you are using pierces a muting mode / DND / Mute 1 h (user, 2026-09-22) - 0.76.0:
+  BlockWatcher.urgent, passed to _show(force=...).
 - [ ] Told someone when the bypass is used (user, 2026-09-21) - assessed, not built. A phone notice through a
   webhook (ntfy.sh / Discord) is 1-2 h and needs no credentials; email needs the user's own SMTP account and
   an app password stored locally (about a day, and the password is readable by whoever uses the PC). Waiting

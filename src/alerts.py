@@ -93,6 +93,10 @@ class BlockWatcher:
     def __init__(self):
         self.warned: dict[tuple, datetime] = {}   # warning key -> when last shown
         self.prev_blocked: set[int] | None = None
+        # the messages from the last check that are about something you are using right now. Those get through
+        # a mode that mutes, or Do not disturb, or the "Mute 1 h" button: being told the thing in front of you
+        # is about to go is the one notice that is worth interrupting a game for.
+        self.urgent: set[str] = set()
 
     @staticmethod
     def _key(item: dict, rule: dict, when: datetime) -> tuple:
@@ -108,6 +112,7 @@ class BlockWatcher:
     def check(self, items: list[dict], groups: list[dict], usage, now: datetime, in_use: set[int],
               settings: dict) -> list[str]:
         messages = []
+        self.urgent = set()
         warn_on = settings["notify.warn.enabled"] == "1"
         warn_sec = int(settings["notify.warn.minutes"]) * 60
         repeat_sec = int(settings["notify.warn.repeat_min"]) * 60
@@ -129,12 +134,17 @@ class BlockWatcher:
             entry["in_use"] |= item["id"] in in_use
 
         if warn_on:
-            messages += self._allowance_notices(items, groups, usage, now, in_use)
+            spending = self._allowance_notices(items, groups, usage, now, in_use)
+            self.urgent.update(spending)          # you are using it right now, by definition
+            messages += spending
             for key, e in upcoming.items():
                 last = self.warned.get(key)
                 if last is None or (e["in_use"] and repeat_sec and (now - last).total_seconds() >= repeat_sec):
                     self.warned[key] = now
-                    messages.append(self._warning(e, now))
+                    text = self._warning(e, now)
+                    if e["in_use"]:               # what you are using is the thing about to be blocked
+                        self.urgent.add(text)
+                    messages.append(text)
 
         if self.prev_blocked is not None and settings["notify.started.enabled"] == "1":
             started: dict[tuple, dict] = {}
@@ -145,9 +155,14 @@ class BlockWatcher:
                 source = ("group", rule["group"]["id"]) if rule.get("group") else ("item",)
                 entry = started.setdefault(source, {"rule": rule, "reason": reason, "until": until, "names": []})
                 entry["names"].append(item["display_name"])
+                entry["in_use"] = entry.get("in_use", False) or item_id in in_use
                 if entry["until"] != until or entry["reason"] != reason:
                     entry["until"], entry["reason"] = None, ""   # they don't share an end: keep the line short
-            messages += [self._started(e, now) for e in started.values()]
+            for e in started.values():
+                text = self._started(e, now)
+                if e.get("in_use"):               # it just went while you were in it
+                    self.urgent.add(text)
+                messages.append(text)
         self.prev_blocked = set(blocked)
         return messages
 
