@@ -7,6 +7,7 @@
 """
 import logging
 import threading
+import time
 
 import modes
 from blocker.apps import list_processes
@@ -16,6 +17,7 @@ from rules import effective_rules, switch_targets, usage_targets, visit_targets
 from trusted_time import now_from_db
 
 TICK_SEC = 2
+RESTART_SEC = 30       # wait before starting the tracker again after it fell over
 IDLE_LIMIT_SEC = 15 * 60   # sites: no keyboard/mouse input for this long = away, don't count for limits
 ACTIVE_IDLE_SEC = 5 * 60   # screen time: input within this = active (plan: 5 min idle threshold)
 _UNSET = object()
@@ -92,20 +94,42 @@ class UsageTracker(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
         self.stop_event = threading.Event()
+        self.last_tick: float = 0.0     # when time was last counted - 0 until the first tick lands
         self.in_use: set[int] = set()   # item ids in use right now (read by the warning watcher)
         self.last_focus = _UNSET        # (exe, site) in front at the previous tick
         self.running: set[str] | None = None   # exes running at the previous tick (to spot app launches)
         self.last_used: dict[int, float] = {}  # item id -> when it was last in use (for "new visit")
 
     def run(self):
+        """Keep counting, whatever happens.
+
+        Only the tick used to be guarded, so anything that went wrong while STARTING - the COM initializer,
+        or opening the database while the service was restarting and holding it - killed this thread on the
+        spot, logged nothing at all (the logging was inside the loop it never reached), and nothing ever
+        started it again. The app carried on and blocking carried on, because the service does that; time
+        simply stopped being counted, silently, until the app was restarted. Hours of use vanished that way.
+        Now every failure is written down and the tracker starts itself again."""
+        while not self.stop_event.is_set():
+            try:
+                self._count(db=Database())
+            except Exception:
+                log.exception("Usage tracking stopped - starting it again in %ds", RESTART_SEC)
+                self.stop_event.wait(RESTART_SEC)
+
+    def _count(self, db):
         import uiautomation as auto  # COM must be initialized in this thread
         with auto.UIAutomationInitializerInThread():
-            db = Database()
             while not self.stop_event.wait(TICK_SEC):
                 try:
                     self.tick(db, sense_desktop)
+                    self.last_tick = time.time()
                 except Exception:
                     log.exception("Usage tracking failed")
+
+    def stalled_for(self, now: float | None = None) -> float:
+        """Seconds since time was last counted. Anything much above TICK_SEC means use is going unrecorded."""
+        now = time.time() if now is None else now
+        return now - self.last_tick if self.last_tick else 0.0
 
     def tick(self, db: Database, sense, running_exes=None):
         exe, url, idle_sec = sense()

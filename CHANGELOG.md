@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.78.1 - 2026-09-22 18:27
+- **Time was silently stopping being counted.** A 2-hour group limit read 39 minutes after a day of use, and
+  the reason was not the counting: the usage tracker had been dead since 14:04 and nothing noticed. Only its
+  tick was guarded, so anything that failed while it was *starting* - the COM initializer, or opening
+  config.db while the service was restarting and holding it - killed the thread on the spot, logged nothing
+  at all (the logging lived inside the loop it never reached), and nothing ever started it again. The app
+  stayed up and blocking carried on, because the service does that, so everything looked fine while 4 hours
+  20 minutes of use went unrecorded. The tracker now writes down every failure and starts itself again after
+  30 seconds, and remembers when it last counted, so this cannot happen quietly again.
+- Time already lost this way cannot be recovered: the screen-time log is written by the same tick, so those
+  hours are missing from both.
+
 ## 0.78.0 - 2026-09-22 14:02
 - **Updating without leaving Lockdown.** About used to find a new version and then send you to a web page to
   fetch it yourself. Now it downloads the installer itself, with a progress bar, and starts it - Lockdown
