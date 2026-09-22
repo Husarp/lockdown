@@ -4,3 +4,28 @@ __pycache__/
 .pytest_cache/
 *.lnk
 build/
+
+# ── Not part of the program ───────────────────────────────────────────────────────────────────────
+# This repository is PUBLIC. Anything not listed here is published the moment it is committed, so
+# working material stays on disk only.
+
+# Private notes and plans. Put new ones in notes/ and they are ignored automatically.
+notes/
+
+# Design working material: screenshots and conversation exports, 5.8 MB and the largest part of this
+# repository. DESIGN.md is kept below - it is written documentation, not working material.
+design/*
+!design/DESIGN.md
+*.dc.html
+*.zip
+
+# Editors and operating systems leaving things behind
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+*~
+*.tmp
+*.bak
+*.log
