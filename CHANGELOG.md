@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.76.1 - 2026-09-22 12:17
+- **Moved to a new GitHub account.** The repository is now `Husarp/lockdown` (private), and the About page's
+  **Check for updates** and **Open the project page** follow it there. Every commit is attributed to a GitHub
+  noreply address rather than a real one, so the history carries no personal e-mail.
+
 ## 0.76.0 - 2026-09-22 11:47
 - **The buttons fit what the reminder says.** "20-20-20: look 20 feet away" was offering *Open Lockdown* and
   *Mute 1 h* - one has nothing to open, the other isn't an answer to it. Reminders shown as a notice now carry
