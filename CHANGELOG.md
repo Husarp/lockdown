@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.79.1 - 2026-09-24 05:52
+- **MIT licence.** The repository is public; now anyone may also use, change and share Lockdown, as
+  long as the copyright notice stays with it. `LICENSE` added, and a *Licence* section in README. The
+  bundled fonts keep their own licence (SIL OFL). No change to the program itself.
+
 ## 0.79.0 - 2026-09-23 01:46
 - **Turn Lockdown off entirely.** A new card on the Anti-Bypass page switches the whole thing off: no site or
   app blocking, no time limits, no protection lists, no bedtime, breaks or reminders - as close to not having

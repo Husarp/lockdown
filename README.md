@@ -166,3 +166,9 @@ sidebar icons (rendered from the design) in `assets/icons`.
   10 s) or by stopping the service; Windows may also briefly use the fallback DNS if the filter answers slowly.
 - Anti-Bypass works in the app: someone with admin rights can still stop the scheduled tasks, or edit
   `config.db` directly (making settings service-only is planned).
+
+## Licence
+
+MIT — © 2026 Husarp. Free to use, change and share, keeping the copyright notice; see
+[LICENSE](LICENSE). The bundled fonts (Barlow Condensed, Inter) keep their own licence, the SIL Open
+Font License — the licence files are next to them in `assets/fonts/`.

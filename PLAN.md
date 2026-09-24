@@ -2000,3 +2000,7 @@ CREATE TABLE page_display (
     config TEXT                   -- JSON: which widgets visible, order, chart types
 );
 ```
+
+## Licence — DONE 2026-09-24
+
+- [x] MIT licence (asked 2026-09-24: "can be public and used") — `LICENSE`, README section — 0.79.1.
