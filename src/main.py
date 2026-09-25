@@ -22,7 +22,7 @@ from paths import ASSETS, command_line, gui_command  # noqa: E402
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WATCHDOG_TASK = "Lockdown Agent Watchdog"
-APP_ID = "Lockdown.App"   # Windows app identity: notifications / taskbar show "Lockdown" + its icon, not "Python"
+APP_ID = "com.husarp.lockdown"   # Windows app identity: notifications / taskbar show "Lockdown" + its icon, not "Python"
 ICON = ASSETS / "lockdown.ico"
 
 

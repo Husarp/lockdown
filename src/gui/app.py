@@ -74,7 +74,7 @@ GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only)
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
 TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
 MUTE_S = 3600           # the popup's "Mute 1 h"
-APP_ID = "Lockdown.App"   # Windows app identity (matches main.py); used to clear only our own notifications
+APP_ID = "com.husarp.lockdown"   # Windows app identity (matches main.py); used to clear only our own notifications
 PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.79.2 - 2026-09-25 02:41
+- **The Windows app identity is now `com.husarp.lockdown`** (it was `Lockdown.App`), the same reverse-DNS
+  shape these projects use everywhere else. It is what Windows hangs Lockdown's name and icon on for
+  notifications and the taskbar, and what the app matches on to clear its own toasts and nobody else's.
+  A test keeps the two copies of it - the one that registers it and the one that clears by it - in step.
+
 ## 0.79.1 - 2026-09-24 05:52
 - **MIT licence.** The repository is public; now anyone may also use, change and share Lockdown, as
   long as the copyright notice stays with it. `LICENSE` added, and a *Licence* section in README. The
