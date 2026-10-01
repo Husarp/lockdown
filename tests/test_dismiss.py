@@ -45,7 +45,7 @@ def test_dismiss_is_not_done(tmp_path):
     t = run(e, NOW, 2)
     e.answer("custom:a", "dismiss")
     assert reminders.counts(db, "a", NOW - timedelta(days=1)).get("done") is None
-    t = run(e, t, 2)                                  # the day is not used up: it comes back
+    t = run(e, t, reminders.PACE_MIN + 1)             # the day is not used up: it comes back (with the pace)
     assert len(_shown(ui)) == 2
     e.answer("custom:a", "done")                      # 1 of 1 - now it is
     before = len(_shown(ui))
@@ -54,13 +54,14 @@ def test_dismiss_is_not_done(tmp_path):
 
 
 def test_dismiss_asks_again_at_its_normal_time(tmp_path):
-    """Skip this one, not the rest of the day: an "every 1 min of use" reminder returns after another minute."""
+    """Skip this one, not the rest of the day: an "every 1 min of use" reminder comes back - as soon as the
+    pace allows another interruption, rather than a minute later."""
     db, ui, e = setup(tmp_path)
     _save(db, {"id": "a", "text": "Push-ups", "kind": "interval", "every": 1})
     t = run(e, NOW, 2)
     e.answer("custom:a", "dismiss")
     assert len(_shown(ui)) == 1
-    run(e, t, 2)
+    run(e, t, reminders.PACE_MIN + 1)
     assert len(_shown(ui)) == 2
 
 

@@ -10,6 +10,7 @@ SS = 4   # supersample, then shrink for smooth edges
 
 ACCENT, ACCENT_DARK = "#DB5126", "#B33D18"
 GREEN, YELLOW, RED = "#27AE60", "#E2A32B", "#E05A44"
+GREY = "#7F8A96"          # the tray while Lockdown is switched off: nothing is enforced
 INK = "#0B0E12"
 
 
@@ -88,6 +89,6 @@ def app_icon(size: int, bold: bool = False, tiny: bool = False) -> Image.Image:
 
 
 def tray_icon(state: str, size: int = 64) -> Image.Image:
-    """Tray mark: a flat shield in the state colour with a dark padlock. state: green / yellow / red."""
-    color = {"green": GREEN, "yellow": YELLOW, "red": RED}[state]
+    """Tray mark: a flat shield in the state colour with a dark padlock. state: green / yellow / red / grey."""
+    color = {"green": GREEN, "yellow": YELLOW, "red": RED, "grey": GREY}[state]
     return mark(size, color, None, INK, color, tiny=size <= 20)

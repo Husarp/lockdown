@@ -8,12 +8,14 @@ from datetime import datetime, timedelta
 
 import customtkinter as ctk
 
+import antibypass
 import modes
 import stats
 from gui import app_browser, appinfo, categories, icons, theme
 from gui.charts import DayBars, TimelineBar
 from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow, page_head
 from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left, allowance_owner,
+                   period_words,
                    effective_rules, item_block, limits, next_block, opening_bucket, time_bucket)
 from trusted_time import now_from_db
 
@@ -138,6 +140,14 @@ class DashboardPage(ctk.CTkFrame):
         self.after(REFRESH_MS, self._auto_refresh)
         self.last_refresh = 0.0
 
+    def _switch_on(self):
+        """Back on from the banner. Never needs the challenge - coming back to your own rules is not the thing to
+        stand in the way of."""
+        antibypass.switch_on(self.db)
+        self.refresh()
+        if "Anti-Bypass" in self.app.pages:
+            self.app.pages["Anti-Bypass"]._paint_off()
+
     # ---------- layout ----------
 
     def _build(self):
@@ -152,6 +162,21 @@ class DashboardPage(ctk.CTkFrame):
         ctk.CTkLabel(texts, text="The Lockdown service isn't running. Screen time is still being recorded.",
                      text_color=theme.MUTED, font=theme.body(11), height=16).pack(anchor="w")
         ctk.CTkButton(self.banner, text="Start service", width=120, command=start_service).pack(side="right", padx=14)
+
+        # Switched off entirely (Anti-Bypass page). It is easy to forget, and everything else on this page goes on
+        # looking normal while it is - so it says so at the top, with the way back on right there (no challenge).
+        self.off_banner = ctk.CTkFrame(b, fg_color=BANNER_BG, border_width=1, border_color=theme.DANGER,
+                                       corner_radius=6)
+        ctk.CTkLabel(self.off_banner, text="", image=theme.icon("alert-triangle", theme.DANGER, 18)).pack(
+            side="left", padx=(14, 8), pady=10)
+        texts = ctk.CTkFrame(self.off_banner, fg_color="transparent")
+        texts.pack(side="left", pady=8)
+        ctk.CTkLabel(texts, text="Lockdown is off - nothing is being enforced", font=theme.semi(13),
+                     height=18).pack(anchor="w")
+        self.off_note = ctk.CTkLabel(texts, text="", text_color=theme.MUTED, font=theme.body(11), height=16)
+        self.off_note.pack(anchor="w")
+        ctk.CTkButton(self.off_banner, text="Turn back on", width=120, command=self._switch_on).pack(side="right",
+                                                                                                    padx=14)
 
         self.main = ctk.CTkFrame(b, fg_color="transparent")
         self.main.pack(fill="both", expand=True)
@@ -251,9 +276,14 @@ class DashboardPage(ctk.CTkFrame):
         today = now.date()
         first = stats.first_activity(db)
         self.date.configure(text=f"{DAY_NAMES[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}")
-        for w in (self.banner, self.main, self.empty):
+        for w in (self.off_banner, self.banner, self.main, self.empty):
             w.pack_forget()
-        if not self.app.service_running:
+        off = antibypass.off_since(db)
+        if off:   # the more basic of the two: with Lockdown off, whether the service runs is beside the point
+            self.off_note.configure(text=f"Switched off since {off[:16]}. Blocking, limits, protection lists and "
+                                         "reminders are all paused; screen time is still recorded.")
+            self.off_banner.pack(fill="x", pady=(0, 12))
+        elif not self.app.service_running:
             self.banner.pack(fill="x", pady=(0, 12))
         if first is None:
             self.empty.pack(fill="both", expand=True)
@@ -309,7 +339,9 @@ class DashboardPage(ctk.CTkFrame):
         self.stat["Screen time today"].set(stats.hm(active), delta, color)
 
         blocked = [i for i in items if item_block(effective_rules(i, groups), now, usage)]
-        if not self.app.service_running:
+        if antibypass.is_off(self.db):   # rules still say "blocked", but nothing acts on them
+            self.stat["Blocked now"].set(f"0 of {len(items)}", "Lockdown is off - not enforced", theme.DANGER)
+        elif not self.app.service_running:
             self.stat["Blocked now"].set(f"0 of {len(items)}", "Service stopped - not enforced", theme.DANGER)
         else:
             upcoming = self._upcoming(now, items, groups, usage)
@@ -374,11 +406,12 @@ class DashboardPage(ctk.CTkFrame):
                 text = f"{stats.hm(used)} of {stats.hm(limit)} allowed during blocked hours (until {period:%H:%M})"
                 left_text = f"{stats.hm(left)} left" if left > 0 else "used up"
             elif kind == "time":
-                when = "" if period == "day" else f" {PERIOD_WORDS[period]}"
+                words = period_words(period, now, clock)
+                when = "" if words == PERIOD_WORDS["day"] else f" {words}"   # ("today" goes without saying here)
                 text, left = f"{stats.hm(used)} of {stats.hm(limit * 60)}{when}", limit * 60 - used
                 left_text = f"{stats.hm(left)} left" if left > 0 else "limit reached"
             else:
-                text = f"{used} opens of {limit} {PERIOD_WORDS[period]}"
+                text = f"{used} opens of {limit} {period_words(period, now, clock)}"
                 left_text = f"{limit - used} left" if used < limit else "limit reached"
                 name += " - opens"
             row.name.configure(text=f"  {name}", image=icon)

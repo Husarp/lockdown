@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lockdown</title>
+<style>
+  :root{
+    --bg:#101418; --sidebar:#0B0E12; --surface:#181D23; --surface2:#202730; --navact:#202730;
+    --border:#2B333D; --text:#E9EDF2; --muted:#8D9AA8; --accent:#DB5126;
+    --danger:#E05A44; --warn:#E2A32B; --ok:#27AE60; --special:#A78BFA; --info:#4E8FD1;
+    --r:10px;
+    --font:'Segoe UI',Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden}
+  #app{display:flex;height:100vh}
+
+  /* sidebar */
+  .side{width:230px;flex:0 0 230px;background:var(--sidebar);border-right:1px solid var(--border);
+        display:flex;flex-direction:column;padding:16px 12px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:17px;padding:6px 8px 16px}
+  .brand .mark{width:22px;height:22px;border-radius:6px;background:var(--accent);display:flex;align-items:center;
+        justify-content:center;font-size:13px}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:8px;color:var(--muted);
+        cursor:pointer;font-weight:500;user-select:none}
+  .nav a .ic{width:17px;text-align:center;opacity:.9}
+  .nav a:hover{background:var(--surface);color:var(--text)}
+  .nav a.on{background:var(--navact);color:var(--text)}
+  .nav a .badge{margin-left:auto;background:var(--accent);color:#fff;font-size:11px;font-weight:600;
+        border-radius:10px;padding:1px 7px}
+  .spacer{flex:1}
+  .status{padding:10px 10px 6px;border-top:1px solid var(--border);margin-top:8px}
+  .clock{font-size:22px;font-weight:700;letter-spacing:.02em}
+  .clock small{font-size:12px;font-weight:500;color:var(--muted);margin-left:8px}
+  .svc{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;margin-top:5px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  .dot.down{background:var(--danger)}
+
+  /* main */
+  .main{flex:1;overflow-y:auto;padding:22px 26px}
+  .head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
+  .head h1{font-size:24px;font-weight:700}
+  .head .date{color:var(--muted);font-size:13px}
+
+  .banner{display:flex;align-items:center;gap:12px;background:#2A1E19;border:1px solid var(--danger);
+        border-radius:var(--r);padding:12px 16px;margin-bottom:16px}
+  .banner .t{font-weight:600}
+  .banner .s{color:var(--muted);font-size:12.5px}
+  .banner button{margin-left:auto}
+  .banner.warn{border-color:var(--warn);background:#241d12}
+
+  button{font-family:var(--font);font-size:13px;font-weight:600;border:none;border-radius:8px;padding:8px 14px;
+        cursor:pointer;background:var(--accent);color:#fff}
+  button.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+  button.sm{padding:5px 10px;font-size:12px}
+
+  .grid{display:grid;gap:14px}
+  .stats{grid-template-columns:repeat(4,1fr)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px}
+  .card h3{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;
+        margin-bottom:10px}
+  .tile .lab{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .tile .val{font-size:30px;font-weight:700;margin-top:6px;line-height:1}
+  .tile .sub{color:var(--muted);font-size:12px;margin-top:6px}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+
+  /* limits / rows */
+  .row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+  .row:first-child{border-top:none}
+  .row .name{font-weight:600}
+  .row .r{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .bar{height:6px;border-radius:4px;background:var(--surface2);overflow:hidden;width:100%;margin-top:8px}
+  .bar > i{display:block;height:100%;background:var(--accent)}
+  .chip{font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:20px}
+  .chip.red{background:rgba(224,90,68,.16);color:var(--danger)}
+  .chip.warn{background:rgba(226,163,43,.16);color:var(--warn)}
+  .chip.ok{background:rgba(39,174,96,.16);color:var(--ok)}
+  .chip.special{background:rgba(167,139,250,.16);color:var(--special)}
+  .chip.off{background:var(--surface2);color:var(--muted)}
+
+  /* 7-day chart */
+  .chart{display:flex;align-items:flex-end;gap:10px;height:130px;margin-top:6px}
+  .chart .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .chart .col i{width:70%;background:var(--surface2);border-radius:5px 5px 0 0;min-height:2px}
+  .chart .col.hi i{background:var(--accent)}
+  .chart .col span{color:var(--muted);font-size:11px}
+
+  .muted{color:var(--muted)}
+  .empty{color:var(--muted);padding:14px 0}
+  .pagepad{max-width:1180px}
+  .soon{border:1px dashed var(--border);border-radius:var(--r);padding:28px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav class="side">
+    <div class="brand"><span class="mark">🛡</span> Lockdown</div>
+    <div class="nav" id="nav"></div>
+    <div class="spacer"></div>
+    <div class="status">
+      <div class="clock" id="clock">--:--<small id="cdate"></small></div>
+      <div class="svc"><span class="dot" id="svcdot"></span><span id="svctext">…</span></div>
+    </div>
+    <div class="nav" style="margin-top:8px"><a data-page="settings"><span class="ic">⚙</span> Settings</a></div>
+  </nav>
+  <main class="main"><div class="pagepad" id="view"></div></main>
+</div>
+
+<script>
+"use strict";
+// ---- state ----------------------------------------------------------------
+var S = { on:true, service:"down", rules:[], rem:[], emergencyLeft:0,
+          theme:"dark", accent:"Orange", home:{screenToday:"—",blockedToday:0,last7:[]}, page:"home" };
+var NAV = [["home","Home","🏠"],["blocking","Blocking","⛔"],["modes","Modes","🎚"],
+           ["insights","Insights","📊"],["reminders","Reminders","🔔"],["guardrails","Guardrails","🛡"]];
+
+function api(){ return (window.pywebview && window.pywebview.api) || null; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+// ---- boot -----------------------------------------------------------------
+function hydrate(){
+  var a = api();
+  if (a && a.get_state){ a.get_state().then(function(s){ if(s){ Object.assign(S,s); render(); } })
+                          .catch(function(){}); }
+  if (a && a.ui_ready) a.ui_ready();
+}
+window.lockdown = { push:function(s){ if(s){ Object.assign(S,s); render(); } } };
+window.addEventListener("pywebviewready", hydrate);
+
+function tickClock(){
+  var d=new Date(), days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],
+      mon=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  document.getElementById("clock").firstChild.nodeValue =
+    String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+  document.getElementById("cdate").textContent = days[d.getDay()]+" "+d.getDate()+" "+mon[d.getMonth()];
+}
+
+// ---- nav / router ---------------------------------------------------------
+function drawNav(){
+  var badge = S.rules.filter(function(r){return r.enabled;}).length;
+  document.getElementById("nav").innerHTML = NAV.map(function(n){
+    var b = (n[0]==="blocking" && badge) ? '<span class="badge">'+badge+'</span>' : '';
+    return '<a data-page="'+n[0]+'" class="'+(S.page===n[0]?"on":"")+'"><span class="ic">'+n[2]+'</span> '+n[1]+b+'</a>';
+  }).join("");
+}
+document.addEventListener("click", function(e){
+  var a = e.target.closest("a[data-page]"); if(!a) return;
+  S.page = a.getAttribute("data-page"); render();
+});
+
+// ---- rule state (mirrors the engine's colours) ----------------------------
+function ruleState(r){
+  if(!r.enabled) return ["off","Disabled"];
+  if(r.limitType!=="off" && r.limit){
+    if(r.used>=r.limit) return ["red","Limit reached"];
+    if(r.used>=r.limit*0.85) return ["warn",(r.limit-r.used)+" min left"];
+    return ["ok",(r.limit-r.used)+" min left"];
+  }
+  if(r.allowActive) return ["special","Allowance · "+r.allowLeft+" min"];
+  if(r.windows && r.windows.length) return ["ok","On a schedule"];
+  return ["red","Blocked"];
+}
+
+// ---- pages ----------------------------------------------------------------
+function svc(){ return S.service==="ok" && S.on; }
+
+function pageHome(){
+  var h=S.home||{}, tiles=[
+    ["Screen time today", h.screenToday||"—", ""],
+    ["Blocked tries", (h.blockedToday||0), ""],
+    ["Rules", S.rules.length, S.rules.filter(function(r){return r.enabled;}).length+" active"],
+    ["Blocking now", (!S.on?"0":(!svc()?"0":String(S.rules.filter(function(r){return r.enabled && ruleState(r)[0]==="red";}).length))),
+      (!S.on?"Lockdown is off":(!svc()?"Service stopped":"of "+S.rules.length+" rules"))]
+  ];
+  var last7=h.last7||[], max=Math.max.apply(null,last7.map(function(d){return d.v;}).concat([1]));
+  var lim = S.rules.filter(function(r){return r.limitType!=="off" && r.limit;});
+  return banner()+
+  '<div class="grid stats">'+tiles.map(function(t){
+    return '<div class="card tile"><div class="lab">'+esc(t[0])+'</div><div class="val">'+esc(t[1])+
+      '</div><div class="sub">'+esc(t[2])+'</div></div>'; }).join("")+'</div>'+
+  '<div class="cols">'+
+    '<div class="card"><h3>Limits today</h3>'+ (lim.length? lim.map(function(r){
+        var st=ruleState(r), pct=Math.min(100,Math.round(r.used/r.limit*100));
+        return '<div class="row"><div style="flex:1"><div class="name">'+esc(r.n)+'</div>'+
+          '<div class="bar"><i style="width:'+pct+'%;background:var(--'+(st[0]==="off"?"muted":st[0])+')"></i></div></div>'+
+          '<div class="r"><span class="muted">'+r.used+' / '+r.limit+' min</span><span class="chip '+st[0]+'">'+esc(st[1])+'</span></div></div>';
+      }).join("") : '<div class="empty">No time limits set.</div>')+'</div>'+
+    '<div class="card"><h3>Last 7 days</h3><div class="chart">'+ (last7.length? last7.map(function(d){
+        var hi = d.v===max && d.v>0;
+        return '<div class="col'+(hi?" hi":"")+'"><i style="height:'+Math.round(d.v/max*100)+'%"></i><span>'+esc(d.d)+'</span></div>';
+      }).join("") : '<div class="empty">No history yet.</div>')+'</div></div>'+
+  '</div>';
+}
+
+function pageBlocking(){
+  if(!S.rules.length) return banner()+'<div class="card"><div class="empty">No sites or apps blocked yet.</div></div>';
+  return banner()+'<div class="card"><h3>Overview · '+S.rules.length+'</h3>'+
+    S.rules.map(function(r){
+      var st=ruleState(r);
+      return '<div class="row"><div style="flex:1"><div class="name">'+esc(r.n)+
+        (r.group?' <span class="muted">· '+esc(r.group)+'</span>':'')+'</div>'+
+        '<div class="muted" style="font-size:12px">'+esc(r.kind==="app"?r.target:r.target.split(" ")[0])+'</div></div>'+
+        '<div class="r"><span class="chip '+st[0]+'">'+esc(st[1])+'</span>'+
+        '<button class="ghost sm" data-toggle="'+esc(r.id)+'">'+(r.enabled?"Disable":"Enable")+'</button></div></div>';
+    }).join("")+'</div>';
+}
+
+function banner(){
+  if(!S.on) return '<div class="banner"><span>⚠</span><div><div class="t">Lockdown is off — nothing is being enforced</div>'+
+    '<div class="s">Blocking, limits and reminders are paused.</div></div>'+
+    '<button data-act="on">Turn back on</button></div>';
+  if(S.service!=="ok") return '<div class="banner warn"><span>⚠</span><div><div class="t">The service isn\'t running</div>'+
+    '<div class="s">Your rules are saved, but nothing is enforced until it restarts.</div></div>'+
+    '<button data-act="restart">Restart service</button></div>';
+  return "";
+}
+
+function pageSoon(name){ return '<div class="soon"><b>'+esc(name)+'</b><br>Being rebuilt in the new UI — coming next.</div>'; }
+
+var PAGES = { home:pageHome, blocking:pageBlocking };
+function render(){
+  drawNav();
+  document.getElementById("svcdot").className = "dot"+(svc()?"":" down");
+  document.getElementById("svctext").textContent = !S.on ? "Lockdown is off" : (S.service==="ok"?"Service running":"Service not running");
+  var titles={home:"Home",blocking:"Blocking",modes:"Modes",insights:"Insights",reminders:"Reminders",guardrails:"Guardrails",settings:"Settings"};
+  var d=new Date(), mon=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var body = (PAGES[S.page]||function(){return pageSoon(titles[S.page]||S.page);})();
+  document.getElementById("view").innerHTML =
+    '<div class="head"><h1>'+esc(titles[S.page]||S.page)+'</h1>'+
+    '<span class="date">'+["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()]+
+      ", "+d.getDate()+" "+mon[d.getMonth()]+'</span></div>'+ body;
+}
+
+// ---- actions --------------------------------------------------------------
+document.addEventListener("click", function(e){
+  var t=e.target.closest("[data-act],[data-toggle]"); if(!t) return; var a=api();
+  if(t.dataset.act==="on" && a){ a.set_enabled(true).then(hydrate); }
+  else if(t.dataset.act==="restart" && a){ a.restart_service(); }
+  else if(t.dataset.toggle && a){
+    var r=S.rules.filter(function(x){return String(x.id)===t.dataset.toggle;})[0];
+    if(r) a.save_rule(Object.assign({},r,{enabled:!r.enabled})).then(hydrate);
+  }
+});
+
+tickClock(); setInterval(tickClock,10000); render();
+if (api()) hydrate();           // api already there (rare); else pywebviewready fires
+</script>
+</body>
+</html>

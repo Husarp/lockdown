@@ -38,10 +38,10 @@ def _nudges_after_answering(tmp_path, repeat):
     """How many times the "Time for bed" overlay is back within 45 seconds of you answering it."""
     db, ui, e = setup(tmp_path)
     reminders.save(db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "bedtime": "23:00",
-                                             "wake": "07:00", "repeat": repeat})
+                                             "wake": "07:00", "repeat": repeat, "tiers": []})
     t = run(e, NOW.replace(hour=23), 1)
     assert ui.shown[-1][:2] == ("overlay", "sleep")
-    e.answer("sleep", "bed")
+    e.answer("sleep", "dismiss")
     run(e, t, 0.75)
     return [s[1] for s in ui.shown].count("sleep") - 1
 

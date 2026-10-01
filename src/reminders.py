@@ -10,7 +10,7 @@ that is over rather than being skipped.
 import json
 import random
 import re
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from rules import TIME_FMT, days_text, parse_hhmm
 
@@ -28,16 +28,25 @@ SLEEP_TEXT = "It's {time}. Sleep well - the screen can wait until tomorrow."
 BREAK_TEXT = "You've been at the PC for {every} min. Take {length} min away from the screen."
 TWENTY_TEXT = "20-20-20: look at something 20 feet (6 m) away for 20 seconds."
 DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat": 5, "mode": "",
-                 "warn_text": "", "text": ""}
+                 "warn_text": "", "text": "",
+                 # The later it gets, the more often the bedtime screen comes back after you dismiss it - so that
+                 # going to bed is easier than fending it off. Each tier is {"from": "HH:MM", "every": minutes},
+                 # read within the night; the latest tier whose time has passed wins. Fully editable.
+                 "tiers": [{"from": "21:00", "every": 15}, {"from": "00:00", "every": 5},
+                           {"from": "03:00", "every": 1}],
+                 "guarded": False}   # dismissing the bedtime screen needs the Anti-Bypass challenge
 DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "strict": False, "snooze": 5, "max_snooze": 2,
-                 "twenty": False, "text": "", "twenty_text": ""}
+                 "twenty": False, "text": "", "twenty_text": "", "guarded": False}
 DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
                   "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
                   "check": 0, "packs": [], "quotes": "",
                   "hours": False,      # only between window[0] and window[1] (every kind, not just random)
-                  "per_day": 0}        # stop for the day after this many Done (0 = no limit)
+                  "per_day": 0,        # stop for the day after this many Done (0 = no limit)
+                  "guarded": False}    # important: dismissing needs the Anti-Bypass challenge
 GROUP_MIN = 5          # a reminder due within this many minutes of one already on screen joins it
 DISMISS_MARK = "✕"    # the X button: closes it without claiming you did it
+PACE_MIN = 20          # at most one interruption per this many minutes - what comes due in between waits for it
+BACKOFF_AFTER = 3      # waved away this many times in a row: it asks half as often for the rest of the day
 
 # Short public-domain quotes
 PACKS = {
@@ -129,6 +138,19 @@ def counts(db, what: str, since: datetime) -> dict[str, int]:
     return dict(rows.fetchall())
 
 
+def loosens_reminder(old: dict, new: dict) -> bool:
+    """A change that weakens an IMPORTANT alert - turning it off, or removing its "important" flag.
+    Those need the Anti-Bypass challenge; ordinary edits (times, message, frequency) do not."""
+    if not old.get("guarded"):
+        return False
+    return bool((old.get("on") and not new.get("on")) or not new.get("guarded"))
+
+
+def tiers_of(s: dict) -> list[dict]:
+    """The sleep escalation tiers, earliest first. Empty means "use the flat `repeat` instead"."""
+    return sorted(s.get("tiers") or [], key=lambda t: parse_hhmm(t["from"]))
+
+
 def schedule_text(r: dict) -> str:
     if r["kind"] == "interval":
         text = f"every {r['every']} min of use"
@@ -166,6 +188,12 @@ class Engine:
         self.sleep_next: dict[str, datetime] = {}            # night -> next bedtime overlay
         self.done_today: dict[tuple, int] = {}               # (reminder, date) -> times done (the daily limit)
         self.grouped: dict[str, list[str]] = {}              # popup key -> the reminders it is showing
+        self.last_interruption: datetime | None = None       # when a reminder or break prompt last came up
+        self.pending: list[str] = []                         # reminders due while the pace said "not yet"
+        self.folded: list[str] = []                          # reminders riding along in the break prompt
+        self.streak: dict[str, int] = {}                     # reminder id / "break" -> dismissed in a row
+        self.backed_off: dict[str, date] = {}                # reminder id / "break" -> the day it asks less
+        self.break_due: dict | None = None                   # the break settings, when it comes up this tick
 
     # ---------- showing ----------
 
@@ -180,6 +208,32 @@ class Engine:
         self.waiting.pop(key, None)
         self.open.add(key)
         self.ui.popup(key, title, text, buttons)
+        if key == "break" or key.startswith("custom:"):
+            self.last_interruption = self.now
+
+    def _paced(self, now: datetime) -> bool:
+        """Too soon for another interruption? Break, hydrate and pull-ups used to arrive one after another, some
+        forty times a day. Now at most one comes up per PACE_MIN minutes, and whatever falls due in between waits
+        and arrives with the next one. Something already on screen does not count against it: what comes due
+        then simply joins it."""
+        if any(k == "break" or k.startswith("custom:") for k in self.open):
+            return False
+        return self.last_interruption is not None and now - self.last_interruption < timedelta(minutes=PACE_MIN)
+
+    def _every(self, key: str, minutes: float, now: datetime) -> float:
+        """An interval - doubled for the rest of the day once you have waved it away BACKOFF_AFTER times running."""
+        return minutes * (2 if self.backed_off.get(key) == now.date() else 1)
+
+    def _dismissed(self, key: str, name: str, now: datetime):
+        """A reminder you keep waving away is noise. After BACKOFF_AFTER in a row it asks half as often for the
+        rest of the day, and says so once. Doing it (or taking the break) starts the count again."""
+        self.streak[key] = self.streak.get(key, 0) + 1
+        if self.streak[key] >= BACKOFF_AFTER and self.backed_off.get(key) != now.date():
+            self.backed_off[key] = now.date()
+            self.streak[key] = 0
+            short = name if len(name) <= 40 else name[:39].rstrip() + "…"
+            self.ui.toast(f'Skipped "{short}" {BACKOFF_AFTER} times in a row - it will ask half as often for the '
+                          f"rest of today.")
 
     def _overlay(self, key: str, title: str, text: str, until: datetime | None, buttons: list[tuple[str, str]]):
         if self.quiet:
@@ -206,6 +260,12 @@ class Engine:
         self._breaks(now, idle_sec, using, dt)
         self._sleep(now)
         self._custom(now, using, dt)
+        if self.break_due:
+            # Shown last, so that a reminder falling due in the same tick is already folded in: drawn once,
+            # rather than drawn and then torn down and drawn again with one more line.
+            self._absorb()
+            self._show_break(self.break_due)
+            self.break_due = None
         if not fullscreen:
             for key, (title, text, buttons) in list(self.waiting.items()):
                 self._popup(key, title, text, buttons)
@@ -239,22 +299,52 @@ class Engine:
                     self.ui.toast(message(b.get("twenty_text"), TWENTY_TEXT))
         if now < self.snoozed.get("break", now):
             return
-        if self.continuous >= b["every"] * 60 and "break" not in self.open:
-            strict = b.get("strict")
-            snoozes_left = self.break_snoozes < b.get("max_snooze", 2)
-            if strict and not snoozes_left:
-                self._start_break(now, b)   # strict, out of snoozes -> the break starts by itself
+        if self.continuous >= self._every("break", b["every"], now) * 60 and "break" not in self.open:
+            if b.get("strict") and self.break_snoozes >= b.get("max_snooze", 2):
+                self._start_break(now, b)   # strict, out of snoozes -> starts by itself, and never waits for the pace
                 return
-            buttons = [("Start break", "start")]
-            if not strict or snoozes_left:
-                buttons.append((f"Snooze {b.get('snooze', 5)} min", "snooze"))
-            if not strict:          # a strict break must not gain a one-click way out
-                buttons.append((DISMISS_MARK, "dismiss"))
-            self._popup("break", "Time for a break",
-                        message(b.get("text"), BREAK_TEXT, every=b["every"], length=b["length"])
-                        + (f"\n\nStrict break: {b.get('max_snooze', 2) - self.break_snoozes} snooze"
-                           f"{'s' * (b.get('max_snooze', 2) - self.break_snoozes != 1)} left, then it starts on its "
-                           "own." if strict else ""), buttons)
+            if "break" not in self.snoozed and self._paced(now):
+                return                      # too soon after the last one: it comes when the pace allows
+            self.snoozed.pop("break", None)  # (back from a snooze: you asked for it now, so it does not wait)
+            self.break_due = b              # (shown at the end of the tick - see tick)
+
+    def _absorb(self):
+        """One popup, not two: reminders waiting for the pace, or on screen now, ride along in the break."""
+        for key in [k for k in self.open if k.startswith("custom:")]:
+            self.folded += [rid for rid in self.grouped.pop(key, [key.split(":", 1)[1]]) if rid not in self.folded]
+            self._close(key)
+        self.folded += [rid for rid in self.pending if rid not in self.folded]
+        self.pending = []
+
+    def _outstanding(self, rid: str) -> bool:
+        """Is this reminder still waiting for you - on screen (on its own, in a group, in the break prompt) or
+        queued for the pace? Then it can't come due again: its next interval starts once this one is dealt with.
+        Otherwise a reminder queued for a while was due again the moment it was shown, and opened a second
+        popup next to the first."""
+        if rid in self.pending or rid in self.folded:
+            return True
+        return any(rid in self.grouped.get(k, [k.split(":", 1)[1]]) for k in self.open if k.startswith("custom:"))
+
+    def _show_break(self, b: dict):
+        """The break prompt, with whatever reminders are riding along in it ("While you're up: ...")."""
+        strict = b.get("strict")
+        snoozes_left = self.break_snoozes < b.get("max_snooze", 2)
+        buttons = [("Start break", "start")]
+        if not strict or snoozes_left:
+            buttons.append((f"Snooze {b.get('snooze', 5)} min", "snooze"))
+        if not strict:          # a strict break must not gain a one-click way out
+            buttons.append((DISMISS_MARK, "dismiss"))
+        text = (message(b.get("text"), BREAK_TEXT, every=b["every"], length=b["length"])
+                + (f"\n\nStrict break: {b.get('max_snooze', 2) - self.break_snoozes} snooze"
+                   f"{'s' * (b.get('max_snooze', 2) - self.break_snoozes != 1)} left, then it starts on its "
+                   "own." if strict else ""))
+        by_id = {x["id"]: x for x in custom_list(self.db)}
+        lines = [by_id[rid]["text"] for rid in self.folded if rid in by_id]
+        if lines:
+            text += "\n\nWhile you're up:\n" + "\n".join(f"• {line}" for line in lines)
+        if "break" in self.open:    # re-shown whole when another reminder joins it - but only if it is on
+            self._close("break")    # screen: closing also drops the full-screen hold, which re-toasts it
+        self._popup("break", "Time for a break", text, buttons)
 
     def _start_break(self, now, b):
         """A strict break: your windows are minimised until it's over (the UI enforces it)."""
@@ -277,6 +367,25 @@ class Engine:
             if bed - timedelta(minutes=s["before"]) <= now < wake:
                 return bed, wake
         return None
+
+    def _sleep_interval(self, s: dict, bed: datetime, now: datetime) -> int:
+        """Minutes until the bedtime screen returns after a dismiss - from the active escalation tier. With no
+        tiers set it falls back to the old flat `repeat`."""
+        wake_t = parse_hhmm(s["wake"])
+        best = None
+        for t in tiers_of(s):
+            tier_t = parse_hhmm(t["from"])
+            if tier_t >= bed.time():                       # same evening, at/after bedtime (e.g. 23:30)
+                when = datetime.combine(bed.date(), tier_t)
+            elif tier_t < wake_t:                          # after midnight, before waking (e.g. 00:00, 03:00)
+                when = datetime.combine(bed.date() + timedelta(days=1), tier_t)
+            else:                                          # earlier in the evening than bedtime (e.g. 21:00):
+                when = bed                                 # already past by the time the screen starts
+            if when <= now and (best is None or when > best[0]):
+                best = (when, int(t["every"]))
+        if best:
+            return max(1, int(best[1]))          # tiers are whole minutes, never below 1
+        return s.get("repeat", 5)                # past bedtime but before the first tier: the old flat value
 
     def _sleep(self, now):
         s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
@@ -303,7 +412,7 @@ class Engine:
             self._overlay("sleep", "Time for bed",
                           message(s.get("text"), SLEEP_TEXT, time=f"{now:%H:%M}", bedtime=f"{bed:%H:%M}",
                                   wake=f"{wake:%H:%M}"),
-                          None, [("Going to bed", "bed"), ("5 more minutes", "more")])
+                          None, [("Dismiss", "dismiss"), ("Disable alerts", "disable")])
 
     # ---------- your reminders ----------
 
@@ -338,12 +447,12 @@ class Engine:
             if key in self.snoozed:
                 if now >= self.snoozed[key] and key not in self.open:
                     del self.snoozed[key]
-                    self._fire(r, now)
+                    self._fire(r, now, paced=False)   # you asked for it back now: it does not wait
                 continue
             if r["kind"] == "interval":
-                if using:
+                if using and not self._outstanding(r["id"]):
                     self.counters[r["id"]] = self.counters.get(r["id"], 0) + dt
-                if self.counters.get(r["id"], 0) >= r["every"] * 60:
+                if self.counters.get(r["id"], 0) >= self._every(r["id"], r["every"], now) * 60:
                     self.counters[r["id"]] = 0
                     self._fire(r, now)
             elif r["kind"] == "times":
@@ -363,6 +472,19 @@ class Engine:
                 if at <= now < at + timedelta(minutes=LATE_FIRE_MIN) and (r["id"], today, "random") not in self.fired:
                     self.fired.add((r["id"], today, "random"))
                     self._fire(r, now)
+        if self.pending and not self.fullscreen and not self._paced(now):
+            # the pace allows another interruption: everything that waited comes up together, as one popup
+            due, self.pending = self.pending, []
+            by_id = {x["id"]: x for x in custom_list(self.db)}
+            # still allowed? Its hours may have ended, or its "stop after N done today" been reached, while it waited
+            due = [rid for rid in due if rid in by_id and by_id[rid]["on"] and self._allowed_now(by_id[rid], now)]
+            if len(due) == 1:
+                self._fire(by_id[due[0]], now, paced=False)
+            elif due:                           # drawn once with every line, not once per reminder joining it
+                key = f"custom:{due[0]}"
+                self.grouped[key] = due
+                self._regroup(key, now)
+                self.last_interruption = now
         for rid, at in list(self.checks.items()):
             if now >= at:
                 del self.checks[rid]
@@ -376,14 +498,28 @@ class Engine:
             pool += PACKS.get(pack, [])
         return self.rng.choice(pool) if pool else ""
 
-    def _fire(self, r: dict, now: datetime):
+    def _fire(self, r: dict, now: datetime, paced: bool = True):
         """Show a reminder; Snooze only while it has snoozes left (then it stays until Done).
         One already on screen takes this one in with it, so two things you could do in one go interrupt you
-        once instead of twice."""
+        once instead of twice - and so does the break prompt. Too soon after the last interruption, it waits."""
+        if self._outstanding(r["id"]):               # already waiting for you: once is enough
+            return
+        if self.break_due:                           # a break comes up this very tick: it rides along in that
+            self.pending.append(r["id"])
+            return
+        if "break" in self.open:                     # you are about to get up anyway: it rides along
+            if r["id"] not in self.folded:
+                self.folded.append(r["id"])
+                self._show_break(load(self.db, BREAK_KEY, DEFAULT_BREAK))
+            return
         open_key = next((k for k in self.open if k.startswith("custom:")), None)
         if open_key and open_key != f"custom:{r['id']}" and r["id"] not in self.grouped.get(open_key, []):
             self.grouped.setdefault(open_key, [open_key.split(":", 1)[1]]).append(r["id"])
             self._regroup(open_key, now)
+            return
+        if paced and not open_key and self._paced(now):
+            if r["id"] not in self.pending:
+                self.pending.append(r["id"])
             return
         key = f"custom:{r['id']}"
         self.grouped[key] = [r["id"]]
@@ -415,6 +551,8 @@ class Engine:
         self.open.discard(key)
         if key == "break":
             b = load(self.db, BREAK_KEY, DEFAULT_BREAK)
+            folded, self.folded = self.folded, []
+            by_id = {x["id"]: x for x in custom_list(self.db)}
             if action == "start":
                 if b.get("strict"):
                     self._start_break(now, b)          # strict: enforce it (minimise windows)
@@ -422,21 +560,39 @@ class Engine:
                     self.continuous = 0
                     self.break_snoozes = 0
                     log(self.db, "break", "taken", now)
+                self.streak["break"] = 0
+                for rid in folded:                      # up and away: not "done" (that is yours to say), not skipped
+                    log(self.db, rid, "with break", now)
+                    self.streak[rid] = 0
             elif action == "snooze":
                 self.break_snoozes += 1
                 self.snoozed["break"] = now + timedelta(minutes=b.get("snooze", 5))
                 log(self.db, "break", "snoozed", now)
+                self.folded = folded                    # they come back with it
             elif action == "dismiss":
                 self.continuous = 0     # skipped, not taken: it asks again after another full stretch of use
                 self.break_snoozes = 0
                 log(self.db, "break", "dismissed", now)
+                self._dismissed("break", "Time for a break", now)
+                for rid in folded:
+                    log(self.db, rid, "dismissed", now)
+                    if rid in by_id:
+                        self._dismissed(rid, by_id[rid]["text"], now)
         elif key == "sleep":
             s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
             night = self._night(s, now)
             if night:
-                wait = 5 if action == "more" else s["repeat"]
-                self.sleep_next[night[0].strftime(TIME_FMT)] = now + timedelta(minutes=wait)
-            log(self.db, "sleep", action, now)
+                bed, wake = night
+                nkey = bed.strftime(TIME_FMT)
+                if action == "off_tonight":                 # behind the challenge: no more tonight
+                    self.sleep_next[nkey] = wake
+                    log(self.db, "sleep", "off tonight", now)
+                elif action.startswith("snooze:"):          # behind the challenge: your own amount
+                    self.sleep_next[nkey] = now + timedelta(minutes=max(1, int(action.split(":", 1)[1])))
+                    log(self.db, "sleep", "snoozed", now)
+                else:                                        # "dismiss": back after the escalating interval
+                    self.sleep_next[nkey] = now + timedelta(minutes=self._sleep_interval(s, bed, now))
+                    log(self.db, "sleep", "dismissed", now)
         elif key.startswith("custom:"):
             by_id = {x["id"]: x for x in custom_list(self.db)}
             for rid in self.grouped.pop(key, [key.split(":", 1)[1]]):   # one answer for everything it showed
@@ -445,6 +601,7 @@ class Engine:
                     continue
                 if action == "done":
                     self.snoozes_used.pop(key, None)
+                    self.streak[rid] = 0
                     log(self.db, rid, "done", now)
                     self.done_today[(rid, now.date())] = self.done_today.get((rid, now.date()), 0) + 1
                     self.counters[rid] = 0
@@ -460,10 +617,11 @@ class Engine:
                     # counter (reset when it fired) and `fired` already arrange.
                     self.snoozes_used.pop(key, None)
                     log(self.db, rid, "dismissed", now)
+                    self._dismissed(rid, r["text"], now)
         elif key.startswith("check:"):
             rid = key.split(":", 1)[1]
             log(self.db, rid, "really done" if action == "yes" else "not done", now)
             if action == "no":
                 r = next((x for x in custom_list(self.db) if x["id"] == rid), None)
                 if r:
-                    self._fire(r, now)
+                    self._fire(r, now, paced=False)

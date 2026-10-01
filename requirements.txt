@@ -5,3 +5,4 @@ uiautomation
 pytest
 pyinstaller
 pywin32
+pywebview

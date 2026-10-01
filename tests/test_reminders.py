@@ -98,14 +98,14 @@ def test_snooze_limit_and_double_check(tmp_path):
 def test_sleep_warning_overlay_repeat_and_mode(tmp_path):
     db, ui, e = setup(tmp_path)
     reminders.save(db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "bedtime": "23:00",
-                                             "wake": "07:00", "mode": "dnd"})
+                                             "wake": "07:00", "mode": "dnd", "tiers": [], "repeat": 5})
     t = run(e, NOW.replace(hour=22, minute=29), 2)
     assert ui.shown[-1][1] == "sleep-warn"
     t = run(e, NOW.replace(hour=23), 1)
     assert ui.shown[-1][:2] == ("overlay", "sleep") and ui.modes == [("dnd", datetime(2026, 9, 15, 7, 0))]
-    e.answer("sleep", "bed")
+    e.answer("sleep", "dismiss")
     run(e, t, 6)
-    assert [s[1] for s in ui.shown].count("sleep") == 2                       # again after 5 min
+    assert [s[1] for s in ui.shown].count("sleep") == 2                       # again after 5 min (no tiers)
     run(e, datetime(2026, 9, 15, 7, 1), 1)
     assert "sleep" in ui.closed
 

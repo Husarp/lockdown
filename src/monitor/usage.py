@@ -13,7 +13,7 @@ import modes
 from blocker.apps import list_processes
 from blocker.hosts import normalize_host
 from db import Database
-from rules import effective_rules, switch_targets, usage_targets, visit_targets
+from rules import counted_rules, switch_targets, usage_targets, visit_targets
 from trusted_time import now_from_db
 
 TICK_SEC = 2
@@ -149,13 +149,13 @@ class UsageTracker(threading.Thread):
             app_launched = is_app and item["target"].lower() in launched
             if not (app_launched or (not is_app and item["id"] in used_ids)):
                 continue
-            rules = effective_rules(item, groups)
+            rules = counted_rules(item, groups)
             last = self.last_used.get(item["id"])
             away = None if last is None else now_ts - last
             # opening limits in "launches / new visits" mode
             db.add_usage(visit_targets(rules, item, now, app_launched, away, clock), 1, now.date())
         for item in used:
-            rules = effective_rules(item, groups)
+            rules = counted_rules(item, groups)
             db.add_usage(usage_targets(rules, item["id"], now, clock), TICK_SEC, now.date())
             if switched:   # you just switched to it (opening limits in "every switch" mode)
                 db.add_usage(switch_targets(rules, item["id"], now, clock), 1, now.date())

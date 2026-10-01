@@ -44,6 +44,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   or on a schedule; also from the tray menu.
 - **Reminders** (Phase 6b): bedtime overlay, break reminders (optionally forced), your own reminders (interval / set
   times / random) with snooze, "did you really do it?" check and quotes; they wait while you're in a full-screen game.
+  At most one interruption every 20 minutes (what falls due in between arrives together), a reminder you keep
+  dismissing asks half as often for the rest of the day, and reminders due around a break ride along in it.
 - **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
   emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
   pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)

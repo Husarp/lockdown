@@ -30,7 +30,7 @@ WARN_MINUTE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 60]
 REPEAT_OPTIONS = [0, 1, 2, 5, 10]   # 0 = don't repeat
 # notify.format defaults to Lockdown's own popup (nicer than the Windows toast and it doesn't pile up in the
 # Action Center); the Notifications page still offers Windows notification / Both.
-DEFAULTS = {"notify.cooldown_min": "5", "notify.format": "inapp",
+DEFAULTS = {"notify.cooldown_min": "30", "notify.format": "inapp",
             "notify.warn.enabled": "1", "notify.warn.minutes": "5", "notify.warn.repeat_min": "0",
             "notify.started.enabled": "1"}
 for _r in REASONS:
@@ -94,7 +94,7 @@ class BlockWatcher:
         self.warned: dict[tuple, datetime] = {}   # warning key -> when last shown
         self.prev_blocked: set[int] | None = None
         # the messages from the last check that are about something you are using right now. Those get through
-        # a mode that mutes, or Do not disturb, or the "Mute 1 h" button: being told the thing in front of you
+        # a mode that mutes, or Do not disturb: being told the thing in front of you
         # is about to go is the one notice that is worth interrupting a game for.
         self.urgent: set[str] = set()
 

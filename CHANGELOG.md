@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.83.3 - 2026-09-29 22:47
+- **Opening the window is instant again (redesign Phase 0).** Clicking the icon while the tray agent is already running no longer imports the whole GUI (customtkinter, PIL, COM, every page) before checking that an instance is already running — that import happens only for the instance that actually shows the UI. The "wait ~10 s for the window" on a normal click is gone.
+- **No more freeze when dismissing the bedtime / break overlay.** The full-screen cover is now torn down *before* its answer runs (e.g. "Disable alerts", which opens the Anti-Bypass challenge). Previously the challenge appeared behind the still-up cover and the app looked frozen. The challenge window is also forced on top. Covered by `tests/test_overlay_teardown.py`.
+- Added `pywebview` to requirements (for the in-progress web-UI redesign; see design/REDESIGN.md §11).
+
+## 0.83.2 - 2026-09-27 17:25
+- **Fewer repeat "site blocked" notifications.** The per-site cooldown is now remembered across restarts, so a restart no longer forgets it and re-notifies at once on the next background connection (browsers and other apps quietly hit youtube.com / googlevideo.com even when you're not on YouTube). The default cooldown is also raised from 5 to 30 minutes.
+
+## 0.83.1 - 2026-09-27 15:44
+- **Corner notifications position correctly on scaled displays.** On a display above 100% scaling the pop-ups were rendered larger than they were placed, so they spilled off the right edge and sat over the taskbar. They now sit just above the taskbar (using the desktop work area) and account for the scaling, so they're never cut off.
+
+## 0.83.0 - 2026-09-27 06:26
+- **Mark an alert "important" and you can't turn it off without the challenge.** Each reminder - sleep, breaks, and your own - now has an **Important** switch. When it's on, that alert can't be turned off, un-flagged, or deleted in the settings without the Anti-Bypass challenge - so you can't just disable an annoying reminder to escape it. Dismissing the popup itself stays free; it's the settings that are locked. Off by default.
+
+## 0.82.0 - 2026-09-27 06:08
+- **The bedtime alerts can now be tuned in the app.** The Sleep card has an escalation editor: steps of "every N min, after HH:MM" that you can add and remove. The later it gets, the more often the "Time for bed" screen comes back after you dismiss it (default: every 15 min from 21:00, every 5 from midnight, every 1 from 3 a.m.). The escalation itself has worked since 0.81.0; this adds the controls for it and replaces the old single "Repeat every" field.
+
+## 0.81.2 - 2026-09-27 05:14
+- **Reminders and Modes open faster.** Their editor forms - a couple hundred widgets each - are now built the first time you open one, not every time the page loads. The pages come up with far fewer widgets (Reminders 426->259, Modes 392->216), so they render noticeably quicker; opening an editor costs about a second, once, then it's reused. Nothing was removed - everything still works.
+
+## 0.81.1 - 2026-09-27 04:36
+- **The window opens maximized and can't be shrunk.** Lockdown now starts full-size and its size is locked (it keeps its title bar, so minimise and close-to-tray still work); reopening from the tray comes back full-size too.
+
+## 0.81.0 - 2026-09-26 20:24
+- **The bedtime screen gets more insistent the later it is.** Instead of one fixed repeat, the sleep reminder
+  now has editable escalation tiers: by default it comes back 15 minutes after you dismiss it from 21:00,
+  every 5 minutes after midnight, and every single minute after 03:00 - so going to bed is easier than
+  fending it off. The tiers are fully customizable (the visual editor lands with the new UI; the defaults work
+  now).
+- **The bedtime screen's buttons are Dismiss and Disable alerts.** Dismiss delays it by the current tier's
+  interval. **Disable alerts** is the only way to actually stop it, and it needs the Anti-Bypass challenge -
+  pass it and you can turn it off for the night or snooze your own amount. Cancelling the challenge just
+  dismisses it, so it always comes back on the escalation - never a free way out.
+- **Verified: the challenge-gated uninstall.** Removing Lockdown from Apps & Features runs the challenge first
+  and refuses unless it passes (this was already wired; confirmed end to end, no change needed).
+
+## 0.80.0 - 2026-09-25 21:22
+- **Fewer interruptions.** On a normal day a break every 45 minutes, "hydrate" every 45 and pull-ups every 60
+  came to about forty popups - most of them waved away (the break: taken 0 times out of 12). Three changes:
+  - **A pace.** At most one interruption every 20 minutes. Whatever falls due in between waits, and arrives
+    with the next one as a single popup - not three in a row. Something already on screen simply takes the
+    new one in. A snooze is not held back (you asked for it at that time), and neither is a strict break
+    that has run out of snoozes (the pace must not become a way to put it off).
+  - **Back-off.** Wave the same reminder away three times running and it asks half as often for the rest of
+    the day, and says so once. Doing it starts the count again.
+  - **Folded into the break.** Reminders due around a break ride along in it - "Time for a break ... While
+    you're up: drink some water" - one popup instead of two. Taking the break records them as "with break"
+    (not done - that is yours to say); dismissing it dismisses them too.
+- **Buttons only where they mean something.** Nearly every notice carried "Open Lockdown" and "Mute 1 h" -
+  a door to the app in general, and a way to silence something that fades by itself anyway. They are gone.
+  The weekly summary now has **See the week** (opens Screen Time) and a new version has **Install**, which
+  downloads and installs it; everything else is simply clicked away.
+- **Limits say which "today" they mean.** Screen Time counts from midnight; your limits reset at 03:00. So
+  two hours of play since midnight read as 28 minutes at 03:30, with nothing to say why. A limit whose day
+  does not start at midnight now says so: "0m / 2h 00m since 03:00", or "since Thu 03:00" just after
+  midnight.
+- **You can't miss that Lockdown is off.** Switched off from the Anti-Bypass page, it now also turns the tray
+  icon grey ("OFF - nothing is enforced") and puts a banner across the top of the Dashboard with a **Turn back
+  on** button. The Dashboard's "Blocked now" stops counting things as blocked while nothing acts on them.
+- Found while building the pace, and fixed: a reminder whose interval kept running while it waited could come
+  due again the moment it was shown and open a second popup beside the first; a reminder queued by the pace
+  could come up after its own hours had ended or its daily limit was reached; and a break held back by a game
+  would have been announced again on every tick.
+
+## 0.79.3 - 2026-09-25 21:00
+- **Disabling a group no longer stops its clock.** A disabled group got no rules at all, so its limit counted
+  nothing and read "0m / 2h 00m today" after 155 minutes of osu!, YouTube and Twitch. It was also a way round
+  the limit: disabling needs the challenge but enabling does not, so disable it, use it for hours, switch it
+  back on, and the limit started again from zero. Time and openings are now counted against every rule,
+  enforced right now or not; disabling stops the blocking only. The same goes for a disabled item's own limit.
+
 ## 0.79.2 - 2026-09-25 02:41
 - **The Windows app identity is now `com.husarp.lockdown`** (it was `Lockdown.App`), the same reverse-DNS
   shape these projects use everywhere else. It is what Windows hangs Lockdown's name and icon on for

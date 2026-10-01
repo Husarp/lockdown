@@ -29,3 +29,6 @@ desktop.ini
 *.tmp
 *.bak
 *.log
+
+# Android: machine-specific SDK path
+android/local.properties

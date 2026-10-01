@@ -199,11 +199,15 @@ class NotificationsPage(ctk.CTkFrame):
 
 
 class Popup(ctk.CTkToplevel):
-    """Small message that slides up and fades in at the bottom-right; an accent edge, the Lockdown mark, a close ✕
-    and (design 3l) "Open Lockdown" / "Mute 1 h" buttons. Click the text or wait (it stays while the mouse is over
-    it) to dismiss. `on_open()` brings Lockdown up, `on_mute()` holds popups for an hour."""
+    """Small message that slides up and fades in at the bottom-right; an accent edge, the Lockdown mark, a close ✕.
+    Click the text or wait (it stays while the mouse is over it) to dismiss.
 
-    def __init__(self, root, message: str, on_open=None, on_mute=None):
+    `action` is (label, callback) for the one thing worth doing about THIS message - "See the week" on the weekly
+    summary, "Install" on a new version - or None, which is most of them. Every notice used to carry "Open
+    Lockdown" and "Mute 1 h": a door to the app in general is not an answer to anything in particular, and a
+    notice that fades by itself does not need a button to make it stop."""
+
+    def __init__(self, root, message: str, action=None):
         super().__init__(root)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -211,7 +215,7 @@ class Popup(ctk.CTkToplevel):
             self.attributes("-alpha", 0.0)
         except Exception:
             pass
-        self.w, self.h = 400, 136 if (on_open or on_mute) else 96
+        self.w, self.h = 400, 136 if action else 96
         self.x = self.winfo_screenwidth() - self.w - 16
         self.target_y = self.winfo_screenheight() - self.h - 64
         self.arrived = False
@@ -231,15 +235,10 @@ class Popup(ctk.CTkToplevel):
         self.hovered = False
         for widget in (self, frame, inner, head, *head.winfo_children(), *inner.winfo_children()):
             widget.bind("<Button-1>", lambda e: self.close())
-        if on_open or on_mute:
-            buttons = ctk.CTkFrame(inner, fg_color="transparent")
-            buttons.pack(anchor="w", pady=(10, 0))
-            if on_open:
-                ctk.CTkButton(buttons, text="Open Lockdown", width=110, height=28, **theme.OUTLINE,
-                              command=lambda: (self.close(), on_open())).pack(side="left", padx=(0, 8))
-            if on_mute:
-                ctk.CTkButton(buttons, text="Mute 1 h", width=80, height=28, **{**theme.OUTLINE, "text_color": MUTED},
-                              command=lambda: (self.close(), on_mute())).pack(side="left")
+        if action:
+            label, run = action
+            ctk.CTkButton(inner, text=label, width=110, height=28, **theme.OUTLINE,
+                          command=lambda: (self.close(), run())).pack(anchor="w", pady=(10, 0))
         Corner.add(self, self.w, self.h)   # stacked above the ones already there, never on top of them
         self.bind("<Enter>", lambda e: setattr(self, "hovered", True))
         self.bind("<Leave>", lambda e: (setattr(self, "hovered", False), self.after(POPUP_MS, self._maybe_close)))

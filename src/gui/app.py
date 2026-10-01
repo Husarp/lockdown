@@ -4,6 +4,7 @@ import queue
 import threading
 import time
 import traceback
+import webbrowser
 
 # Import COM libraries on the main thread: background threads importing them at the same time can deadlock.
 import comtypes.client  # noqa: F401
@@ -73,7 +74,6 @@ GC_MS = 2000
 GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
 TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
-MUTE_S = 3600           # the popup's "Mute 1 h"
 APP_ID = "com.husarp.lockdown"   # Windows app identity (matches main.py); used to clear only our own notifications
 PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
@@ -94,6 +94,9 @@ class LockdownApp(ctk.CTk):
         self.geometry("1100x720")
         self.minsize(560, 420)
         self.scaling = self._pick_scaling()
+        # Always maximized and non-resizable: the window opens full-size and can't be shrunk (it still keeps its
+        # title bar, so minimise / close-to-tray work as normal). Set after the window exists so "zoomed" sticks.
+        self.after(0, self._maximize)
         if start_hidden:
             self.withdraw()
 
@@ -109,10 +112,9 @@ class LockdownApp(ctk.CTk):
         self.pages: dict[str, ctk.CTkFrame] = {}
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         self.last_event_id = self.db.last_block_event_id()  # only notify about new visits
-        self.last_alert: dict[int, float] = {}               # item id -> when last notified
+        self.last_alert = self._load_last_alert()            # item id -> when last notified (kept across restarts)
         self._grace: dict[str, tuple] = {}                   # domain -> (revert-to state, expiry) for grace-undo
         self.popup: Popup | None = None
-        self.muted_until = 0.0                               # popup "Mute 1 h": no alerts until this time.time()
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -186,6 +188,14 @@ class LockdownApp(ctk.CTk):
         if abs(want - 1.0) > 0.01:
             ctk.set_widget_scaling(want)
         return want
+
+    def _maximize(self):
+        """Open maximized and lock the size, so the window can't be made smaller (it keeps its title bar)."""
+        try:
+            self.resizable(False, False)
+            self.state("zoomed")
+        except Exception:
+            pass
 
     def _tick_clock(self):
         if self.clock.winfo_exists():
@@ -334,6 +344,7 @@ class LockdownApp(ctk.CTk):
             event = self.events.get()
             if event == "open":
                 self.deiconify()
+                self._maximize()   # reopen from the tray full-size, not at some leftover small size
                 self.lift()
                 self.focus_force()
             elif event == "exit":
@@ -421,6 +432,9 @@ class LockdownApp(ctk.CTk):
             return
         self.deiconify()   # (tray Exit while the window is hidden)
         self.challenge = ChallengeWindow(self, changes, proceed, cancel)
+        self.challenge.attributes("-topmost", True)   # sit above any overlay/popup so it's never hidden behind one
+        self.challenge.lift()
+        self.challenge.focus_force()
 
     def grace_note(self, domain: str, revert_to):
         """Remember the state to revert to after a tightening change, so an accidental toggle can be undone within
@@ -444,9 +458,10 @@ class LockdownApp(ctk.CTk):
         heartbeat = float(self.db.get_setting(HEARTBEAT_KEY, "0"))
         running = time.time() - heartbeat < SERVICE_TIMEOUT_SEC
         blocked = len(self.db.list_items())
-        if running != self.service_running:
-            self.service_running = running
-            for page in ("Blocking", "Dashboard"):   # statuses / the "not enforced" banner depend on it
+        off = antibypass.is_off(self.db)
+        if running != self.service_running or off != getattr(self, "was_off", None):
+            self.service_running, self.was_off = running, off
+            for page in ("Blocking", "Dashboard"):   # statuses / the "not enforced" banners depend on it
                 if page in self.pages:
                     self.pages[page].refresh()
         self.status_dot.set_state(running)
@@ -455,7 +470,8 @@ class LockdownApp(ctk.CTk):
             text_color=(theme.SUCCESS if running else theme.DANGER))
         state = modes.active(self.db, now_from_db(self.db))
         mode_text = f" · {state['mode']['name']} mode" if state else ""
-        self.tray.update(running, f"{blocked} sites/apps blocked{mode_text}")
+        self.tray.update(running, "OFF - nothing is enforced" if off else f"{blocked} sites/apps blocked{mode_text}",
+                         off=off)
         self.tray.set_modes([(m["id"], m["name"]) for m in modes.load(self.db)],
                             state["mode"]["id"] if state else None)
         self.after(3000, self._poll_status)
@@ -464,6 +480,23 @@ class LockdownApp(ctk.CTk):
         state = modes.active(self.db, now_from_db(self.db))
         self.tray.set_modes([(m["id"], m["name"]) for m in modes.load(self.db)],
                             state["mode"]["id"] if state else None)
+
+    _ALERT_KEY = "notify.last_alert"
+
+    def _load_last_alert(self) -> dict:
+        """The per-item last-notified times, kept in settings so a restart honours the cooldown."""
+        import json
+        try:
+            raw = json.loads(self.db.get_setting(self._ALERT_KEY, "") or "{}")
+        except ValueError:
+            return {}
+        return {(None if k == "null" else int(k)): float(v) for k, v in raw.items()}
+
+    def _save_last_alert(self):
+        import json
+        keep = time.time() - 7 * 86400   # drop entries older than a week so it can't grow forever
+        data = {("null" if k is None else str(k)): v for k, v in self.last_alert.items() if v >= keep}
+        self.db.set_setting(self._ALERT_KEY, json.dumps(data))
 
     def _poll_block_events(self):
         events = self.db.block_events_after(self.last_event_id)
@@ -484,6 +517,7 @@ class LockdownApp(ctk.CTk):
         if not alerts.should_notify(event, item_notify, enabled, self.last_alert.get(event["item_id"]), now, cooldown):
             return
         self.last_alert[event["item_id"]] = now
+        self._save_last_alert()   # so a restart doesn't forget the cooldown and re-notify at once
         lists = protection.all_lists(protection.settings(self.db))   # (your own lists have their own names)
         self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{reason}"), event, now_from_db(self.db),
                                          lists))
@@ -510,7 +544,8 @@ class LockdownApp(ctk.CTk):
                 from gui.dashboard import goal_seconds
                 items = self.db.list_items()
                 self._show(digest.summary(self.db, now.date(), goal_seconds(self.db),
-                                          lambda kind, name: appinfo.name_of(kind, name, items)))
+                                          lambda kind, name: appinfo.name_of(kind, name, items)),
+                           action=("See the week", lambda: self._open_on("Screen Time")))
                 digest.mark_shown(self.db, now)
         finally:
             self.after(WATCH_MS, self._poll_watcher)
@@ -548,9 +583,18 @@ class LockdownApp(ctk.CTk):
         if not updates.worth_saying(self.db, found):
             return
         updates.said(self.db, found["version"])
-        where = "About" if updates.can_install(found) else "the GitHub page"
-        self._show(f"Lockdown {found['version']} is out - open Lockdown and go to {where} to install it.",
-                   actions=False)      # "Mute 1 h" is not an answer to this, and it is not urgent either
+        if updates.can_install(found):
+            self._show(f"Lockdown {found['version']} is out.", action=("Install", lambda: self._install(found)))
+        else:   # a release with no installer attached: only the page can help
+            self._show(f"Lockdown {found['version']} is out - the GitHub page has it.",
+                       action=("Open the page", lambda: webbrowser.open(found["url"])))
+
+    def _install(self, found):
+        """The notice's Install: open About on the release it found and start the download straight away."""
+        self._open_on("About")
+        about = self.pages["About"]
+        about._checked(found)
+        about._get()
 
     def _poll_minimize(self):
         """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front.
@@ -642,14 +686,11 @@ class LockdownApp(ctk.CTk):
             self._show("Focus session done.", force=True)
         self.last_phase = phase
 
-    def _show(self, message: str, force: bool = False, actions: bool = True):
+    def _show(self, message: str, force: bool = False, action=None):
         """Notification in the chosen format. Muted while a mode with "mute" is on (unless force - what you
         are using right now is about to be blocked, which is worth saying even in a game).
-        actions=False leaves off "Open Lockdown" / "Mute 1 h": a reminder telling you to look out of the
-        window has nothing to open, and muting Lockdown is not the answer to it."""
+        action: (label, callback) for the one thing worth doing about this particular message, or None."""
         if not force:
-            if time.time() < self.muted_until:
-                return
             state = modes.active(self.db, now_from_db(self.db))
             if state and state["mode"].get("mute"):
                 return
@@ -658,12 +699,14 @@ class LockdownApp(ctk.CTk):
             self.tray.notify(message)
             self.after(TOAST_CLEAR_MS, self._clear_toast_history)   # don't let one-time alerts pile up as unread
         if fmt in ("inapp", "both"):
-            self.popup = Popup(self, message,
-                               on_open=(lambda: self.events.put("open")) if actions else None,
-                               on_mute=self._mute if actions else None)
+            self.popup = Popup(self, message, action=action)
 
-    def _mute(self):
-        self.muted_until = time.time() + MUTE_S
+    def _open_on(self, page: str):
+        """Bring the window up on one particular page - what a notice's button is for."""
+        self.deiconify()
+        self.lift()
+        self.show_page(page)
+        self.focus_force()
 
     def _clear_toast_history(self):
         """Remove Lockdown's own notifications from the Windows Action Center (the bell), a few seconds after they

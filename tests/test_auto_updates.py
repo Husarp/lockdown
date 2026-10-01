@@ -10,7 +10,7 @@ from db import Database
 NOW = datetime(2026, 9, 22, 12, 0)
 
 
-def release(tag="v0.80.0", assets=True):
+def release(tag="v9.9.0", assets=True):
     body = {"tag_name": tag, "html_url": f"https://github.com/x/y/releases/tag/{tag}", "assets": []}
     if assets:
         body["assets"] = [{"name": "notes.txt", "browser_download_url": "http://x/notes.txt", "size": 10},
@@ -21,7 +21,7 @@ def release(tag="v0.80.0", assets=True):
 
 def test_it_finds_the_installer_on_the_release(tmp_path):
     found = updates.latest_release(fetch=lambda url: release())
-    assert found["version"] == "0.80.0" and found["newer"]
+    assert found["version"] == "9.9.0" and found["newer"]
     assert found["asset"] == "http://x/s.exe" and found["size"] == 35_000_000
     assert updates.can_install(found)
 
@@ -86,7 +86,7 @@ def test_you_are_told_once_per_version_not_once_a_day(tmp_path):
     assert updates.worth_saying(db, found)
     updates.said(db, found["version"])
     assert not updates.worth_saying(db, found)     # same version tomorrow: silence
-    newer = updates.latest_release(fetch=lambda url: release(tag="v0.81.0"))
+    newer = updates.latest_release(fetch=lambda url: release(tag="v9.9.1"))
     assert updates.worth_saying(db, newer)         # a different one is worth saying
 
 

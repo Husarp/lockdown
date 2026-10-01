@@ -10,7 +10,7 @@ import reminders
 from gui import theme
 from gui.components import Card, Rows, Segmented, eyebrow, hairline, page_head
 from gui.rule_editors import DayToggle
-from gui.widgets import ConfirmButton, Corner
+from gui.widgets import ConfirmButton, ConfirmDialog, Corner
 from rules import DAY_NAMES, parse_hhmm
 from trusted_time import now_from_db
 
@@ -21,6 +21,17 @@ SNOOZES = [1, 5, 10, 15, 30]
 DISMISS = {"fg_color": ("#E4E7EC", "#161B21"), "hover_color": ("#D2D7DE", "#222A33"),
            "border_width": 1, "border_color": ("#C4CBD4", "#2B333D"), "text_color": MUTED}
 CHECKS = {"Off": 0, "5 min": 5, "10 min": 10, "15 min": 15, "30 min": 30}
+
+
+def _finish(win, action, on_answer):
+    """Tear the overlay/popup DOWN first, then run the answer on the next idle tick. If we ran the answer first
+    (as before), a slow/raising handler - or the Anti-Bypass challenge it opens - would sit *behind* the still-up
+    full-screen cover and the app looked frozen. Destroying first guarantees a clean screen for whatever follows."""
+    root = win.master
+    try:
+        win.destroy()
+    finally:
+        root.after_idle(lambda: on_answer(action))
 
 
 # ---------------------------------------------------------------- on screen
@@ -42,11 +53,11 @@ class ReminderPopup(ctk.CTkToplevel):
         for i, (label, action) in enumerate(buttons):
             if action == "dismiss":      # small and dark on purpose: a way out, not an answer
                 ctk.CTkButton(row, text=label, width=34, **DISMISS,
-                              command=lambda a=action: (on_answer(a), self.destroy())).pack(side="left", padx=4)
+                              command=lambda a=action: _finish(self, a, on_answer)).pack(side="left", padx=4)
                 continue
             style = {} if i == 0 else theme.OUTLINE
             ctk.CTkButton(row, text=label, width=110, **style,
-                          command=lambda a=action: (on_answer(a), self.destroy())).pack(side="left", padx=4)
+                          command=lambda a=action: _finish(self, a, on_answer)).pack(side="left", padx=4)
         self.update_idletasks()
         Corner.add(self, self.winfo_reqwidth(), self.winfo_reqheight())
 
@@ -77,7 +88,7 @@ class Overlay(ctk.CTkToplevel):
         for i, (label, action) in enumerate(buttons):
             style = {} if i == 0 else {**theme.OUTLINE, "text_color": "#E8ECF1"}
             ctk.CTkButton(row, text=label, width=150, height=36, **style,
-                          command=lambda a=action: (on_answer(a), self.destroy())).pack(side="left", padx=6)
+                          command=lambda a=action: _finish(self, a, on_answer)).pack(side="left", padx=6)
         self._count()
 
     def _count(self):
@@ -110,7 +121,7 @@ class ReminderUI:
             win.destroy()
 
     def toast(self, text):
-        self.app._show(text, actions=False)   # nothing to open, and "Mute 1 h" is not the answer to it
+        self.app._show(text)
 
     def break_start(self, until):
         """Strict break: minimise everything now; the app keeps windows down until `until` (see _poll_minimize)."""
@@ -135,7 +146,21 @@ class ReminderUI:
 
     def _answer(self, key, action):
         self.windows.pop(key, None)
+        if key == "sleep" and action == "disable":
+            self._disable_sleep()      # the escape hatch: challenge first, then off-tonight or snooze
+            return
         self.engine.answer(key, action)
+
+    def _disable_sleep(self):
+        """"Disable alerts" on the bedtime screen needs the anti-bypass challenge; passing it offers "off for
+        tonight" or a snooze. Cancelling just dismisses it, so it returns on the escalation - never a free out."""
+        def choose():
+            ConfirmDialog(self.app, "Bedtime alerts off", "Off for the rest of tonight, or snooze a while?",
+                          on_yes=lambda: self.engine.answer("sleep", "off_tonight"), yes_text="Off tonight",
+                          alt_text="Snooze 15 min", on_alt=lambda: self.engine.answer("sleep", "snooze:15"),
+                          on_no=lambda: self.engine.answer("sleep", "dismiss"))
+        self.app.guard(["Turn off tonight's bedtime alerts"], choose,
+                       cancel=lambda: self.engine.answer("sleep", "dismiss"))
 
 
 # ---------------------------------------------------------------- the Reminders tab
@@ -218,7 +243,10 @@ class RemindersView(ctk.CTkScrollableFrame):
         sleep.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         b = sleep.body
         self.sleep_on = ctk.CTkSwitch(b, text="Remind me to go to bed", font=theme.semi(13), command=self._save_sleep)
-        self.sleep_on.pack(anchor="w", pady=(4, 8))
+        self.sleep_on.pack(anchor="w", pady=(4, 4))
+        self.sleep_guarded = ctk.CTkCheckBox(b, text="Important — needs the challenge to turn off",
+                                             checkbox_width=18, checkbox_height=18, command=self._save_sleep)
+        self.sleep_guarded.pack(anchor="w", pady=(0, 8))
         line = ctk.CTkFrame(b, fg_color="transparent")
         line.pack(anchor="w", pady=5)
         ctk.CTkLabel(line, text="Bedtime", width=LABEL_W, anchor="w", text_color=MUTED).pack(side="left", padx=(0, 12))
@@ -231,8 +259,20 @@ class RemindersView(ctk.CTkScrollableFrame):
             side="left", padx=12)
         self.before = _duration(b, "Heads-up", "before bedtime (\"Off\", \"30\", \"1h\")", LABEL_W,
                                 self._save_sleep)
-        self.repeat = _duration(b, "Repeat every", "once it's past bedtime (\"30s\", \"5\", \"1h30\")", LABEL_W,
-                                self._save_sleep)
+        esc = ctk.CTkFrame(b, fg_color="transparent")
+        esc.pack(anchor="w", fill="x", pady=5)
+        ctk.CTkLabel(esc, text="Comes back", width=LABEL_W, anchor="w", text_color=MUTED).pack(side="left",
+                                                                                              padx=(0, 12), anchor="n")
+        right = ctk.CTkFrame(esc, fg_color="transparent")
+        right.pack(side="left", fill="x")
+        self.tier_box = ctk.CTkFrame(right, fg_color="transparent")
+        self.tier_box.pack(anchor="w")
+        self.tier_rows = []
+        ctk.CTkButton(right, text="+ Add step", width=90, height=26, **theme.OUTLINE,
+                      command=self._add_tier).pack(anchor="w", pady=(4, 0))
+        ctk.CTkLabel(right, text="The later it is, the more often the bedtime screen returns after you dismiss it.",
+                     text_color=MUTED, font=theme.body(11), wraplength=330, justify="left").pack(anchor="w",
+                                                                                                 pady=(2, 0))
         self.sleep_mode = _option(b, "Turn on", ["No mode"], "at bedtime, until wake-up time", LABEL_W)
         self.sleep_mode.configure(command=lambda v: self._save_sleep())
         self.sleep_warn_text = _message(b, "Heads-up says", reminders.SLEEP_WARN_TEXT, LABEL_W, self._save_sleep)
@@ -264,6 +304,9 @@ class RemindersView(ctk.CTkScrollableFrame):
                      text_color=MUTED, font=theme.body(11), wraplength=330, justify="left").pack(
             anchor="w", padx=(LABEL_W + 12, 0))
         hairline(b).pack(fill="x", pady=(8, 10))
+        self.break_guarded = ctk.CTkSwitch(b, text="Important — needs the challenge to turn off", font=theme.semi(13),
+                                           command=self._save_break)
+        self.break_guarded.pack(anchor="w", pady=(0, 8))
         self.strict = ctk.CTkSwitch(b, text="Strict break", font=theme.semi(13), command=self._save_break)
         self.strict.pack(anchor="w")
         note(b, "Minimises everything until the break is over - you can't just dismiss it.")
@@ -284,7 +327,8 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.rows = Rows(own.body, _reminder_row, "No reminders yet - e.g. \"Drink water\" every 60 min.",
                          {"fill": "x", "pady": 3})
         self.editor = Card(self, "Reminder")
-        self._build_editor(self.editor.body)
+        self._editor_built = False   # its ~200 widgets are built the first time you open it, not on page load
+                                     # (customtkinter widget creation is the page's main cost - this ~halves it)
 
     # ---------- load ----------
 
@@ -294,9 +338,9 @@ class RemindersView(ctk.CTkScrollableFrame):
         for entry, value in ((self.bedtime, s["bedtime"]), (self.wake, s["wake"])):
             entry.delete(0, "end")
             entry.insert(0, value)
-        for entry, value in ((self.before, s["before"]), (self.repeat, s["repeat"])):
-            entry.delete(0, "end")
-            entry.insert(0, reminders.minutes_text(value))
+        self.before.delete(0, "end")
+        self.before.insert(0, reminders.minutes_text(s["before"]))
+        self._load_tiers(reminders.tiers_of(s))
         for entry, value in ((self.sleep_warn_text, s.get("warn_text")), (self.sleep_text, s.get("text"))):
             if entry.get() != (value or ""):
                 entry.delete(0, "end")
@@ -305,12 +349,14 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.mode_ids = {"No mode": ""} | {m["name"]: m["id"] for m in all_modes}
         self.sleep_mode.configure(values=list(self.mode_ids))
         self.sleep_mode.set(next((n for n, i in self.mode_ids.items() if i == s["mode"]), "No mode"))
+        self.sleep_guarded.select() if s.get("guarded") else self.sleep_guarded.deselect()
         b = reminders.load(self.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
         self.break_on.select() if b["on"] else self.break_on.deselect()
         self.every.set(f"{b['every']} min")
         self.length.set(f"{b['length']} min")
         self.snooze.set(f"{b.get('snooze', 5)} min")
         self.strict.select() if b.get("strict") else self.strict.deselect()
+        self.break_guarded.select() if b.get("guarded") else self.break_guarded.deselect()
         self.max_snooze.set(str(b.get("max_snooze", 2)))
         self.twenty.select() if b["twenty"] else self.twenty.deselect()
         for entry, value in ((self.break_text, b.get("text")), (self.twenty_text, b.get("twenty_text"))):
@@ -336,6 +382,58 @@ class RemindersView(ctk.CTkScrollableFrame):
 
     # ---------- sleep / breaks ----------
 
+    def _tier_row(self, every: str = "15", after: str = "21:00"):
+        row = ctk.CTkFrame(self.tier_box, fg_color="transparent")
+        row.pack(anchor="w", pady=2)
+        ctk.CTkLabel(row, text="every", text_color=MUTED).pack(side="left")
+        row.every = ctk.CTkEntry(row, width=44, justify="center")
+        row.every.insert(0, every)
+        row.every.pack(side="left", padx=6)
+        ctk.CTkLabel(row, text="min, after", text_color=MUTED).pack(side="left")
+        row.after = ctk.CTkEntry(row, width=60, justify="center")
+        row.after.insert(0, after)
+        row.after.pack(side="left", padx=6)
+        ctk.CTkButton(row, text="\u00d7", width=26, height=26, **theme.OUTLINE,
+                      command=lambda: self._remove_tier(row)).pack(side="left")
+        for e in (row.every, row.after):
+            e.bind("<Return>", lambda ev: self._save_sleep())
+            e.bind("<FocusOut>", lambda ev: self._save_sleep())
+        self.tier_rows.append(row)
+
+    def _add_tier(self):
+        self._tier_row()
+        self._save_sleep()
+
+    def _remove_tier(self, row):
+        self.tier_rows.remove(row)
+        row.destroy()
+        self._save_sleep()
+
+    def _load_tiers(self, tiers):
+        for row in self.tier_rows:
+            row.destroy()
+        self.tier_rows = []
+        for t in tiers:
+            self._tier_row(str(t.get("every", 5)), t.get("from", "21:00"))
+
+    def _read_tiers(self):
+        tiers = []
+        for row in self.tier_rows:
+            after, every = parse_hhmm(row.after.get()), int(reminders.parse_minutes(row.every.get(), allow_off=False))
+            tiers.append({"from": f"{after:%H:%M}", "every": max(1, every)})
+        return sorted(tiers, key=lambda t: parse_hhmm(t["from"]))
+
+    def _save_guarded(self, name, old, key, new):
+        """Save reminder settings. Turning an important alert off (or removing its \"important\" flag) is
+        loosening, so it needs the Anti-Bypass challenge first; on cancel the switches snap back and nothing
+        is saved."""
+        loosens = reminders.loosens_reminder(old, new)
+        if loosens:
+            self.page.guard([f"Turn off / un-flag the important {name} reminder"],
+                            lambda: reminders.save(self.db, key, new), cancel=self.refresh)
+        else:
+            reminders.save(self.db, key, new)
+
     def _save_sleep(self):
         try:
             bedtime, wake = parse_hhmm(self.bedtime.get()), parse_hhmm(self.wake.get())
@@ -344,15 +442,17 @@ class RemindersView(ctk.CTkScrollableFrame):
             return
         try:
             before = reminders.parse_minutes(self.before.get(), most=12 * 60)
-            repeat = reminders.parse_minutes(self.repeat.get(), allow_off=False)
-        except ValueError as e:
-            self._sleep_says(str(e))
+            tiers = self._read_tiers()
+        except ValueError:
+            self._sleep_says("Steps need minutes like 5 and a time like 21:00.")
             return
         self.sleep_error.pack_forget()
-        reminders.save(self.db, reminders.SLEEP_KEY, {
+        old = reminders.load(self.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
+        self._save_guarded("bedtime", old, reminders.SLEEP_KEY, {
             "on": bool(self.sleep_on.get()), "bedtime": f"{bedtime:%H:%M}", "wake": f"{wake:%H:%M}",
-            "before": before, "repeat": repeat, "warn_text": self.sleep_warn_text.get().strip(),
+            "before": before, "repeat": 5, "tiers": tiers, "warn_text": self.sleep_warn_text.get().strip(),
             "text": self.sleep_text.get().strip(),
+            "guarded": bool(self.sleep_guarded.get()),
             "mode": self.mode_ids.get(self.sleep_mode.get(), "")})
 
     def _sleep_says(self, text: str):
@@ -360,12 +460,13 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.sleep_error.pack(anchor="w")
 
     def _save_break(self):
-        reminders.save(self.db, reminders.BREAK_KEY, {
+        old = reminders.load(self.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
+        self._save_guarded("break", old, reminders.BREAK_KEY, {
             "on": bool(self.break_on.get()), "every": int(self.every.get().split()[0]),
             "length": int(self.length.get().split()[0]), "strict": bool(self.strict.get()),
             "snooze": int(self.snooze.get().split()[0]), "max_snooze": int(self.max_snooze.get()),
             "twenty": bool(self.twenty.get()), "text": self.break_text.get().strip(),
-            "twenty_text": self.twenty_text.get().strip()})
+            "twenty_text": self.twenty_text.get().strip(), "guarded": bool(self.break_guarded.get())})
 
     # ---------- your reminders ----------
 
@@ -424,6 +525,8 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.r_check = _option(b, "Ask \"did you actually do it?\"", list(CHECKS), "after Done")
         self.r_per_day = _option(b, "Stop for the day after", ["No limit"] + [str(n) for n in range(1, 13)],
                                  "times DONE (not times shown: snoozing or ignoring it doesn't count)")
+        self.r_guarded = ctk.CTkCheckBox(b, text="Important — needs the challenge to turn off", checkbox_width=18, checkbox_height=18)
+        self.r_guarded.pack(anchor="w", pady=(8, 0))
         eyebrow(b, "Quotes (a random one is shown with the reminder)").pack(anchor="w", pady=(12, 4))
         packs = ctk.CTkFrame(b, fg_color="transparent")
         packs.pack(anchor="w")
@@ -454,6 +557,9 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.r_hours_row.pack(anchor="w", pady=(6, 0)) if kind == "interval" else self.r_hours_row.pack_forget()
 
     def _edit(self, r: dict | None):
+        if not self._editor_built:        # build the editor on first use (see __init__)
+            self._build_editor(self.editor.body)
+            self._editor_built = True
         self.editing = r
         r = r or {**reminders.DEFAULT_CUSTOM}
         self.editor.title.configure(text="Edit reminder" if self.editing else "New reminder")
@@ -463,6 +569,7 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.r_kind.set(next(k for k, v in KINDS.items() if v == r["kind"]))
         self.r_hours.select() if r.get("hours") else self.r_hours.deselect()
         self.r_per_day.set(str(r.get("per_day") or "No limit"))
+        self.r_guarded.select() if r.get("guarded") else self.r_guarded.deselect()
         for entry, value in ((self.r_every, str(r["every"])), (self.r_at, ", ".join(r["times"])),
                              (self.r_from, r["window"][0]), (self.r_to, r["window"][1]),
                              (self.r_hours_from, r["window"][0]), (self.r_hours_to, r["window"][1])):
@@ -519,22 +626,42 @@ class RemindersView(ctk.CTkScrollableFrame):
                "check": CHECKS[self.r_check.get()], "packs": [n for n, b in self.r_packs.items() if b.get()],
                "quotes": self.r_quotes.get("1.0", "end").strip(),
                "hours": bool(self.r_hours.get()) and kind == "interval",
-               "per_day": 0 if self.r_per_day.get() == "No limit" else int(self.r_per_day.get())}
+               "per_day": 0 if self.r_per_day.get() == "No limit" else int(self.r_per_day.get()),
+               "guarded": bool(self.r_guarded.get())}
         if self.editing:
             new["on"] = self.editing["on"]
             items = [new if x["id"] == new["id"] else x for x in items]
         else:
             items.append(new)
-        reminders.save(self.db, reminders.CUSTOM_KEY, items)
-        self.editor.pack_forget()
-        self.refresh()
+        def do():
+            reminders.save(self.db, reminders.CUSTOM_KEY, items)
+            self.editor.pack_forget()
+            self.refresh()
+        if self.editing and self.editing.get("guarded") and not new.get("guarded"):
+            self.page.guard([f'Remove "important" from "{new["text"]}"'], do,
+                            cancel=lambda: self.r_guarded.select())
+            return
+        do()
 
     def _toggle(self, r: dict, on):
+        if not on and r.get("guarded"):     # turning an important reminder off needs the challenge
+            self.page.guard([f'Turn off the important reminder "{r["text"]}"'],
+                            lambda: self._set_on(r, False), cancel=self.refresh)
+            return
+        self._set_on(r, on)
+
+    def _set_on(self, r: dict, on):
         items = reminders.load(self.db, reminders.CUSTOM_KEY, [])
         reminders.save(self.db, reminders.CUSTOM_KEY, [{**x, "on": bool(on)} if x["id"] == r["id"] else x
                                                        for x in items])
 
     def _delete(self, r: dict):
+        if r.get("guarded"):
+            self.page.guard([f'Delete the important reminder "{r["text"]}"'], lambda: self._do_delete(r))
+            return
+        self._do_delete(r)
+
+    def _do_delete(self, r: dict):
         items = reminders.load(self.db, reminders.CUSTOM_KEY, [])
         reminders.save(self.db, reminders.CUSTOM_KEY, [x for x in items if x["id"] != r["id"]])
         self.editor.pack_forget()

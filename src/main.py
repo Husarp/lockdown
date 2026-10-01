@@ -125,9 +125,11 @@ if __name__ == "__main__":
     set_identity()
     if "--challenge" in sys.argv:
         sys.exit(challenge(sys.argv[sys.argv.index("--challenge") + 1]))
-    from gui.app import LockdownApp
     events: queue.Queue = queue.Queue()
     if not single_instance.acquire(events):
-        sys.exit(0)  # already running - it will show its window
+        sys.exit(0)  # already running - it will show its window (no heavy GUI import on this path)
     register_autostart()
+    # Heavy import (customtkinter, PIL, COM, every page) happens only for the instance that actually runs the UI -
+    # a click while the tray agent is already running exits above without paying it, so "open" is near-instant.
+    from gui.app import LockdownApp
     LockdownApp(events, start_hidden="--tray" in sys.argv or "--watchdog" in sys.argv).mainloop()

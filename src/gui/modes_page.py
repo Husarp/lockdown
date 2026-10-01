@@ -358,7 +358,7 @@ class ModesPage(ctk.CTkFrame):
                       command=lambda: self.start_panel.pack_forget()).pack(side="left", padx=6)
         self.starting: dict | None = None
 
-        self.editor = ModeEditor(self.body, self)
+        self.editor = None   # the mode editor is heavy; build it the first time you open one, not on page load
         eyebrow(self.body, "Your modes").pack(anchor="w", pady=(4, 6))
         self.grid_box = ctk.CTkFrame(self.body, fg_color="transparent")
         self.grid_box.pack(fill="x")
@@ -371,7 +371,8 @@ class ModesPage(ctk.CTkFrame):
 
     def on_show(self):
         self.start_panel.pack_forget()   # leaving and coming back returns to the default view (no open editor)
-        self.editor.pack_forget()
+        if self.editor:
+            self.editor.pack_forget()
         self.refresh()
 
     def refresh(self):
@@ -477,9 +478,12 @@ class ModesPage(ctk.CTkFrame):
     # ---------- editor ----------
 
     def open_editor(self, mode: dict | None):
+        if self.editor is None:
+            self.editor = ModeEditor(self.body, self)
         self.editor.load(mode)
         self.editor.pack(fill="x", pady=(0, 12), after=self.now_card)
         self.body._parent_canvas.yview_moveto(0)
 
     def close_editor(self):
-        self.editor.pack_forget()
+        if self.editor:
+            self.editor.pack_forget()

@@ -18,6 +18,7 @@ class Tray:
         self.modes: list[tuple[str, str]] = []   # (id, name)
         self.active_mode: str | None = None
         self._icon_state: str | None = None
+        self.off = False                         # Lockdown switched off entirely (Anti-Bypass page)
         self.icon = pystray.Icon(
             "Lockdown", icon_art.tray_icon("red"), "Lockdown",
             menu=pystray.Menu(
@@ -47,8 +48,9 @@ class Tray:
             self.icon.update_menu()
 
     def _refresh_icon(self):
-        """green = blocking enforced, yellow = a mode is on, red = service down."""
-        state = "red" if not self.running else "yellow" if self.active_mode else "green"
+        """grey = switched off, green = blocking enforced, yellow = a mode is on, red = service down."""
+        state = ("grey" if self.off else "red" if not self.running else "yellow" if self.active_mode
+                 else "green")
         if state != self._icon_state:
             self._icon_state = state
             self.icon.icon = icon_art.tray_icon(state)
@@ -71,9 +73,9 @@ class Tray:
         self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo=message[:255], szInfoTitle="Lockdown",
                            dwInfoFlags=NIIF_USER | NIIF_LARGE_ICON, hBalloonIcon=self._logo)
 
-    def update(self, running: bool, status_text: str):
+    def update(self, running: bool, status_text: str, off: bool = False):
         self.status_text = status_text
-        self.running = running
+        self.running, self.off = running, off
         self._refresh_icon()
-        self.icon.title = f"Lockdown - {status_text}" + ("" if running else " (service not running)")
+        self.icon.title = f"Lockdown - {status_text}" + ("" if running or off else " (service not running)")
         self.icon.update_menu()

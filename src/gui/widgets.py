@@ -1,10 +1,36 @@
 """Small shared widgets."""
+import ctypes
+from ctypes import wintypes
+
 import customtkinter as ctk
 
 from gui import theme
 
 CONFIRM_RED = theme.DANGER
 CONFIRM_MS = 3000
+
+
+def _work_area() -> tuple[int, int] | None:
+    """The desktop work area's (right, bottom) in physical pixels - i.e. the screen minus the taskbar -
+    so corner windows sit above the taskbar, not over it. Windows only; None if it can't be read."""
+    try:
+        rect = wintypes.RECT()
+        # SPI_GETWORKAREA = 0x0030; the process is per-monitor DPI aware (customtkinter sets that),
+        # so this is in the same physical pixels Tk geometry uses.
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+            return rect.right, rect.bottom
+    except Exception:
+        pass
+    return None
+
+
+def _window_scaling(window) -> float:
+    """customtkinter renders toplevels at this multiple of the size we ask for (display scaling)."""
+    try:
+        from customtkinter.windows.widgets.scaling.scaling_tracker import ScalingTracker
+        return ScalingTracker.get_window_scaling(window)
+    except Exception:
+        return 1.0
 
 _open: dict[str, ctk.CTkToplevel] = {}   # one window per kind (see `once`)
 
@@ -188,13 +214,21 @@ class Corner:
         if not cls._live:
             return
         screen = cls._live[-1][0]
-        bottom = screen.winfo_screenheight() - cls.MARGIN_Y
-        right = screen.winfo_screenwidth() - cls.MARGIN_X
-        y = bottom
+        scaling = _window_scaling(screen)          # customtkinter renders windows this much bigger than we ask
+        wa = _work_area()
+        if wa:                                     # sit just above the taskbar (work area excludes it)
+            right_edge, bottom_edge, margin_y = wa[0], wa[1], 12
+        else:                                      # fall back to the full screen and a big margin to clear the taskbar
+            right_edge, bottom_edge, margin_y = screen.winfo_screenwidth(), screen.winfo_screenheight(), cls.MARGIN_Y
+        right = right_edge - cls.MARGIN_X
+        y = bottom_edge - margin_y
         for window, width, height in reversed(cls._live):   # newest last in the list = lowest on the screen
-            y = max(cls.TOP, y - height)
+            # position by the ACTUAL on-screen size (customtkinter scales w/h but not x/y), so it never
+            # spills off the right edge or over the taskbar on a scaled display.
+            aw, ah = round(width * scaling), round(height * scaling)
+            top = max(cls.TOP, y - ah)
             try:
-                window.corner_place(right - width, y)
+                window.corner_place(right - aw, top)
             except Exception:
                 pass
-            y -= cls.GAP
+            y = top - cls.GAP

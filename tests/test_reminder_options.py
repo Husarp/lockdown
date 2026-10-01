@@ -46,16 +46,30 @@ def test_only_on_the_days_you_picked(tmp_path):
 
 def test_the_limit_counts_what_you_did_not_what_you_saw(tmp_path):
     db, ui, e = setup(tmp_path)
-    _save(db, {"id": "a", "text": "Drink water", "kind": "interval", "every": 1, "per_day": 2})
+    _save(db, {"id": "a", "text": "Drink water", "kind": "interval", "every": 1, "per_day": 2, "snooze": 5})
     t = run(e, NOW, 2)
     e.answer("custom:a", "done")                      # 1 of 2
-    t = run(e, t, 2)
+    t = run(e, t, reminders.PACE_MIN + 1)             # (the next one waits for the pace)
+    assert len(_shown(ui)) == 2
     e.answer("custom:a", "snooze")                    # snoozing is not doing it: still 1 of 2
-    t = run(e, t + timedelta(minutes=6), 2)
+    t = run(e, t, 6)
+    assert len(_shown(ui)) == 3
     e.answer("custom:a", "done")                      # 2 of 2 - that's the day done
-    before = len(_shown(ui))
-    run(e, t + timedelta(minutes=10), 5)
-    assert len(_shown(ui)) == before
+    run(e, t, 60)
+    assert len(_shown(ui)) == 3
+
+
+def test_a_reminder_queued_by_the_pace_still_respects_its_hours(tmp_path):
+    """It waited for the pace - and its hours ended meanwhile. It must not come up after them."""
+    db, ui, e = setup(tmp_path)
+    reminders.save(db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "on": False})
+    _save(db, {"id": "a", "text": "Drink water", "kind": "interval", "every": 10},
+          {"id": "b", "text": "Pull-ups", "kind": "interval", "every": 12, "hours": True,
+           "window": ["08:00", "09:15"]})
+    t = run(e, NOW, 11)                               # water at 09:10
+    e.answer("custom:a", "done")
+    run(e, t, 30)                                     # pull-ups due 09:12 - queued - its hours end 09:15
+    assert not [s for s in _shown(ui) if "Pull-ups" in s[3]]
 
 
 def test_two_due_at_once_interrupt_you_once(tmp_path):

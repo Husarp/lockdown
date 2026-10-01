@@ -21,14 +21,14 @@ def test_which_one_is_newer(latest, current, newer):
     assert updates.is_newer(latest, current) is newer
 
 
-def _release(tag="v0.80.0"):
+def _release(tag="v9.9.0"):
     return json.dumps({"tag_name": tag, "html_url": f"https://github.com/x/y/releases/tag/{tag}"}).encode()
 
 
 def test_the_answer_from_github(monkeypatch):
     monkeypatch.setattr(updates, "REPO", "someone/lockdown")
     found = updates.latest_release(fetch=lambda url: _release())
-    assert found == {"version": "0.80.0", "url": "https://github.com/x/y/releases/tag/v0.80.0", "newer": True,
+    assert found == {"version": "9.9.0", "url": "https://github.com/x/y/releases/tag/v9.9.0", "newer": True,
                      "asset": None, "size": 0}        # this release has no installer attached
 
 

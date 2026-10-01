@@ -159,6 +159,27 @@
 - Not done: showing a warning in the app when counting has stalled (the tracker now recovers on its own,
   so this would only ever be information)
 
+- **Count while disabled** — DONE (0.79.3): disabling a group or item stops it blocking, not counting;
+  a disabled group's limit read 0m after hours of use, and enable-after-use reset the limit to zero
+
+### 1.5c Fewer, better interruptions (requested 2026-09-25) — DONE (0.80.0)
+- Buttons only when specific: "Open Lockdown" and "Mute 1 h" removed; "See the week" on the weekly
+  summary, "Install" on a new version — DONE
+- Pace: at most one interruption per 20 min, what waited arrives as one popup; snoozes and strict breaks
+  are never held — DONE
+- Back-off: three dismisses in a row halve a reminder for the rest of the day, and it says so — DONE
+- Reminders due around a break ride along in it ("While you're up") — DONE
+- 03:00 reset kept (your choice, 2026-09-25) but limits now say "since 03:00" instead of "today" — DONE
+- Lockdown off is shown by a grey tray icon and a Dashboard banner with "Turn back on" — DONE
+
+### 1.5d Sleep alerts — DONE (0.81.0)
+- Escalating frequency by lateness (editable tiers; default 21:00→15m, 00:00→5m, 03:00→1m) — DONE
+- Overlay buttons Dismiss / Disable-alerts; Disable needs the challenge, then off-tonight or custom snooze — DONE
+- Challenge-gated uninstall verified (already wired) — DONE
+- Visual tier editor in the Sleep card (add/remove "every N min, after HH:MM" steps) — DONE (0.82.0)
+
+- Per-alert **Important** flag: dismissing a marked reminder (sleep/break/custom) needs the challenge — DONE (0.83.0)
+
 ### 1.5b Updating
 - **In-app update** — DONE: About downloads the installer from the GitHub release and runs it, rather than
   sending you to a web page
@@ -264,6 +285,28 @@ All settings, blocklists, schedules, and configurations are **always viewable** 
 ---
 
 ## 3. GUI / User Interface
+
+> **View-layer redesign (planned, 2026-09-26).** A fresh design + faster page loads + a re-sorted
+> nav (10 items -> 6). Engine untouched; only `src/gui/` is rebuilt, page by page. Full plan in
+> [design/REDESIGN.md](design/REDESIGN.md); the hand-off prompt is [design/designer-brief.md](design/designer-brief.md).
+> Decisions settled 2026-09-26: Modes stays its own item; Notifications folds into Reminders;
+> Anti-Bypass is renamed Guardrails.
+>
+> **Adopted 2026-09-26: pywebview (web UI + Edge WebView2)**, per the delivered design. The engine is
+> untouched; only the view moves. Design + working UI + Api scaffold landed in `design/redesign/`; the
+> migration plan (Api contract, port order, the "UI is untrusted" rule) is section 10 of
+> [design/REDESIGN.md](design/REDESIGN.md).
+>
+> **Port started 2026-09-26:** the new UI runs alongside the current app
+> (`.venv\Scripts\python.exe src\webview_app.py`) with `get_state()` live (real rules, reminders, on/off,
+> service, theme). Writes refuse until each screen is ported. Next: Home's computed numbers, then Blocking.
+>
+> **Performance redesign analysis (2026-09-29):** diagnosed the ~10 s start, the lag, and the overlay
+> freeze; confirmed pywebview/WebView2 but reshaped it into ONE resident agent process (pre-created hidden
+> windows + workers) so a click is a ~300 ms `show()`. Includes a Phase 0 quick-win (two ~10-line fixes for
+> the worst symptoms) and a phased migration. Full write-up: section 11 of
+> [design/REDESIGN.md](design/REDESIGN.md). **Not started — waiting for the user's go.**
+
 
 ### 3.1 Layout — Sidebar Navigation
 
