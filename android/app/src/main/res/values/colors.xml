@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Lockdown's accent (the desktop app's orange) - used for the launcher icon background. -->
+    <color name="icon_background">#DB5126</color>
+</resources>

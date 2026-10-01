@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lockdown Mobile</string>
+    <string name="accessibility_desc">Lets Lockdown see which app is open so it can block the ones you\'ve chosen. It reads only the current app\'s name (and, for keyword blocking, the address bar) - nothing is sent anywhere.</string>
+</resources>
