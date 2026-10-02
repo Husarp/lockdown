@@ -17,6 +17,7 @@ import antibypass
 import digest
 from importer import distracting
 import modes
+import pause
 import reminders
 import retention
 import updates
@@ -123,6 +124,8 @@ class LockdownApp(ctk.CTk):
         self.update_popup: Popup | None = None   # the "new version" notice, while it is on screen
         self.update_popup_for = None             # ... and which version it offers
         self.update_shown = None                 # (version, installable) the banner / dot / tray show now, or None
+        self.update_bar = None                   # ... what the banner itself shows (None: hidden)
+        self.update_closed = None                # the version whose banner was closed with x (until the next start)
         self.update_asking = False               # a check is out on its thread
 
         self.grid_columnconfigure(1, weight=1)
@@ -131,11 +134,12 @@ class LockdownApp(ctk.CTk):
         right = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(2, weight=1)
+        right.grid_rowconfigure(3, weight=1)
         self._build_update_banner(right)
+        self._build_pause_banner(right)
         self._build_save_bar(right)
         self.content = ctk.CTkFrame(right, corner_radius=0, fg_color="transparent")
-        self.content.grid(row=2, column=0, sticky="nsew")
+        self.content.grid(row=3, column=0, sticky="nsew")
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(0, weight=1)
         self.curtain = Curtain(self.content)   # hides a page while it's being drawn
@@ -144,7 +148,8 @@ class LockdownApp(ctk.CTk):
         self.events = events
         self.tray = Tray(on_open=lambda: self.events.put("open"), on_exit=lambda: self.events.put("exit"),
                          on_mode=lambda mode_id: self.events.put(("mode", mode_id)),
-                         on_update=lambda: self.events.put("update"))
+                         on_update=lambda: self.events.put("update"),
+                         on_pause=lambda: self.events.put("pause"), on_resume=lambda: self.events.put("resume"))
         self.last_phase = None   # Pomodoro phase last announced
         self.tray.start()
         # Windows notifications (with buttons); the tray's balloon if they can't be had here
@@ -174,6 +179,7 @@ class LockdownApp(ctk.CTk):
         self.after(PREBUILD_MS[0], self._prebuild)
         distracting.seed(self.db)          # games, streaming ... are Distracting by default
         self.after(5000, self._seed_games)
+        updates.remove_downloads()         # the installer an in-app update downloaded has done its job
         self.refresh_update(popup=False)   # a newer version found before: the banner is there from the start
         self.after(UPDATE_FIRST_MS, lambda: self._poll_updates(first=True))
         # old per-minute / per-event detail -> daily totals, once a day, on its own thread and connection
@@ -246,7 +252,7 @@ class LockdownApp(ctk.CTk):
 
     def _build_save_bar(self, parent):
         bar = ctk.CTkFrame(parent, fg_color="transparent")
-        bar.grid(row=1, column=0, sticky="e", padx=24, pady=(12, 0))
+        bar.grid(row=2, column=0, sticky="e", padx=24, pady=(12, 0))
         self.autosave_var = ctk.BooleanVar(value=self.draft.autosave)
         ctk.CTkSwitch(bar, text="Auto-save", variable=self.autosave_var, command=self._toggle_autosave).pack(
             side="left", padx=(0, 16))
@@ -395,6 +401,10 @@ class LockdownApp(ctk.CTk):
                     self.lift()
                     self.focus_force()
                     self._check_updates(updates.OPEN_HOURS)   # opening the window: look again if it's been a while
+                elif event == "pause":    # the tray's "Pause my blocks...": the card on the Anti-Bypass page
+                    self._open_on("Anti-Bypass")
+                elif event == "resume":   # the tray's "Resume blocking"
+                    self.resume_blocks()
                 elif event == "update":   # the tray's "Install update"
                     if found := updates.available(self.db):
                         self._install(found)
@@ -520,6 +530,7 @@ class LockdownApp(ctk.CTk):
             running = time.time() - heartbeat < SERVICE_TIMEOUT_SEC
             blocked = self.db.item_count()   # (not list_items: 45 ms with 6 000 items, every 3 s)
             off = antibypass.is_off(self.db)
+            paused = self.refresh_pause()
             if running != self.service_running or off != getattr(self, "was_off", None):
                 self.service_running, self.was_off = running, off
                 for page in ("Blocking", "Dashboard"):   # statuses / the "not enforced" banners depend on it
@@ -534,6 +545,7 @@ class LockdownApp(ctk.CTk):
             mode_text = f" · {state['mode']['name']} mode" if state else ""
             # (the tray only talks to its icon when something actually changed - see Tray.update)
             self.tray.update(running, "OFF - nothing is enforced" if off else
+                             f"Blocking paused until {paused:%H:%M}" if paused else
                              f"{blocked} sites/apps blocked{mode_text}", off=off)
             self.tray.set_modes([(m["id"], m["name"]) for m in mode_list], state["mode"]["id"] if state else None)
         finally:
@@ -628,9 +640,10 @@ class LockdownApp(ctk.CTk):
 
     # ---------- a newer Lockdown ----------
     # Checked every time you open the window (at most once per updates.RETRY_MIN minutes), and in the background
-    # every updates.EVERY_HOURS hours. What it finds stays on screen until installed, skipped or
-    # snoozed: the banner over every page, a dot on About, "Update available" in the tray menu - plus the corner
-    # popup once per version (once more after "Remind me later"), which waits while you don't want interruptions.
+    # every updates.EVERY_HOURS hours. What it finds stays on screen until installed or snoozed (the banner's x
+    # hides only the banner, until the next start): the banner over every page, a dot on About, "Update available"
+    # in the tray menu - plus the corner popup once per version (once more after "Remind me later"), which waits
+    # while you don't want interruptions.
 
     def _poll_updates(self, first: bool = False):
         """Every minute, on the Tk thread: start a check if one is due (only the request goes out on its own
@@ -671,21 +684,25 @@ class LockdownApp(ctk.CTk):
         now = now_from_db(self.db)
         found = updates.banner(self.db, now)
         shown = (found["version"], updates.can_install(found)) if found else None
-        if shown != self.update_shown:
-            self.update_shown = shown
-            if found:
+        # the banner's x hides it until Lockdown is next started - kept here in memory, never in the database
+        bar = shown if shown and shown[0] != getattr(self, "update_closed", None) else None
+        if bar != getattr(self, "update_bar", None):
+            self.update_bar = bar
+            if bar:
                 self.update_text.configure(text=updates.label(found))
-                self.update_get.configure(text="Install" if shown[1] else "Open the page")
+                self.update_get.configure(text="Install" if bar[1] else "Open the page")
                 self.update_banner.grid()
             else:
                 self.update_banner.grid_remove()
+        if shown != self.update_shown:
+            self.update_shown = shown
             self.nav_icons["About"] = self.nav_plain[bool(found)]
             self.nav_buttons["About"][0].configure(
                 image=self.nav_icons["About"][1 if getattr(self, "current_page", None) == "About" else 0])
             self.tray.set_update(found["version"] if found else None)
             if self.update_popup is not None and getattr(self, "update_popup_for", None) != (shown or (None,))[0]:
                 # the popup still open is about a version no longer to be shown (a newer one came out while it
-                # waited, or it was installed / skipped / snoozed): its Install would fetch the wrong release
+                # waited, or it was installed / snoozed): its Install would fetch the wrong release
                 self._close_update_popup()   # (test_a_newer_release_replaces_the_open_popup)
         if popup and found and updates.worth_saying(self.db, found, now):
             self._update_notice(found)
@@ -715,10 +732,11 @@ class LockdownApp(ctk.CTk):
         self._close_update_popup()
         self.refresh_update(popup=False)
 
-    def update_skip(self):
-        """The banner's ✕: skip this version - nothing more about it, only about a newer one."""
+    def update_close(self):
+        """The banner's ✕: the banner goes until Lockdown is next started (APP-STANDARDS 2) - not for good, and
+        not when the window is only closed to the tray and opened again. The About dot and the tray's line stay."""
         if self.update_shown:
-            updates.skip(self.db, self.update_shown[0])
+            self.update_closed = self.update_shown[0]
         self._close_update_popup()
         self.refresh_update(popup=False)
 
@@ -753,14 +771,10 @@ class LockdownApp(ctk.CTk):
                                                 border_color=theme.ACCENT, corner_radius=6)
         bar.grid(row=0, column=0, sticky="ew", padx=24, pady=(12, 0))
         # The buttons are packed first: in a narrow window pack squeezes whatever was packed last, and that must
-        # be "you have X" and the text - never Install / Later / skip (test_banner_buttons_survive_a_narrow_window)
+        # be "you have X" and the text - never Install / Later / ✕ (test_banner_buttons_survive_a_narrow_window)
         close = ctk.CTkLabel(bar, text="✕", text_color=theme.MUTED, font=theme.body(13), cursor="hand2", width=24)
         close.pack(side="right", padx=(4, 10))
-        skip = ctk.CTkLabel(bar, text="skip this version", text_color=theme.MUTED, font=theme.body(11),
-                            cursor="hand2")
-        skip.pack(side="right")
-        for widget in (close, skip):
-            widget.bind("<Button-1>", lambda e: self.update_skip())
+        close.bind("<Button-1>", lambda e: self.update_close())   # hidden until the next start
         ctk.CTkButton(bar, text="Later", width=74, height=28, **theme.OUTLINE,
                       command=self.update_later).pack(side="right", padx=(0, 14))
         self.update_get = ctk.CTkButton(bar, text="Install", width=90, height=28, command=self._install)
@@ -771,8 +785,8 @@ class LockdownApp(ctk.CTk):
         self.update_text.pack(side="left")
         you = ctk.CTkLabel(bar, text=f"you have {VERSION}", text_color=theme.MUTED, font=theme.body(12))
         you.pack(side="left", padx=10)
-        # (and in a really narrow window the two extras go - "skip this version" keeps its ✕)
-        extras = ((you, dict(side="left", padx=10, after=self.update_text)), (skip, dict(side="right", after=close)))
+        # (and in a really narrow window "you have X" goes)
+        extras = ((you, dict(side="left", padx=10, after=self.update_text)),)
 
         def fit(_event=None):
             room = bar.winfo_width()
@@ -780,7 +794,7 @@ class LockdownApp(ctk.CTk):
                 return
             need = 60 + sum(w.winfo_reqwidth() for w in bar.winfo_children()   # (60: the gaps between them)
                             if w.winfo_manager() == "pack" or any(w is x for x, _ in extras))
-            for widget, how in extras:   # "you have" goes first, then "skip this version"
+            for widget, how in extras:
                 show = need <= room
                 if not show:
                     need -= widget.winfo_reqwidth()
@@ -790,6 +804,69 @@ class LockdownApp(ctk.CTk):
                     widget.pack_forget()
         bar.bind("<Configure>", fit, add="+")
         self.update_text.bind("<Configure>", fit)   # (a longer version number: check again)
+        bar.grid_remove()
+
+    # ---------- "Pause my blocks" (pause.py) ----------
+    # Started from the card on the Anti-Bypass page (the tray's "Pause my blocks..." opens it), with the challenge;
+    # ended by the clock, or early - free - from the banner, the tray or that card.
+
+    def pause_blocks(self, minutes: int | None, silent: bool, done=lambda: None):
+        """Pause all your blocks for `minutes` (None: until the next reset time) - loosening, so through the
+        Anti-Bypass challenge. While a locked mode is on it asks even with no challenge turned on (as stopping that
+        mode does), since the pause would lift the mode's blocks too. done() runs either way (the card repaints)."""
+        now = now_from_db(self.db)
+        state = modes.active(self.db, now)
+        locked = bool(state and state["locked"] and not state["scheduled"])
+        end = pause.end_for(self.db, minutes, now)
+        how = "for the rest of the day" if minutes is None else f"for {pause.label(minutes)}"
+        change = (f"Pause all your blocks {how} (until {end:%H:%M}): every blocked site and app, limits, hours, "
+                  "modes, temporary and permanent blocks" + (", and silence all notifications" if silent else ""))
+
+        def go():
+            pause.start(self.db, now_from_db(self.db), minutes, silent)   # (the time it is once the challenge is done)
+            self.refresh_pause()
+            done()
+        self.guard([change], go, done, force=locked)
+
+    def resume_blocks(self):
+        """"Resume now" / "Resume blocking": your blocks are back at once. Never needs the challenge."""
+        pause.resume(self.db)
+        self.refresh_pause()
+
+    def refresh_pause(self):
+        """The slim "Blocking paused until HH:MM · Resume now" banner over every page, and the tray's state, from
+        what is saved (cheap: nothing is touched unless it changed - it runs with the status poll every 3 s, which
+        is how a pause that runs out takes its banner with it). Returns the pause's end, or None."""
+        now = now_from_db(self.db)
+        until = pause.until(self.db, now)
+        shown = (until, bool(pause.silent_until(self.db, now))) if until else None
+        if shown != getattr(self, "pause_shown", None):
+            self.pause_shown = shown
+            if until:
+                self.pause_text.configure(text=f"Blocking paused until {until:%H:%M}" +
+                                               (" · notifications silenced" if shown[1] else ""))
+                self.pause_banner.grid()
+            else:
+                self.pause_banner.grid_remove()
+            self.tray.set_paused(until)
+            for page in ("Blocking", "Dashboard", "Anti-Bypass"):   # statuses and the card follow it
+                if page in self.pages:
+                    self.pages[page].refresh()
+        return until
+
+    def _build_pause_banner(self, parent):
+        """Built once, shown / hidden and relabelled by refresh_pause."""
+        self.pause_shown = None
+        self.pause_banner = bar = ctk.CTkFrame(parent, fg_color=theme.SURFACE, border_width=1,
+                                               border_color=theme.INFO, corner_radius=6)
+        bar.grid(row=1, column=0, sticky="ew", padx=24, pady=(12, 0))
+        ctk.CTkButton(bar, text="Resume now", width=110, height=26, command=self.resume_blocks).pack(
+            side="right", padx=(0, 10), pady=5)
+        ctk.CTkLabel(bar, text="", image=theme.icon("hourglass", theme.INFO, 16)).pack(side="left", padx=(14, 8))
+        self.pause_text = ctk.CTkLabel(bar, text="", font=theme.semi(13), anchor="w")
+        self.pause_text.pack(side="left")
+        ctk.CTkLabel(bar, text="protection lists and blocked words still apply", text_color=theme.MUTED,
+                     font=theme.body(12)).pack(side="left", padx=10)
         bar.grid_remove()
 
     def _read_minimize_blocks(self, now, usage=None, items=None, groups=None):
@@ -904,7 +981,10 @@ class LockdownApp(ctk.CTk):
         hold back into the notification centre while you play (it stays there toast.HELD_EXPIRE_MIN), never one
         that breaks through Do not disturb. With nothing full-screen a sticky notice is a Windows "reminder",
         which stays on screen until answered. If Windows notifications can't be had here (the balloon has no
-        buttons), a notice with buttons on the desktop is Lockdown's pop-up instead, so its buttons are kept."""
+        buttons), a notice with buttons on the desktop is Lockdown's pop-up instead, so its buttons are kept.
+        "Pause my blocks" with "Silence all notifications" mutes everything, force or not, until it ends."""
+        if pause.silent_until(self.db, now_from_db(self.db)):
+            return False
         if not force:
             state = modes.active(self.db, now_from_db(self.db))
             if state and state["mode"].get("mute"):

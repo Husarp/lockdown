@@ -53,6 +53,15 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)
   and/or only during chosen hours; tightening is always instant. The tray app and the service come back
   within a minute if they're closed; a new time zone counts only after 24 hours; uninstalling asks for the challenge.
+- **Pause my blocks (0.84.8):** on the Anti-Bypass page or from the tray ("Pause my blocks..."): every site and app on
+  your list - items, groups, modes, categories; hours, time limits, opening limits, temporary and permanent blocks -
+  is unblocked for 30 min, 1 h, 2 h, 4 h or the rest of the day (until the next reset time), then blocked again by
+  itself. Optionally **Silence all notifications** for the same while (warnings, reminders, bedtime and break
+  alerts and screens, pop-ups and Windows notifications). The protection lists, blocked words and SafeSearch stay
+  on, and the time you use still counts toward your limits. Starting it needs the Anti-Bypass challenge; **Resume
+  now** (the banner over every page, the tray, the Anti-Bypass page) ends it early, free. Kept in trusted time, so a
+  restart or a clock change doesn't stretch it. Not the same as turning Lockdown off (everything, until you turn it
+  back on) or an emergency unlock (picked items, spends a use).
 - **Phase 8a**: your own block lists by URL (with a preview), settings backup / import, screen-time CSV, a weekly
   summary notification, streaks, a month calendar on Screen Time, display settings (⚙) for Dashboard / Screen Time.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
@@ -61,12 +70,15 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   of per-minute detail with daily totals kept forever - the Dashboard of a year-old install loads in about a tenth
   of the time, and an install no longer gets slower the longer it is used.
 
-- **Updates (0.84.4):** Lockdown asks GitHub for a newer release a minute after it starts, every 3 hours, and when
-  you open the window (if the last check is over an hour old). A newer version shows as a banner over every page
-  ("Lockdown X is available - Install / Later / skip this version"), a dot on About and "Update available" with
+- **Updates (0.84.4, 0.84.8):** Lockdown asks GitHub for a newer release a minute after it starts, every 6 hours,
+  and when you open the window (at most every 5 minutes). A newer version shows as a banner over every page
+  ("Lockdown X is available - Install / Later / ✕"), a dot on About and "Update available" with
   "Install update" in the tray menu, plus one notice (Install / Remind me later). **Later** hides it for
-  4 hours, **skip** until a newer version comes; **Install** downloads and runs the installer from the About page,
-  with progress. Only ever forward to a newer version; "Check for updates automatically" (About) turns it off.
+  4 hours, the **✕** hides the banner until Lockdown is next started (never for good); **Install** downloads
+  `LockdownSetup-X.Y.Z.exe` to the temp folder and runs it from the About page, with progress (the file is deleted
+  at the next start). If that fails, About says so with **Try again** and **GitHub** - nothing opens by itself.
+  About's update section: Check for updates automatically (on/off), the version with **Check now**, **GitHub**
+  (the releases page) and **Get update** when there is one. Only ever forward to a newer version.
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 

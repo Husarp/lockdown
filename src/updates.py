@@ -9,13 +9,19 @@ check is tried again on the next poll. With no repository set (REPO empty)
 there is nothing to ask, and the button isn't there. Standard library only.
 
 What was found is kept (FOUND_KEY), so "Lockdown X is available" stays on screen - the banner over every page, a
-dot on About, a line in the tray menu - until it is installed, you skip that version, or you ask to be reminded
-later (hidden for SNOOZE_HOURS, then back).
+dot on About, a line in the tray menu - until it is installed or you ask to be reminded later (hidden for
+SNOOZE_HOURS, then back). The banner's x hides only the banner, and only until Lockdown is next started (the window
+keeps that in memory - APP-STANDARDS 2); nothing hides an update for good.
+
+The in-app update downloads LockdownSetup-X.Y.Z.exe to the temp folder and runs it; the next start deletes it
+(remove_downloads). The installer is found on the release by its .exe ending, whatever it is called.
 """
 import json
 import re
+import tempfile
 import urllib.request
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from version import REPO, VERSION
 
@@ -33,7 +39,6 @@ TRIED_KEY = "updates.last_try"     # when the last check was started, answered o
 SEEN_KEY = "updates.seen"          # the newest version the popup has already told you about
 FOUND_KEY = "updates.found"        # the newest release found (JSON), so the banner survives a restart
 SNOOZE_KEY = "updates.snooze_until"   # "Remind me later": popup and banner hidden until then (trusted time)
-SKIP_KEY = "updates.skipped"       # the banner's x: this version (and older) is not mentioned again
 EVERY_HOURS = 6                    # the automatic check in the background
 OPEN_HOURS = 0                     # opening the window always checks (RETRY_MIN still spaces the requests)
 RETRY_MIN = 5                      # never two requests within this many minutes (opening and closing the window)
@@ -54,8 +59,16 @@ def repo_page() -> str | None:
     return PAGE.format(repo=REPO) if REPO else None
 
 
+def releases_page(found: dict | None = None) -> str | None:
+    """What the GitHub button opens: the release found (its page), else the list of releases."""
+    if found and found.get("url"):
+        return found["url"]
+    return PAGE.format(repo=REPO) + "/releases" if REPO else None
+
+
 def installer_asset(assets) -> tuple[str, int] | None:
-    """The .exe attached to a release - what to download. Releases carry other files too."""
+    """The .exe attached to a release - what to download - by its ending, never by an exact name: releases are
+    named with their version (LockdownSetup-0.84.8.exe), and carry other files too (the Android .apk, checksums)."""
     for a in assets or []:
         if (a.get("name") or "").lower().endswith(".exe") and a.get("browser_download_url"):
             return a["browser_download_url"], int(a.get("size") or 0)
@@ -90,6 +103,27 @@ def can_install(found: dict | None) -> bool:
     """Only ever forwards. Lockdown is a blocker: installing an older build would be a way to drop the rules
     you set, so "update" never means "go back". Without an installer attached there is nothing to run either."""
     return bool(found and found.get("newer") and found.get("asset"))
+
+
+DOWNLOAD_PREFIX = "LockdownSetup"   # what the in-app update saves to the temp folder: LockdownSetup-X.Y.Z.exe
+
+
+def download_path(version: str, folder=None) -> Path:
+    """Where the in-app update saves the installer: LockdownSetup-X.Y.Z.exe in the temp folder."""
+    return Path(folder or tempfile.gettempdir()) / f"{DOWNLOAD_PREFIX}-{version}.exe"
+
+
+def remove_downloads(folder=None) -> list[Path]:
+    """At start: delete the installers an in-app update downloaded (it has run by now). One still running or held
+    open is left for the next start. Returns what was deleted."""
+    gone = []
+    for path in Path(folder or tempfile.gettempdir()).glob(f"{DOWNLOAD_PREFIX}-*.exe"):
+        try:
+            path.unlink()
+            gone.append(path)
+        except OSError:
+            pass
+    return gone
 
 
 def download(url: str, dest, progress=None, opener=None):
@@ -201,7 +235,7 @@ def available(db) -> dict | None:
     return found
 
 
-# ---------- "Remind me later" and "Skip this version" ----------
+# ---------- "Remind me later" ----------
 
 def snooze(db, now: datetime, hours: float = SNOOZE_HOURS):
     """Remind me later: popup and banner hidden for `hours`, then both come back (the popup once more)."""
@@ -216,30 +250,21 @@ def snoozed(db, now: datetime) -> bool:
     return bool(until and now < until <= now + timedelta(hours=SNOOZE_HOURS))
 
 
-def skip(db, version: str):
-    """The banner's x: don't mention this version (or anything older) again; a newer one is news again."""
-    db.set_setting(SKIP_KEY, version)
-
-
-def skipped(db, found: dict | None) -> bool:
-    mark = db.get_setting(SKIP_KEY, "")
-    return bool(found and mark and not is_newer(found["version"], mark))
-
-
 def banner(db, now: datetime) -> dict | None:
     """What the in-app banner (and the dot on About, and the tray's "Update available") should show: the
-    release found, while it is newer than this version, not skipped and not snoozed - else None. Not affected
-    by the popup setting or by Do not disturb: it sits quietly in the window, it doesn't interrupt."""
+    release found, while it is newer than this version and not snoozed - else None. Not affected by the popup
+    setting or by Do not disturb: it sits quietly in the window, it doesn't interrupt. (The banner's x is the
+    window's own business: until the next start - LockdownApp.update_close.)"""
     found = available(db)
-    if not found or skipped(db, found) or snoozed(db, now):
+    if not found or snoozed(db, now):
         return None
     return found
 
 
 def worth_saying(db, found: dict | None, now: datetime | None = None) -> bool:
     """The corner popup: once per new version (and once more after "Remind me later" runs out), not once per
-    check forever - never for a skipped version, while snoozed, or if you turned the notice off."""
-    if not found or not found.get("newer") or not notify_on(db) or skipped(db, found):
+    check forever - never while snoozed, or if you turned the notice off."""
+    if not found or not found.get("newer") or not notify_on(db):
         return False
     if now is not None and snoozed(db, now):
         return False

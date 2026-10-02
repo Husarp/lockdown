@@ -35,6 +35,7 @@ from db import Database
 from monitor.usage import COUNTED_KEY, MAX_GAP_SEC, MEMBERS_KEY
 from paths import DATA_DIR, LOG_PATH
 import modes
+import pause
 from rules import counted_rules, usage_targets, visit_targets
 from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, ZONE_KEY, TrustedClock, utc_offset, zone_name, zone_step
 
@@ -78,6 +79,7 @@ def setup_logging():
 class Enforcer:
     was_off = False        # switched off entirely (see enforce_once); a class default so that the DNS
     # threads can read it before the first tick, and so a bare instance has it
+    was_paused = False     # a "Pause my blocks" is running (logged when it starts / ends)
     counting = False       # the service is counting app time itself (the tray app isn't, count_unwatched_apps)
     count_carry = 0.0
     count_mark = None      # the mark the service itself wrote last
@@ -149,6 +151,10 @@ class Enforcer:
         if off != self.was_off:
             log.info("Lockdown switched %s", "off - nothing is enforced" if off else "back on")
             self.was_off = off
+        paused = pause.until(self.db, now)   # "Pause my blocks": db.blocks lifts your blocks (not the lists)
+        if bool(paused) != self.was_paused:
+            log.info("Your blocks are %s", f"paused until {paused:%H:%M}" if paused else "back on")
+            self.was_paused = bool(paused)
         all_blocks = [] if off else self.db.blocks(now)
         blocks, dns_blocks = {}, {}
         for b in all_blocks:

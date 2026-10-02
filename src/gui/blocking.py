@@ -73,6 +73,9 @@ def status_of(page, item: dict, now, usage) -> dict:
         return {"text": "● Not applied (unsaved)", "text_color": ORANGE}
     if item.get("disabled"):
         return {"text": "● Disabled", "text_color": MUTED}
+    paused = getattr(usage, "paused", None)
+    if paused and now < paused:   # "Pause my blocks" (pause.py): the banner over the page says until when
+        return {"text": f"● Paused · {duration_text((paused - now).total_seconds())} left", "text_color": BLUE}
     unlocked = getattr(usage, "unlocks", {}).get(f"item:{item['id']}")
     if unlocked and now < unlocked:
         return {"text": f"● Unlocked · {duration_text((unlocked - now).total_seconds())} left", "text_color": BLUE}

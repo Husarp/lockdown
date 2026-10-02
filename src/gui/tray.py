@@ -39,7 +39,7 @@ def update_text(version: str | None) -> str:
 
 
 class Tray:
-    def __init__(self, on_open, on_exit, on_mode=None, on_update=None):
+    def __init__(self, on_open, on_exit, on_mode=None, on_update=None, on_pause=None, on_resume=None):
         self.status_text = "Starting..."
         self.running: bool | None = None
         self.on_mode = on_mode
@@ -49,6 +49,7 @@ class Tray:
         self.off = False                         # Lockdown switched off entirely (Anti-Bypass page)
         self.update_version: str | None = None   # a newer Lockdown found and not installed / skipped / snoozed
         self.on_update = on_update
+        self.paused_until = None                 # "Pause my blocks" is running until then (pause.py)
         self._title: str | None = None
         self._lock = threading.Lock()
         self.icon = _Icon(
@@ -61,6 +62,10 @@ class Tray:
                 pystray.MenuItem("Install update", lambda: self.on_update and self.on_update(),
                                  visible=lambda item: bool(self.update_version and self.on_update)),
                 pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Pause my blocks...", lambda: on_pause and on_pause(),
+                                 visible=lambda item: bool(on_pause) and not self.paused_until),
+                pystray.MenuItem("Resume blocking", lambda: on_resume and on_resume(),
+                                 visible=lambda item: bool(on_resume and self.paused_until)),
                 pystray.MenuItem("Modes", pystray.Menu(self._mode_items)),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit", lambda: on_exit()),
@@ -93,10 +98,22 @@ class Tray:
             self.icon.update_menu()
         return True
 
+    def set_paused(self, until) -> bool:
+        """"Pause my blocks" started or ended: the icon turns blue (or back), and the menu offers Resume blocking
+        instead of Pause my blocks. Only touches the icon when it changed."""
+        if until == self.paused_until:
+            return False
+        self.paused_until = until
+        with self._lock:
+            self._refresh_icon()
+            self.icon.update_menu()
+        return True
+
     def _refresh_icon(self):
-        """grey = switched off, green = blocking enforced, yellow = a mode is on, red = service down."""
-        state = ("grey" if self.off else "red" if not self.running else "yellow" if self.active_mode
-                 else "green")
+        """grey = switched off, green = blocking enforced, blue = your blocks are paused, yellow = a mode is on,
+        red = service down."""
+        state = ("grey" if self.off else "red" if not self.running else "blue" if self.paused_until
+                 else "yellow" if self.active_mode else "green")
         if state != self._icon_state:
             self._icon_state = state
             self.icon.icon = icon_art.tray_icon(state)

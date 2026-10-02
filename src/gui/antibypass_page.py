@@ -5,6 +5,7 @@ from datetime import datetime
 import customtkinter as ctk
 
 import antibypass
+import pause
 import reminders   # (parse_minutes / minutes_text: the same "45s", "10", "1h30" boxes)
 from gui import theme
 from gui.components import Card, Segmented, help_icon, page_head
@@ -21,6 +22,7 @@ PROTECTS = ["Removing a blocked site / app / group, or taking sites or members o
             "Switching a protection list off, or allowing a site it blocks",
             "Turning SafeSearch or the blocked-words check off, removing your words, adding exceptions",
             "Emergency unlock: turning it on, longer unlocks, more uses",
+            "Pausing your blocks (Pause my blocks) - resuming early is always free",
             "Quitting Lockdown from the tray",
             "Weakening Anti-Bypass itself (these settings)"]
 
@@ -311,6 +313,27 @@ class AntiBypassPage(ctk.CTkFrame):
                                 "Stopping a locked mode always needs the phrase, even with no challenge turned on here.",
                      text_color=MUTED, wraplength=380, justify="left", anchor="w").pack(anchor="w", padx=12, pady=9)
 
+        held = Card(left, "Pause my blocks")
+        held.pack(fill="x", pady=(0, 12))
+        self.pause_note = ctk.CTkLabel(held.body, text="", justify="left", anchor="w", wraplength=520)
+        self.pause_note.pack(anchor="w")
+        self.pause_form = ctk.CTkFrame(held.body, fg_color="transparent")
+        self.pause_length = Segmented(self.pause_form, values=list(pause.DURATIONS))
+        self.pause_length.set("1 h")
+        self.pause_length.pack(anchor="w", pady=(8, 0))
+        self.pause_silent = ctk.CTkCheckBox(self.pause_form, text="Silence all notifications (warnings, reminders, "
+                                                                  "bedtime and break alerts, pop-ups)",
+                                            checkbox_width=18, checkbox_height=18)
+        self.pause_silent.pack(anchor="w", pady=(8, 0))
+        self.pause_btn = ctk.CTkButton(held.body, text="", width=200, command=self._toggle_pause)
+        self.pause_btn.pack(anchor="w", pady=(10, 2))
+        ctk.CTkLabel(held.body, text="Unblocks every site and app on your list for a while - hours, time limits, "
+                                     "opening limits, modes, temporary and permanent blocks. The protection lists, "
+                                     "blocked words and SafeSearch keep working, and the time you use still counts "
+                                     "toward your limits. It ends by itself; starting it needs the challenge, "
+                                     "resuming early never does. No emergency unlock is used.",
+                     text_color=MUTED, wraplength=520, justify="left", anchor="w").pack(anchor="w", pady=(4, 0))
+
         off = Card(left, "Turn Lockdown off")
         off.pack(fill="x", pady=(0, 12))
         self.off_note = ctk.CTkLabel(off.body, text="", justify="left", anchor="w", wraplength=520)
@@ -332,6 +355,7 @@ class AntiBypassPage(ctk.CTkFrame):
             "•  Uninstalling Lockdown asks for the challenge too."]), justify="left", anchor="w",
             wraplength=520).pack(anchor="w")
         self._banner_sig = None
+        self._paint_pause()
         self._paint_off()
         self.refresh()
         self.after(LIVE_MS, self._live)
@@ -360,6 +384,28 @@ class AntiBypassPage(ctk.CTkFrame):
             self.off_note.configure(text="Lockdown is on and enforcing your rules.",
                                     text_color=theme.ALLOWED, font=theme.semi(13))
             self.off_btn.configure(text="Turn Lockdown off")
+
+    def _paint_pause(self):
+        now = now_from_db(self.app.db)
+        state = pause.state(self.app.db, now)
+        if state:
+            self.pause_note.configure(text=f"Your blocks are paused until {state['until']:%H:%M}" +
+                                           (" - notifications are silenced." if state["silent"] else "."),
+                                      text_color=theme.INFO, font=theme.semi(13))
+            self.pause_form.pack_forget()
+            self.pause_btn.configure(text="Resume blocking")
+        else:
+            self.pause_note.configure(text="Your blocks are on.", text_color=theme.ALLOWED, font=theme.semi(13))
+            self.pause_form.pack(anchor="w", fill="x", after=self.pause_note)
+            self.pause_btn.configure(text="Pause my blocks")
+
+    def _toggle_pause(self):
+        if pause.state(self.app.db, now_from_db(self.app.db)):
+            self.app.resume_blocks()               # resuming never needs the challenge
+        else:
+            self.app.pause_blocks(pause.DURATIONS[self.pause_length.get()], bool(self.pause_silent.get()),
+                                  self._paint_pause)
+        self._paint_pause()
 
     def _toggle_off(self):
         if antibypass.is_off(self.app.db):
@@ -394,6 +440,7 @@ class AntiBypassPage(ctk.CTkFrame):
         for w in cfg["windows"]:
             self._add_row(w["days"], w["start"], w["end"])
         self.error.configure(text="")
+        self._paint_pause()
         self._set_banner()
 
     def _set_banner(self):

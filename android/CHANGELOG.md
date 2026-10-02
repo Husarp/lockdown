@@ -1,5 +1,14 @@
 # Changelog — Lockdown Mobile
 
+## 0.5.11 - 2026-10-02 23:22
+- **The app now updates itself.** It checks GitHub when it opens and every time you come back to it (at most every 5 minutes), and when a newer Lockdown Mobile is out, a banner on Home shows the version with **UPDATE** and **✕**. The ✕ hides the banner until the app is next started (coming back from another app doesn't bring it back).
+- **UPDATE downloads the new version inside the app** (progress 0–100%) and hands it to Android's installer — no browser, no Downloads folder. The first time, Android's "Install unknown apps" screen opens for Lockdown; allow it, come back, and the install carries on by itself. Android still asks you to confirm every update.
+- **A failed update says why**, with **TRY AGAIN** and **GITHUB** buttons; nothing opens by itself.
+- **Settings → Updates:** Check for updates (on/off), your version with **CHECK NOW** (gives up after 10 seconds and says in words what's likely wrong, e.g. no internet or a firewall), **GITHUB** (the releases page), and **GET UPDATE** when one is available. An automatic check that fails stays silent.
+- The downloaded file is deleted once the new version runs.
+- The install keeps going even if Android restarts Lockdown when you allow "Install unknown apps" (some phones do), and a download that finishes while you're in another app opens the installer when you come back instead of being silently blocked by Android. Back from Android's settings screen returns straight to Lockdown.
+- Note: the app looks for the `LockdownMobile-X.Y.Z.apk` file on the **latest** GitHub release; a release with only the PC installer means "no Android update". Only an APK signed with Lockdown Mobile's own key installs over it.
+
 ## 0.5.10 - 2026-10-02 13:43
 - **Fixed: the bedtime grayscale switch couldn't turn grayscale off.** Switching it off only saved the setting; nothing ever gave the screen its colour back, so the phone stayed grey until you turned it off in Android's own settings. Turning it off now restores colour straight away (and turning it on at night greys the screen straight away, not up to 15 minutes later).
 - **Grayscale follows Bedtime.** If Bedtime itself is off, the screen no longer turns grey at night.

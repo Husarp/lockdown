@@ -13,6 +13,7 @@ import re
 from datetime import date, datetime, time, timedelta
 
 import emergency
+import pause
 from rules import TIME_FMT, days_text, parse_hhmm
 
 TICK_SEC = 5
@@ -218,6 +219,7 @@ class Engine:
         self.backed_off: dict[str, date] = {}                # reminder id / "break" -> the day it asks less
         self.break_due: dict | None = None                   # the break settings, when it comes up this tick
         self.paused: datetime | None = None                  # an emergency unlock paused bedtime/break alerts until
+        self.silent: datetime | None = None                  # "Pause my blocks" silenced every notification until
 
     # ---------- showing ----------
 
@@ -284,10 +286,19 @@ class Engine:
         the bedtime screen holds too, which it doesn't do for a game."""
         self.now, self.quiet = now, quiet
         self.fullscreen = fullscreen = fullscreen or quiet
-        self.paused = emergency.alerts_paused_until(self.db, now)
+        # an emergency that paused the alerts, or "Pause my blocks" with "Silence all notifications" (pause.py)
+        self.silent = pause.silent_until(self.db, now)
+        self.paused = max(filter(None, (emergency.alerts_paused_until(self.db, now), self.silent)), default=None)
         using = idle_sec < USING_IDLE_SEC
         self._breaks(now, idle_sec, using, dt)
         self._sleep(now)
+        if self.silent:
+            # silenced: your reminders don't come up either (one on screen goes), until the pause ends
+            for key in [k for k in (*self.open, *self.waiting) if k.startswith(("custom:", "check:"))]:
+                self.grouped.pop(key, None)
+                self._close(key)
+            self.pending, self.folded = [], []
+            return
         self._custom(now, using, dt)
         if self.break_due:
             # Shown last, so that a reminder falling due in the same tick is already folded in: drawn once,

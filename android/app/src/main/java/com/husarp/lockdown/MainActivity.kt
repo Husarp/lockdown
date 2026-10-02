@@ -62,11 +62,25 @@ class MainActivity : ComponentActivity() {
         ) {
             com.husarp.lockdown.vpn.LockdownVpn.start(this)
         }
+        // A fresh start (not a rotation): the update banner may show again, and an installed update's APK goes.
+        if (savedInstanceState == null) com.husarp.lockdown.update.Updates.onAppStart(this)
         enableEdgeToEdge()
         setContent {
             val cfg by com.husarp.lockdown.data.Store.state.collectAsStateWithLifecycle()
             LockdownTheme(pref = cfg.settings.theme) { App() }
         }
+    }
+
+    // Launch and every return to the app: check for updates (at most every 5 min) and carry on an install
+    // that was waiting on Android's "install unknown apps" screen.
+    override fun onResume() {
+        super.onResume()
+        com.husarp.lockdown.update.Updates.onResume(this)
+    }
+
+    override fun onPause() {
+        com.husarp.lockdown.update.Updates.onPause()
+        super.onPause()
     }
 }
 

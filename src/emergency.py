@@ -49,7 +49,8 @@ def choices(db, now: datetime) -> tuple[list[dict], list[dict]]:
     candidates = [i for i in items if not any(r["rule_type"] == "permanent" for r in effective_rules(i, groups))]
     # what would still be blocked with every candidate unlocked: held by something the unlock doesn't lift
     far = now + timedelta(days=3650)
-    trial = Usage(usage.data, usage.clock, {**usage.unlocks, **{f"item:{i['id']}": far for i in candidates}})
+    trial = Usage(usage.data, usage.clock, {**usage.unlocks, **{f"item:{i['id']}": far for i in candidates}},
+                  usage.paused)
     held = {b["item"]["id"] for b in db.blocks(now, trial, items, groups)}
     blocked = {b["item"]["id"] for b in db.blocks(now, usage, items, groups)}
     free = sorted((i for i in candidates if i["id"] not in held), key=lambda i: i["display_name"].lower())

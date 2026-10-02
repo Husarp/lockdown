@@ -18,6 +18,7 @@ import threading
 import time
 
 import modes
+import pause
 import json
 
 from blocker.apps import PROTECTED, app_folder, exe_name, in_folder, kills, list_processes, names_of
@@ -423,7 +424,8 @@ class UsageTracker(threading.Thread):
             if not rules:
                 return targets
             unlocks = {f"item:{i}": u for i, u in db.active_unlocks(now).items()}
-            usage = Usage(db.usage_of(block_targets(rules, now, clock) | set(targets)), clock, unlocks)
+            usage = Usage(db.usage_of(block_targets(rules, now, clock) | set(targets)), clock, unlocks,
+                          pause.until(db, now))   # (paused: it isn't closed, so its opening counts)
             return closed_opening(rules, targets, now, usage)
         except Exception:
             log.exception("Could not tell whether %s is blocked - counting its opening", item["display_name"])

@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import modes
+import pause
 from paths import DB_PATH
 from rules import RESET_KEY, TIME_FMT, LimitClock, Usage, effective_rules, item_block
 
@@ -520,6 +521,9 @@ class Database:
         usage / items / groups: what the caller already loaded for this same tick (one usage_lookup per tick)."""
         now = now or datetime.now()
         usage = usage if usage is not None else self.usage_lookup(now)
+        if (paused := getattr(usage, "paused", None)) and now < paused:
+            return []   # "Pause my blocks": nothing of yours blocks - items, groups, categories, modes (the
+            #             protection lists, blocked words and SafeSearch are not in here: they keep working)
         groups = groups if groups is not None else self.list_groups()
         items = [i for i in (items if items is not None else self.list_items())
                  if not i["disabled"]]   # disabled = paused, nothing applies
@@ -630,11 +634,13 @@ class Database:
         return out
 
     def usage_lookup(self, now: datetime) -> Usage:
-        """usage(owner, bucket) -> seconds, over recently written rows; with the limit clock and active unlocks."""
+        """usage(owner, bucket) -> seconds, over recently written rows; with the limit clock, the active emergency
+        unlocks and a running "Pause my blocks" (pause.py)."""
         since = (now.date() - timedelta(days=USAGE_DAYS_LOADED)).isoformat()
         data = {(r["owner"], r["bucket"]): r["seconds"] for r in self.conn.execute(
             "SELECT owner, bucket, seconds FROM usage WHERE day >= ?", (since,))}
-        return Usage(data, self.limit_clock(), {f"item:{i}": u for i, u in self.active_unlocks(now).items()})
+        return Usage(data, self.limit_clock(), {f"item:{i}": u for i, u in self.active_unlocks(now).items()},
+                     pause.until(self, now))
 
     def limit_clock(self) -> LimitClock:
         return self.parsed(RESET_KEY, LimitClock)   # (a LimitClock never changes once made)

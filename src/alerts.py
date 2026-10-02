@@ -104,8 +104,8 @@ class BlockWatcher:
         source = ("group", rule["group"]["id"]) if rule.get("group") else ("item", item["id"])
         if rule["rule_type"] == "time_limit":      # usage-based: the predicted time drifts, key by day
             return source, "limit", when.date()
-        if rule["rule_type"] == "unlock":          # items unlocked together are announced together
-            return "unlock", when
+        if rule["rule_type"] in ("unlock", "pause"):   # items unlocked together are announced together
+            return rule["rule_type"], when
         if rule.get("allowance_min") and rule["rule_type"] == "scheduled":
             return source, "allowance", when.strftime("%Y%m%d")
         return source, "schedule", when.strftime("%Y%m%d%H%M")
@@ -208,6 +208,11 @@ class BlockWatcher:
             return f"{scope}: {minutes} min of the time limit left."
         if rule["rule_type"] == "unlock":
             return f"Emergency unlock ends in {minutes} min: {names} will be blocked again."
+        if rule["rule_type"] == "pause":
+            count = len(set(e["names"]))
+            what = names if count <= 3 else f"{count} things"
+            return (f"Your blocks are back on in {minutes} min ({_when_text(e['when'], now)}): {what} will be "
+                    "blocked again.")
         if rule.get("allowance_min"):
             return f"{names}: {minutes} min of your allowance left - then it's blocked."
         if rule.get("group"):

@@ -38,7 +38,6 @@ import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
-import com.husarp.lockdown.update.Updates
 import com.husarp.lockdown.usage.Usage
 import com.husarp.lockdown.vpn.LockdownVpn
 import java.util.UUID
@@ -52,7 +51,6 @@ fun SettingsScreen() {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val s = cfg.settings
     val scope = rememberCoroutineScope()
-    var updateMsg by remember { mutableStateOf<String?>(null) }
     var importMsg by remember { mutableStateOf<String?>(null) }
 
     fun set(block: (Settings) -> Settings) = Store.update { it.copy(settings = block(it.settings)) }
@@ -230,32 +228,7 @@ fun SettingsScreen() {
             }
         }
 
-        Card {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Updates", style = MaterialTheme.typography.titleSmall)
-                        Text("Version ${Updates.current(ctx)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = s.checkUpdates, onCheckedChange = { set { c -> c.copy(checkUpdates = it) } })
-                }
-                updateMsg?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp)) }
-                TextButton(onClick = {
-                    updateMsg = "Checking…"
-                    scope.launch {
-                        val rel = withContext(Dispatchers.IO) { Updates.latest() }
-                        updateMsg = when {
-                            rel == null -> "Couldn't check right now."
-                            Updates.isNewer(rel.tag, Updates.current(ctx)) -> {
-                                ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(rel.url)))
-                                "Update ${rel.tag} available - opening the release page."
-                            }
-                            else -> "You're up to date."
-                        }
-                    }
-                }) { Text("Check now") }
-            }
-        }
+        com.husarp.lockdown.update.UpdateSection()
     }
 }
 

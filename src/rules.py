@@ -219,10 +219,12 @@ def change_reset(config: str | None, new_time: str, now: datetime) -> str:
 
 class Usage:
     """usage(owner, bucket) -> seconds (or openings) used. Also carries what the rules need besides usage:
-    the limit clock and the active emergency unlocks ({"item:<id>": until})."""
+    the limit clock, the active emergency unlocks ({"item:<id>": until}) and the end of a running "Pause my
+    blocks" (pause.py: nothing of yours blocks until then), or None."""
 
-    def __init__(self, data: dict | None = None, clock: LimitClock = DEFAULT_CLOCK, unlocks: dict | None = None):
-        self.data, self.clock, self.unlocks = data or {}, clock, unlocks or {}
+    def __init__(self, data: dict | None = None, clock: LimitClock = DEFAULT_CLOCK, unlocks: dict | None = None,
+                 paused: datetime | None = None):
+        self.data, self.clock, self.unlocks, self.paused = data or {}, clock, unlocks or {}, paused
 
     def __call__(self, owner: str, bucket: str) -> int:
         return self.data.get((owner, bucket), 0)
@@ -248,9 +250,18 @@ def _clock(usage) -> LimitClock:
     return getattr(usage, "clock", DEFAULT_CLOCK)
 
 
-def _unlocked_until(rules: list[dict], now: datetime, usage) -> datetime | None:
-    until = getattr(usage, "unlocks", {}).get(rules[0].get("item_owner")) if rules else None
+def _paused(usage, now: datetime) -> datetime | None:
+    """The end of the running "Pause my blocks", or None."""
+    until = getattr(usage, "paused", None)
     return until if until and now < until else None
+
+
+def _unlocked_until(rules: list[dict], now: datetime, usage) -> datetime | None:
+    """Until when nothing blocks these rules: an emergency unlock on the item, or a pause of all your blocks
+    (the later of the two)."""
+    until = getattr(usage, "unlocks", {}).get(rules[0].get("item_owner")) if rules else None
+    ends = [t for t in (until, _paused(usage, now) if rules else None) if t and now < t]
+    return max(ends) if ends else None
 
 
 # ---------- usage buckets ----------
@@ -503,7 +514,7 @@ def closed_opening(rules: list[dict], targets: set[tuple[str, str]], now: dateti
     if closes(item_block(rules, now, usage)):
         return targets - openings
     after = Usage({**getattr(usage, "data", {}), **{t: usage(*t) + 1 for t in openings}},
-                  _clock(usage), getattr(usage, "unlocks", {}))
+                  _clock(usage), getattr(usage, "unlocks", {}), getattr(usage, "paused", None))
     if not closes(item_block(rules, now, after)):
         return targets
     clock = _clock(usage)
@@ -559,10 +570,12 @@ def _schedule_next_start(schedule_json: str, now: datetime) -> datetime | None:
 def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = False) -> tuple[datetime, dict] | None:
     """(when, rule) of the next block for an item that isn't blocked now, or None.
     Usage-based blocks (time limit, allowance) are only predicted while the item is in use.
-    During an emergency unlock: its end, if the item is blocked then (rule {"rule_type": "unlock"})."""
+    During an emergency unlock: its end, if the item is blocked then (rule {"rule_type": "unlock"}); during a pause
+    of all your blocks that ends last, rule {"rule_type": "pause"}."""
     if until := _unlocked_until(rules, now, usage):
         after = Usage(getattr(usage, "data", {}), _clock(usage))
-        return (until, {"rule_type": "unlock", "group": None}) if item_block(rules, until, after) else None
+        kind = "pause" if until == _paused(usage, now) else "unlock"
+        return (until, {"rule_type": kind, "group": None}) if item_block(rules, until, after) else None
     found = []
     for r in rules:
         kind = r["rule_type"]

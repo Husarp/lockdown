@@ -75,6 +75,8 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        com.husarp.lockdown.update.UpdateBanner()
+
         // Hero
         Card(color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, shape = MaterialTheme.shapes.extraLarge) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

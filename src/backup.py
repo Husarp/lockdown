@@ -10,8 +10,9 @@ FORMAT = 1
 RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "clock_zone", "dns_filter.saved",
                 "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last",
                 "retention.last_day",   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
-                "usage.counted_until", "firewall_quic", "apps.members"}
-# (monitor.usage.COUNTED_KEY, service.QUIC_KEY, monitor.usage.MEMBERS_KEY)
+                "usage.counted_until", "firewall_quic", "apps.members",
+                "pause.blocks"}   # (a running "Pause my blocks" - an import neither carries one in nor ends one)
+# (monitor.usage.COUNTED_KEY, service.QUIC_KEY, monitor.usage.MEMBERS_KEY, pause.KEY)
 
 
 def export(db) -> dict:

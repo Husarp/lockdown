@@ -4,7 +4,8 @@ Before, the automatic check ran once a day, so three releases in one morning wen
 one corner popup that faded after 8 s (or was swallowed by a muted mode) and was then marked "said" for good -
 nothing in the window or the tray showed it again. Now: a check a minute after start, every EVERY_HOURS, and on
 opening the window; a banner over every page, a dot on About and a line in the tray menu while the update waits;
-the popup answers "Install" / "Remind me later" (4 h) / x; the banner's x skips that version."""
+the popup answers "Install" / "Remind me later" (4 h) / x; the banner's x hides the banner until Lockdown is next
+started (0.84.8 - it used to skip that version for good)."""
 import types
 from datetime import datetime, timedelta
 
@@ -123,14 +124,14 @@ def test_a_clock_turned_back_cannot_stretch_the_snooze(db):
     assert updates.banner(db, NOW)["version"] == "0.84.4"
 
 
-def test_skipping_hides_it_until_a_newer_version_comes(db):
+def test_nothing_hides_an_update_for_good(db):
+    """0.84.8 (APP-STANDARDS 2): the banner's x used to skip that version for good (updates.skipped). Now nothing in
+    the database hides it - an old "skipped" mark from before has no effect - and the x is the window's, until the
+    next start (test_the_x_hides_the_banner_until_the_next_start)."""
+    db.set_setting("updates.skipped", "0.84.4")                    # left behind by 0.84.7's x
     updates.checked(db, NOW, release())
-    updates.skip(db, "0.84.4")
-    assert updates.banner(db, NOW) is None
-    assert not updates.worth_saying(db, release(), NOW)
-    updates.checked(db, NOW, release("0.84.5"))                    # a newer one is news again
-    assert updates.banner(db, NOW)["version"] == "0.84.5"
-    assert updates.worth_saying(db, release("0.84.5"), NOW)
+    assert updates.banner(db, NOW)["version"] == "0.84.4"
+    assert updates.worth_saying(db, release(), NOW)
 
 
 def test_turning_the_popup_off_keeps_the_banner(db):
@@ -192,7 +193,7 @@ def fake_app(db):
                                notices=[], update_popup=None, popup=None, tray_versions=[])
     me.tray = types.SimpleNamespace(set_update=me.tray_versions.append)
     me._update_notice = lambda found: me.notices.append(found["version"])
-    for name in ("refresh_update", "update_later", "update_skip", "_close_update_popup"):
+    for name in ("refresh_update", "update_later", "update_close", "_close_update_popup"):
         setattr(me, name, types.MethodType(getattr(appmod.LockdownApp, name), me))
     return me, appmod
 
@@ -214,7 +215,7 @@ def test_banner_dot_and_tray_follow_the_found_version(db, monkeypatch):
     assert len(me.update_banner.log) == before and me.tray_versions == ["0.84.4"]
 
 
-def test_later_and_skip_from_the_window(db, monkeypatch):
+def test_later_and_the_x_from_the_window(db, monkeypatch):
     me, appmod = fake_app(db)
     clock = [NOW]
     monkeypatch.setattr(appmod, "now_from_db", lambda d: clock[0])
@@ -226,11 +227,34 @@ def test_later_and_skip_from_the_window(db, monkeypatch):
     clock[0] = NOW + timedelta(hours=4)
     me.refresh_update()
     assert me.update_shown == ("0.84.4", True)                     # back after 4 h
-    me.update_skip()
+    me.update_close()
     clock[0] = NOW + timedelta(days=2)
     me.refresh_update()
-    assert me.update_shown is None                                 # skipped for good
+    assert me.update_bar is None                                   # the banner stays away while Lockdown runs
+    assert me.update_banner.log[-1][0] == "grid_remove"
+    assert me.tray_versions[-1] == "0.84.4" and me.nav_icons["About"] == ("dot", "dot-on")   # the dot and tray stay
     assert updates.available(db)["version"] == "0.84.4"            # (About still offers it)
+
+
+def test_the_x_hides_the_banner_until_the_next_start(db, monkeypatch):
+    """APP-STANDARDS 2: closing the banner hides it until Lockdown is next started - not for good. Closing the
+    window to the tray and opening it again (the window object lives on) does not bring it back; a fresh start
+    (a new window object, the same database) does. A newer version is news at once."""
+    me, appmod = fake_app(db)
+    monkeypatch.setattr(appmod, "now_from_db", lambda d: NOW)
+    updates.checked(db, NOW, release())
+    me.refresh_update()
+    me.update_close()
+    for _ in range(3):                                             # the minute poll, opening from the tray ...
+        me.refresh_update()
+    assert me.update_bar is None
+    updates.checked(db, NOW, release("0.84.5"))                    # a newer one comes out: the banner is back
+    me.refresh_update()
+    assert me.update_bar == ("0.84.5", True)
+    me.update_close()
+    restarted, _ = fake_app(db)                                    # Lockdown started again
+    restarted.refresh_update()
+    assert restarted.update_bar == ("0.84.5", True) and ("grid", None, None) in restarted.update_banner.log
 
 
 def test_the_popup_waits_while_you_dont_want_interruptions(db, monkeypatch):
@@ -345,25 +369,23 @@ def test_banner_buttons_survive_a_narrow_window(monkeypatch):
     monkeypatch.setattr(appmod, "ctk", types.SimpleNamespace(CTkFrame=W, CTkLabel=W, CTkButton=W))
     for name in ("icon", "body", "semi"):
         monkeypatch.setattr(appmod.theme, name, lambda *a, **k: None)
-    me = types.SimpleNamespace(update_skip=lambda: None, update_later=lambda: None, _install=lambda: None)
+    me = types.SimpleNamespace(update_close=lambda: None, update_later=lambda: None, _install=lambda: None)
     appmod.LockdownApp._build_update_banner(me, W())
     assert packed.index("Install") < packed.index("") and packed.index("Later") < packed.index("")
     assert packed[-1].startswith("you have")                      # the first thing pack squeezes
     bar = me.update_banner
     me.update_text.req = 220
-    you, skip = (next(w for w in bar.kids if w.text.startswith(t)) for t in ("you have", "skip"))
+    you = next(w for w in bar.kids if w.text.startswith("you have"))
+    assert not any(w.text.startswith("skip") for w in bar.kids)   # 0.84.8: the x no longer skips a version
     you.req = 100
     fit = bar.binds[0]
     bar.winfo_width = lambda: 1000
     fit()
-    assert you.manager == skip.manager == "pack"
-    bar.winfo_width = lambda: 600                                  # 90+74+24+100+220+100+60 = 668 > 600
+    assert you.manager == "pack"
+    bar.winfo_width = lambda: 500                                  # 90+74+24+100+220+60 = 568 > 500
     fit()
-    assert you.manager == "" and skip.manager == "pack"
-    bar.winfo_width = lambda: 450
-    fit()
-    assert you.manager == skip.manager == ""
+    assert you.manager == ""
     assert all(w.manager == "pack" for w in bar.kids if w.text in ("Install", "Later", "✕"))
     bar.winfo_width = lambda: 1000
     fit()
-    assert you.manager == skip.manager == "pack"                   # wide again: both back
+    assert you.manager == "pack"                                   # wide again: back

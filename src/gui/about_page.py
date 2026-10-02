@@ -1,6 +1,5 @@
 """About: which version this is, where to get a newer one, what Lockdown can do, and where it keeps things."""
 import subprocess
-import tempfile
 import threading
 import webbrowser
 from pathlib import Path
@@ -34,6 +33,8 @@ FEATURES = [
         "The enforcer runs as a Windows service with its own trusted clock - changing the Windows clock does "
         "nothing.",
         "Emergency unlock: a few uses a week, for when you really need something back.",
+        "Pause my blocks (Anti-Bypass page or the tray): everything on your list unblocked for 30 min to the rest "
+        "of the day, behind the challenge - protection lists and blocked words stay on.",
     ]),
     ("Knowing where the time goes", [
         "Screen Time: what you used, for how long, by category, with a timeline of the day.",
@@ -65,19 +66,24 @@ class AboutPage(ctk.CTkScrollableFrame):
         buttons = ctk.CTkFrame(card.body, fg_color="transparent")
         buttons.pack(anchor="w", pady=(8, 2))
         if updates.repo_page():
-            self.check_btn = ctk.CTkButton(buttons, text="Check for updates", width=150, command=self._check)
+            # APP-STANDARDS 2: the switch, the version with Check now, GitHub (the releases page), and Get update
+            # once there is one. A failed update shows Try again next to GitHub - nothing opens by itself.
+            self.check_btn = ctk.CTkButton(buttons, text="Check now", width=120, command=self._check)
             self.check_btn.pack(side="left", padx=(0, 8))
-            # only appears once a newer version has actually been found (see _checked)
-            self.get_btn = ctk.CTkButton(buttons, text="Download and install", width=170, command=self._get)
-            self.page_btn = ctk.CTkButton(buttons, text="Open the GitHub page", width=170, **theme.OUTLINE,
-                                          command=lambda: webbrowser.open(updates.repo_page()))
+            # only appears once a newer version has actually been found (see show_found)
+            self.get_btn = ctk.CTkButton(buttons, text="Get update", width=130, command=self._get)
+            # only after an update failed (see _failed)
+            self.retry_btn = ctk.CTkButton(buttons, text="Try again", width=110, command=self._retry)
+            self.page_btn = ctk.CTkButton(buttons, text="GitHub", width=100, **theme.OUTLINE,
+                                          command=lambda: webbrowser.open(updates.releases_page(self.found)))
             self.page_btn.pack(side="left")
             self.bar = ctk.CTkProgressBar(card.body, height=8)
             self.bar.set(0)
             self.found = None
             self.downloading = False
-            auto = ctk.CTkCheckBox(card.body, text=f"Check for updates automatically (every {updates.EVERY_HOURS} "
-                                                   "hours, and when Lockdown starts)",
+            self.failed_file = None   # the installer that downloaded but didn't start (Try again runs it again)
+            auto = ctk.CTkCheckBox(card.body, text=f"Check for updates automatically (when Lockdown starts or you "
+                                                   f"open it, and every {updates.EVERY_HOURS} hours)",
                                    checkbox_width=18, checkbox_height=18,
                                    command=lambda: self._set(updates.AUTO_KEY, auto.get()))
             auto.pack(anchor="w", pady=(10, 0))
@@ -145,6 +151,7 @@ class AboutPage(ctk.CTkScrollableFrame):
     def show_found(self, found):
         """What a check found - from the button here, or kept from the automatic one (see on_show)."""
         self.found = found
+        self.retry_btn.pack_forget()   # (after a failed update: a fresh answer replaces Try again)
         if not found:
             self.update_note.configure(text="Couldn't ask GitHub just now - no connection, or no release "
                                             "published yet.", text_color=theme.WARNING)
@@ -166,6 +173,8 @@ class AboutPage(ctk.CTkScrollableFrame):
         if not updates.can_install(self.found) or self.downloading:
             return
         self.downloading = True
+        self.failed_file = None
+        self.retry_btn.pack_forget()
         self.get_btn.configure(state="disabled")
         self.check_btn.configure(state="disabled")
         self.bar.set(0)
@@ -177,7 +186,7 @@ class AboutPage(ctk.CTkScrollableFrame):
     def _fetch(self):
         found = self.found
         try:
-            dest = Path(tempfile.gettempdir()) / f"LockdownSetup-{found['version']}.exe"
+            dest = updates.download_path(found["version"])   # (deleted at the next start: updates.remove_downloads)
             updates.download(found["asset"], dest, progress=self._progress)
         except Exception as error:
             self.app.call_soon(self._failed, error)
@@ -189,13 +198,34 @@ class AboutPage(ctk.CTkScrollableFrame):
         if total:
             self.app.call_latest("update-progress", self.bar.set, done / total)
 
-    def _failed(self, error):
+    def _failed(self, error, dest=None):
+        """The in-app update failed (the download, or starting the installer): say so, with Try again and GitHub
+        next to each other - nothing opens by itself; you choose (APP-STANDARDS 3)."""
         self.downloading = False
+        self.failed_file = dest
         self.bar.pack_forget()
+        self.get_btn.pack_forget()
         self.get_btn.configure(state="normal")
         self.check_btn.configure(state="normal")
-        self.update_note.configure(text=f"The download didn't finish ({type(error).__name__}). You can get it "
-                                        "from the GitHub page instead.", text_color=theme.WARNING)
+        self.retry_btn.pack(side="left", padx=(0, 8), before=self.page_btn)
+        what = (f"The installer didn't start ({error})" if dest else
+                f"The download didn't finish ({type(error).__name__} - no connection, or GitHub didn't answer)")
+        self.update_note.configure(text=f"{what}. Press Try again, or get it from GitHub.",
+                                   text_color=theme.WARNING)
+
+    def _retry(self):
+        """Try again: start the installer that already downloaded, or download it again."""
+        if self.downloading:
+            return
+        self.retry_btn.pack_forget()
+        if self.failed_file is not None and Path(self.failed_file).exists():
+            self.downloading = True
+            self.get_btn.configure(state="disabled")
+            self.check_btn.configure(state="disabled")
+            self._got(self.failed_file)
+        else:
+            self.show_found(self.found)
+            self._get()
 
     def _got(self, dest):
         self.bar.set(1)
@@ -205,12 +235,7 @@ class AboutPage(ctk.CTkScrollableFrame):
         try:
             updates.install(dest)
         except Exception as error:   # it used to fail silently and sit at 100%
-            self.downloading = False
-            self.bar.pack_forget()
-            self.get_btn.configure(state="normal")
-            self.check_btn.configure(state="normal")
-            self.update_note.configure(text=f"The installer didn't start ({error}). Press Download and install "
-                                            "again, or run it yourself: " + str(dest), text_color=theme.WARNING)
+            self._failed(error, dest)
             return
         self.after(1500, self._close_for_update)
 

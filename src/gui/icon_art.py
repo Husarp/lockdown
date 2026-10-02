@@ -1,7 +1,8 @@
 """The Lockdown mark - a shield with a padlock - drawn with Pillow (design/Lockdown Round 2.dc.html, plate 3n).
 
 Used for the app icon (assets/lockdown.ico / .png, built by scripts/make_icons.py) and the tray icon, which
-recolours the shield for its three states: green = blocking enforced, yellow = a mode is on, red = service down.
+recolours the shield for its states: green = blocking enforced, yellow = a mode is on, red = service down (grey =
+switched off, blue = your blocks are paused).
 All geometry is in a 64-unit space and scaled to the requested size.
 """
 from PIL import Image, ImageDraw
@@ -11,6 +12,7 @@ SS = 4   # supersample, then shrink for smooth edges
 ACCENT, ACCENT_DARK = "#DB5126", "#B33D18"
 GREEN, YELLOW, RED = "#27AE60", "#E2A32B", "#E05A44"
 GREY = "#7F8A96"          # the tray while Lockdown is switched off: nothing is enforced
+BLUE = "#4E8FD1"          # the tray while your blocks are paused (pause.py)
 INK = "#0B0E12"
 
 
@@ -89,6 +91,6 @@ def app_icon(size: int, bold: bool = False, tiny: bool = False) -> Image.Image:
 
 
 def tray_icon(state: str, size: int = 64) -> Image.Image:
-    """Tray mark: a flat shield in the state colour with a dark padlock. state: green / yellow / red / grey."""
-    color = {"green": GREEN, "yellow": YELLOW, "red": RED, "grey": GREY}[state]
+    """Tray mark: a flat shield in the state colour with a dark padlock. state: green / yellow / red / grey / blue."""
+    color = {"green": GREEN, "yellow": YELLOW, "red": RED, "grey": GREY, "blue": BLUE}[state]
     return mark(size, color, None, INK, color, tiny=size <= 20)
