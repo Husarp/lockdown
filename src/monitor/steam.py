@@ -45,7 +45,8 @@ def parse_manifest(text: str) -> dict:
 
 
 def main_exe(folder: Path, name: str) -> Path | None:
-    """The game's own .exe: named like the game if possible, else the biggest one, preferring shallow ones."""
+    """The game's own .exe: an Unreal game's ...-Shipping.exe (the process that really runs), else one named like
+    the game, else the biggest one, preferring shallow ones."""
     wanted = re.sub(r"[^a-z0-9]", "", name.lower())
     best, best_score = None, None
     for root, dirs, files in os.walk(folder):
@@ -62,7 +63,10 @@ def main_exe(folder: Path, name: str) -> Path | None:
                 size = path.stat().st_size
             except OSError:
                 continue
-            score = (named, -depth, size)
+            # an Unreal game's real process is <Name>-Win64-Shipping.exe in Binaries\Win64; the small <Name>.exe
+            # in the game's folder only starts it. Picking that starter named the wrong process on the list.
+            shipping = "shipping" in f.lower()
+            score = (shipping, named, -depth, size)
             if best_score is None or score > best_score:
                 best, best_score = path, score
     return best

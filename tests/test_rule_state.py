@@ -44,14 +44,16 @@ def test_a_limit_nearly_used_up_is_orange():
     assert rule_state(rule, NOW, usage) == "blocked"      # used up: it is blocking
 
 
-def test_hours_with_an_allowance_left_are_still_red():
-    """The hours are on - the allowance is the way out of them, not a reprieve - so the rule stays red and
-    what is left of the allowance is a chip of its own (purple)."""
+def test_hours_with_an_allowance_left_are_orange_not_red():
+    """Inside the blocked hours with allowance left the rule is NOT blocking - red said it was (0.84.1: YouTube
+    showed red all night while it stayed open). It is orange ("allowed, not for long") until the allowance is
+    used up, then red; what is left is the allowance chip of its own (purple)."""
     rule = _hours("11:00", "15:00", allowance_min=20)
     from rules import allowance_bucket, allowance_note, schedule_until
     bucket = allowance_bucket(rule, schedule_until(rule["schedule"], NOW))
-    for spent in (0, 5, 19, 20):
-        assert rule_state(rule, NOW, Usage({("item:1", bucket): spent * 60})) == "blocked"
+    for spent in (0, 5, 19):
+        assert rule_state(rule, NOW, Usage({("item:1", bucket): spent * 60})) == "soon"
+    assert rule_state(rule, NOW, Usage({("item:1", bucket): 20 * 60})) == "blocked"
     assert allowance_note(rule, NOW, Usage({("item:1", bucket): 5 * 60})) == \
         "+ 20 min allowed during blocked hours (15m left until 15:00)"
     assert allowance_note(rule, NOW, Usage({("item:1", bucket): 20 * 60})) == \

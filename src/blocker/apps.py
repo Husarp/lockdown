@@ -1,5 +1,6 @@
 """Process listing / termination for app blocking (service side, standard library only)."""
 import ctypes
+import functools
 import os
 from ctypes import wintypes
 from pathlib import PureWindowsPath
@@ -108,16 +109,75 @@ def descendants(pids: set[int], procs: list[tuple[int, int, str]]) -> set[int]:
     return out
 
 
+def exe_name(target: str | None) -> str:
+    """The process name an app item stands for: lowercase, without quotes or a folder
+    ("C:\\Games\\Foo\\Foo.exe" -> "foo.exe"). Windows lists processes by bare name, so a target typed as a full path
+    used to match nothing at all - the app was never closed and its time never counted."""
+    text = (target or "").strip().strip('"').strip()
+    return PureWindowsPath(text).name.lower() if text else ""
+
+
+def typed_path(target: str | None) -> str | None:
+    """The full path of an app item whose target was typed as one (else None)."""
+    text = (target or "").strip().strip('"').strip()
+    return text if "\\" in text or "/" in text else None
+
+
+# Unreal Engine games run as <Project>-Win64-Shipping.exe (-WinGDK- in the Xbox / Game Pass build); the
+# <Project>.exe you pick only starts it and exits. The game is that exe wherever it is installed.
+SHIPPING_SUFFIXES = ("-win64-shipping.exe", "-wingdk-shipping.exe", "-win32-shipping.exe")
+
+
+@functools.lru_cache(maxsize=4096)
+def names_of(target: str | None) -> frozenset[str]:
+    """Every process name that IS the app item: its own exe, and for "Game.exe" Unreal's
+    "game-win64-shipping.exe" (SHIPPING_SUFFIXES). Matching the exe on the list alone let an Unreal game that is
+    not under Steam - or one whose starter Steam skips - run, uncounted, outside its allowed hours (0.84.1)."""
+    exe = exe_name(target)
+    if not exe:
+        return frozenset()
+    stem = exe[:-4] if exe.endswith(".exe") else ""
+    if not stem or stem.endswith("-shipping"):
+        return frozenset({exe})
+    return frozenset({exe, *(stem + s for s in SHIPPING_SUFFIXES)})
+
+
+# Game libraries: a game is installed in a folder of its own inside one of these, and everything running from that
+# folder is the game. Each entry is the folders' names (lowercase) just above a game's own folder.
+GAME_LIBRARIES = (("steamapps", "common"), ("epic games",), ("gog galaxy", "games"), ("gog games",),
+                  ("xboxgames",), ("riot games",), ("ea games",), ("ubisoft game launcher", "games"),
+                  ("amazon games", "library"), ("itch", "apps"))
+
+
+def game_folder(path: str | None) -> str | None:
+    """A game's whole install folder (lowercase) for any path inside it - steamapps\\common\\<game>,
+    Epic Games\\<game>, GOG, XboxGames, Riot ... (GAME_LIBRARIES) - else None."""
+    if not path:
+        return None
+    folder = PureWindowsPath(path).parent
+    lowered = [p.lower() for p in folder.parts]
+    for library in GAME_LIBRARIES:
+        n = len(library)
+        for i in range(1, len(lowered) - n):   # (not the drive; the exe may sit deeper, in Binaries\\Win64 etc.)
+            if tuple(lowered[i:i + n]) == library:
+                return str(PureWindowsPath(*folder.parts[:i + n + 1])).lower()
+    return None
+
+
+def steam_game_folder(path: str | None) -> str | None:
+    """A Steam game's whole folder (steamapps\\common\\<game>, lowercase) for any path inside it, else None."""
+    found = game_folder(path)
+    return found if found and "\\steamapps\\common\\" in found else None
+
+
 def helper_folder(app_path: str | None) -> str | None:
     """The app's install folder, if it's safe to treat everything running from it as the app's background
     processes: not inside Windows, not a drive root / top-level folder, not a user's own folders."""
     if not app_path:
         return None
+    if game := game_folder(app_path):   # a game from a game library: its whole folder
+        return game
     folder = PureWindowsPath(app_path).parent
-    lowered = [p.lower() for p in folder.parts]
-    for i in range(len(lowered) - 2):   # a Steam game: its whole folder (the exe may sit in bin\win64 etc.)
-        if lowered[i:i + 2] == ["steamapps", "common"]:
-            return str(PureWindowsPath(*folder.parts[:i + 3])).lower()
     windows = PureWindowsPath(os.environ.get("SystemRoot", r"C:\Windows"))
     parts = [p.lower() for p in folder.parts[1:]]
     if len(parts) < 2 or folder == windows or windows in folder.parents:
@@ -125,6 +185,89 @@ def helper_folder(app_path: str | None) -> str | None:
     if parts[0] == "users" and (len(parts) < 3 or parts[2] in ("desktop", "downloads", "documents")):
         return None
     return str(folder).lower()
+
+
+def app_folder(item: dict) -> str | None:
+    """The folder whose every process IS this app - closed with it, and its time counted for it:
+    - a game's whole install folder, always, when it is in a game library (Steam, Epic, GOG, Xbox, Riot ...:
+      game_folder). A game rarely runs as the exe you picked: Unreal games start Game-Win64-Shipping.exe from
+      Binaries\\Win64, others go through a launcher. Matching the exe name alone let the real game run untouched
+      outside its allowed hours, and its time and allowance were never counted;
+    - any other app's install folder, when "also close its background processes" is ticked.
+    Otherwise None (an ordinary install folder can hold other programs - Word's holds Excel). What such an app
+    starts from its own folder is still the app (service.Enforcer.track_families)."""
+    return _app_folder(item.get("app_path") or typed_path(item.get("target")), item.get("block_type"))
+
+
+@functools.lru_cache(maxsize=4096)
+def _app_folder(path: str | None, block_type: str | None) -> str | None:
+    if not path:
+        return None
+    if game := game_folder(path):
+        return game
+    return helper_folder(path) if kills_background(block_type) else None
+
+
+def in_folder(path: str | None, folder: str) -> bool:
+    return bool(path) and path.lower().replace("/", "\\").startswith(folder + "\\")
+
+
+EXES_DEPTH = 4   # how deep exes_in looks inside a game's folder (an Unreal game's is <Project>\\Binaries\\Win64)
+
+
+@functools.lru_cache(maxsize=64)
+def exes_in(folder: str) -> dict[str, str]:
+    """{lowercase exe name: full path} of the .exe files in a folder, at most EXES_DEPTH folders down (the first one
+    found by name wins, shallowest first)."""
+    out: dict[str, str] = {}
+    base = folder.rstrip("\\/").count(os.sep)
+    for root, dirs, files in os.walk(folder):
+        if root.count(os.sep) - base >= EXES_DEPTH:
+            dirs[:] = []
+        for f in files:
+            if f.lower().endswith(".exe"):
+                out.setdefault(f.lower(), os.path.join(root, f))
+    return out
+
+
+def unreal_starter(shipping_path: str, exe: str) -> str | None:
+    """Where Unreal puts the starter `exe` of a running Shipping exe: <game>\\<exe> for
+    <game>\\<Project>\\Binaries\\Win64\\<Project>-Win64-Shipping.exe - if that file is there."""
+    parts = PureWindowsPath(shipping_path).parents
+    if len(parts) < 4 or parts[0].name.lower() not in ("win64", "wingdk", "win32") or parts[1].name.lower() != "binaries":
+        return None
+    candidate = str(parts[3] / exe)
+    return candidate if is_file(candidate) else None
+
+
+is_file = os.path.isfile
+
+
+@functools.lru_cache(maxsize=8192)
+def parents_of(path: str | None) -> tuple[str, ...]:
+    """Every folder a (lowercase) exe path is in, innermost first - in_folder(path, f) is True for exactly these."""
+    if not path:
+        return ()
+    parts = path.lower().replace("/", "\\").split("\\")[:-1]
+    return tuple("\\".join(parts[:i]) for i in range(len(parts), 0, -1))
+
+
+def merge_blocks(old: dict | None, new: dict) -> dict:
+    """Two blocks on the same exe (a second item for it, a category blocker, an old item saved as a full path):
+    one block that does everything either asks for, closing winning over minimising. The later one used to replace
+    the earlier - a "minimize" blocker could quietly undo a "close outside these hours" (0.84.1)."""
+    if old is None:
+        return new
+    flags = block_flags(old["item"].get("block_type")) | block_flags(new["item"].get("block_type"))
+    if "close" in flags:
+        flags.discard("minimize")
+    else:
+        flags.discard("background")
+    base, other = (new, old) if kills(new["item"].get("block_type")) and not kills(old["item"].get("block_type")) \
+        else (old, new)
+    item = {**base["item"], "block_type": make_block_type(flags),
+            "app_path": base["item"].get("app_path") or other["item"].get("app_path")}
+    return {**base, "item": item}
 
 
 def process_path(pid: int) -> str | None:

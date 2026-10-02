@@ -385,8 +385,8 @@ def rule_state(rule: dict, now: datetime, usage=no_usage) -> str:
                 for p, limit in limits(rule, fields).items()]
         return "soon" if used and max(used) >= NEARLY else "allowed"
     if kind == "scheduled" and rule.get("schedule"):
-        if allowance_left(rule, now, usage):   # its hours are on; the allowance is the way out, not a reprieve
-            return "blocked"
+        if allowance_left(rule, now, usage):   # inside its hours, on the allowance: still allowed, not for long
+            return "soon"                      # (red here read as "blocked" while it was not - 0.84.1)
         start = _schedule_next_start(rule["schedule"], now)
         if start and start - now <= timedelta(minutes=SOON_MIN):
             return "soon"

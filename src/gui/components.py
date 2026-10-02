@@ -170,14 +170,19 @@ class Segmented(ctk.CTkFrame):
     Drawn with Pillow onto a canvas (gui.paint) rather than out of CTk buttons: Tk rounds corners without
     anti-aliasing, so at this size the chips came out as hard little blocks inside the track.
 
-    The chip hugs its label: 8px either side and 2px of track around it. These sit in rows next to other
-    controls, so every pixel of width counts - a window that isn't maximised ran out of room for them."""
+    0.84.1 redesign: the labels are 13 px like the body text (they were drawn in points, so Windows' display
+    scaling was applied twice - at 150 % they were twice the size of the text around them and spilled out of the
+    chips); 28 px tall, in line with the entries beside it; 12 px of room either side of a label, so the chosen
+    chip doesn't pinch its text and the others don't run together; the track always has a 1 px border, so it reads
+    on a card and on the page, light or dark; hovering only brightens the label - a filled chip under the mouse
+    looked like a second selection."""
 
-    PAD, GAP, SIDE = 2, 1, 6
-    TRACK_R, CHIP_R = 4, 3
-    MIN = 26          # so a short label ("All", "Both") still gets a chip worth looking at
+    PAD, GAP, SIDE = 3, 2, 12
+    TRACK_R, CHIP_R = 6, 4
+    MIN = 44          # so a short label ("All", "Day") still gets a chip worth aiming at
+    FONT_PX = 13      # the body text's size (theme: CTkFont 13), so a chip reads like the label beside it
 
-    def __init__(self, master, values: list[str], command=None, height: int = 22, **_ignored):
+    def __init__(self, master, values: list[str], command=None, height: int = 28, **_ignored):
         super().__init__(master, fg_color="transparent", corner_radius=0)
         self.command, self.value, self.values = command, None, list(values)
         self._hover = None
@@ -211,7 +216,16 @@ class Segmented(ctk.CTkFrame):
         return out
 
     def _at(self, x: float):
-        return next((v for (x0, x1), v in zip(self._spans(), self.values) if x0 <= x <= x1), None)
+        """The chip under x - or the nearest one anywhere on the track, so the padding and the gaps between chips
+        aren't dead strips under a hand cursor. Off the track: None."""
+        if not 0 <= x <= self._size[0]:
+            return None
+        spans = self._spans()
+        for i, v in enumerate(self.values):
+            right = (spans[i][1] + spans[i + 1][0]) / 2 if i + 1 < len(spans) else float("inf")
+            if x <= right:
+                return v
+        return None
 
     def _click(self, event):
         value = self._at(event.x)
@@ -232,7 +246,9 @@ class Segmented(ctk.CTkFrame):
     def _measure(self):
         """Work out the chips for the scale we are drawn at (it changes when the window is resized)."""
         s = self._scale = ctk.ScalingTracker.get_widget_scaling(self)
-        self._font = tkfont.Font(family=theme.BODY_SEMI, size=max(8, round(11 * s)))
+        # negative = pixels, like every CTkFont: scaled once, by us (a positive size is points, which Tk scales by
+        # the display's DPI again)
+        self._font = tkfont.Font(family=theme.BODY_SEMI, size=-max(8, round(self.FONT_PX * s)))
         self._seg = [max(round(self.MIN * s), self._font.measure(v) + round(self.SIDE * 2 * s))
                      for v in self.values]
         w = round(self.PAD * 2 * s) + sum(self._seg) + round(self.GAP * s) * max(0, len(self._seg) - 1)
@@ -258,23 +274,44 @@ class Segmented(ctk.CTkFrame):
             return
         w, h = self._size
         s, bg = self._scale, self._bg()
-        # the track is a well: darker on a card, lighter on the page background (as the design has it)
-        well = theme.pick(theme.BG if bg == theme.pick(theme.SURFACE) else theme.SURFACE2)
+        # the track: one fill with a hairline border, the same on a card and on the page (the old "well" was
+        # BG on the page's BG - next to invisible in light mode, so the options looked like loose text)
         art = paint.Art(w, h, bg)
-        art.rrect(0, 0, w, h, self.TRACK_R * s, fill=well)
+        art.rrect(0, 0, w, h, self.TRACK_R * s, fill=theme.pick(theme.SURFACE2), outline=theme.pick(theme.BORDER),
+                  width=max(1.0, s))
+        top, bottom = self.PAD * s, h - self.PAD * s
         for (x0, x1), v in zip(self._spans(), self.values):
             if v == self.value:
-                art.rrect(x0, self.PAD * s, x1, h - self.PAD * s, self.CHIP_R * s, fill=theme.pick(theme.ACCENT))
-            elif v == self._hover:
-                art.rrect(x0, self.PAD * s, x1, h - self.PAD * s, self.CHIP_R * s,
-                          fill=theme._mix(well, theme.pick(theme.TEXT), 0.1))
+                art.rrect(x0, top, x1, bottom, self.CHIP_R * s, fill=theme.pick(theme.ACCENT))
         self._photo = art.photo()   # kept: Tk only keeps a pointer to the image
         self.canvas.delete("all")
         self.canvas.configure(bg=bg)
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        middle = round((top + bottom) / 2)
         for (x0, x1), v in zip(self._spans(), self.values):
-            colour = theme.WHITE if v == self.value else theme.TEXT if v == self._hover else theme.MUTED
-            self.canvas.create_text(round((x0 + x1) / 2), h / 2, text=v, fill=theme.pick(colour), font=self._font)
+            colour = on_accent() if v == self.value else theme.TEXT if v == self._hover else theme.MUTED
+            self.canvas.create_text(round((x0 + x1) / 2), middle, text=v, fill=theme.pick(colour), font=self._font,
+                                    anchor="center")
+
+
+def _luminance(hex_colour: str) -> float:
+    """WCAG relative luminance of '#RRGGBB'."""
+    out = []
+    for i in (1, 3, 5):
+        c = int(hex_colour[i:i + 2], 16) / 255
+        out.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+
+
+def on_accent(accent: str | None = None) -> str:
+    """Text colour on an accent fill: white, unless the accent is so light that white falls under 3:1 (Yellow:
+    2.6:1) - then near-black."""
+    accent = accent or theme.pick(theme.ACCENT)
+    try:
+        white_contrast = 1.05 / (_luminance(accent) + 0.05)
+    except (ValueError, IndexError, TypeError):
+        return theme.pick(theme.WHITE)
+    return "#141414" if white_contrast < 3 else theme.pick(theme.WHITE)
 
 
 class TabBar(ctk.CTkFrame):

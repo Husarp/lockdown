@@ -261,7 +261,7 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 2   # 2: change_counter + its triggers (0.84.0 review)
+SCHEMA_VERSION = 3   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -435,8 +435,13 @@ class Database:
         with self.conn:
             self.conn.execute("DELETE FROM blocked_items WHERE id = ?", (item_id,))
 
-    def items_version(self) -> int:
-        row = self.conn.execute("SELECT n FROM change_counter WHERE name = 'items'").fetchone()
+    def items_version(self) -> int | None:
+        """None when it can't be told (the counter table missing from a damaged or hand-edited database): then
+        list_items loads the items every time instead of failing - enforcement must never stop over a cache."""
+        try:
+            row = self.conn.execute("SELECT n FROM change_counter WHERE name = 'items'").fetchone()
+        except sqlite3.OperationalError:
+            return None
         return row[0] if row else 0
 
     def item_count(self) -> int:
@@ -447,7 +452,7 @@ class Database:
         some connection changed the items or rules; each call gets its own copies (callers may change them)."""
         version = self.items_version()
         cached = self._items
-        if cached is None or cached[0] != version or self.conn.in_transaction:
+        if cached is None or version is None or cached[0] != version or self.conn.in_transaction:
             items = [dict(r) for r in self.conn.execute(
                 "SELECT * FROM blocked_items ORDER BY display_name COLLATE NOCASE")]
             rules: dict[int, list[dict]] = {}

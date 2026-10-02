@@ -32,7 +32,10 @@ from blocker import apps, browser_policy, connections, dnsfilter, firewall, host
 import keywords
 from blocker.listener import BlockListener
 from db import Database
+from monitor.usage import COUNTED_KEY, MAX_GAP_SEC, MEMBERS_KEY
 from paths import DATA_DIR, LOG_PATH
+import modes
+from rules import counted_rules, usage_targets, visit_targets
 from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, ZONE_KEY, TrustedClock, utc_offset, zone_name, zone_step
 
 INTERVAL_SEC = 2
@@ -45,10 +48,16 @@ APP_CHECK_SEC = 0.25
 APP_GRACE_SEC = 10          # app already open when its block began: asked to close, force-killed after this
 LAUNCH_SLACK_SEC = 1        # started more than this after the block began = launched while blocked
 FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
+QUIC_KEY = "firewall_quic"        # JSON {browser exe: path} of the "no QUIC" rules in place (update_quic)
 NETLOG_SEC = 2
 NETLOG_KEEP = timedelta(hours=1)  # the network log only shows the last hour
 PROTECTION_CHECK_SEC = 10         # how often the service looks whether a protection list is due for download
 DNS_ADAPTER_CHECK_SEC = 10        # how often network adapters are (re)pointed at the DNS filter (new networks)
+LEARN_PATHS_SEC = 30              # how often apps added by name only get their exe path filled in (learn_paths)
+# The tray app counts time (it sees which window is in front). When it hasn't counted for this long - not
+# running, exited, frozen, its tracker stalled - the service counts every blocked app that is running instead,
+# so limits and "N minutes allowed during blocked hours" keep filling (count_unwatched_apps).
+TRACKER_STALE_SEC = 10
 
 log = logging.getLogger("lockdown.service")
 
@@ -69,6 +78,18 @@ def setup_logging():
 class Enforcer:
     was_off = False        # switched off entirely (see enforce_once); a class default so that the DNS
     # threads can read it before the first tick, and so a bare instance has it
+    counting = False       # the service is counting app time itself (the tray app isn't, count_unwatched_apps)
+    count_carry = 0.0
+    count_mark = None      # the mark the service itself wrote last
+    kill_failed: frozenset = frozenset()   # pids that couldn't be closed (logged once each)
+    count_paths: dict = {}                 # pid -> (exe, lowercase path), for count_unwatched_apps
+    quic: dict = {}                        # browser exe -> path with a "no QUIC" firewall rule (update_quic)
+    family: dict = {}      # exe -> {pid: (name, start time)} it started from its own folder: they ARE the app
+    members: dict = {}     # pid -> sorted exes of the listed apps it is part of, other than by name (publish_members)
+    published: dict | None = None
+    app_items: dict = {}   # exe -> item, for every app on the list (track_families)
+    count_running: set | None = None       # exes running at the service's last counting pass (launches)
+    paths_learned_at = float("-inf")       # (learn_paths)
     def __init__(self, db: Database):
         self.db = db
         last = db.get_setting(LAST_TRUSTED_KEY)
@@ -81,11 +102,12 @@ class Enforcer:
         self.visit_lock = threading.Lock()
         self.last_visit: dict[str, float] = {}
         self.app_blocks: dict[str, dict] = {}   # exe -> block, for blocked apps (read by the app thread)
-        self.app_first_seen: dict[int, float] = {}
+        self.app_first_seen: dict[int, tuple[str, float]] = {}   # pid -> (name, when first seen blocked)
         self.block_since: dict[str, float] = {}    # exe -> when its block began
         self.helpers: dict[str, set[int]] = {}     # exe -> pids it started ("also close background processes")
         self.path_cache: dict[int, tuple[str, str]] = {}   # pid -> (exe, lowercase path)
         self.firewalled: dict[str, str] = json.loads(db.get_setting(FIREWALL_KEY, "{}"))
+        self.quic: dict[str, str] = json.loads(db.get_setting(QUIC_KEY, "{}"))
         self.protection = protection.Protection()   # always-on scam / phishing / malware / adult lists
 
     def update_clock(self) -> datetime:
@@ -114,6 +136,10 @@ class Enforcer:
 
     def enforce_once(self):
         now = self.update_clock()
+        try:
+            self.count_unwatched_apps(now)
+        except Exception:   # counting must never stop the blocking
+            log.exception("Counting app time failed")
         if self.db.delete_expired_temporary(now):
             log.info("Removed expired temporary blocks")
         # Switched off entirely: carry on with an empty list of blocks rather than skipping the work, so the
@@ -132,15 +158,33 @@ class Enforcer:
                     # a site set to "close the tab" only is not sent nowhere - the tray agent acts instead
                     if site_block.blocks_dns(b["item"].get("block_type")):
                         dns_blocks.setdefault(h, b)
-        self.app_blocks = {b["item"]["target"].lower(): b for b in all_blocks
-                           if b["item"]["item_type"] == "app" and b["item"]["target"].lower() not in apps.PROTECTED}
+        # (by the bare exe name: a target typed as a full path is still that exe - apps.exe_name; two blocks on
+        # one exe become one that does what both ask, closing winning - apps.merge_blocks)
+        app_blocks: dict[str, dict] = {}
+        for b in all_blocks:
+            exe = apps.exe_name(b["item"]["target"]) if b["item"]["item_type"] == "app" else ""
+            if exe and exe not in apps.PROTECTED:
+                app_blocks[exe] = apps.merge_blocks(app_blocks.get(exe), b)
+        self.app_blocks = app_blocks
+        # every app on the list, blocked now or not: what it starts is followed all the time (track_families)
+        app_items = {exe: b["item"] for exe, b in app_blocks.items()}
+        for item in self.db.list_items():
+            exe = apps.exe_name(item["target"]) if item["item_type"] == "app" else ""
+            if exe and exe not in apps.PROTECTED:
+                app_items.setdefault(exe, item)
+        self.app_items = app_items
         self.update_firewall()
+        if not off:
+            self.learn_paths()
+        self.publish_members()
 
         newly_blocked = sorted(set(dns_blocks) - set(self.dns_blocks))
         if newly_blocked:
             # resolve before the hosts file points them at 127.0.0.1
             for ip in connections.resolve(hosts.expand(newly_blocked)):
                 self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
+            self.close_cached(newly_blocked, now)
+        self.update_quic(bool(dns_blocks))
 
         # (the protection lists are not in the hosts file: Windows' DNS client hangs on huge hosts files - they're
         # blocked by the DNS filter, see dns_loop)
@@ -194,6 +238,44 @@ class Enforcer:
             if self.blocked_name(name) and not connections.is_loopback(ip):
                 self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
 
+    def close_cached(self, hostnames: list[str], now: datetime):
+        """The addresses this PC itself looked the newly blocked names up as - read from the DNS cache BEFORE the
+        hosts file is rewritten and the cache flushed. cut_live_connections reads the cache only after the flush,
+        when the names it holds answer 127.0.0.1, so the open video stream (rr1---sn-....googlevideo.com - a name
+        nobody can resolve in advance) was never on the list and an open YouTube page played on."""
+        try:
+            names = netlog.dns_names()
+        except OSError:
+            return
+        wanted = set(hostnames)
+        for ip, name in names.items():
+            parts = name.lower().rstrip(".").removeprefix("www.").split(".")
+            if any(".".join(parts[i:]) in wanted for i in range(len(parts) - 1)) and not connections.is_loopback(ip):
+                self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
+
+    def update_quic(self, active: bool):
+        """While any site is sent nowhere, browsers may not use QUIC (HTTP/3 over UDP 443): a firewall rule per
+        browser. A QUIC connection can't be cut from outside like a TCP one, so a page open when its block
+        began kept streaming over it - the QuicAllowed policy only covers Chrome and Edge, and only after a
+        restart. Browsers fall back to TCP at once, which the service can cut. Removed when no site is blocked."""
+        if active:
+            wanted = dict(self.quic)
+            for pid, name in apps.list_processes():
+                if name in firewall.BROWSERS and name not in wanted and (path := apps.process_path(pid)):
+                    wanted[name] = path
+        else:
+            wanted = {}
+        if wanted == self.quic:
+            return
+        for exe in set(self.quic) - set(wanted):
+            firewall.remove_quic(exe)
+        for exe, path in wanted.items():
+            if self.quic.get(exe) != path:
+                firewall.add_quic(exe, path)
+                log.info("QUIC (UDP 443) blocked for %s while sites are blocked", exe)
+        self.quic = wanted
+        self.db.set_setting(QUIC_KEY, json.dumps(wanted))
+
     def on_visit(self, hostname: str):
         """Called by listener threads when a browser tries to open a blocked hostname."""
         blocks = self.blocks
@@ -215,35 +297,227 @@ class Enforcer:
             self.visit_db.add_block_event(key, item["id"], item["display_name"], block["reason"], block["until"],
                                           now=self.clock.now())
 
+    # ---------- counting app time when the tray app doesn't ----------
+
+    def count_unwatched_apps(self, now: datetime):
+        """Backstop for the tray app's usage tracker. Only the tray can see which window is in front, so it does
+        the counting - but when it isn't running, has frozen, or its tracker has stalled, nothing was counted
+        at all: a daily limit never filled and the "N minutes allowed during blocked hours" never ran out, so
+        the game played on for hours outside its allowed time. Now, once nothing has been counted for
+        TRACKER_STALE_SEC, the service counts every listed app that is running (its own exe, what it started, or
+        any program from its game folder), the category blockers those apps belong to (one pot per category, as
+        the tray counts it), and app launches for opening limits - erring on the side of counting, never of
+        losing time. Both write the same mark (COUNTED_KEY), so a stretch is counted by one of them, not by both
+        and not by neither."""
+        now_ts = now.timestamp()
+        try:
+            mark = float(self.db.get_setting(COUNTED_KEY) or 0)
+        except ValueError:
+            mark = 0.0
+        gap = now_ts - mark
+        if mark and abs(gap) <= TRACKER_STALE_SEC:   # counted a moment ago (by the tray, or by us)
+            if self.counting and mark != self.count_mark:
+                log.info("The tray app is counting usage again")
+                self.counting = False
+                self.count_running = None
+            return
+        if not self.counting:
+            log.warning("The tray app isn't counting usage - the service counts running blocked apps instead")
+            self.counting = True
+        total = (min(gap, MAX_GAP_SEC) if mark and gap > 0 else INTERVAL_SEC) + self.count_carry
+        seconds = int(total)
+        self.count_carry = total - seconds
+        procs = apps.list_processes_full()
+        alive = {pid for pid, _ppid, _name in procs}
+        self.count_paths = {pid: v for pid, v in self.count_paths.items() if pid in alive}
+        running = {name for _pid, _ppid, name in procs}
+        launched = running - self.count_running if self.count_running is not None else set()
+        self.count_running = running
+        members = {exe for pid, exes in self.members.items() if pid in alive for exe in exes}
+        groups, clock, categories = self.db.list_groups(), self.db.limit_clock(), self.db.categories()
+        items = self.db.list_items()
+        used = []
+        for item in items:
+            if item["item_type"] != "app":
+                continue
+            rules = counted_rules(item, groups)
+            if apps.names_of(item["target"]) & launched:   # opening limits ("launches")
+                self.db.add_usage(visit_targets(rules, item, now, True, None, clock), 1, now.date())
+            if apps.exe_name(item["target"]) in members or self._running(item, running, procs):
+                used.append(item)
+        # category blockers: the categories of the listed apps that run, and of any running program you put in one
+        cats = {modes.item_category(i, categories) for i in used}
+        cats |= {cat for (kind, name), cat in categories.items() if kind == "app" and name in running}
+        used += [i for i in items if i["item_type"] == "category" and i["target"] in cats]
+        for item in used:
+            self.db.add_usage(usage_targets(counted_rules(item, groups), item["id"], now, clock), seconds, now.date())
+        self.db.set_setting(COUNTED_KEY, f"{now_ts:.3f}")
+        self.count_mark = float(f"{now_ts:.3f}")
+
+    def _running(self, item: dict, running: set[str], procs) -> bool:
+        """Is the app running: its exe (bare name, any case; Unreal's Shipping exe too - apps.names_of), or a
+        program from its folder (apps.app_folder)."""
+        if apps.names_of(item["target"]) & running:
+            return True
+        folder = apps.app_folder(item)
+        if not folder:
+            return False
+        for pid, _ppid, name in procs:
+            cached = self.count_paths.get(pid)
+            if not cached or cached[0] != name:
+                cached = self.count_paths[pid] = (name, (apps.process_path(pid) or "").lower())
+            if name not in apps.PROTECTED and apps.in_folder(cached[1], folder):
+                return True
+        return False
+
+    def publish_members(self):
+        """Tell the tray app which running processes belong to a listed app other than by name - what the app
+        started from its own folder (also after the starter has gone), or a program from its game folder. The
+        tray counts the window in front; it can't follow who started what, and a game protected by anti-cheat
+        won't even tell it its path, so before this the real game's window was not counted at all."""
+        members = self.members
+        if members != self.published:
+            self.db.set_setting(MEMBERS_KEY, json.dumps({str(pid): exes for pid, exes in members.items()}))
+            self.published = members
+
     # ---------- apps ----------
 
     def enforce_apps(self):
         """Blocked app launched while blocked: killed at once. Already open when the block began: the tray
-        agent asks it to close (so you can save), force-killed after the grace time."""
+        agent asks it to close (so you can save), force-killed after the grace time. "The app" is every process
+        that is it (app_processes) - not only the exe named on the list."""
         now = time.time()
         targets = {exe: b for exe, b in self.app_blocks.items() if apps.kills(b["item"]["block_type"])}
         self.block_since = {exe: self.block_since.get(exe, now) for exe in targets}
         procs = apps.list_processes_full()
+        names = {pid: name for pid, _ppid, name in procs}
+        self.path_cache = {pid: v for pid, v in self.path_cache.items() if names.get(pid) == v[0]}
+        self.kill_failed = frozenset(self.kill_failed & set(names))
+        self.track_families(procs, names)
+        owned = self.app_processes(targets, procs)
         self.enforce_background(targets, procs)
         seen = {}
-        for pid, _ppid, exe in procs:
-            block = targets.get(exe)
-            if not block:
+        for pid, _ppid, name in procs:
+            exe = owned.get(pid)
+            if not exe:
                 continue
-            if pid not in self.app_first_seen:
+            block = targets[exe]
+            what = exe if name == exe else f"{name} (part of {exe})"
+            first = self.app_first_seen.get(pid)
+            if not first or first[0] != name:   # (a process number Windows has handed to another program: new)
                 self.record_event(exe, block)
                 started = apps.start_time(pid)
                 rule = block.get("rule") or {}
                 # over an opening limit ("launches" mode): this very launch went over it
                 over_openings = rule.get("rule_type") == "switch_limit" and (rule.get("switch_mode") or "visit") == "visit"
                 launched_while_blocked = started and started > self.block_since[exe] + LAUNCH_SLACK_SEC
-                if (over_openings or launched_while_blocked) and apps.terminate(pid):
-                    log.info("Blocked app %s was started - closed immediately (pid %d)", exe, pid)
+                if (over_openings or launched_while_blocked) and self._terminate(pid, what):
+                    log.info("Blocked app %s was started - closed immediately (pid %d)", what, pid)
                     continue
-            first = seen[pid] = self.app_first_seen.get(pid, now)
-            if now - first >= APP_GRACE_SEC and apps.terminate(pid):
-                log.info("Force-closed blocked app %s (pid %d)", exe, pid)
+                first = (name, now)
+            seen[pid] = first
+            if now - first[1] >= APP_GRACE_SEC and self._terminate(pid, what):
+                log.info("Force-closed blocked app %s (pid %d)", what, pid)
         self.app_first_seen = seen
+
+    def _terminate(self, pid: int, what: str) -> bool:
+        """Close a process. A refusal is written to the log (once per process) - it used to pass in silence, so a
+        game that can't be closed (anti-cheat, another account's process) played on and left no trace."""
+        if apps.terminate(pid):
+            return True
+        if pid not in self.kill_failed:
+            self.kill_failed = self.kill_failed | {pid}
+            log.warning("Couldn't close blocked app %s (pid %d) - Windows refused; still trying", what, pid)
+        return False
+
+    def track_families(self, procs: list[tuple[int, int, str]], names: dict[int, str]):
+        """For EVERY app on the list, blocked now or not: what it starts from its own install folder (or its game
+        folder) is the app too, remembered after the starter has gone. Only followed while blocked before, so a game
+        whose starter ran inside the allowed hours and exited (Game.exe -> Game-Win64-Shipping.exe) left a game
+        nobody knew about - not closed when the hours ended, its time never counted. A remembered process is
+        recognised by its number AND its name, and its start time is checked again before it is closed, so a
+        number Windows hands to another program never makes that program "the game"."""
+        by_name: dict[str, set[int]] = {}
+        for pid, name in names.items():
+            by_name.setdefault(name, set()).add(pid)
+        family: dict[str, dict[int, tuple[str, float | None]]] = {}
+        members: dict[int, set[str]] = {}
+        folders: dict[str, set[str]] = {}
+        me = os.getpid()
+        for exe, item in self.app_items.items():
+            kept = {pid: v for pid, v in self.family.get(exe, {}).items() if names.get(pid) == v[0]}
+            main = set().union(*(by_name.get(n, ()) for n in apps.names_of(exe)))
+            folder = apps.app_folder(item)
+            if main:
+                homes = {f for pid in main if (f := apps.helper_folder(self._path(pid, names[pid])))}
+                if folder:
+                    homes.add(folder)
+                for pid in apps.descendants(main, procs) if homes else ():
+                    name = names[pid]
+                    if pid in kept or name in apps.PROTECTED or pid == me:
+                        continue
+                    path = self._path(pid, name)
+                    # (a game Steam started from a library inside Steam's own folder is that game, not Steam)
+                    game = apps.game_folder(path)
+                    if (not game or game in homes) and any(apps.in_folder(path, home) for home in homes):
+                        kept[pid] = (name, apps.start_time(pid))
+            if kept:
+                family[exe] = kept
+            for pid in kept:
+                members.setdefault(pid, set()).add(exe)
+            if folder:
+                folders.setdefault(folder, set()).add(exe)
+        if folders:   # programs from an app's folder: each process's folders looked up, not every folder scanned
+            for pid, name in names.items():
+                if name in apps.PROTECTED or pid == me:
+                    continue
+                for parent in apps.parents_of(self._path(pid, name)):
+                    for exe in folders.get(parent, ()):
+                        if name not in apps.names_of(exe):
+                            members.setdefault(pid, set()).add(exe)
+        self.family = family
+        self.members = {pid: sorted(exes) for pid, exes in members.items()}
+
+    def app_processes(self, targets: dict[str, dict], procs: list[tuple[int, int, str]]) -> dict[int, str]:
+        """pid -> blocked exe, for every process that IS a blocked app:
+        - the exe on the list (by bare name, any case), and an Unreal game's Shipping exe (apps.names_of);
+        - what it started from its own install folder, whenever that was (track_families): an Unreal game's
+          Game.exe runs Binaries\\Win64\\Game-Win64-Shipping.exe and exits;
+        - for a game from a game library (Steam, Epic, GOG, Xbox ...), anything running from the game's folder,
+          whoever started it (apps.app_folder).
+        Before, only the exe named on the list was closed: the game itself, under another name, played on.
+        Windows' and Lockdown's own processes never count."""
+        names = {pid: name for pid, _ppid, name in procs}
+        by_name: dict[str, list[int]] = {}
+        for pid, name in names.items():
+            by_name.setdefault(name, []).append(pid)
+        me = os.getpid()
+        owned: dict[int, str] = {}
+        folders: dict[str, str] = {}
+        for exe, block in targets.items():
+            mine = {pid for n in apps.names_of(exe) for pid in by_name.get(n, ())}
+            for pid, (_name, started) in self.family.get(exe, {}).items():
+                now_started = apps.start_time(pid) if started is not None else None
+                if started is None or now_started is None or abs(now_started - started) < 1:
+                    mine.add(pid)
+            if folder := apps.app_folder(block["item"]):
+                folders.setdefault(folder, exe)
+            for pid in mine:
+                owned.setdefault(pid, exe)
+        if folders:   # (each process's folders looked up - not every blocked folder scanned for every process)
+            for pid, name in names.items():
+                if pid not in owned:
+                    exe = next((folders[f] for f in apps.parents_of(self._path(pid, name)) if f in folders), None)
+                    if exe:
+                        owned[pid] = exe
+        return {pid: exe for pid, exe in owned.items() if pid != me and names[pid] not in apps.PROTECTED}
+
+    def _path(self, pid: int, name: str) -> str:
+        """Lowercase exe path of a process ('' if unknown), looked up once per process."""
+        cached = self.path_cache.get(pid)
+        if not cached or cached[0] != name:
+            cached = self.path_cache[pid] = (name, (apps.process_path(pid) or "").lower())
+        return cached[1]
 
     def enforce_background(self, targets: dict[str, dict], procs: list[tuple[int, int, str]]):
         """"Also close its background processes": once the app itself is closed, close what it started and
@@ -252,27 +526,65 @@ class Enforcer:
         self.helpers = {exe: pids for exe, pids in self.helpers.items() if exe in wanted}
         if not wanted:
             return
-        alive = {pid for pid, _ppid, _exe in procs}
-        self.path_cache = {pid: v for pid, v in self.path_cache.items() if pid in alive}
         for exe, block in wanted.items():
             main = {pid for pid, _ppid, name in procs if name == exe}
             if main:   # the app goes first (asked to close, then force-closed); remember what it started
                 self.helpers.setdefault(exe, set()).update(apps.descendants(main, procs))
                 continue
-            folder = apps.helper_folder(block["item"]["app_path"])
+            folder = apps.helper_folder(block["item"]["app_path"] or apps.typed_path(block["item"]["target"]))
             for pid, _ppid, name in procs:
                 if name in apps.PROTECTED or pid == os.getpid():
                     continue
                 if pid not in self.helpers.get(exe, ()) and not (folder and self._in_folder(pid, name, folder)):
                     continue
-                if apps.terminate(pid):
+                if self._terminate(pid, f"{name} (background process of {exe})"):
                     log.info("Closed background process %s of blocked app %s (pid %d)", name, exe, pid)
 
     def _in_folder(self, pid: int, name: str, folder: str) -> bool:
-        cached = self.path_cache.get(pid)
-        if not cached or cached[0] != name:
-            cached = self.path_cache[pid] = (name, (apps.process_path(pid) or "").lower())
-        return cached[1].startswith(folder + "\\")
+        return apps.in_folder(self._path(pid, name), folder)
+
+    def learn_paths(self):
+        """Fill in the exe path of apps added by name only, from what is running (at most every LEARN_PATHS_SEC).
+        The path tells which folder is the app's, so a game's other exes are recognised as the game - by the
+        service when it closes it and by the tray app when it counts its time. Learned from:
+        - a running copy of the exe itself;
+        - a program running from a game's folder (Steam, Epic ...) that holds the exe: Steam often starts an Unreal
+          game's Shipping exe directly, so the exe you listed never ran and its folder was never learned;
+        - an Unreal Shipping exe whose starter sits where Unreal puts it (<game>\\<Project>\\Binaries\\Win64\\..).
+        A copy in your Desktop / Downloads / Documents (or a drive's top folder) is never learned - a renamed decoy
+        run from there would have hidden where the real game is - and a copy in a game folder wins over any other."""
+        mono = time.monotonic()
+        if mono - self.paths_learned_at < LEARN_PATHS_SEC:
+            return
+        self.paths_learned_at = mono
+        wanted: dict[str, list[int]] = {}
+        for item in self.db.list_items():
+            if item["item_type"] == "app" and not item.get("app_path") and not apps.typed_path(item["target"]):
+                wanted.setdefault(apps.exe_name(item["target"]), []).append(item["id"])
+        if not wanted:
+            return
+        found: dict[str, str] = {}
+        for pid, name in apps.list_processes():
+            if name in apps.PROTECTED or not (path := apps.process_path(pid)):
+                continue
+            candidates = []
+            if name in wanted:
+                candidates.append((name, path))
+            if game := apps.game_folder(path):
+                candidates += [(exe, p) for exe, p in apps.exes_in(game).items() if exe in wanted]
+            for exe in wanted:
+                if name in apps.names_of(exe) and name != exe and (p := apps.unreal_starter(path, exe)):
+                    candidates.append((exe, p))
+            for exe, p in candidates:
+                if apps.game_folder(p):
+                    if not apps.game_folder(found.get(exe)):
+                        found[exe] = p
+                elif apps.helper_folder(p) and exe not in found:
+                    found[exe] = p
+        for exe, path in found.items():
+            for item_id in wanted[exe]:
+                self.db.set_app_path(item_id, path)
+            log.info("Learned where %s is installed: %s", exe, path)
 
     def update_firewall(self):
         """Firewall rules for blocked apps with block type 'firewall'/'both'; remove the rest."""
@@ -429,6 +741,9 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
         for exe in json.loads(db.get_setting(FIREWALL_KEY, "{}")):
             firewall.remove(exe)
         db.set_setting(FIREWALL_KEY, "{}")
+        for exe in json.loads(db.get_setting(QUIC_KEY, "{}")):
+            firewall.remove_quic(exe)
+        db.set_setting(QUIC_KEY, "{}")
         hosts.apply([])   # (the Lockdown section of the hosts file goes too)
         hosts.flush_dns()
         log.info("Browser policies, firewall rules, DNS filter and hosts-file entries removed")

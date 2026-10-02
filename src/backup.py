@@ -9,7 +9,9 @@ from datetime import date, timedelta
 FORMAT = 1
 RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "clock_zone", "dns_filter.saved",
                 "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last",
-                "retention.last_day"}   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
+                "retention.last_day",   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
+                "usage.counted_until", "firewall_quic", "apps.members"}
+# (monitor.usage.COUNTED_KEY, service.QUIC_KEY, monitor.usage.MEMBERS_KEY)
 
 
 def export(db) -> dict:

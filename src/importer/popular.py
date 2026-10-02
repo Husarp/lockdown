@@ -10,6 +10,7 @@ can't do - the DNS filter does it (see service.Enforcer.blocked_name).
 """
 
 MEDIA_HOSTS_KEY = "media_hosts_added"   # the one-off pass below has run
+MEDIA_HOSTS_DONE = "2"                    # "1": run before 0.84.1, when www. items were missed
 
 POPULAR_SITES: dict[str, dict[str, list[str]]] = {
     "Social": {
@@ -61,7 +62,8 @@ POPULAR_SITES: dict[str, dict[str, list[str]]] = {
 
 def hosts_of(target: str) -> list[str] | None:
     """The full hostname list of the known site this item is, or None if it isn't one of them."""
-    have = set(target.lower().split())
+    # (an old or imported item may say www.youtube.com: still YouTube, and still needs googlevideo.com)
+    have = {h.removeprefix("www.") for h in target.lower().split()}
     for sites in POPULAR_SITES.values():
         for hostnames in sites.values():
             if have & set(hostnames):
@@ -73,11 +75,16 @@ def add_media_hosts(db) -> list[str]:
     """One-off: sites blocked before the media domains existed only have their page hostnames, so a blocked
     YouTube kept streaming from googlevideo.com. Give each known site the hostnames it is missing - once, so
     one you remove yourself stays removed. Returns the names that changed."""
-    if db.get_setting(MEDIA_HOSTS_KEY, "") == "1":
+    done = db.get_setting(MEDIA_HOSTS_KEY, "")
+    if done == MEDIA_HOSTS_DONE:
         return []
     changed = []
     for item in db.list_items():
         if item["item_type"] != "site":
+            continue
+        # the first pass (done "1", before 0.84.1) didn't know www.youtube.com was YouTube: run again for those
+        # only, so media hosts you took off a site yourself stay off
+        if done == "1" and not any(h.startswith("www.") for h in item["target"].lower().split()):
             continue
         known = hosts_of(item["target"])
         missing = [h for h in known or [] if h not in item["target"].lower().split()]
@@ -86,5 +93,5 @@ def add_media_hosts(db) -> list[str]:
                            item["rules"], item.get("block_type"), item.get("app_path"),
                            bool(item.get("disabled")))
             changed.append(item["display_name"])
-    db.set_setting(MEDIA_HOSTS_KEY, "1")
+    db.set_setting(MEDIA_HOSTS_KEY, MEDIA_HOSTS_DONE)
     return changed

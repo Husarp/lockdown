@@ -18,6 +18,7 @@ from trusted_time import now_from_db
 TICK_SEC = 0.5
 RETRY_SEC = 2   # the same page still there this long after acting: act again (going back -> closing)
 SITES_SEC = 2   # how often the list of blocked sites is re-read
+RESTART_SEC = 30   # wait before starting the check again after it fell over
 
 log = logging.getLogger("lockdown.words")
 
@@ -45,13 +46,16 @@ def act(hwnd: int, action: str) -> bool:
 
 
 def blocked_sites(db) -> dict[str, str]:
-    """{hostname: "close" / "back"} for the sites blocked right now that ask for the tab to be acted on."""
+    """{hostname: "close" / "back"} for every site blocked right now.
+
+    A site that is only "sent nowhere" (dns) gets "back" too, as a backstop: a page that was already open when its
+    block began keeps playing over the connections it has - IPv6 and QUIC ones can't be cut from outside the
+    browser - so a YouTube tab stayed usable all night (0.84.1). Going back off it (closing the tab if that
+    doesn't leave the page) ends that. A page that really can't load loses nothing by it."""
     out = {}
     for host, block in db.active_blocks(now_from_db(db)).items():
         if block["item"]["item_type"] == "site":
-            action = site_block.tab_action(block["item"].get("block_type"))
-            if action:
-                out[host] = action
+            out[host] = site_block.tab_action(block["item"].get("block_type")) or "back"
     return out
 
 
@@ -81,6 +85,17 @@ class WordGuard(threading.Thread):
         self.last: tuple | None = None   # ((hwnd, address, title), when we acted)
 
     def run(self):
+        """Keep checking, whatever happens: starting up (COM, opening the database while the service holds it)
+        used to be outside any guard, so one failure there ended the check for good, silently - the same hole
+        the usage tracker had (UsageTracker.run)."""
+        while not self.stop_event.is_set():
+            try:
+                self._check()
+            except Exception:
+                log.exception("Word check stopped - starting it again in %ds", RESTART_SEC)
+                self.stop_event.wait(RESTART_SEC)
+
+    def _check(self):
         import uiautomation as auto   # COM must be initialized in this thread
         with auto.UIAutomationInitializerInThread():
             db = Database()

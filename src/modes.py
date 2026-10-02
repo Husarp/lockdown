@@ -5,6 +5,7 @@ Used by the service (db.blocks) and the GUI - standard library only."""
 import json
 from datetime import datetime, timedelta
 
+from blocker.apps import exe_name
 from rules import TIME_FMT, schedule_until
 
 LIST_KEY = "modes.list"       # JSON list of modes
@@ -125,12 +126,18 @@ def item_category(item: dict, categories: dict[tuple[str, str], str]) -> str:
     if item["item_type"] == "category":
         return item["target"]
     if item["item_type"] == "app":
-        return categories.get(("app", item["target"].lower()), "distracting")
+        # (a target typed as a full path is still that exe)
+        return categories.get(("app", exe_name(item["target"])), "distracting")
+    # Only what you chose for one of the item's own hostnames counts, and Distracting wins: putting
+    # music.youtube.com under Neutral used to make the whole YouTube item Neutral - the first match won - so
+    # Work / Study / Focus stopped blocking YouTube (0.84.1). The main hostname is Distracting unless you chose
+    # otherwise; the others it carries (googlevideo.com ...) only count where you chose something for them.
     hosts = item["target"].lower().split()
-    for (kind, name), cat in categories.items():
-        if kind == "site" and any(name == h or name.endswith("." + h) for h in hosts):
-            return cat
-    return "distracting"
+    if not hosts:
+        return "distracting"
+    chosen = [categories.get(("site", hosts[0]), "distracting")]
+    chosen += [c for h in hosts[1:] if (c := categories.get(("site", h)))]
+    return "distracting" if "distracting" in chosen else chosen[0]
 
 
 def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[tuple[str, str], str]) -> list[dict]:

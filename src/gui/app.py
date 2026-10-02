@@ -21,7 +21,7 @@ import reminders
 import retention
 import updates
 from blocker import protection
-from blocker.apps import minimizes
+from blocker.apps import exe_name, minimizes
 from db import Database
 from gui import mainthread, shortcuts, theme
 from gui.about_page import AboutPage
@@ -582,7 +582,7 @@ class LockdownApp(ctk.CTk):
             items, groups, usage = self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now)
             for message in self.watcher.check(items, groups, usage, now, self.usage_tracker.in_use, settings):
                 self._show(message, force=message in self.watcher.urgent)
-            self.minimize_blocks = {b["item"]["target"].lower(): b
+            self.minimize_blocks = {exe_name(b["item"]["target"]): b
                                     for b in self.db.blocks(now, usage=usage, items=items, groups=groups)
                                     if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
             if digest.due(self.db, now):   # the weekly summary

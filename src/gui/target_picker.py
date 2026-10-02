@@ -7,7 +7,7 @@ from gui import theme
 
 from gui.components import help_icon
 
-from blocker.apps import PROTECTED, block_flags, make_block_type
+from blocker.apps import PROTECTED, block_flags, exe_name, make_block_type, typed_path
 from blocker.site_block import make_site_block_type, site_flags
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
@@ -145,7 +145,7 @@ class TargetPicker(ctk.CTkFrame):
         entry.insert(0, text)
 
     def _is_app(self) -> bool:
-        return not self.category and (bool(self.app) or self.entry.get().strip().lower().endswith(".exe"))
+        return not self.category and (bool(self.app) or exe_name(self.entry.get()).endswith(".exe"))
 
     def _wants_block_row(self) -> bool:
         """Apps - and a category, whose apps get closed / minimised the same way."""
@@ -256,14 +256,15 @@ class TargetPicker(ctk.CTkFrame):
             return {"kind": "category", "targets": [self.category], "name": name or text,
                     "source": "category", "block_type": self.selected_block_type(), "app_path": None}
         if self._is_app():
-            exe = (self.app["exe"] if self.app else text).lower()
+            # (a path typed or pasted in - "C:\Games\Foo\Foo.exe" - is that exe; the path is kept as where it is)
+            exe = self.app["exe"] if self.app else exe_name(text)
             if exe in PROTECTED:
                 raise ValueError(f"{exe} is part of Windows (or Lockdown) and can't be blocked.")
             if self.selected_block_type() is None:
                 raise ValueError("Tick at least one of Close app / Minimize / Block internet.")
             return {"kind": "app", "targets": [exe], "name": name or (self.app or {}).get("name") or exe[:-4].title(),
                     "source": "app-browser" if self.app else "manual", "block_type": self.selected_block_type(),
-                    "app_path": (self.app or {}).get("path")}
+                    "app_path": (self.app or {}).get("path") or typed_path(text)}
         host = normalize_host(text)
         entry = popular_hosts(host)   # known site: block all of its hostnames
         if self.selected_site_block_type() is None:

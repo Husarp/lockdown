@@ -2,6 +2,10 @@
 import subprocess
 
 RULE_PREFIX = "Lockdown block "
+QUIC_PREFIX = "Lockdown no QUIC "
+# browsers that speak QUIC (HTTP/3): while a site is blocked they get no outgoing UDP 443 (service.update_quic)
+BROWSERS = {"chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe", "vivaldi.exe", "chromium.exe",
+            "arc.exe"}
 
 
 def _netsh(*args: str) -> bool:
@@ -26,3 +30,14 @@ def add(exe: str, path: str) -> bool:
 
 def remove(exe: str) -> bool:
     return _netsh("delete", "rule", f"name={rule_name(exe)}")
+
+
+def add_quic(exe: str, path: str) -> bool:
+    """No outgoing UDP 443 (QUIC / HTTP/3) for the browser at `path`: it falls back to TCP, which can be cut."""
+    remove_quic(exe)
+    return _netsh("add", "rule", f"name={QUIC_PREFIX}{exe}", "dir=out", "action=block", "protocol=UDP",
+                  "remoteport=443", f"program={path}", "enable=yes")
+
+
+def remove_quic(exe: str) -> bool:
+    return _netsh("delete", "rule", f"name={QUIC_PREFIX}{exe}")

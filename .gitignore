@@ -32,3 +32,13 @@ desktop.ini
 
 # Android: machine-specific SDK path
 android/local.properties
+
+# Local build tooling and archives (never published)
+_build/
+_archive/
+android/design/_ds/
+
+# Private plans: kept on disk, never published
+PLAN.md
+android/PLAN.md
+_notes/

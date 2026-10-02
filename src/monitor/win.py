@@ -39,10 +39,44 @@ def process_name(hwnd: int) -> str:
     return exe_name(pid_path(window_pid(hwnd)))
 
 
+def foreground_process() -> tuple[int, str, str]:
+    """(window handle, lowercase exe name, exe path or '') of the foreground window; (0, '', '') if none.
+
+    The path needs OpenProcess, which a game protected by anti-cheat (or one running elevated under some
+    policies) can refuse - then the name comes from the process list, which needs no access to the process.
+    Before, that window simply had no name, and its time was never counted."""
+    hwnd = _user32.GetForegroundWindow()
+    if not hwnd:
+        return 0, "", ""
+    pid = window_pid(hwnd)
+    path = pid_path(pid)
+    return hwnd, exe_name(path) if path else snapshot_name(pid), path
+
+
+DESKTOP_READOBJECTS = 0x0001
+
+
+def session_locked() -> bool:
+    """Is the workstation locked (or the secure desktop up - UAC, Ctrl+Alt+Del)? Then the input desktop is
+    Winlogon's and this session can't open it. That is what stops time being counted - no keyboard or mouse
+    input does not (a video, a cutscene, a game played with a controller)."""
+    desk = _user32.OpenInputDesktop(0, False, DESKTOP_READOBJECTS)
+    if not desk:
+        return True
+    _user32.CloseDesktop(desk)
+    return False
+
+
+def snapshot_name(pid: int) -> str:
+    """Lowercase exe name of a process from the process list ('' if it isn't there)."""
+    from blocker.apps import list_processes
+    return next((name for p, name in list_processes() if p == pid), "") if pid else ""
+
+
 def foreground() -> tuple[int, str]:
     """(window handle, lowercase exe name) of the foreground window; (0, '') if none (e.g. locked)."""
-    hwnd = _user32.GetForegroundWindow()
-    return (hwnd, process_name(hwnd)) if hwnd else (0, "")
+    hwnd, exe, _path = foreground_process()
+    return hwnd, exe
 
 
 class MONITORINFO(ctypes.Structure):

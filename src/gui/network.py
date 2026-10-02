@@ -167,7 +167,7 @@ class NetworkPage(ctk.CTkFrame):
         bar.pack(fill="x", padx=30, pady=(0, 6))
         self.status_filter = Segmented(bar, ["All", "Allowed", "Blocked"], command=lambda v: self._filtered())
         self.status_filter.set("All")
-        self.status_filter.pack(side="left", padx=10)
+        self.status_filter.pack(side="left", padx=(0, 10))   # (level with the "All apps" menu below it)
         self.search = ctk.CTkEntry(bar, width=180, placeholder_text="Search site or app")
         self.search.pack(side="left")
         self.search.bind("<KeyRelease>", lambda e: self._filtered())
