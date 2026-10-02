@@ -4,7 +4,7 @@
 - a blocked site that you chose to have closed instead of (or as well as) being sent nowhere
 
 Either way the tab is closed (Ctrl+W) or the browser goes back (Alt+Left) - if going back doesn't leave the
-page (e.g. a new tab has no previous page), the tab is closed."""
+page (e.g. a new tab has no previous page), or lands on something blocked again, the tab is closed."""
 import logging
 import threading
 import time
@@ -24,13 +24,33 @@ RESTART_SEC = 30   # wait before starting the check again after it fell over
 log = logging.getLogger("lockdown.words")
 
 
+_bar: dict[int, tuple[str, str]] = {}   # browser window -> (its title, its address) at the last read of its bar
+
+
 def sense_tab():
-    """(window handle, address, title) of the browser window in front, or None."""
+    """(window handle, address, title, address bar hidden) of the browser window in front, or None."""
     from monitor import browser_url, win
     hwnd, exe = win.foreground()
     if not hwnd or exe not in browser_url.BROWSERS:
         return None
-    return hwnd, browser_url.browser_url(hwnd), win.window_title(hwnd)
+    title = win.window_title(hwnd)
+    url, hidden = tab_address(hwnd, browser_url.browser_url(hwnd), title)
+    return hwnd, url, title, hidden
+
+
+def tab_address(hwnd: int, url: str | None, title: str) -> tuple[str | None, bool]:
+    """(the address to check, whether the address bar couldn't be read). A video played full screen hides the
+    address bar, so the tab check read nothing and left a full-screen YouTube video alone, while the
+    tracker counted it (it keeps the last address - usage._read_url). Now the same: the address last read in this
+    window while its title is unchanged, else the site the title names ("Cats - YouTube — Mozilla Firefox" -
+    site_block.title_site), 0.84.9. Kept apart from the tracker's memory: this runs on its own thread."""
+    if url is not None:
+        if len(_bar) > 200:
+            _bar.clear()
+        _bar[hwnd] = (title, url)
+        return url, False
+    last = _bar.get(hwnd)
+    return (last[1] if last and title and last[0] == title else site_block.title_site(title)), True
 
 
 def act(hwnd: int, action: str) -> bool:
@@ -128,7 +148,8 @@ class WordGuard(threading.Thread):
                     log.exception("Word check failed")
 
     def tick(self, cfg: dict, sense, do, now: float, sites: dict | None = None):
-        """sites: {hostname: "close" / "back"} from blocked_sites()."""
+        """sites: {hostname: "close" / "back"} from blocked_sites().
+        sense() -> (window, address, title[, address bar hidden]) - sense_tab()."""
         tab = sense() if (cfg["enabled"] or sites) else None
         word = tab and cfg["enabled"] and keywords.find(tab[1], tab[2], cfg)
         action = cfg["action"] if word else (site_action(tab[1], sites or {}) if tab else None)
@@ -140,6 +161,15 @@ class WordGuard(threading.Thread):
             if now - self.last[1] < RETRY_SEC:
                 return          # just acted - give the browser a moment
             action = "close"    # going back didn't leave the page
+        elif self.last and self.last[0][0] == tab[0]:
+            # we just acted on this window and it still shows something blocked: going back on a YouTube video
+            # lands on the one before, still YouTube - it hopped back through the history while the video
+            # played (0.84.9). Close it.
+            action = "close"
+        elif not word and len(tab) > 3 and tab[3]:
+            # no address bar (a full-screen video): going back would only seek the video or hop to the one
+            # before - close the tab (0.84.9)
+            action = "close"
         if do(tab[0], action):
             self.last = (tab, now)
             if first and word:  # one notice per detection; a blocked site has its own alert already

@@ -23,6 +23,7 @@ import json
 
 from blocker.apps import PROTECTED, app_folder, exe_name, in_folder, kills, list_processes, names_of
 from blocker.hosts import normalize_host
+from blocker.site_block import title_site
 from db import Database
 from rules import (Usage, block_targets, closed_opening, counted_rules, effective_rules, limit_targets,
                    switch_targets, usage_targets, visit_targets)
@@ -165,8 +166,17 @@ def _read_url(browser_url, win, hwnd: int, back_off: bool) -> str | None:
     NO_BAR_RETRY_SEC, as searching its UI tree each tick would be slow; one that won't answer is still its app,
     just without a site. A failed read is not repeated every tick either, while the title stays the same (a
     browser window in front with no address bar - an installed web app - used to be searched twice a second): it
-    is asked again after URL_REFRESH_SEC, or at once when the title changes - as often as at the 2-second tick."""
+    is asked again after URL_REFRESH_SEC, or at once when the title changes - as often as at the 2-second tick.
+
+    No address read under this title (the bar hidden, and autoplay or a playlist moved the full-screen video on to
+    the next one, or a browser web app): the site the title names, if it names one ("Cats - YouTube — Mozilla
+    Firefox" is youtube.com - site_block.title_site, 0.84.9). That video used to count as no site at all."""
     title = win.window_title(hwnd)
+    url = _read_bar(browser_url, win, hwnd, back_off, title)
+    return url if url is not None else title_site(title)
+
+
+def _read_bar(browser_url, win, hwnd: int, back_off: bool, title: str) -> str | None:
     now = time.monotonic()
     last = _seen.get(hwnd)
     if last and title and last[0] == title and 0 <= now - last[2] < URL_REFRESH_SEC:

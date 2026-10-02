@@ -41,3 +41,27 @@ def add_quic(exe: str, path: str) -> bool:
 
 def remove_quic(exe: str) -> bool:
     return _netsh("delete", "rule", f"name={QUIC_PREFIX}{exe}")
+
+
+VIDEO_RULE = "Lockdown video hosts"
+# domains that only ever serve a site's video: their addresses can be blocked outright while the site is blocked
+# (youtube.com's own addresses can't - Google search and Gmail share them)
+VIDEO_DOMAINS = ("googlevideo.com", "nflxvideo.net", "ttvnw.net")
+
+
+def is_video_host(name: str) -> bool:
+    name = name.lower().rstrip(".")
+    return any(name == d or name.endswith("." + d) for d in VIDEO_DOMAINS)
+
+
+def set_video_block(ips: list[str]) -> bool:
+    """One rule: nothing on this PC may reach these addresses, IPv4 and IPv6. Windows re-checks connections that
+    are already open when the rules change (WFP re-authorization), so this should also stop a video that is
+    already streaming - over IPv6 too, which connections.close_to can't cut."""
+    remove_video_block()
+    return _netsh("add", "rule", f"name={VIDEO_RULE}", "dir=out", "action=block", f"remoteip={','.join(ips)}",
+                  "enable=yes")
+
+
+def remove_video_block() -> bool:
+    return _netsh("delete", "rule", f"name={VIDEO_RULE}")

@@ -475,6 +475,7 @@ def test_a_browser_window_with_no_address_bar_in_front_is_not_searched_every_tic
     second - and at once when its title changes (it may have become a normal window with a bar)."""
     clock, win, browser = bar
     browser.urls = {}
+    win.titles[1] = "Calendar"   # (a YouTube title would count as YouTube with no bar - site_block.title_site)
     for _ in range(round(10 / TICK_SEC)):
         clock += TICK_SEC
         assert usage_mod._read_url(browser, win, 1, False) is None

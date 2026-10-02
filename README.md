@@ -92,7 +92,8 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
     Manual edits are repaired; the rest of the hosts file is never touched (backup: `C:\ProgramData\Lockdown\hosts.backup`);
   - keeps browser policies set that turn off DNS-over-HTTPS and QUIC in Chrome, Edge, Brave and Firefox
     (browsers then show "managed by your organization") — otherwise browsers could skip the hosts file;
-  - closes already-open connections to a site right after it gets blocked.
+  - closes already-open connections to a site right after it gets blocked; while a site is blocked its video hosts
+    (googlevideo.com ...) are also firewalled, IPv4 and IPv6, and the DNS filter answers for them (0.84.9).
 - Apps are matched by exe name. The service checks running processes 4x per second: an app started while blocked
   is killed at once; one that was already open when its block began is asked to close (like clicking X) and
   force-closed after 10 s. "Minimize" keeps the app running but the tray agent minimizes it whenever it comes to the
