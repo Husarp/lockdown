@@ -260,6 +260,7 @@ def test_tray_menu_is_rebuilt_on_pystrays_thread_only_when_shown(monkeypatch):
     ("gui/blocking.py", "_live_update"), ("gui/network.py", "_live"), ("gui/app.py", "_tick_clock"),
     ("gui/app.py", "_poll_events"), ("gui/app.py", "_collect_garbage"), ("gui/app.py", "_poll_status"),
     ("gui/app.py", "_poll_watcher"), ("gui/app.py", "_poll_block_events"), ("gui/app.py", "_poll_reminders"),
+    ("gui/app.py", "_poll_updates"),
 ])
 def test_refresh_loops_reschedule_even_after_an_error(path, method):
     """Review (threading #6): a page loop that raised once never ran again (the lock banner, a mode's lock state,

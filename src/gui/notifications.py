@@ -205,9 +205,13 @@ class Popup(ctk.CTkToplevel):
     `action` is (label, callback) for the one thing worth doing about THIS message - "See the week" on the weekly
     summary, "Install" on a new version - or None, which is most of them. Every notice used to carry "Open
     Lockdown" and "Mute 1 h": a door to the app in general is not an answer to anything in particular, and a
-    notice that fades by itself does not need a button to make it stop."""
+    notice that fades by itself does not need a button to make it stop.
 
-    def __init__(self, root, message: str, action=None):
+    `actions` is a list of such (label, callback) pairs, for the rare notice with more than one answer ("Install"
+    / "Remind me later" on a new version). `sticky`: it does not fade or close when clicked - only its buttons
+    and the ✕ close it (a notice you are meant to answer, not one that passes)."""
+
+    def __init__(self, root, message: str, action=None, actions=None, sticky: bool = False):
         super().__init__(root)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -215,7 +219,9 @@ class Popup(ctk.CTkToplevel):
             self.attributes("-alpha", 0.0)
         except Exception:
             pass
-        self.w, self.h = 400, 136 if action else 96
+        actions = list(actions or ([action] if action else []))
+        self.sticky = sticky
+        self.w, self.h = 400, 136 if actions else 96
         self.x = self.winfo_screenwidth() - self.w - 16
         self.target_y = self.winfo_screenheight() - self.h - 64
         self.arrived = False
@@ -228,17 +234,22 @@ class Popup(ctk.CTkToplevel):
         head.pack(fill="x")
         ctk.CTkLabel(head, text="", image=theme.icon("shield-check", theme.ACCENT, 15), width=15).pack(side="left")
         ctk.CTkLabel(head, text=" Lockdown", font=theme.semi(12)).pack(side="left")
-        ctk.CTkLabel(head, text="✕", text_color=MUTED, font=theme.body(11), cursor="hand2").pack(side="right")
+        close = ctk.CTkLabel(head, text="✕", text_color=MUTED, font=theme.body(11), cursor="hand2")
+        close.pack(side="right")
         ctk.CTkLabel(head, text="now", text_color=MUTED, font=theme.body(10)).pack(side="right", padx=(0, 8))
         ctk.CTkLabel(inner, text=message, wraplength=350, justify="left", font=theme.body(12), anchor="w").pack(
             anchor="w", pady=(6, 0))
         self.hovered = False
-        for widget in (self, frame, inner, head, *head.winfo_children(), *inner.winfo_children()):
+        for widget in ((close,) if sticky else
+                       (self, frame, inner, head, *head.winfo_children(), *inner.winfo_children())):
             widget.bind("<Button-1>", lambda e: self.close())
-        if action:
-            label, run = action
-            ctk.CTkButton(inner, text=label, width=110, height=28, **theme.OUTLINE,
-                          command=lambda: (self.close(), run())).pack(anchor="w", pady=(10, 0))
+        if actions:
+            row = ctk.CTkFrame(inner, fg_color="transparent")
+            row.pack(anchor="w", pady=(10, 0))
+            for n, (label, run) in enumerate(actions):   # (with several, the first is the main one: filled)
+                look = theme.OUTLINE if n or len(actions) == 1 else {}
+                ctk.CTkButton(row, text=label, width=110, height=28, **look,
+                              command=lambda run=run: (self.close(), run())).pack(side="left", padx=(0, 8))
         Corner.add(self, self.w, self.h)   # stacked above the ones already there, never on top of them
         self.bind("<Enter>", lambda e: setattr(self, "hovered", True))
         self.bind("<Leave>", lambda e: (setattr(self, "hovered", False), self.after(POPUP_MS, self._maybe_close)))
@@ -265,7 +276,7 @@ class Popup(ctk.CTkToplevel):
             self.after(22, lambda: self._animate(step + 1))
 
     def _maybe_close(self):
-        if not self.hovered:
+        if not self.hovered and not self.sticky:
             self.close()
 
     def close(self):

@@ -43,6 +43,7 @@ from monitor.word_guard import WordGuard
 from rules import DAY_NAMES, TIME_FMT
 from service import HEARTBEAT_KEY
 from trusted_time import now_from_db
+from version import VERSION
 
 # (sidebar label, page class or the phase in which the page gets built, icon)
 PAGES = [
@@ -68,8 +69,8 @@ MIN_SCALE = 0.62        # below this it would be unreadable
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
 WATCH_MS = 5000
-UPDATE_FIRST_MS = 90_000      # let the app settle before touching the network
-UPDATE_POLL_MS = 3_600_000    # then look every hour whether a day has passed since the last check
+UPDATE_FIRST_MS = 60_000      # let the app settle before touching the network, then check (0.84.4: every start)
+UPDATE_POLL_MS = 60_000       # then every minute: is a check due (every updates.EVERY_HOURS), has a snooze run out
 MINIMIZE_MS = 250
 GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
@@ -121,6 +122,10 @@ class LockdownApp(ctk.CTk):
         self.last_alert = self._load_last_alert()            # item id -> when last notified (kept across restarts)
         self._grace: dict[str, tuple] = {}                   # domain -> (revert-to state, expiry) for grace-undo
         self.popup: Popup | None = None
+        self.update_popup: Popup | None = None   # the "new version" notice, while it is on screen
+        self.update_popup_for = None             # ... and which version it offers
+        self.update_shown = None                 # (version, installable) the banner / dot / tray show now, or None
+        self.update_asking = False               # a check is out on its thread
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -128,10 +133,11 @@ class LockdownApp(ctk.CTk):
         right = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1)
+        right.grid_rowconfigure(2, weight=1)
+        self._build_update_banner(right)
         self._build_save_bar(right)
         self.content = ctk.CTkFrame(right, corner_radius=0, fg_color="transparent")
-        self.content.grid(row=1, column=0, sticky="nsew")
+        self.content.grid(row=2, column=0, sticky="nsew")
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(0, weight=1)
         self.curtain = Curtain(self.content)   # hides a page while it's being drawn
@@ -139,7 +145,8 @@ class LockdownApp(ctk.CTk):
         # Tray / second-launch callbacks arrive on other threads; hand them to Tk via a queue.
         self.events = events
         self.tray = Tray(on_open=lambda: self.events.put("open"), on_exit=lambda: self.events.put("exit"),
-                         on_mode=lambda mode_id: self.events.put(("mode", mode_id)))
+                         on_mode=lambda mode_id: self.events.put(("mode", mode_id)),
+                         on_update=lambda: self.events.put("update"))
         self.last_phase = None   # Pomodoro phase last announced
         self.tray.start()
         self.protocol("WM_DELETE_WINDOW", self.withdraw)  # close = minimize to tray
@@ -167,7 +174,8 @@ class LockdownApp(ctk.CTk):
         self.after(PREBUILD_MS[0], self._prebuild)
         distracting.seed(self.db)          # games, streaming ... are Distracting by default
         self.after(5000, self._seed_games)
-        self.after(UPDATE_FIRST_MS, self._poll_updates)
+        self.refresh_update(popup=False)   # a newer version found before: the banner is there from the start
+        self.after(UPDATE_FIRST_MS, lambda: self._poll_updates(first=True))
         # old per-minute / per-event detail -> daily totals, once a day, on its own thread and connection
         self.retention = retention.RetentionThread()
         self.retention.start()
@@ -238,7 +246,7 @@ class LockdownApp(ctk.CTk):
 
     def _build_save_bar(self, parent):
         bar = ctk.CTkFrame(parent, fg_color="transparent")
-        bar.grid(row=0, column=0, sticky="e", padx=24, pady=(12, 0))
+        bar.grid(row=1, column=0, sticky="e", padx=24, pady=(12, 0))
         self.autosave_var = ctk.BooleanVar(value=self.draft.autosave)
         ctk.CTkSwitch(bar, text="Auto-save", variable=self.autosave_var, command=self._toggle_autosave).pack(
             side="left", padx=(0, 16))
@@ -280,18 +288,24 @@ class LockdownApp(ctk.CTk):
         for text, color in (("LOCK", theme.TEXT), ("DOWN", theme.ACCENT)):
             ctk.CTkLabel(logo, text=text, text_color=color, font=ctk.CTkFont(theme.DISPLAY_HEAVY, 24)).pack(side="left")
         self.nav_icons = {}
+        self.nav_plain = {}   # (the About icons without / with the "update waiting" dot - see refresh_update)
         for i, (name, _, icon) in enumerate(PAGES, start=1):
             row = ctk.CTkFrame(bar, fg_color="transparent", corner_radius=6, height=36)
             row.grid(row=i, column=0, padx=12, pady=2, sticky="ew")
             marker = ctk.CTkFrame(row, width=3, height=36, corner_radius=0, fg_color="transparent")
             marker.pack(side="left", fill="y")
             self.nav_icons[name] = (theme.icon(icon, theme.MUTED, 17), theme.icon(icon, theme.TEXT, 17))
+            if name == "About":
+                self.nav_plain = {False: self.nav_icons[name],
+                                  True: (theme.icon(icon, theme.MUTED, 17, dot=theme.ACCENT),
+                                         theme.icon(icon, theme.TEXT, 17, dot=theme.ACCENT))}
             btn = ctk.CTkButton(row, text=f"  {name}", image=self.nav_icons[name][0], anchor="w", height=36,
                                 corner_radius=6, fg_color="transparent", text_color=theme.MUTED,
                                 hover_color=theme.SURFACE2, font=ctk.CTkFont(theme.BODY, 13),
                                 command=lambda n=name: self.show_page(n))
             btn.pack(side="left", fill="x", expand=True)
             self.nav_buttons[name] = (btn, marker)
+
         bar.grid_rowconfigure(len(PAGES) + 1, weight=1)
         status_row = ctk.CTkFrame(bar, fg_color="transparent")
         status_row.grid(row=len(PAGES) + 2, column=0, padx=18, pady=16, sticky="w")
@@ -380,6 +394,10 @@ class LockdownApp(ctk.CTk):
                     self._maximize()   # reopen from the tray full-size, not at some leftover small size
                     self.lift()
                     self.focus_force()
+                    self._check_updates(updates.OPEN_HOURS)   # opening the window: look again if it's been a while
+                elif event == "update":   # the tray's "Install update"
+                    if found := updates.available(self.db):
+                        self._install(found)
                 elif event == "exit":
                     self.guard(["Quit Lockdown (blocked-visit notices, time limits and reminders stop until you "
                                 "start it again)"], self._exit)
@@ -608,39 +626,166 @@ class LockdownApp(ctk.CTk):
         finally:
             self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
 
-    def _poll_updates(self):
-        """Ask GitHub once a day whether there is a newer Lockdown, and say so once per version. Off entirely
-        when you untick it on the About page. The request goes out on its own thread - the network must never
-        hold up the window."""
+    # ---------- a newer Lockdown ----------
+    # Checked every time you open the window (at most once per updates.RETRY_MIN minutes), and in the background
+    # every updates.EVERY_HOURS hours. What it finds stays on screen until installed, skipped or
+    # snoozed: the banner over every page, a dot on About, "Update available" in the tray menu - plus the corner
+    # popup once per version (once more after "Remind me later"), which waits while you don't want interruptions.
+
+    def _poll_updates(self, first: bool = False):
+        """Every minute, on the Tk thread: start a check if one is due (only the request goes out on its own
+        thread - the network must never hold up the window), and bring the banner / popup back once a "Remind
+        me later" has run out. Off entirely (no checks) when you untick it on the About page."""
         try:
-            if updates.due(self.db, now_from_db(self.db)):
-                threading.Thread(target=self._ask_github, daemon=True).start()
+            self._check_updates(updates.EVERY_HOURS)   # in the background only every EVERY_HOURS (Adam, 0.84.4)
+            self.refresh_update()
         finally:
             self.after(UPDATE_POLL_MS, self._poll_updates)
 
+    def _check_updates(self, hours: float):
+        if self.update_asking:
+            return
+        now = now_from_db(self.db)
+        if updates.due(self.db, now, hours):
+            self.update_asking = True
+            updates.trying(self.db, now)
+            threading.Thread(target=self._ask_github, daemon=True).start()
+
     def _ask_github(self):
         """(worker thread) Never self.after() here - that is a Tk call from the wrong thread."""
-        found = updates.latest_release()
-        self.call_soon(self._update_found, found)
+        found = None
+        try:
+            found = updates.latest_release()
+        finally:
+            self.call_soon(self._update_found, found)
 
     def _update_found(self, found):
-        if found:                       # a failed check is not written down, so it tries again on the next poll
-            updates.checked(self.db, now_from_db(self.db))
-        if not updates.worth_saying(self.db, found):
-            return
-        updates.said(self.db, found["version"])
-        if updates.can_install(found):
-            self._show(f"Lockdown {found['version']} is out.", action=("Install", lambda: self._install(found)))
-        else:   # a release with no installer attached: only the page can help
-            self._show(f"Lockdown {found['version']} is out - the GitHub page has it.",
-                       action=("Open the page", lambda: webbrowser.open(found["url"])))
+        self.update_asking = False
+        if found:   # a failed check is not written down, so it tries again on a later poll
+            updates.checked(self.db, now_from_db(self.db), found)
+        self.refresh_update()
 
-    def _install(self, found):
-        """The notice's Install: open About on the release it found and start the download straight away."""
+    def refresh_update(self, popup: bool = True):
+        """Banner, About dot and tray line from what was found (cheap: nothing is rebuilt, and nothing at all is
+        touched unless what to show changed). Then the popup, if this version still has to be told about."""
+        now = now_from_db(self.db)
+        found = updates.banner(self.db, now)
+        shown = (found["version"], updates.can_install(found)) if found else None
+        if shown != self.update_shown:
+            self.update_shown = shown
+            if found:
+                self.update_text.configure(text=updates.label(found))
+                self.update_get.configure(text="Install" if shown[1] else "Open the page")
+                self.update_banner.grid()
+            else:
+                self.update_banner.grid_remove()
+            self.nav_icons["About"] = self.nav_plain[bool(found)]
+            self.nav_buttons["About"][0].configure(
+                image=self.nav_icons["About"][1 if getattr(self, "current_page", None) == "About" else 0])
+            self.tray.set_update(found["version"] if found else None)
+            if self.update_popup is not None and getattr(self, "update_popup_for", None) != (shown or (None,))[0]:
+                # the popup still open is about a version no longer to be shown (a newer one came out while it
+                # waited, or it was installed / skipped / snoozed): its Install would fetch the wrong release
+                self._close_update_popup()   # (test_a_newer_release_replaces_the_open_popup)
+        if popup and found and updates.worth_saying(self.db, found, now):
+            self._update_notice(found)
+
+    def _update_notice(self, found):
+        """The corner popup. It stays until you answer it (Install / Remind me later / ✕), and it waits - not
+        written down as said - while a muted mode, Do not disturb or a full-screen app means "not now"; the
+        banner is on screen meanwhile either way."""
+        if self.update_popup is not None and self.update_popup.winfo_exists():
+            return
+        if win.do_not_disturb() or win.is_fullscreen():
+            return
+        get = (("Install", lambda: self._install(found)) if updates.can_install(found) else
+               ("Open the page", lambda: webbrowser.open(found["url"])))
+        before = self.popup
+        if self._show(f"{updates.label(found)} - you have {VERSION}.", sticky=True,
+                      actions=[get, ("Remind me later", self.update_later)]):
+            updates.said(self.db, found["version"])
+            if self.popup is not before:
+                self.update_popup, self.update_popup_for = self.popup, found["version"]
+
+    def update_later(self):
+        """"Remind me later": popup and banner gone for updates.SNOOZE_HOURS, then both back."""
+        updates.snooze(self.db, now_from_db(self.db))
+        self._close_update_popup()
+        self.refresh_update(popup=False)
+
+    def update_skip(self):
+        """The banner's ✕: skip this version - nothing more about it, only about a newer one."""
+        if self.update_shown:
+            updates.skip(self.db, self.update_shown[0])
+        self._close_update_popup()
+        self.refresh_update(popup=False)
+
+    def _close_update_popup(self):
+        if self.update_popup is not None and self.update_popup.winfo_exists():
+            self.update_popup.close()
+        self.update_popup = None
+
+    def _install(self, found=None):
+        """Install (popup, banner, tray): the About page's download - with its progress bar - then the
+        installer. Never a second download while one is running."""
+        found = found or updates.available(self.db)
+        if not found:
+            return
+        self._close_update_popup()
+        if not updates.can_install(found):   # a release with no installer attached: only the page can help
+            webbrowser.open(found["url"])
+            return
         self._open_on("About")
         about = self.pages["About"]
-        about._checked(found)
-        about._get()
+        if not about.downloading:
+            about.show_found(found)
+            about._get()
+
+    def _build_update_banner(self, parent):
+        """"Lockdown X is available  [Install] [Later] ✕" over every page. Built once, shown / hidden and
+        relabelled by refresh_update - never rebuilt."""
+        self.update_banner = bar = ctk.CTkFrame(parent, fg_color=theme.SURFACE, border_width=1,
+                                                border_color=theme.ACCENT, corner_radius=6)
+        bar.grid(row=0, column=0, sticky="ew", padx=24, pady=(12, 0))
+        # The buttons are packed first: in a narrow window pack squeezes whatever was packed last, and that must
+        # be "you have X" and the text - never Install / Later / skip (test_banner_buttons_survive_a_narrow_window)
+        close = ctk.CTkLabel(bar, text="✕", text_color=theme.MUTED, font=theme.body(13), cursor="hand2", width=24)
+        close.pack(side="right", padx=(4, 10))
+        skip = ctk.CTkLabel(bar, text="skip this version", text_color=theme.MUTED, font=theme.body(11),
+                            cursor="hand2")
+        skip.pack(side="right")
+        for widget in (close, skip):
+            widget.bind("<Button-1>", lambda e: self.update_skip())
+        ctk.CTkButton(bar, text="Later", width=74, height=28, **theme.OUTLINE,
+                      command=self.update_later).pack(side="right", padx=(0, 14))
+        self.update_get = ctk.CTkButton(bar, text="Install", width=90, height=28, command=self._install)
+        self.update_get.pack(side="right", padx=(0, 8))
+        ctk.CTkLabel(bar, text="", image=theme.icon("shield-check", theme.ACCENT, 18)).pack(side="left",
+                                                                                          padx=(14, 8), pady=8)
+        self.update_text = ctk.CTkLabel(bar, text="", font=theme.semi(13), anchor="w")
+        self.update_text.pack(side="left")
+        you = ctk.CTkLabel(bar, text=f"you have {VERSION}", text_color=theme.MUTED, font=theme.body(12))
+        you.pack(side="left", padx=10)
+        # (and in a really narrow window the two extras go - "skip this version" keeps its ✕)
+        extras = ((you, dict(side="left", padx=10, after=self.update_text)), (skip, dict(side="right", after=close)))
+
+        def fit(_event=None):
+            room = bar.winfo_width()
+            if room <= 1:
+                return
+            need = 60 + sum(w.winfo_reqwidth() for w in bar.winfo_children()   # (60: the gaps between them)
+                            if w.winfo_manager() == "pack" or any(w is x for x, _ in extras))
+            for widget, how in extras:   # "you have" goes first, then "skip this version"
+                show = need <= room
+                if not show:
+                    need -= widget.winfo_reqwidth()
+                if show and not widget.winfo_manager():
+                    widget.pack(**how)
+                elif not show and widget.winfo_manager():
+                    widget.pack_forget()
+        bar.bind("<Configure>", fit, add="+")
+        self.update_text.bind("<Configure>", fit)   # (a longer version number: check again)
+        bar.grid_remove()
 
     def _read_minimize_blocks(self, now, usage=None, items=None, groups=None):
         self.minimize_writes = usage_mod.limit_writes
@@ -743,20 +888,22 @@ class LockdownApp(ctk.CTk):
             self._show("Focus session done.", force=True)
         self.last_phase = phase
 
-    def _show(self, message: str, force: bool = False, action=None):
+    def _show(self, message: str, force: bool = False, action=None, actions=None, sticky: bool = False) -> bool:
         """Notification in the chosen format. Muted while a mode with "mute" is on (unless force - what you
         are using right now is about to be blocked, which is worth saying even in a game).
-        action: (label, callback) for the one thing worth doing about this particular message, or None."""
+        action: (label, callback) for the one thing worth doing about this particular message, or None;
+        actions / sticky: see Popup. Returns False if it was muted (nothing shown)."""
         if not force:
             state = modes.active(self.db, now_from_db(self.db))
             if state and state["mode"].get("mute"):
-                return
+                return False
         fmt = alerts.get(self.db, "notify.format")
         if fmt in ("toast", "both"):
             self.tray.notify(message)
             self.after(TOAST_CLEAR_MS, self._clear_toast_history)   # don't let one-time alerts pile up as unread
         if fmt in ("inapp", "both"):
-            self.popup = Popup(self, message, action=action)
+            self.popup = Popup(self, message, action=action, actions=actions, sticky=sticky)
+        return True
 
     def _open_on(self, page: str):
         """Bring the window up on one particular page - what a notice's button is for."""

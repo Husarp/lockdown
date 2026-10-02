@@ -59,6 +59,13 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   of per-minute detail with daily totals kept forever - the Dashboard of a year-old install loads in about a tenth
   of the time, and an install no longer gets slower the longer it is used.
 
+- **Updates (0.84.4):** Lockdown asks GitHub for a newer release a minute after it starts, every 3 hours, and when
+  you open the window (if the last check is over an hour old). A newer version shows as a banner over every page
+  ("Lockdown X is available - Install / Later / skip this version"), a dot on About and "Update available" with
+  "Install update" in the tray menu, plus one corner popup (Install / Remind me later / ✕). **Later** hides it for
+  4 hours, **skip** until a newer version comes; **Install** downloads and runs the installer from the About page,
+  with progress. Only ever forward to a newer version; "Check for updates automatically" (About) turns it off.
+
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
 ## How it works

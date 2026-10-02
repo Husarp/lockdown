@@ -33,8 +33,13 @@ class _Icon(pystray.Icon):
         return super()._on_notify(wparam, lparam)
 
 
+def update_text(version: str | None) -> str:
+    """The tray menu's line while a newer Lockdown is waiting ("" when there is none)."""
+    return f"Update available: Lockdown {version}" if version else ""
+
+
 class Tray:
-    def __init__(self, on_open, on_exit, on_mode=None):
+    def __init__(self, on_open, on_exit, on_mode=None, on_update=None):
         self.status_text = "Starting..."
         self.running: bool | None = None
         self.on_mode = on_mode
@@ -42,6 +47,8 @@ class Tray:
         self.active_mode: str | None = None
         self._icon_state: str | None = None
         self.off = False                         # Lockdown switched off entirely (Anti-Bypass page)
+        self.update_version: str | None = None   # a newer Lockdown found and not installed / skipped / snoozed
+        self.on_update = on_update
         self._title: str | None = None
         self._lock = threading.Lock()
         self.icon = _Icon(
@@ -49,6 +56,10 @@ class Tray:
             menu=pystray.Menu(
                 pystray.MenuItem("Open Lockdown", lambda: on_open(), default=True),
                 pystray.MenuItem(lambda item: self.status_text, None, enabled=False),
+                pystray.MenuItem(lambda item: update_text(self.update_version), None, enabled=False,
+                                 visible=lambda item: bool(self.update_version)),
+                pystray.MenuItem("Install update", lambda: self.on_update and self.on_update(),
+                                 visible=lambda item: bool(self.update_version and self.on_update)),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Modes", pystray.Menu(self._mode_items)),
                 pystray.Menu.SEPARATOR,
@@ -72,6 +83,15 @@ class Tray:
             with self._lock:
                 self._refresh_icon()   # a mode turning on/off changes the tray colour (green <-> yellow)
                 self.icon.update_menu()
+
+    def set_update(self, version: str | None) -> bool:
+        """"Update available" in the menu (or not). Only marks the menu out of date when it changed."""
+        if version == self.update_version:
+            return False
+        self.update_version = version
+        with self._lock:
+            self.icon.update_menu()
+        return True
 
     def _refresh_icon(self):
         """grey = switched off, green = blocking enforced, yellow = a mode is on, red = service down."""

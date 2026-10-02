@@ -1,5 +1,5 @@
 """Updating without leaving the app: find the installer on the release, refuse to go backwards, and check
-once a day rather than on every tick."""
+every few hours rather than on every tick."""
 import io
 import json
 from datetime import datetime, timedelta
@@ -66,12 +66,13 @@ def test_the_installer_is_started_and_nothing_else(tmp_path):
 
 # ---------- the daily check ----------
 
-def test_it_asks_once_a_day(tmp_path):
+def test_it_asks_every_few_hours_not_on_every_tick(tmp_path):
+    """(0.84.4: every EVERY_HOURS = 3 h instead of once a day - see tests/test_update_notice.py)"""
     db = Database(tmp_path / "t.db")
     assert updates.due(db, NOW)                    # never checked yet
     updates.checked(db, NOW)
-    assert not updates.due(db, NOW + timedelta(hours=23))
-    assert updates.due(db, NOW + timedelta(hours=25))
+    assert not updates.due(db, NOW + timedelta(hours=updates.EVERY_HOURS - 0.1))
+    assert updates.due(db, NOW + timedelta(hours=updates.EVERY_HOURS))
 
 
 def test_turning_it_off_stops_the_asking(tmp_path):

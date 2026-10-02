@@ -1,9 +1,16 @@
 """Is there a newer Lockdown? Asks GitHub for the latest release of the repository in version.py, and can
 fetch and start the installer so you never have to visit a web page.
 
-Nothing is sent but the request itself - no account, no identifier. The check runs once a day if you leave
-"Check for updates automatically" on, and whenever you press the button on the About page. With no repository
-set (REPO empty) there is nothing to ask, and the button isn't there. Standard library only.
+Nothing is sent but the request itself - no account, no identifier. If you leave "Check for updates
+automatically" on, it checks every time you open the window and every EVERY_HOURS hours in the background - and
+whenever you press the button on the About page. Two requests are never less than RETRY_MIN minutes apart, so even
+opening the window over and over stays far inside GitHub's 60 an hour for a caller without an account; a failed
+check is tried again on the next poll. With no repository set (REPO empty)
+there is nothing to ask, and the button isn't there. Standard library only.
+
+What was found is kept (FOUND_KEY), so "Lockdown X is available" stays on screen - the banner over every page, a
+dot on About, a line in the tray menu - until it is installed, you skip that version, or you ask to be reminded
+later (hidden for SNOOZE_HOURS, then back).
 """
 import json
 import re
@@ -20,11 +27,18 @@ TIMEOUT = 8
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
 CHUNK = 64 * 1024
 
-AUTO_KEY = "updates.auto"          # check once a day by itself
-NOTIFY_KEY = "updates.notify"      # and say so when it finds one
-LAST_KEY = "updates.last_check"    # when the last check happened
-SEEN_KEY = "updates.seen"          # the newest version you have already been told about
-EVERY_HOURS = 24
+AUTO_KEY = "updates.auto"          # check by itself (every few hours)
+NOTIFY_KEY = "updates.notify"      # and say so (the corner popup) when it finds one
+LAST_KEY = "updates.last_check"    # when the last check that got an answer happened
+TRIED_KEY = "updates.last_try"     # when the last check was started, answered or not (spaces out retries)
+SEEN_KEY = "updates.seen"          # the newest version the popup has already told you about
+FOUND_KEY = "updates.found"        # the newest release found (JSON), so the banner survives a restart
+SNOOZE_KEY = "updates.snooze_until"   # "Remind me later": popup and banner hidden until then (trusted time)
+SKIP_KEY = "updates.skipped"       # the banner's x: this version (and older) is not mentioned again
+EVERY_HOURS = 6                    # the automatic check in the background
+OPEN_HOURS = 0                     # opening the window always checks (RETRY_MIN still spaces the requests)
+RETRY_MIN = 5                      # never two requests within this many minutes (opening and closing the window)
+SNOOZE_HOURS = 4                   # "Remind me later"
 
 
 def numbers(version: str) -> tuple:
@@ -105,7 +119,7 @@ def install(path, run=None):
     (run or (lambda p: subprocess.Popen([str(p)])))(path)
 
 
-# ---------- the daily check ----------
+# ---------- the automatic check ----------
 
 def auto_on(db) -> bool:
     return db.get_setting(AUTO_KEY, "1") == "1"
@@ -115,29 +129,111 @@ def notify_on(db) -> bool:
     return db.get_setting(NOTIFY_KEY, "1") == "1"
 
 
-def due(db, now: datetime) -> bool:
-    """Once a day, and only while you leave it switched on."""
+def _time(db, key: str) -> datetime | None:
+    try:
+        return datetime.strptime(db.get_setting(key, ""), TIME_FMT)
+    except ValueError:
+        return None
+
+
+def due(db, now: datetime, hours: float = EVERY_HOURS) -> bool:
+    """Every `hours` (EVERY_HOURS; OPEN_HOURS when the window is opened; 0 when Lockdown starts), only while
+    you leave it switched on. A check that got no answer is not written down as done, so the next poll tries
+    again - but never within RETRY_MIN minutes of the last try, so a GitHub that is down or refusing (rate
+    limit) is not asked every minute."""
     if not REPO or not auto_on(db):
         return False
-    last = db.get_setting(LAST_KEY, "")
-    if not last:
-        return True
-    try:
-        return now - datetime.strptime(last, TIME_FMT) >= timedelta(hours=EVERY_HOURS)
-    except ValueError:
-        return True
+    tried = _time(db, TRIED_KEY)
+    if tried and timedelta(0) <= now - tried < timedelta(minutes=RETRY_MIN):
+        return False
+    last = _time(db, LAST_KEY)
+    return last is None or not timedelta(0) <= now - last < timedelta(hours=hours)
 
 
-def checked(db, now: datetime):
+def trying(db, now: datetime):
+    """A check is starting (answered or not)."""
+    db.set_setting(TRIED_KEY, now.strftime(TIME_FMT))
+
+
+def checked(db, now: datetime, found: dict | None = None):
+    """A check got an answer. `found` (when given) is kept, so what it found stays on screen across restarts."""
     db.set_setting(LAST_KEY, now.strftime(TIME_FMT))
+    if found is not None:
+        remember(db, found)
 
 
-def worth_saying(db, found: dict | None) -> bool:
-    """Once per new version, not once a day forever - and never if you turned the notice off."""
-    if not found or not found.get("newer") or not notify_on(db):
+def remember(db, found: dict | None):
+    """Keep the newest release found - only if it is newer than this version; anything else clears it."""
+    if found and found.get("newer") and found.get("version"):
+        keep = {k: found.get(k) for k in ("version", "url", "asset", "size")}
+        db.set_setting(FOUND_KEY, json.dumps(keep))
+    elif found is not None:
+        db.set_setting(FOUND_KEY, "")
+
+
+def available(db) -> dict | None:
+    """The release found last time, if it is still newer than the version running now. Once it is installed
+    (or something newer than it is), there is nothing to show - never an "update" to an older build."""
+    try:
+        found = json.loads(db.get_setting(FOUND_KEY, "") or "null")
+    except ValueError:
+        return None
+    if not isinstance(found, dict) or not found.get("version") or not is_newer(str(found["version"]), VERSION):
+        return None
+    found["newer"] = True
+    found.setdefault("size", 0)
+    return found
+
+
+# ---------- "Remind me later" and "Skip this version" ----------
+
+def snooze(db, now: datetime, hours: float = SNOOZE_HOURS):
+    """Remind me later: popup and banner hidden for `hours`, then both come back (the popup once more)."""
+    db.set_setting(SNOOZE_KEY, (now + timedelta(hours=hours)).strftime(TIME_FMT))
+    db.set_setting(SEEN_KEY, "")
+
+
+def snoozed(db, now: datetime) -> bool:
+    until = _time(db, SNOOZE_KEY)
+    # (a snooze more than SNOOZE_HOURS ahead can only come from a clock that jumped back: don't let it hide
+    # the update for days)
+    return bool(until and now < until <= now + timedelta(hours=SNOOZE_HOURS))
+
+
+def skip(db, version: str):
+    """The banner's x: don't mention this version (or anything older) again; a newer one is news again."""
+    db.set_setting(SKIP_KEY, version)
+
+
+def skipped(db, found: dict | None) -> bool:
+    mark = db.get_setting(SKIP_KEY, "")
+    return bool(found and mark and not is_newer(found["version"], mark))
+
+
+def banner(db, now: datetime) -> dict | None:
+    """What the in-app banner (and the dot on About, and the tray's "Update available") should show: the
+    release found, while it is newer than this version, not skipped and not snoozed - else None. Not affected
+    by the popup setting or by Do not disturb: it sits quietly in the window, it doesn't interrupt."""
+    found = available(db)
+    if not found or skipped(db, found) or snoozed(db, now):
+        return None
+    return found
+
+
+def worth_saying(db, found: dict | None, now: datetime | None = None) -> bool:
+    """The corner popup: once per new version (and once more after "Remind me later" runs out), not once per
+    check forever - never for a skipped version, while snoozed, or if you turned the notice off."""
+    if not found or not found.get("newer") or not notify_on(db) or skipped(db, found):
+        return False
+    if now is not None and snoozed(db, now):
         return False
     return db.get_setting(SEEN_KEY, "") != found["version"]
 
 
 def said(db, version: str):
     db.set_setting(SEEN_KEY, version)
+
+
+def label(found: dict) -> str:
+    """The banner's / tray's words."""
+    return f"Lockdown {found['version']} is available"

@@ -75,7 +75,9 @@ class AboutPage(ctk.CTkScrollableFrame):
             self.bar = ctk.CTkProgressBar(card.body, height=8)
             self.bar.set(0)
             self.found = None
-            auto = ctk.CTkCheckBox(card.body, text="Check for updates automatically (once a day)",
+            self.downloading = False
+            auto = ctk.CTkCheckBox(card.body, text=f"Check for updates automatically (every {updates.EVERY_HOURS} "
+                                                   "hours, and when Lockdown starts)",
                                    checkbox_width=18, checkbox_height=18,
                                    command=lambda: self._set(updates.AUTO_KEY, auto.get()))
             auto.pack(anchor="w", pady=(10, 0))
@@ -135,8 +137,14 @@ class AboutPage(ctk.CTkScrollableFrame):
 
     def _checked(self, found):
         self.check_btn.configure(state="normal")
+        if found:   # (kept as well: the banner and the tray say the same as this page)
+            updates.checked(self.app.db, now_from_db(self.app.db), found)
+        self.show_found(found)
+        self.app.refresh_update(popup=False)
+
+    def show_found(self, found):
+        """What a check found - from the button here, or kept from the automatic one (see on_show)."""
         self.found = found
-        updates.checked(self.app.db, now_from_db(self.app.db))
         if not found:
             self.update_note.configure(text="Couldn't ask GitHub just now - no connection, or no release "
                                             "published yet.", text_color=theme.WARNING)
@@ -155,8 +163,9 @@ class AboutPage(ctk.CTkScrollableFrame):
     # ---------- downloading and installing it ----------
 
     def _get(self):
-        if not updates.can_install(self.found):
+        if not updates.can_install(self.found) or self.downloading:
             return
+        self.downloading = True
         self.get_btn.configure(state="disabled")
         self.check_btn.configure(state="disabled")
         self.bar.set(0)
@@ -181,6 +190,7 @@ class AboutPage(ctk.CTkScrollableFrame):
             self.app.call_latest("update-progress", self.bar.set, done / total)
 
     def _failed(self, error):
+        self.downloading = False
         self.bar.pack_forget()
         self.get_btn.configure(state="normal")
         self.check_btn.configure(state="normal")
@@ -209,4 +219,9 @@ class AboutPage(ctk.CTkScrollableFrame):
         subprocess.Popen(["explorer", str(path)])
 
     def on_show(self):
-        pass
+        """A newer version the automatic check already found is offered here straight away - no need to press
+        "Check for updates" first."""
+        if updates.repo_page() and not self.downloading:
+            found = updates.available(self.app.db)
+            if found and (self.found or {}).get("version") != found["version"]:
+                self.show_found(found)

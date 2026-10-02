@@ -204,14 +204,25 @@ def apply():
     t["CTkFont"].update(family=BODY, size=13, weight="normal")
 
 
-def icon(name: str, color, size: int = 18) -> ctk.CTkImage:
-    """A white Lucide icon from assets/icons, tinted (light / dark variants)."""
-    from PIL import Image
+def icon(name: str, color, size: int = 18, dot=None) -> ctk.CTkImage:
+    """A white Lucide icon from assets/icons, tinted (light / dark variants). dot: a colour for a small badge in
+    the top-right corner ("something new here" - the About item while an update is waiting). Drawn into the
+    picture, so it follows the button's hover / selected colours with nothing laid over it."""
+    from PIL import Image, ImageDraw
     src = Image.open(ASSETS / "icons" / f"{name}.png").convert("RGBA")
 
-    def tint(c: str):
+    def tint(c: str, d: str | None):
         img = Image.new("RGBA", src.size, c)
         img.putalpha(src.getchannel("A"))
+        if d:
+            w = img.width
+            r, gap = w * 0.22, w * 0.07
+            cx, cy = w - r, r
+            alpha = img.getchannel("A")   # a clear ring round the dot, so it reads against the icon's lines
+            ImageDraw.Draw(alpha).ellipse((cx - r - gap, cy - r - gap, cx + r + gap, cy + r + gap), fill=0)
+            img.putalpha(alpha)
+            ImageDraw.Draw(img).ellipse((cx - r, cy - r, cx + r, cy + r), fill=d)
         return img
     light, dark = color if isinstance(color, (tuple, list)) else (color, color)
-    return ctk.CTkImage(tint(light), tint(dark), size=(size, size))
+    dl, dd = (dot if isinstance(dot, (tuple, list)) else (dot, dot)) if dot else (None, None)
+    return ctk.CTkImage(tint(light, dl), tint(dark, dd), size=(size, size))
