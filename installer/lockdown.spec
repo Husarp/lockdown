@@ -18,8 +18,12 @@ GUI_RES = version_res.write(os.path.join(RES, "version_Lockdown.txt"), VERSION, 
 SVC_RES = version_res.write(os.path.join(RES, "version_LockdownService.txt"), VERSION, "LockdownService",
                             "Lockdown enforcement service")
 
+# uiautomation loads its UIAutomationClient_VC140_*.dll helpers from its own bin folder; PyInstaller misses them
+from PyInstaller.utils.hooks import collect_data_files
+UIA_DLLS = collect_data_files("uiautomation", includes=["bin/*.dll"])
+
 gui = Analysis([os.path.join(SRC, "main.py")], pathex=[SRC],
-               datas=[(os.path.join(ROOT, "assets"), "assets")],
+               datas=[(os.path.join(ROOT, "assets"), "assets")] + UIA_DLLS,
                hiddenimports=["gui.about_page", "gui.antibypass_page", "gui.display_settings", "comtypes.stream"],
                excludes=["pytest"])
 svc = Analysis([os.path.join(SRC, "service_win.py")], pathex=[SRC],
