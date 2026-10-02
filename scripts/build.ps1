@@ -33,7 +33,9 @@ Compress-Archive -Path "$Build\dist\Lockdown\*" -DestinationPath $zip -Compressi
 
 & $Py -m PyInstaller --noconfirm --log-level WARN --onefile --noconsole --uac-admin --name LockdownSetup `
     --icon "$Root\assets\lockdown.ico" --paths "$Root\src" --version-file "$Build\version_LockdownSetup.txt" `
-    --add-data "$zip;." --add-data "$Root\assets\lockdown.ico;." `
+    --add-data "$zip;." --add-data "$Root\assets\lockdown.ico;." --add-data "$Root\assets\setup;setup" `
+    --add-data "$Root\assets\fonts\Inter-Regular.otf;fonts" --add-data "$Root\assets\fonts\Inter-SemiBold.otf;fonts" `
+    --add-data "$Root\assets\fonts\BarlowCondensed-Bold.ttf;fonts" `
     --distpath $Build --workpath "$Build\work-setup" --specpath "$Build\work-setup" installer\setup.py
 if ($LASTEXITCODE) { throw "Building the installer failed" }
 $setup = Get-Item "$Build\LockdownSetup.exe"

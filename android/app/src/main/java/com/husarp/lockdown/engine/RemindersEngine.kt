@@ -35,6 +35,14 @@ data class SleepCfg(
     val guarded: Boolean = false,               // dismissing needs the anti-bypass challenge
 )
 
+/** Should bedtime grayscale be on at [mins] (minutes since midnight)? Only with the toggle on, Bedtime on, and inside bedtime→wake. */
+fun bedtimeGrayscaleWanted(toggle: Boolean, s: SleepCfg, mins: Int): Boolean {
+    if (!toggle || !s.on) return false
+    fun hhmm(t: String) = t.split(":").let { (it.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+    val bed = hhmm(s.bedtime); val wake = hhmm(s.wake)
+    return if (bed <= wake) mins in bed until wake else mins >= bed || mins < wake
+}
+
 @Serializable
 data class BreakCfg(
     val on: Boolean = true,

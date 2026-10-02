@@ -15,8 +15,8 @@ android {
         applicationId = "com.husarp.lockdown"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.5.9"
+        versionCode = 28
+        versionName = "0.5.10"
     }
 
     // The release key lives outside the project (never published): its file and passwords are in

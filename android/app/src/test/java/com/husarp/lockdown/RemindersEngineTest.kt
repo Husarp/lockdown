@@ -4,6 +4,7 @@ import com.husarp.lockdown.engine.BreakCfg
 import com.husarp.lockdown.engine.CustomCfg
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.engine.SleepCfg
+import com.husarp.lockdown.engine.bedtimeGrayscaleWanted
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -133,5 +134,17 @@ class RemindersEngineTest {
         assertTrue(RemindersEngine.loosensReminder(oldOn = true, oldGuarded = true, newOn = true, newGuarded = false))
         assertFalse(RemindersEngine.loosensReminder(oldOn = true, oldGuarded = false, newOn = false, newGuarded = false))
         assertFalse(RemindersEngine.loosensReminder(oldOn = true, oldGuarded = true, newOn = true, newGuarded = true))
+    }
+
+    @Test fun bedtime_grayscale_only_when_toggle_and_bedtime_on_inside_the_window() {
+        val s = SleepCfg(on = true, bedtime = "23:00", wake = "07:00")
+        assertTrue(bedtimeGrayscaleWanted(true, s, 23 * 60 + 30))                 // inside, across midnight
+        assertTrue(bedtimeGrayscaleWanted(true, s, 2 * 60))
+        assertFalse(bedtimeGrayscaleWanted(true, s, 12 * 60))                     // daytime -> off
+        assertFalse(bedtimeGrayscaleWanted(false, s, 23 * 60 + 30))               // toggle off at night -> off (the bug)
+        assertFalse(bedtimeGrayscaleWanted(true, s.copy(on = false), 23 * 60 + 30)) // Bedtime off -> off
+        val day = SleepCfg(on = true, bedtime = "13:00", wake = "15:00")          // same-day window
+        assertTrue(bedtimeGrayscaleWanted(true, day, 14 * 60))
+        assertFalse(bedtimeGrayscaleWanted(true, day, 15 * 60))
     }
 }

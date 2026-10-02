@@ -1,5 +1,10 @@
 # Changelog — Lockdown Mobile
 
+## 0.5.10 - 2026-10-02 13:43
+- **Fixed: the bedtime grayscale switch couldn't turn grayscale off.** Switching it off only saved the setting; nothing ever gave the screen its colour back, so the phone stayed grey until you turned it off in Android's own settings. Turning it off now restores colour straight away (and turning it on at night greys the screen straight away, not up to 15 minutes later).
+- **Grayscale follows Bedtime.** If Bedtime itself is off, the screen no longer turns grey at night.
+- Lockdown only turns off grayscale it turned on itself, never one you set in Android's accessibility settings.
+
 ## 0.5.9 - 2026-09-30 01:17
 - **Fixed: the phrase challenge could never be passed.** When a phrase *and* a cool-off were both set, the cool-off timer never counted down, so "Confirm change" stayed disabled even with the phrase typed correctly. The cool-off now ticks whenever a wait is set.
 - **Alert when you mistype the phrase.** The field turns red and shows "That doesn't match the phrase — check it." as soon as what you've typed stops matching (and "Keep going…" while you're on track).

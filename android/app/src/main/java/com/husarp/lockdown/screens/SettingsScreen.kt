@@ -209,7 +209,7 @@ fun SettingsScreen() {
         Text("Extras", style = MaterialTheme.typography.titleMedium)
         Toggle("Pause before opening", "A short countdown before a limited app opens.", s.pauseBeforeOpen) { set { c -> c.copy(pauseBeforeOpen = it) } }
         Toggle("Daily open cap", "Limit how many times a blocked app can be opened (set per app; 0 = off).", s.openCapPerDay > 0) { set { c -> c.copy(openCapPerDay = if (it) 10 else 0) } }
-        Toggle("Bedtime grayscale", "Drain the screen's colour at bedtime. Needs a one-time adb permission.", s.bedtimeGrayscale) { set { c -> c.copy(bedtimeGrayscale = it) } }
+        Toggle("Bedtime grayscale", "Drain the screen's colour at bedtime. Needs a one-time adb permission.", s.bedtimeGrayscale) { set { c -> c.copy(bedtimeGrayscale = it) }; com.husarp.lockdown.remind.Grayscale.sync(ctx) }
         Toggle("Force SafeSearch", "Keep SafeSearch and YouTube Restricted Mode on through the filter.", s.forceSafeSearch) { set { c -> c.copy(forceSafeSearch = it) } }
         Toggle("Weekly digest", "A weekly notification with your screen time.", s.weeklyDigest) { set { c -> c.copy(weeklyDigest = it) } }
         Toggle("Network log", "Record DNS lookups the filter sees.", s.networkLog) { set { c -> c.copy(networkLog = it) } }

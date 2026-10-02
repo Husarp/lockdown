@@ -44,6 +44,33 @@ object Reminders {
     }
 }
 
+/**
+ * Bedtime grayscale (Android's daltonizer, needs WRITE_SECURE_SETTINGS). [sync] writes the wanted state both ways,
+ * so turning the toggle or Bedtime off brings colour back. It only turns off grayscale Lockdown itself turned on,
+ * never one the user set in Android's accessibility settings.
+ */
+object Grayscale {
+    fun sync(ctx: Context) {
+        val cfg = Store.config
+        val now = Calendar.getInstance()
+        val mins = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        apply(ctx, com.husarp.lockdown.engine.bedtimeGrayscaleWanted(cfg.settings.bedtimeGrayscale, cfg.sleep, mins))
+    }
+
+    private fun apply(ctx: Context, on: Boolean) = runCatching {
+        val cr = ctx.contentResolver
+        val p = ctx.getSharedPreferences("gray", Context.MODE_PRIVATE)
+        if (on) {
+            android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer", 0) // 0 = grayscale
+            android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer_enabled", 1)
+            p.edit().putBoolean("applied", true).apply()
+        } else if (p.getBoolean("applied", false)) {
+            android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer_enabled", 0)
+            p.edit().putBoolean("applied", false).apply()
+        }
+    }
+}
+
 /** Weekly refresh of the enabled protection lists (on unmetered Wi-Fi). */
 class ProtectionWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
@@ -83,8 +110,6 @@ class DigestWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
 class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
         val cfg = Store.config
-        val now = Calendar.getInstance()
-        val mins = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
 
         // Bedtime nudges are driven by the accessibility service (fine escalation cadence), not here.
         val sleep = cfg.sleep
@@ -118,19 +143,9 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
             notify(6, "Clock changed", "The phone's clock was set back - Lockdown's timers ignore that.")
 
         // bedtime grayscale: drain the screen's colour during the sleep window (needs WRITE_SECURE_SETTINGS)
-        if (cfg.settings.bedtimeGrayscale) {
-            val bed = hhmm(sleep.bedtime); val wake = hhmm(sleep.wake)
-            val night = if (bed <= wake) mins in bed until wake else mins >= bed || mins < wake
-            runCatching {
-                val cr = applicationContext.contentResolver
-                if (night) android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer", 0) // 0 = grayscale
-                android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer_enabled", if (night) 1 else 0)
-            }
-        }
+        Grayscale.sync(applicationContext)
         return Result.success()
     }
-
-    private fun hhmm(s: String) = s.split(":").let { (it.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (it.getOrNull(1)?.toIntOrNull() ?: 0) }
 
     private fun notify(id: Int, title: String, text: String) {
         val nm = applicationContext.getSystemService(NotificationManager::class.java)

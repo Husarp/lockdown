@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +43,7 @@ import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.CustomCfg
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.guard.rememberGuard
+import com.husarp.lockdown.remind.Grayscale
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.EditorHeader
 import com.husarp.lockdown.ui.Numeral
@@ -73,6 +75,7 @@ fun ReminderScreen() {
 @Composable
 private fun RemList(open: (RemPage) -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
 
@@ -91,8 +94,8 @@ private fun RemList(open: (RemPage) -> Unit) {
                     Spacer(Modifier.size(10.dp))
                     Text("Bedtime", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Switch(checked = cfg.sleep.on, onCheckedChange = { on ->
-                        if (on) Store.update { it.copy(sleep = it.sleep.copy(on = true)) }
-                        else guard(cfg.sleep.guarded) { Store.update { it.copy(sleep = it.sleep.copy(on = false)) } }
+                        if (on) { Store.update { it.copy(sleep = it.sleep.copy(on = true)) }; Grayscale.sync(ctx) }
+                        else guard(cfg.sleep.guarded) { Store.update { it.copy(sleep = it.sleep.copy(on = false)) }; Grayscale.sync(ctx) }
                     })
                 }
                 Spacer(Modifier.height(10.dp))
@@ -145,6 +148,7 @@ private fun RemList(open: (RemPage) -> Unit) {
 @Composable
 private fun BedtimeEditor(onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize()) {
         EditorHeader("Bedtime", onBack = onClose)
@@ -165,7 +169,7 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 Text("Escalating nudges", style = MaterialTheme.typography.titleSmall)
                 cfg.sleep.tiers.forEach { Text("From ${it.from}: every ${it.every} min", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
             }
-            SwitchRowInline("Grayscale the screen at bedtime", cfg.settings.bedtimeGrayscale) { on -> Store.update { it.copy(settings = it.settings.copy(bedtimeGrayscale = on)) } }
+            SwitchRowInline("Grayscale the screen at bedtime", cfg.settings.bedtimeGrayscale) { on -> Store.update { it.copy(settings = it.settings.copy(bedtimeGrayscale = on)) }; Grayscale.sync(ctx) }
             SwitchRowInline("Important (need the challenge to turn off)", cfg.sleep.guarded) { on -> Store.update { it.copy(sleep = it.sleep.copy(guarded = on)) } }
         }
     }

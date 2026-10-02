@@ -127,12 +127,29 @@ def test_installer_is_started_through_the_shell_so_windows_can_ask_for_admin(tmp
     class Shell32:
         result = 42
         def ShellExecuteW(self, hwnd, verb, file, params, folder, show):
-            calls.append((verb, file))
+            calls.append((verb, file, params))
             return Shell32.result
 
     monkeypatch.setattr(ctypes, "windll", type("W", (), {"shell32": Shell32()})(), raising=False)
     updates.install(tmp_path / "setup.exe")
-    assert calls == [("runas", str(tmp_path / "setup.exe"))]
+    assert calls == [("runas", str(tmp_path / "setup.exe"), "--update")]
     Shell32.result = 5                      # refused, or No on the admin prompt: an error the window can show
     with pytest.raises(OSError):
         updates.install(tmp_path / "setup.exe")
+
+
+def test_the_installer_is_told_it_is_an_in_app_update(tmp_path, monkeypatch):
+    """0.84.6: "--update" - the installer then asks nothing (you already said Install in Lockdown), shows only its
+    progress bar, starts Lockdown again and closes by itself. LockdownSetup.exe reads it in setup.mode_of."""
+    import ctypes
+    import importlib.util
+    from pathlib import Path
+    seen = []
+    shell = type("S", (), {"ShellExecuteW": lambda self, *a: seen.append(a[3]) or 42})()
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"shell32": shell})(), raising=False)
+    updates.install(tmp_path / "setup.exe")
+    spec = importlib.util.spec_from_file_location(
+        "lockdown_setup_args", Path(__file__).resolve().parents[1] / "installer" / "setup.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    assert setup.mode_of(["LockdownSetup.exe", *seen[0].split()]) == "update"

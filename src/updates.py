@@ -119,13 +119,18 @@ def install(path, run=None):
     Through the shell (ShellExecute, "runas"), not subprocess: the installer is built to require admin, and
     CreateProcess - what subprocess uses - can't ask for that. Windows refused with error 740 ("The requested
     operation requires elevation"), the error went nowhere and the update sat at 100% for good. ShellExecute shows
-    the admin prompt. Raises OSError if it couldn't be started (or you said No), so the caller can say so."""
+    the admin prompt. Raises OSError if it couldn't be started (or you said No), so the caller can say so.
+    With INSTALLER_ARGS ("--update") the installer asks nothing - you already said Install here - shows only its
+    progress, starts Lockdown again and closes by itself."""
     (run or _run_elevated)(path)
+
+
+INSTALLER_ARGS = "--update"
 
 
 def _run_elevated(path):
     import ctypes
-    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(path), None, None, 1)
+    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(path), INSTALLER_ARGS, None, 1)
     if result <= 32:   # ShellExecute: anything up to 32 is an error code (5 = refused / No on the admin prompt)
         raise OSError(f"the installer could not be started (ShellExecute {result})")
 
