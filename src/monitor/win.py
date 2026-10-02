@@ -124,6 +124,14 @@ def is_fullscreen() -> bool:
     return rect.left <= m.left and rect.top <= m.top and rect.right >= m.right and rect.bottom >= m.bottom
 
 
+def no_activate(widget_hwnd: int):
+    """Make a Tk pop-up (from its winfo_id) never take the activation: clicking it or its buttons leaves the
+    window you were in active (WS_EX_NOACTIVATE on its top-level window)."""
+    hwnd = _user32.GetAncestor(widget_hwnd, 2) or widget_hwnd   # GA_ROOT: Tk's wrapper around the widget
+    style = _user32.GetWindowLongW(hwnd, -20) & 0xFFFFFFFF      # GWL_EXSTYLE
+    _user32.SetWindowLongW(hwnd, -20, ctypes.c_long((style | 0x08000000) & 0xFFFFFFFF).value)   # WS_EX_NOACTIVATE
+
+
 def top_windows() -> list[tuple[int, str, str]]:
     """(hwnd, title, exe path) of visible top-level windows with a title."""
     found = []

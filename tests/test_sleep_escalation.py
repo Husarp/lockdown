@@ -56,7 +56,7 @@ def test_the_overlay_offers_dismiss_and_disable(tmp_path):
     _db, ui, e = _engine(tmp_path)
     _show_bed(e, 23)
     overlay = [s for s in ui.shown if s[1] == "sleep"][-1]
-    assert overlay[4] == ["dismiss", "disable"]
+    assert overlay[4][:2] == ["dismiss", "disable"]   # (+ "emergency" while uses are left - 0.84.7)
 
 
 def test_dismiss_brings_it_back_after_the_current_interval(tmp_path):

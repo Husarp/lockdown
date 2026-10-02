@@ -66,8 +66,8 @@ def test_autosave(draft):
     item = draft.add_item("Reddit", ["reddit.com"], "manual")
     draft.set_rule(item["id"], {"rule_type": "permanent"})
     assert not draft.dirty and len(draft.db.list_items()) == 1
-    draft.set_setting("notify.format", "toast")   # a non-default value (default is now "inapp")
-    assert draft.db.get_setting("notify.format") == "toast"
+    draft.set_setting("notify.format", "inapp")   # a non-default value (default is now "toast", 0.84.7)
+    assert draft.db.get_setting("notify.format") == "inapp"
 
 
 def test_save_skips_items_removed_by_service(draft):

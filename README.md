@@ -27,7 +27,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   press **Save changes** (unsaved items then show "Not applied").
 - **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week), a configurable **limit reset
   time** (Settings; a change never ends the current limit day, week or month early), and **Emergency unlock**
-  (Blocking > Overview: unblock chosen items for 20 min; 3 uses per week by default, configurable in Settings).
+  (Blocking > Overview: unblock chosen items for 20 min - blocked yet or not, e.g. before your allowance runs out; the
+  time still counts toward your limits - and/or pause the bedtime and break alerts; also "Emergency (N left)" on the
+  bedtime screen; 3 uses per week by default, configurable in Settings; never for permanently-blocked items).
 
 - **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
   categories (productive / neutral / distracting + your own, with your colours - click a category to change it). Your Steam games and purely-for-fun sites / apps (game
@@ -62,7 +64,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
 - **Updates (0.84.4):** Lockdown asks GitHub for a newer release a minute after it starts, every 3 hours, and when
   you open the window (if the last check is over an hour old). A newer version shows as a banner over every page
   ("Lockdown X is available - Install / Later / skip this version"), a dot on About and "Update available" with
-  "Install update" in the tray menu, plus one corner popup (Install / Remind me later / ✕). **Later** hides it for
+  "Install update" in the tray menu, plus one notice (Install / Remind me later). **Later** hides it for
   4 hours, **skip** until a newer version comes; **Install** downloads and runs the installer from the About page,
   with progress. Only ever forward to a newer version; "Check for updates automatically" (About) turns it off.
 
@@ -103,6 +105,9 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   (a letter icon is shown when offline).
 - The service also listens on `127.0.0.1:80/443`: when a browser tries to open a blocked site, it records which
   site and why; the tray agent turns that into a notification (configurable on the Notifications page).
+- **Notifications (0.84.7):** Windows' own notifications by default (package `windows-toasts`), with their buttons.
+  While a full-screen app (a game) is in front Lockdown never draws a window of its own: everything, held
+  reminders too, goes out as a normal Windows notification, which Windows may hold in the notification centre.
 - **DNS filter** (protection lists - millions of sites, far too many for the hosts file, which makes Windows' DNS hang):
   the service runs a small DNS server on `127.0.0.1` / `::1` port 53. Connected network adapters are set to DNS
   "127.0.0.1, <their own DNS servers>" (+ `::1` for IPv6): listed sites get 127.0.0.1, everything else is passed to

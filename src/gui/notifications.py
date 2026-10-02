@@ -69,9 +69,11 @@ class NotificationsPage(ctk.CTkFrame):
         self.fmt = Segmented(fmt_row, values=list(alerts.FORMATS.values()), command=lambda v: self.draft.set_setting(
             "notify.format", next(k for k, lbl in alerts.FORMATS.items() if lbl == v)))
         self.fmt.pack(side="left", padx=8)
-        help_icon(fmt_row, "Windows notifications clear themselves from the notification centre (the bell) a few "
-                           "seconds later, so these one-time alerts don't pile up as unread. Only Lockdown's own "
-                           "notifications are cleared.").pack(side="left", padx=4)
+        help_icon(fmt_row, "Windows draws its notifications, so they never cover a game the way a pop-up window "
+                           "can. While a full-screen app is in front, Lockdown always uses them (whatever you pick "
+                           "here). Windows' \"Do not disturb when playing a game\" keeps them out of games entirely - "
+                           "they wait in the notification centre (the bell) and clear themselves later.").pack(
+            side="left", padx=4)
         ctk.CTkLabel(box, text="Per-site override: the Alerts column in Blocking > Overview.", text_color=MUTED).grid(
             row=row + 3, column=0, columnspan=2, padx=16, pady=(4, 12), sticky="w")
         # the two lower cards side by side (design 3i): Upcoming blocks (wider) | Weekly summary
@@ -198,8 +200,22 @@ class NotificationsPage(ctk.CTkFrame):
         self.started_switch.select() if s["notify.started.enabled"] == "1" else self.started_switch.deselect()
 
 
+def no_activate(window):
+    """Once on screen, a pop-up never takes the activation (see win.no_activate) - not the app you are in."""
+    def done(event):
+        if event.widget is not window:   # (its children's <Map> arrive here too; wait for the window's own)
+            return
+        window.unbind("<Map>")
+        try:
+            from monitor import win
+            win.no_activate(window.winfo_id())
+        except Exception:
+            pass   # (not Windows)
+    window.bind("<Map>", done, add="+")
+
+
 class Popup(ctk.CTkToplevel):
-    """Small message that slides up and fades in at the bottom-right; an accent edge, the Lockdown mark, a close ✕.
+    """Small message that slides up at the bottom-right; an accent edge, the Lockdown mark, a close ✕.
     Click the text or wait (it stays while the mouse is over it) to dismiss.
 
     `action` is (label, callback) for the one thing worth doing about THIS message - "See the week" on the weekly
@@ -209,16 +225,18 @@ class Popup(ctk.CTkToplevel):
 
     `actions` is a list of such (label, callback) pairs, for the rare notice with more than one answer ("Install"
     / "Remind me later" on a new version). `sticky`: it does not fade or close when clicked - only its buttons
-    and the ✕ close it (a notice you are meant to answer, not one that passes)."""
+    and the ✕ close it (a notice you are meant to answer, not one that passes).
+
+    Never drawn while a full-screen app is in front (App._show sends a Windows notification then). Kept light for
+    the desktop: no title bar to colour, so none of CTk's hide/update/show dance on Windows; it never takes the
+    activation (no_activate); no fade - a see-through (layered) window is re-blended by Windows every step."""
+    _deactivate_windows_window_header_manipulation = True
 
     def __init__(self, root, message: str, action=None, actions=None, sticky: bool = False):
         super().__init__(root)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        try:
-            self.attributes("-alpha", 0.0)
-        except Exception:
-            pass
+        no_activate(self)
         actions = list(actions or ([action] if action else []))
         self.sticky = sticky
         self.w, self.h = 400, 136 if actions else 96
@@ -268,10 +286,6 @@ class Popup(ctk.CTkToplevel):
         frac = min(1.0, step / 6)
         self.arrived = frac >= 1.0
         self.geometry(f"{self.w}x{self.h}+{self.x}+{int(self.target_y + 14 * (1 - frac))}")
-        try:
-            self.attributes("-alpha", frac)
-        except Exception:
-            pass
         if frac < 1.0:
             self.after(22, lambda: self._animate(step + 1))
 

@@ -12,6 +12,7 @@ import random
 import re
 from datetime import date, datetime, time, timedelta
 
+import emergency
 from rules import TIME_FMT, days_text, parse_hhmm
 
 TICK_SEC = 5
@@ -196,7 +197,7 @@ class Engine:
         self.fullscreen = False
         self.quiet = False          # Windows' Do not disturb (or a mode that mutes): everything waits
         self.open: set[str] = set()          # popups / overlays on screen
-        self.waiting: dict[str, tuple] = {}  # popups held back while a full-screen app is in front
+        self.waiting: dict[str, tuple] = {}  # popups held back while a full-screen app is in front (a notice meanwhile)
         self.continuous = 0.0                # seconds of use since the last break
         self.twenty = 0.0
         self.break_until: datetime | None = None
@@ -216,6 +217,7 @@ class Engine:
         self.streak: dict[str, int] = {}                     # reminder id / "break" -> dismissed in a row
         self.backed_off: dict[str, date] = {}                # reminder id / "break" -> the day it asks less
         self.break_due: dict | None = None                   # the break settings, when it comes up this tick
+        self.paused: datetime | None = None                  # an emergency unlock paused bedtime/break alerts until
 
     # ---------- showing ----------
 
@@ -223,8 +225,11 @@ class Engine:
         if key in self.open:
             return
         if self.fullscreen:
+            # Over a game no window of ours (it made the game stutter): a Windows notification with the same
+            # buttons instead (ui.held), once. Answered there, it is done (held_answer); if not, the popup comes
+            # up when the game is no longer in front.
             if key not in self.waiting:
-                self.ui.toast(f"{title}: {text.splitlines()[0]}")
+                self.ui.held(key, title, text, buttons)
                 self.waiting[key] = (title, text, buttons)
             return
         self.waiting.pop(key, None)
@@ -265,7 +270,8 @@ class Engine:
             self.ui.overlay(key, title, text, until, buttons)
 
     def _close(self, key: str):
-        self.waiting.pop(key, None)
+        if self.waiting.pop(key, None) is not None and key not in self.open:
+            self.ui.close(key)   # (its notice goes too)
         if key in self.open:
             self.open.discard(key)
             self.ui.close(key)
@@ -278,6 +284,7 @@ class Engine:
         the bedtime screen holds too, which it doesn't do for a game."""
         self.now, self.quiet = now, quiet
         self.fullscreen = fullscreen = fullscreen or quiet
+        self.paused = emergency.alerts_paused_until(self.db, now)
         using = idle_sec < USING_IDLE_SEC
         self._breaks(now, idle_sec, using, dt)
         self._sleep(now)
@@ -296,6 +303,20 @@ class Engine:
 
     def _breaks(self, now, idle_sec, using, dt):
         b = load(self.db, BREAK_KEY, DEFAULT_BREAK)
+        if self.paused:
+            # Emergency: the screen is yours until it ends - no break prompt, and a strict break that is
+            # minimising your windows stops. Use keeps counting, so the next prompt comes when it's due.
+            self._close("break")
+            if self.break_until:
+                self.break_until = None
+                self.break_snoozes = 0
+                self.ui.break_end()
+                log(self.db, "break", "emergency", now)
+            if idle_sec >= BREAK_RESET_SEC:
+                self.continuous = 0
+            elif using and b["on"]:
+                self.continuous += dt
+            return
         if self.break_until:
             if now >= self.break_until:
                 self.ui.break_end()
@@ -417,8 +438,11 @@ class Engine:
             return
         bed, wake = night
         key = bed.strftime(TIME_FMT)
+        if self.paused:   # an emergency paused the alerts: nothing on screen until it ends, then as before
+            self._close("sleep")
+            self._close("sleep-warn")
         if now < bed:
-            if ("warn", key) not in self.fired:
+            if ("warn", key) not in self.fired and not self.paused:
                 self.fired.add(("warn", key))
                 self._popup("sleep-warn", "Bedtime soon",
                             message(s.get("warn_text"), SLEEP_WARN_TEXT, bedtime=f"{bed:%H:%M}",
@@ -430,11 +454,14 @@ class Engine:
             self.sleep_next[key] = now
             if s["mode"]:
                 self.ui.start_mode(s["mode"], wake)
-        if now >= self.sleep_next.get(key, now) and "sleep" not in self.open:
+        if now >= self.sleep_next.get(key, now) and "sleep" not in self.open and not self.paused:
+            buttons = [("Dismiss", "dismiss"), ("Disable alerts", "disable")]
+            if left := emergency.available(self.db, now):   # the sanctioned way out, no challenge: it costs a use
+                buttons.append((f"Emergency ({left} left)", "emergency"))
             self._overlay("sleep", "Time for bed",
                           message(s.get("text"), SLEEP_TEXT, time=f"{now:%H:%M}", bedtime=f"{bed:%H:%M}",
                                   wake=f"{wake:%H:%M}"),
-                          None, [("Dismiss", "dismiss"), ("Disable alerts", "disable")])
+                          None, buttons)
 
     # ---------- your reminders ----------
 
@@ -568,6 +595,14 @@ class Engine:
 
     # ---------- answers from the UI ----------
 
+    def held_answer(self, key: str, action: str) -> bool:
+        """A button on the notice of a held popup (see _popup). False if that popup is no longer waiting - shown
+        since, answered or gone - so a late click on an old notice does nothing."""
+        if self.waiting.pop(key, None) is None:
+            return False
+        self.answer(key, action)
+        return True
+
     def answer(self, key: str, action: str):
         now = self.now
         self.open.discard(key)
@@ -600,6 +635,18 @@ class Engine:
                     log(self.db, rid, "dismissed", now)
                     if rid in by_id:
                         self._dismissed(rid, by_id[rid]["text"], now)
+        elif key == "sleep" and action == "emergency":
+            # "Emergency (N left)" on the bedtime screen: one emergency use pauses the bedtime and break alerts
+            # for its length. The bedtime settings themselves are not touched.
+            try:
+                self.paused = emergency.unlock(self.db, [], now, alerts=True)
+            except ValueError as e:
+                self.ui.toast(str(e))
+                self.answer("sleep", "dismiss")   # (as if dismissed: back on the escalation)
+                return
+            self.ui.close("sleep")   # a bedtime screen that came back while you were confirming goes too
+            log(self.db, "sleep", "emergency", now)
+            self.ui.toast(f"Emergency: bedtime and break alerts paused until {self.paused:%H:%M}.")
         elif key == "sleep":
             s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
             night = self._night(s, now)

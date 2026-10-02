@@ -23,7 +23,7 @@ import updates
 from blocker import protection
 from blocker.apps import exe_name, minimizes
 from db import Database
-from gui import mainthread, shortcuts, theme
+from gui import mainthread, shortcuts, theme, toast
 from gui.about_page import AboutPage
 from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
@@ -74,8 +74,6 @@ UPDATE_POLL_MS = 60_000       # then every minute: is a check due (every updates
 MINIMIZE_MS = 250
 GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
-TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
-APP_ID = "com.husarp.lockdown"   # Windows app identity (matches main.py); used to clear only our own notifications
 PREBUILD_MS = (3000, 500)   # build the other pages in the background: first after 3 s, then one every 0.5 s
 
 
@@ -149,6 +147,8 @@ class LockdownApp(ctk.CTk):
                          on_update=lambda: self.events.put("update"))
         self.last_phase = None   # Pomodoro phase last announced
         self.tray.start()
+        # Windows notifications (with buttons); the tray's balloon if they can't be had here
+        self.toaster = toast.Toaster(self.call_soon, self.tray.notify, on_click=lambda: self.events.put("open"))
         self.protocol("WM_DELETE_WINDOW", self.withdraw)  # close = minimize to tray
         # A pop-up that holds the focus (grab) makes Tk ignore the taskbar's / Alt+Tab's "restore" of the minimized
         # window: let go of it while minimized, take it back when the window is restored.
@@ -691,12 +691,13 @@ class LockdownApp(ctk.CTk):
             self._update_notice(found)
 
     def _update_notice(self, found):
-        """The corner popup. It stays until you answer it (Install / Remind me later / ✕), and it waits - not
-        written down as said - while a muted mode, Do not disturb or a full-screen app means "not now"; the
-        banner is on screen meanwhile either way."""
+        """The notice (a Windows notification that stays until answered, or the corner popup). It offers Install /
+        Remind me later, and it waits - not written down as said - while a muted mode or Do not disturb means
+        "not now"; the banner is on screen meanwhile either way. Over a full-screen app it goes out as an ordinary
+        Windows notification (no window of ours over a game), which waits in the notification centre."""
         if self.update_popup is not None and self.update_popup.winfo_exists():
             return
-        if win.do_not_disturb() or win.is_fullscreen():
+        if win.do_not_disturb():
             return
         get = (("Install", lambda: self._install(found)) if updates.can_install(found) else
                ("Open the page", lambda: webbrowser.open(found["url"])))
@@ -704,6 +705,7 @@ class LockdownApp(ctk.CTk):
         if self._show(f"{updates.label(found)} - you have {VERSION}.", sticky=True,
                       actions=[get, ("Remind me later", self.update_later)]):
             updates.said(self.db, found["version"])
+            self.update_toast = getattr(self, "last_toast", None)
             if self.popup is not before:
                 self.update_popup, self.update_popup_for = self.popup, found["version"]
 
@@ -724,6 +726,9 @@ class LockdownApp(ctk.CTk):
         if self.update_popup is not None and self.update_popup.winfo_exists():
             self.update_popup.close()
         self.update_popup = None
+        if getattr(self, "update_toast", None) is not None:   # (and the Windows notification, if it is still up)
+            self.toaster.remove(self.update_toast)
+            self.update_toast = None
 
     def _install(self, found=None):
         """Install (popup, banner, tray): the About page's download - with its progress bar - then the
@@ -892,16 +897,28 @@ class LockdownApp(ctk.CTk):
         """Notification in the chosen format. Muted while a mode with "mute" is on (unless force - what you
         are using right now is about to be blocked, which is worth saying even in a game).
         action: (label, callback) for the one thing worth doing about this particular message, or None;
-        actions / sticky: see Popup. Returns False if it was muted (nothing shown)."""
+        actions / sticky: see Popup. Returns False if it was muted (nothing shown).
+
+        While a full-screen app (a game) is in front, no window of ours is drawn - a topmost popup over a game made
+        it stutter. It goes out as a Windows notification whatever the setting: an ordinary one, which Windows may
+        hold back into the notification centre while you play (it stays there toast.HELD_EXPIRE_MIN), never one
+        that breaks through Do not disturb. With nothing full-screen a sticky notice is a Windows "reminder",
+        which stays on screen until answered. If Windows notifications can't be had here (the balloon has no
+        buttons), a notice with buttons on the desktop is Lockdown's pop-up instead, so its buttons are kept."""
         if not force:
             state = modes.active(self.db, now_from_db(self.db))
             if state and state["mode"].get("mute"):
                 return False
         fmt = alerts.get(self.db, "notify.format")
-        if fmt in ("toast", "both"):
-            self.tray.notify(message)
-            self.after(TOAST_CLEAR_MS, self._clear_toast_history)   # don't let one-time alerts pile up as unread
-        if fmt in ("inapp", "both"):
+        full = win.is_fullscreen()
+        buttons = actions or ([action] if action else [])
+        popup = not full and (fmt in ("inapp", "both") or (bool(buttons) and not self.toaster.works()))
+        self.last_toast = None
+        if fmt == "both" or not popup:
+            self.last_toast = self.toaster.send(
+                message, buttons, scenario="reminder" if sticky and not full else None,
+                expire_min=toast.HELD_EXPIRE_MIN if full else toast.EXPIRE_MIN)
+        if popup:
             self.popup = Popup(self, message, action=action, actions=actions, sticky=sticky)
         return True
 
@@ -911,20 +928,3 @@ class LockdownApp(ctk.CTk):
         self.lift()
         self.show_page(page)
         self.focus_force()
-
-    def _clear_toast_history(self):
-        """Remove Lockdown's own notifications from the Windows Action Center (the bell), a few seconds after they
-        show, so these one-time alerts don't stack up as "unread". Only Lockdown's AUMID is cleared - never any
-        other app's notifications."""
-        import os
-        import subprocess
-        ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
-                          r"System32\WindowsPowerShell\v1.0\powershell.exe")
-        cmd = ("$null=[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
-               "ContentType=WindowsRuntime];"
-               f"[Windows.UI.Notifications.ToastNotificationManager]::History.Clear('{APP_ID}')")
-        try:
-            subprocess.Popen([ps, "-NoProfile", "-NonInteractive", "-Command", cmd],
-                             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-        except OSError:
-            pass

@@ -128,7 +128,8 @@ CREATE TABLE IF NOT EXISTS emergency_unlocks (
     started DATETIME,             -- trusted local time
     until DATETIME,
     item_ids TEXT NOT NULL,       -- JSON list
-    names TEXT NOT NULL           -- JSON list of display names (kept for history / graphs)
+    names TEXT NOT NULL,          -- JSON list of display names (kept for history / graphs)
+    alerts INTEGER                -- 1: bedtime and break alerts are paused until `until` as well (0.84.7)
 );
 
 -- Network log: new connections per minute, app and address (kept for 1 hour; written by the service)
@@ -234,7 +235,8 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("block_rules", "switch_mode", "TEXT"), ("block_rules", "visit_gap_min", "INTEGER"),
               ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER"),
               ("block_rules", "allowance_shared", "INTEGER"), ("group_rules", "allowance_shared", "INTEGER"),
-              ("blocked_items", "disabled", "INTEGER"), ("block_groups", "disabled", "INTEGER")]
+              ("blocked_items", "disabled", "INTEGER"), ("block_groups", "disabled", "INTEGER"),
+              ("emergency_unlocks", "alerts", "INTEGER")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
                for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
 RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "allowance_shared",
@@ -261,7 +263,8 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 3   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 4   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+#                      4: emergency_unlocks.alerts (0.84.7)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -536,6 +539,11 @@ class Database:
                 for member in modes.category_members({b["item"]["target"]}, items, categories,
                                                      block_type=b["item"].get("block_type")):
                     key = (member["item_type"], member["target"].lower())
+                    # an emergency unlock on one of its sites/apps frees that one (as it does from a mode) -
+                    # but not from a permanently-blocked category, which the emergency unlock never touches
+                    unlocked = usage.unlocks.get(f"item:{member['id']}")
+                    if member["id"] is not None and b["reason"] != "permanent" and unlocked and now < unlocked:
+                        continue
                     if key not in done:
                         done.add(key)
                         out.append({**b, "item": member})
@@ -634,17 +642,20 @@ class Database:
     # ---------- emergency unlocks ----------
 
     @_write
-    def add_unlock(self, item_ids: list[int], names: list[str], start: datetime, until: datetime):
+    def add_unlock(self, item_ids: list[int], names: list[str], start: datetime, until: datetime,
+                   alerts: bool = False):
         with self.conn:
-            self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names) VALUES (?, ?, ?, ?)",
+            self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names, alerts) "
+                              "VALUES (?, ?, ?, ?, ?)",
                               (start.strftime(TIME_FMT), until.strftime(TIME_FMT), json.dumps(item_ids),
-                               json.dumps(names)))
+                               json.dumps(names), int(bool(alerts))))
 
     def unlocks_since(self, since: datetime) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM emergency_unlocks WHERE until > ? ORDER BY started",
                                  (since.strftime(TIME_FMT),))
         return [{"started": datetime.strptime(r["started"], TIME_FMT), "until": datetime.strptime(r["until"], TIME_FMT),
-                 "item_ids": json.loads(r["item_ids"]), "names": json.loads(r["names"])} for r in rows]
+                 "item_ids": json.loads(r["item_ids"]), "names": json.loads(r["names"]), "alerts": bool(r["alerts"])}
+                for r in rows]
 
     def active_unlocks(self, now: datetime) -> dict[int, datetime]:
         """item id -> until, for items in an emergency unlock right now."""

@@ -1,6 +1,6 @@
 """The Windows app identity. It is written down in two places - main.py registers it and sets it on the
-process, gui/app.py uses it to clear only Lockdown's own notifications - and they have to be the same string
-or the app clears nothing (or somebody else's toasts)."""
+process, gui/toast.py sends Lockdown's Windows notifications under it - and they have to be the same string,
+or the notifications show no Lockdown name/icon and their buttons can't call back."""
 import re
 from pathlib import Path
 
@@ -15,7 +15,7 @@ def _app_id(path: Path) -> str:
 
 
 def test_both_copies_agree():
-    assert _app_id(SRC / "main.py") == _app_id(SRC / "gui" / "app.py") == WANTED
+    assert _app_id(SRC / "main.py") == _app_id(SRC / "gui" / "toast.py") == WANTED
 
 
 def test_it_is_a_reverse_dns_name():

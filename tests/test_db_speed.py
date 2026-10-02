@@ -452,7 +452,8 @@ def test_schema_changes_come_with_a_schema_version_bump():
     existing database (the migration pass is skipped). Change both - then update the pinned hash here."""
     import hashlib
     text = dbmod.SCHEMA + repr(dbmod.MIGRATIONS) + repr(dbmod.INDEXES)
-    pinned = {2: "bd713ebe83619146", 3: "bd713ebe83619146"}   # 3: same schema; re-runs the media-hosts one-off (0.84.1)
+    pinned = {2: "bd713ebe83619146", 3: "bd713ebe83619146",   # 3: same schema; re-runs the media-hosts one-off (0.84.1)
+              4: "9667f9c57d6187a4"}                          # 4: emergency_unlocks.alerts (0.84.7)
     assert pinned.get(SCHEMA_VERSION) == hashlib.sha256(text.encode()).hexdigest()[:16], \
         (SCHEMA_VERSION, hashlib.sha256(text.encode()).hexdigest()[:16])
 

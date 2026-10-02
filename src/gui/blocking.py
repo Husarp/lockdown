@@ -222,7 +222,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
             self.unlock_panel.pack(fill="x", pady=(0, 10), before=self.list_card)
 
     def _build_unlock_panel(self):
-        """Everything blocked right now, with checkboxes; unlocking any number of them is one use."""
+        """Everything an emergency unlock can free - blocked right now or not - with checkboxes, plus "pause
+        bedtime and break alerts"; any number of them together is one use."""
         panel, db = self.unlock_panel, self.page.app.db
         for w in panel.winfo_children():
             w.destroy()
@@ -232,27 +233,42 @@ class OverviewTab(ctk.CTkScrollableFrame):
         per = emergency.PERIODS[emergency.get(db, "emergency.per")]
         ctk.CTkLabel(panel, text="Emergency unlock", font=theme.card_title()).pack(anchor="w", padx=14, pady=(10, 0))
         ctk.CTkLabel(panel, text=f"{left} of {allowed} left {per} (resets {DAY_NAMES[reset.weekday()]} {reset:%H:%M}). "
-                                 f"Pick what to unblock for {minutes} min - several at once still count as one use.",
+                                 f"Pick what to unblock for {minutes} min - several at once still count as one use. "
+                                 "It works whether something is blocked yet or not: running out of allowance or "
+                                 "limit meanwhile doesn't block it until the unlock ends. The time you use still "
+                                 "counts toward your limits and allowances.",
                      text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
-        # things on your list, except permanently-blocked ones - the emergency unlock is for limits/hours, not for
+        # Things on your list, except permanently-blocked ones - the emergency unlock is for limits/hours, not for
         # things you chose to block for good (so it can't be turned against you, e.g. adult sites). A mode can also
         # block made-up items (no id) that can't be unlocked.
-        blocked = sorted({b["item"]["id"]: b["item"] for b in db.blocks(now)
-                          if b["item"]["id"] is not None and b["reason"] != "permanent"}.values(),
-                         key=lambda i: i["display_name"].lower())
+        blocked, open_now = emergency.choices(db, now)
+        unlocked = db.active_unlocks(now)
         permanent = any(b["reason"] == "permanent" for b in db.blocks(now) if b["item"]["id"] is not None)
         boxes = []
-        for item in blocked:
+
+        def tick_line(text, item=None, note=""):
             line = ctk.CTkFrame(panel, fg_color="transparent")
             line.pack(anchor="w", padx=14, pady=2)
             box = ctk.CTkCheckBox(line, text="", width=24)
             box.pack(side="left")
-            ctk.CTkLabel(line, text=f"  {item['display_name']}", image=icons.for_item(item, 16),
+            ctk.CTkLabel(line, text=f"  {text}", image=icons.for_item(item, 16) if item else None,
                          compound="left").pack(side="left")
-            boxes.append((box, item))
-        if not blocked:
-            ctk.CTkLabel(panel, text="Nothing here can be emergency-unlocked right now.").pack(anchor="w", padx=14,
-                                                                                               pady=4)
+            if note:
+                ctk.CTkLabel(line, text=f"  {note}", text_color=MUTED, font=theme.body(11)).pack(side="left")
+            return box
+
+        for title, group in (("Blocked now", blocked), ("Not blocked right now", open_now)):
+            if not group:
+                continue
+            eyebrow(panel, title).pack(anchor="w", padx=14, pady=(8, 2))
+            for item in group:
+                until = unlocked.get(item["id"])
+                boxes.append((tick_line(item["display_name"], item,
+                                        f"unlocked until {until:%H:%M}" if until else ""), item))
+        eyebrow(panel, "Alerts").pack(anchor="w", padx=14, pady=(8, 2))
+        paused = emergency.alerts_paused_until(db, now)
+        alerts_box = tick_line("Pause bedtime and break alerts", note=(f"paused until {paused:%H:%M}" if paused else
+                                                                       "your bedtime settings stay as they are"))
         if permanent:
             ctk.CTkLabel(panel, text="Permanently-blocked items can't be emergency-unlocked.", text_color=MUTED,
                          font=theme.body(11)).pack(anchor="w", padx=14, pady=(2, 0))
@@ -260,23 +276,24 @@ class OverviewTab(ctk.CTkScrollableFrame):
         error.pack(anchor="w", padx=14)
         buttons = ctk.CTkFrame(panel, fg_color="transparent")
         buttons.pack(anchor="w", padx=14, pady=(0, 10))
-        if blocked and left:
-            ConfirmButton(buttons, lambda: self._unlock([i for b, i in boxes if b.get()], error),
+        if left:
+            ConfirmButton(buttons, lambda: self._unlock([i for b, i in boxes if b.get()], bool(alerts_box.get()),
+                                                        error),
                           text=f"Unlock for {minutes} min", confirm_text=f"Confirm - uses 1 of {left}",
                           width=170).pack(side="left", padx=(0, 8))
         ctk.CTkButton(buttons, text="Close", width=80, **theme.OUTLINE,
                       command=self._toggle_unlock).pack(side="left")
 
-    def _unlock(self, items: list[dict], error):
+    def _unlock(self, items: list[dict], alerts: bool, error):
         db = self.page.app.db
         try:
-            until = emergency.unlock(db, items, now_from_db(db))
+            until = emergency.unlock(db, items, now_from_db(db), alerts=alerts)
         except ValueError as e:
             error.configure(text=str(e))
             return
         self.unlock_panel.pack_forget()
-        names = ", ".join(i["display_name"] for i in items)
-        self.page.confirm(f"{names} unlocked until {until:%H:%M}", immediate=True)
+        what = [i["display_name"] for i in items] + (["bedtime and break alerts paused"] if alerts else [])
+        self.page.confirm(f"{', '.join(what)} - until {until:%H:%M}", immediate=True)
         self.page.refresh()
 
     # ---------- list ----------

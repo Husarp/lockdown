@@ -6,3 +6,4 @@ pytest
 pyinstaller
 pywin32
 pywebview
+windows-toasts; sys_platform == "win32"

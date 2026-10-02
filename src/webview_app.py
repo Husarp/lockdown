@@ -258,8 +258,9 @@ class Api:
 
     def emergency_unlock(self):
         try:
-            items = [i for i in self.db.list_items() if not i.get("disabled")]
-            until = emergency.unlock(self.db, items, now_from_db(self.db))
+            now = now_from_db(self.db)
+            items = [i for part in emergency.choices(self.db, now) for i in part]   # never the permanent ones
+            until = emergency.unlock(self.db, items, now)
             return {"ok": True, "until": until.strftime("%H:%M")}
         except ValueError as e:
             return {"ok": False, "error": str(e)}

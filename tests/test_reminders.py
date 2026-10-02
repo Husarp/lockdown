@@ -8,7 +8,7 @@ NOW = datetime(2026, 9, 14, 9, 0)   # Monday
 
 class FakeUI:
     def __init__(self):
-        self.shown, self.closed, self.toasts, self.modes = [], [], [], []
+        self.shown, self.closed, self.toasts, self.modes, self.held_back = [], [], [], [], []
 
     def popup(self, key, title, text, buttons):
         self.shown.append(("popup", key, title, text, [b[1] for b in buttons]))
@@ -21,6 +21,9 @@ class FakeUI:
 
     def toast(self, text):
         self.toasts.append(text)
+
+    def held(self, key, title, text, buttons):     # a popup held by a full-screen app: a Windows notification
+        self.held_back.append((key, title, [b[1] for b in buttons]))
 
     def start_mode(self, mode_id, until):
         self.modes.append((mode_id, until))
@@ -73,7 +76,8 @@ def test_popups_wait_during_full_screen_apps(tmp_path):
     reminders.save(db, reminders.CUSTOM_KEY, [{"id": "water", "text": "Drink water", "kind": "times",
                                               "times": ["09:10"]}])
     t = run(e, NOW, 15, fullscreen=True)
-    assert not [s for s in ui.shown if s[1] == "custom:water"] and ui.toasts == ["Reminder: Drink water"]
+    assert not [s for s in ui.shown if s[1] == "custom:water"] and ui.toasts == []
+    assert ui.held_back == [("custom:water", "Reminder", ["done", "snooze", "dismiss"])]   # its buttons, once
     run(e, t, 1)
     assert [s for s in ui.shown if s[1] == "custom:water"]
 

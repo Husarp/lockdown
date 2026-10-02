@@ -19,12 +19,16 @@ SVC_RES = version_res.write(os.path.join(RES, "version_LockdownService.txt"), VE
                             "Lockdown enforcement service")
 
 # uiautomation loads its UIAutomationClient_VC140_*.dll helpers from its own bin folder; PyInstaller misses them
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 UIA_DLLS = collect_data_files("uiautomation", includes=["bin/*.dll"])
+# Windows notifications (gui/toast.py, 0.84.7): windows_toasts is imported lazily and the winrt .pyd modules are
+# namespace packages PyInstaller doesn't follow - name them all
+TOASTS = collect_submodules("windows_toasts") + collect_submodules("winrt")
 
 gui = Analysis([os.path.join(SRC, "main.py")], pathex=[SRC],
                datas=[(os.path.join(ROOT, "assets"), "assets")] + UIA_DLLS,
-               hiddenimports=["gui.about_page", "gui.antibypass_page", "gui.display_settings", "comtypes.stream"],
+               hiddenimports=["gui.about_page", "gui.antibypass_page", "gui.display_settings", "comtypes.stream"]
+               + TOASTS,
                excludes=["pytest"])
 svc = Analysis([os.path.join(SRC, "service_win.py")], pathex=[SRC],
                hiddenimports=["win32timezone"], excludes=["pytest", "customtkinter", "PIL", "pystray", "uiautomation"])

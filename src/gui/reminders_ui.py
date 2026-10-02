@@ -8,10 +8,12 @@ from datetime import datetime, timedelta
 
 import customtkinter as ctk
 
+import emergency
 import modes
 import reminders
-from gui import screens, theme
+from gui import screens, theme, toast
 from gui.components import Card, Rows, Segmented, eyebrow, hairline, page_head
+from gui.notifications import no_activate
 from gui.rule_editors import DayToggle
 from gui.widgets import ConfirmButton, ConfirmDialog, Corner
 from rules import DAY_NAMES, parse_hhmm
@@ -24,6 +26,8 @@ SNOOZES = [1, 5, 10, 15, 30]
 DISMISS = {"fg_color": ("#E4E7EC", "#161B21"), "hover_color": ("#D2D7DE", "#222A33"),
            "border_width": 1, "border_color": ("#C4CBD4", "#2B333D"), "text_color": MUTED}
 CHECKS = {"Off": 0, "5 min": 5, "10 min": 10, "15 min": 15, "30 min": 30}
+ASK_LIMIT_MS = 2 * 60_000   # the bedtime screen's "Disable alerts" challenge / question: untouched this long = Dismiss
+ASK_MAX_MS = 16 * 60_000    # ... and never open longer than this, typing or not (a key now and then is no pause)
 
 
 def _finish(win, action, on_answer):
@@ -40,13 +44,16 @@ def _finish(win, action, on_answer):
 # ---------------------------------------------------------------- on screen
 
 class ReminderPopup(ctk.CTkToplevel):
-    """Bottom-right, always on top, stays until you answer."""
+    """Bottom-right, always on top, stays until you answer. Never while a full-screen app is in front (the engine
+    holds it and ReminderUI.held sends a Windows notification instead); light like notifications.Popup."""
     escape_closes = False   # (it waits for an answer)
+    _deactivate_windows_window_header_manipulation = True   # no title bar to colour: skip CTk's hide/update/show
 
     def __init__(self, root, title: str, text: str, buttons, on_answer):
         super().__init__(root)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
+        no_activate(self)
         frame = ctk.CTkFrame(self, border_width=1, border_color=theme.ACCENT, corner_radius=8)
         frame.pack(fill="both", expand=True)
         ctk.CTkLabel(frame, text=title, font=theme.semi(14)).pack(anchor="w", padx=16, pady=(12, 0))
@@ -209,6 +216,7 @@ class ReminderUI:
 
     def __init__(self, app):
         self.app, self.windows = app, {}
+        self.notices = {}         # key -> the Windows notification standing in for a popup held by a game
         self.engine = None
         self.break_until = None   # set during a strict break: the app minimises windows until then
 
@@ -221,10 +229,30 @@ class ReminderUI:
         self.windows[key] = Overlay(self.app, title, text, until, buttons, lambda a: self._answer(key, a),
                                     lambda: now_from_db(self.app.db))
 
+    def held(self, key, title, text, buttons):
+        """A popup held back while a full-screen app is in front: meanwhile a Windows notification with the same
+        buttons (Windows draws it, so nothing of ours goes over the game; it may wait in the notification centre).
+        A button there answers it as the popup would have. Nothing while a mode that mutes is on (as _show): the
+        popup still comes once the mode ends."""
+        self.close(key)
+        state = modes.active(self.app.db, now_from_db(self.app.db))
+        if state and state["mode"].get("mute"):
+            return
+        self.notices[key] = self.app.toaster.send(
+            text, [("Dismiss" if action == "dismiss" else label, lambda a=action: self._held_answer(key, a))
+                   for label, action in buttons][:5], title=title, expire_min=toast.HELD_EXPIRE_MIN)
+
+    def _held_answer(self, key, action):
+        self.notices.pop(key, None)
+        self.engine.held_answer(key, action)
+
     def close(self, key):
         win = self.windows.pop(key, None)
         if win is not None and win.winfo_exists():
             win.destroy()
+        notice = self.notices.pop(key, None)
+        if notice is not None:   # shown as a popup now, or no longer due: its notification goes
+            self.app.toaster.remove(notice)
 
     def toast(self, text):
         self.app._show(text)
@@ -255,18 +283,80 @@ class ReminderUI:
         if key == "sleep" and action == "disable":
             self._disable_sleep()      # the escape hatch: challenge first, then off-tonight or snooze
             return
+        if key == "sleep" and action == "emergency":
+            self._emergency_sleep()    # the sanctioned escape: no challenge, but it costs an emergency use
+            return
         self.engine.answer(key, action)
+
+    def _emergency_sleep(self):
+        """"Emergency (N left)" on the bedtime screen: asks once (a stray click must not spend a use), then pauses
+        the bedtime and break alerts for the emergency length. Cancelling just dismisses it, as Dismiss does.
+        It counts as dismissed from the click on, so leaving the question open is no free pause: the bedtime screen
+        comes back on its escalation as usual (and "Pause" closes it again)."""
+        db = self.app.db
+        now = self.engine.now   # (the engine decides the use as of its last tick: the same time here)
+        left, minutes = emergency.available(db, now), int(emergency.get(db, "emergency.minutes"))
+        if not left:     # spent elsewhere (or turned off) since the screen came up: the engine says so, dismisses
+            self.engine.answer("sleep", "emergency")
+            return
+        self.engine.answer("sleep", "dismiss")
+        ask = ConfirmDialog(self.app, "Emergency", f"Pause the bedtime and break alerts for {minutes} min? "
+                                                   f"Uses 1 of your {left} emergency unlock{'s' * (left != 1)} "
+                                                   "left. Your bedtime settings stay as they are.",
+                            on_yes=lambda: self.engine.answer("sleep", "emergency"), yes_text=f"Pause {minutes} min")
+        # (not left up for good: as a modal it would hold the clicks of the bedtime screen when that comes back)
+        self.app.after(ASK_LIMIT_MS, lambda: _give_up(ask))
 
     def _disable_sleep(self):
         """"Disable alerts" on the bedtime screen needs the anti-bypass challenge; passing it offers "off for
-        tonight" or a snooze. Cancelling just dismisses it, so it returns on the escalation - never a free out."""
+        tonight" or a snooze. Cancelling just dismisses it, so it returns on the escalation - never a free out.
+        Neither waits for ever: the bedtime screen stays away while they are open, so after ASK_LIMIT_MS with
+        no typing in the challenge (a long phrase may take longer than that to type), or ASK_MAX_MS in all, they
+        close and it counts as Dismiss - the screen comes back on its escalation."""
+        asking = {"open": True, "question": None, "typed": False, "waited": 0}
+
+        def answer(action):
+            if asking["open"]:
+                asking["open"] = False
+                self.engine.answer("sleep", action)
+
         def choose():
-            ConfirmDialog(self.app, "Bedtime alerts off", "Off for the rest of tonight, or snooze a while?",
-                          on_yes=lambda: self.engine.answer("sleep", "off_tonight"), yes_text="Off tonight",
-                          alt_text="Snooze 15 min", on_alt=lambda: self.engine.answer("sleep", "snooze:15"),
-                          on_no=lambda: self.engine.answer("sleep", "dismiss"))
-        self.app.guard(["Turn off tonight's bedtime alerts"], choose,
-                       cancel=lambda: self.engine.answer("sleep", "dismiss"))
+            if asking["open"]:
+                asking["typed"] = True   # (passed the challenge just now: a fresh ASK_LIMIT_MS for the question)
+                asking["question"] = ConfirmDialog(
+                    self.app, "Bedtime alerts off", "Off for the rest of tonight, or snooze a while?",
+                    on_yes=lambda: answer("off_tonight"), yes_text="Off tonight", alt_text="Snooze 15 min",
+                    on_alt=lambda: answer("snooze:15"), on_no=lambda: answer("dismiss"))
+
+        before = getattr(self.app, "challenge", None)
+        self.app.guard(["Turn off tonight's bedtime alerts"], choose, cancel=lambda: answer("dismiss"))
+        challenge = getattr(self.app, "challenge", None)
+        challenge = challenge if challenge is not before else None   # (only the one opened for this)
+        asking["typed"] = False   # (no challenge: the question was opened just above - this is its time)
+        if challenge is not None:
+            challenge.bind("<Key>", lambda _e: asking.update(typed=True), add="+")   # (any key in it: still at it)
+
+        def time_up():
+            if not asking["open"]:
+                return
+            asking["waited"] += ASK_LIMIT_MS
+            if asking["typed"] and asking["waited"] < ASK_MAX_MS:
+                asking["typed"] = False
+                self.app.after(ASK_LIMIT_MS, time_up)
+                return
+            _give_up(challenge)
+            _give_up(asking["question"])
+            answer("dismiss")   # (if neither was up any more)
+        self.app.after(ASK_LIMIT_MS, time_up)
+
+
+def _give_up(window):
+    """Close a challenge / question left unanswered, as its Cancel would (so it gives its own "no")."""
+    try:
+        if window is not None and window.winfo_exists():
+            (getattr(window, "_cancel", None) or window._no)()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- the Reminders tab

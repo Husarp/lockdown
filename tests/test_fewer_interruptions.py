@@ -168,7 +168,7 @@ def test_a_break_held_by_a_game_is_announced_once(tmp_path):
     db, ui, e = setup(tmp_path)
     _break(db, every=10)
     run(e, NOW, 20, fullscreen=True)
-    assert len([t for t in ui.toasts if t.startswith("Time for a break")]) == 1
+    assert len([h for h in ui.held_back if h[1] == "Time for a break"]) == 1
 
 
 def test_a_strict_break_is_never_held_by_the_pace(tmp_path):

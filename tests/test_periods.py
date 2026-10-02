@@ -115,7 +115,9 @@ def test_unlock_lifts_every_block_and_warns_before_end():
 
 def test_emergency_uses(tmp_path):
     db = Database(tmp_path / "t.db")
-    iid = db.add_site("YouTube", ["youtube.com"])
+    # (blocked until next year - not permanently: 0.84.7 refuses to emergency-unlock a permanent block)
+    iid = db.add_site("YouTube", ["youtube.com"],
+                      rules=[{"rule_type": "temporary", "temp_until": "2027-01-01 00:00:00"}])
     items = [{"id": iid, "display_name": "YouTube"}, {"id": 99, "display_name": "Discord"}]
     assert emergency.uses_left(db, at(0, 12))[:2] == (3, 3)
     until = emergency.unlock(db, items, at(0, 12))                 # two items = one use
