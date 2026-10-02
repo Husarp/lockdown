@@ -468,7 +468,7 @@ class Database:
     # ---------- groups ----------
 
     def list_groups(self) -> list[dict]:
-        """All groups: {id, name, rules: [...], members: {item_id: {rule_type: customized rule}}}."""
+        """All groups: {id, name, rules: [...], members: {item_id: {rule_type: extra rule on top of the group's}}}."""
         groups = {r["id"]: {**dict(r), "rules": [], "members": {}} for r in self.conn.execute(
             "SELECT * FROM block_groups ORDER BY name COLLATE NOCASE")}
         for r in self.conn.execute("SELECT * FROM group_rules ORDER BY id"):

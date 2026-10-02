@@ -89,10 +89,15 @@ def test_draft_changes():
     assert ab.draft_changes(saved, saved, {5: group}, {}, NOW) == ["Remove group Social"]
     fewer = {**group, "members": {1: None}}
     assert ab.draft_changes(saved, saved, {5: group}, {5: fewer}, NOW) == ["Loosen group Social"]
+    # a member's extra rule comes on top of the group's 30 min (0.84.3), so adding one never loosens anything -
+    # even a "90 min" one, which used to replace the group's 30 for that member
     custom = {**group, "members": {1: {"time_limit": {"rule_type": "time_limit", "daily_limit_min": 90}}, 2: None}}
-    assert ab.draft_changes(saved, saved, {5: group}, {5: custom}, NOW) == ["Loosen group Social"]
+    assert ab.draft_changes(saved, saved, {5: group}, {5: custom}, NOW) == []
     stricter = {**group, "members": {1: {"time_limit": {"rule_type": "time_limit", "daily_limit_min": 10}}, 2: None}}
     assert ab.draft_changes(saved, saved, {5: group}, {5: stricter}, NOW) == []
+    # ... but relaxing or removing an extra rule hands that member time back
+    assert ab.draft_changes(saved, saved, {5: stricter}, {5: custom}, NOW) == ["Loosen group Social"]
+    assert ab.draft_changes(saved, saved, {5: stricter}, {5: group}, NOW) == ["Loosen group Social"]
 
 
 def test_settings_emergency_protection_looser():

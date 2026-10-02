@@ -20,10 +20,11 @@ import time
 import modes
 import json
 
-from blocker.apps import app_folder, exe_name, in_folder, list_processes, names_of
+from blocker.apps import PROTECTED, app_folder, exe_name, in_folder, kills, list_processes, names_of
 from blocker.hosts import normalize_host
 from db import Database
-from rules import counted_rules, limit_targets, switch_targets, usage_targets, visit_targets
+from rules import (Usage, block_targets, closed_opening, counted_rules, effective_rules, limit_targets,
+                   switch_targets, usage_targets, visit_targets)
 from trusted_time import now_from_db
 
 TICK_SEC = 0.5         # (0.84.2: was 2) how soon things are noticed - not how much time is counted
@@ -372,7 +373,8 @@ class UsageTracker(threading.Thread):
             last = self.last_used.get(item["id"])
             away = None if last is None else now_ts - last
             # opening limits in "launches / new visits" mode - one opening can go over one: written at once
-            if opened := visit_targets(rules, item, now, app_launched, away, clock):
+            if opened := self.unless_closed(db, item, groups, visit_targets(rules, item, now, app_launched, away,
+                                                                            clock), now, clock):
                 self._add(opened, 1, False, now)
                 self.urgent = self.opened = True
         # Each bucket gets this tick's time once, however many items in use feed it: a shared group (or category)
@@ -391,7 +393,8 @@ class UsageTracker(threading.Thread):
             for target, limit in limit_targets(rules, now, clock).items():
                 limits[target] = min(limits.get(target, limit), limit)
             if switched and item["id"] in focused_ids:   # you just switched to it ("every switch" opening limits)
-                switch_to |= switch_targets(rules, item["id"], now, clock)   # (one switch: once per bucket too)
+                switch_to |= self.unless_closed(db, item, groups, switch_targets(rules, item["id"], now, clock),
+                                                now, clock)   # (one switch: once per bucket too)
             self.last_used[item["id"]] = now_ts
         for target, (spent, app_fed) in buckets.items():
             self._add((target,), spent, app_fed, now)
@@ -405,6 +408,26 @@ class UsageTracker(threading.Thread):
         near = self.near_limit(db)
         if near or self.urgent or self.mark_ts is None or self.unflushed >= FLUSH_SEC:
             self.flush(db)
+
+    @staticmethod
+    def unless_closed(db: Database, item: dict, groups: list[dict], targets: set, now, clock) -> set:
+        """The opening counters to add 1 to: not the ones an app that is closed at once would spend
+        (rules.closed_opening) - so retrying a blocked member doesn't use up the group's openings (0.84.3).
+        Only for an app Lockdown closes when blocked: one that is only minimized or cut off the internet can
+        still be used, so its openings count. Anything that can't be read counts everything."""
+        if not any(t[1].startswith("op:") for t in targets) or item["item_type"] != "app" \
+                or not kills(item.get("block_type")) or names_of(item["target"]) & PROTECTED:
+            return targets
+        try:
+            rules = effective_rules(item, groups)
+            if not rules:
+                return targets
+            unlocks = {f"item:{i}": u for i, u in db.active_unlocks(now).items()}
+            usage = Usage(db.usage_of(block_targets(rules, now, clock) | set(targets)), clock, unlocks)
+            return closed_opening(rules, targets, now, usage)
+        except Exception:
+            log.exception("Could not tell whether %s is blocked - counting its opening", item["display_name"])
+            return targets
 
     def _add(self, targets, seconds: float, app_fed: bool, now):
         """Count `seconds` (or openings) in every (owner, bucket) of `targets` - in memory until flush()."""

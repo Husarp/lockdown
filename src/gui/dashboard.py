@@ -148,7 +148,8 @@ def upcoming(now, items, groups, usage) -> list[dict]:
         for r in rules:
             if r["rule_type"] == "time_limit" and r.get("daily_limit_min"):
                 left = r["daily_limit_min"] * 60 - usage(r["usage_owner"], time_bucket("day", now, usage.clock))
-                if 0 < left <= 30 * 60:
+                # several day limits (the group's, its own extra): the row is the one with least left
+                if 0 < left <= 30 * 60 and left < merged.get(("limit", item["id"]), {}).get("left", left + 1):
                     merged[("limit", item["id"])] = {"kind": "limit", "when": None, "left": left,
                                                      "title": f"{item['display_name']} limit will be reached",
                                                      "names": []}
@@ -402,22 +403,33 @@ class DashboardPage(ctk.CTkFrame):
 
     def _limits(self, now, items, groups, usage):
         clock = usage.clock
-        seen, entries = set(), []
+        seen, entries, allowances = set(), [], {}
         for item in items:
             for r in effective_rules(item, groups):
                 spent = allowance_left(r, now, usage)   # "N min allowed during blocked hours", while inside them
                 pot = allowance_owner(r)    # a group's allowance is one pot, so it is one row
-                if spent and (pot, "allowance") not in seen:
-                    seen.add((pot, "allowance"))
+                if spent:
                     used, allowed, until = spent
-                    name = f"{r['group']['name']} (group)" if pot.startswith("group:") \
-                        else item["display_name"]
-                    icon = icons.get(r["group"]["name"], 16) if r.get("group") else icons.for_item(item, 16)
-                    entries.append((f"{name} - allowance", icon, "allowance", used / max(allowed, 1), until,
-                                    used, allowed))
-                if r["rule_type"] not in ("time_limit", "switch_limit") or (r["usage_owner"], r["rule_type"]) in seen:
+                    key = (pot, "allowance", r["rule_key"], until)
+                    # one pot, two allowances (a group's per-member one and the member's own extra, ending at the
+                    # same minute): the row shows the one with least left - the one that really limits it
+                    if key not in allowances or allowed - used < allowances[key][1]:
+                        name = f"{r['group']['name']} (group)" if pot.startswith("group:") \
+                            else item["display_name"]
+                        icon = icons.get(r["group"]["name"], 16) if r.get("group") else icons.for_item(item, 16)
+                        row = (f"{name} - allowance", icon, "allowance", used / max(allowed, 1), until, used, allowed)
+                        if key in allowances:
+                            entries[allowances[key][0]] = row
+                            allowances[key] = (allowances[key][0], allowed - used)
+                        else:
+                            allowances[key] = (len(entries), allowed - used)
+                            entries.append(row)
+                # one row per limit: a group's shared limit once, and a member's own limit in a group (on top of
+                # the group's) as a row of its own besides the group's
+                key = (r["usage_owner"], r["rule_key"])
+                if r["rule_type"] not in ("time_limit", "switch_limit") or key in seen:
                     continue
-                seen.add((r["usage_owner"], r["rule_type"]))
+                seen.add(key)
                 is_time = r["rule_type"] == "time_limit"
                 group = r["usage_owner"].startswith("group:")
                 best = None
@@ -429,6 +441,8 @@ class DashboardPage(ctk.CTkFrame):
                         best = (frac, period, used, limit)
                 if best:
                     name = f"{r['group']['name']} (group)" if group else item["display_name"]
+                    if r.get("extra_of"):
+                        name += f" (own, in {r['extra_of']['name']})"
                     icon = icons.get(r["group"]["name"], 16) if group else icons.for_item(item, 16)
                     entries.append((name, icon, "time" if is_time else "opens", *best))
         self.limits.note.configure(text=f"{len(entries)} active")

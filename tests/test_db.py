@@ -124,7 +124,10 @@ def test_member_override(tmp_path):
     b = db.add_item("Signal", ["signal.exe"], "app")
     db.add_group("Night", [{"rule_type": "scheduled", "schedule": night}],
                  {a: {}, b: {"scheduled": {"schedule": night, "allowance_min": 5}}})
-    assert {x["item"]["display_name"] for x in db.blocks(MON_22)} == {"Discord"}   # Signal has 5 min left
+    # Signal's own "5 min allowed" night rule comes on top of the group's night block, which has no allowance:
+    # it can't loosen the group, so Signal is blocked too (0.84.3 - before, the customization replaced the group's
+    # rule and Signal got 5 minutes the group never gave)
+    assert {x["item"]["display_name"] for x in db.blocks(MON_22)} == {"Discord", "Signal"}
 
 
 def test_migrates_old_usage_table(tmp_path):

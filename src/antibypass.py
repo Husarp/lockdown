@@ -209,11 +209,16 @@ def group_looser(old: dict, new: dict | None, now: datetime) -> bool:
         return True
     if rules_looser(old["rules"], new["rules"], now) or not set(old["members"]) <= set(new["members"]):
         return True
-    for member, custom in old["members"].items():   # a member's own version of a group rule
-        before = {r["rule_type"]: {**r, **(custom or {}).get(r["rule_type"], {})} for r in old["rules"]}
-        after = {r["rule_type"]: {**r, **(new["members"][member] or {}).get(r["rule_type"], {})} for r in new["rules"]}
-        if any(rule_looser(r, after.get(t), now) for t, r in before.items()):
-            return True
+    # A member's extra rules come on top of the group's (0.84.3): adding or tightening one is free, but removing
+    # or relaxing one hands that member time back, so it is loosening like any other rule.
+    for member, extras in old["members"].items():
+        after = new["members"].get(member) or {}
+        for t, r in (extras or {}).items():
+            if t == "temporary" and r.get("temp_until") and _temp_end(r, now) <= now:
+                continue                                # run out: it blocks nothing, clearing it away is free
+            changed = after.get(t)
+            if rule_looser({**r, "rule_type": t}, changed and {**changed, "rule_type": t}, now):
+                return True
     return False
 
 

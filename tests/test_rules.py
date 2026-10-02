@@ -121,9 +121,13 @@ def test_effective_rules_inherit_and_override():
                "members": {1: {"scheduled": {"schedule": NIGHT, "allowance_min": 5}}}},
               {"id": 6, "name": "Other", "rules": [{"rule_type": "permanent"}], "members": {2: {}}}]
     rules = effective_rules(item, groups)
-    assert [(r["rule_type"], (r["group"] or {}).get("name")) for r in rules] == \
-        [("permanent", None), ("scheduled", "Night"), ("time_limit", "Night")]
-    assert rules[1]["allowance_min"] == 5                  # member customization
+    # the member's extra rule comes ON TOP of the group's, it doesn't replace it (0.84.3)
+    assert [(r["rule_type"], (r["group"] or {}).get("name"), (r.get("extra_of") or {}).get("name"))
+            for r in rules] == [("permanent", None, None), ("scheduled", "Night", None),
+                                ("time_limit", "Night", None), ("scheduled", None, "Night")]
+    assert not rules[1].get("allowance_min")               # the group's own rule, unchanged
+    assert rules[3]["allowance_min"] == 5                  # the member's extra rule
+    assert rules[3]["usage_owner"] == rules[3]["allowance_owner"] == "item:1"
     assert rules[2]["usage_owner"] == "group:5"            # shared group limit
 
 

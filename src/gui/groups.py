@@ -1,9 +1,12 @@
 """Groups tab: named sets of rules (any combination) shared by member sites/apps.
 
-Members inherit the group's rules; editing the group changes all of them. A member can be customized
-(e.g. an "emergency" app gets a 5-minute allowance in the night block). A group daily limit is one
-shared total for all members.
+Members inherit the group's rules; editing the group changes all of them. A group daily limit is one
+shared total for all members. A member can get extra rules ON TOP of the group's (e.g. YouTube at most 1 h a
+day inside a "Fun" group of 2 h): the group's rules still apply to it and its time still fills the group's
+pot - an extra rule only ever makes that member stricter, never the group looser (0.84.3).
 """
+from datetime import datetime
+
 import customtkinter as ctk
 
 from gui import icons, theme
@@ -11,12 +14,20 @@ from gui.components import BlockerRail, eyebrow
 from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, HoursEditor, LimitEditor, SwitchEditor, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton, clear_entry, once
-from rules import describe_rule, effective_rules, item_block
+from rules import TIME_FMT, describe_rule, effective_rules, item_block
 
 MUTED = theme.MUTED
 ERROR = theme.DANGER
 GREEN, ORANGE, RED = theme.ALLOWED, theme.PENDING, theme.BLOCKED
 CUSTOMIZABLE = ("scheduled", "time_limit", "switch_limit", "temporary")
+
+
+def _live(overrides: dict) -> dict:
+    """A member's extra rules, less an extra temporary block that has run out (it blocks nothing, and clearing it
+    away is free): it would otherwise show as "Keep (-3h left)" and keep the "+ extra limits" chip."""
+    now = datetime.now()
+    return {t: r for t, r in overrides.items()
+            if not (t == "temporary" and r.get("temp_until") and datetime.strptime(r["temp_until"], TIME_FMT) <= now)}
 
 
 def _make_editor(parent, rule_type: str):
@@ -26,29 +37,34 @@ def _make_editor(parent, rule_type: str):
 
 
 class CustomizeMember(ctk.CTkToplevel):
-    """Per-member versions of the group's rules. on_done(overrides) with {rule_type: rule}."""
+    """Extra rules for one member, on top of the group's. on_done(overrides) with {rule_type: rule}."""
 
     def __init__(self, master, member: dict, group_rules: list[dict], on_done):
         super().__init__(master)
-        self.title(f"Customize {member['name']}")
+        self.title(f"Extra limits for {member['name']}")
         self.geometry("900x600")
         self.transient(master.winfo_toplevel())
         self.after(50, self.grab_set)
         self.on_done = on_done
         body = ctk.CTkScrollableFrame(self)
         body.pack(fill="both", expand=True, padx=12, pady=12)
-        ctk.CTkLabel(body, text=f"{member['name']}: use the group's rule, or its own version",
-                     font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0, 8))
+        ctk.CTkLabel(body, text=f"Extra limits for {member['name']}, on top of the group's",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(0, 2))
+        ctk.CTkLabel(body, text="The group's rules always apply to it too, and its time still counts towards the "
+                                "group's shared limits. These can only make it stricter: blocked hours add to the "
+                                "group's, allowed hours narrow them, and the first limit to run out blocks it.",
+                     text_color=MUTED, wraplength=840, justify="left").pack(anchor="w", pady=(0, 8))
         self.parts = {}
-        for rule in group_rules:
-            t = rule["rule_type"]
-            if t not in CUSTOMIZABLE:
-                continue
+        # every kind a member can be tightened with - not only the kinds the group has: a group with only blocked
+        # hours can still give YouTube 1 h a day of its own
+        of_group = {r["rule_type"]: r for r in group_rules}
+        for t in CUSTOMIZABLE:
+            rule = of_group.get(t)
             box = ctk.CTkFrame(body)
             box.pack(fill="x", pady=6)
-            custom = ctk.CTkSwitch(box, text=f"Own {RULE_NAMES[t].lower()} for this member")
+            custom = ctk.CTkSwitch(box, text=f"Also limit this member: {RULE_NAMES[t].lower()}")
             custom.pack(anchor="w", padx=12, pady=(10, 4))
-            editor = EDITORS[t](box)   # a customized limit counts for this member alone
+            editor = EDITORS[t](box)   # counts this member's own use - on top of the group's, which still applies
             editor.load(member["overrides"].get(t) or rule)
             custom.configure(command=lambda s=custom, e=editor: e.pack(anchor="w", padx=12, pady=(0, 10))
                              if s.get() else e.pack_forget())
@@ -56,9 +72,6 @@ class CustomizeMember(ctk.CTkToplevel):
                 custom.select()
                 editor.pack(anchor="w", padx=12, pady=(0, 10))
             self.parts[t] = (custom, editor)
-        if not self.parts:
-            ctk.CTkLabel(body, text="This group has no rules that can be customized (hours, limits, temporary).",
-                         text_color=MUTED).pack(anchor="w")
         self.error = ctk.CTkLabel(body, text="", text_color=ERROR)
         self.error.pack(anchor="w")
         buttons = ctk.CTkFrame(self, fg_color="transparent")
@@ -144,7 +157,7 @@ class GroupEditor(ctk.CTkFrame):
             item = self.draft.items.get(item_id)
             if item:
                 self.members.append({"item_id": item_id, "name": item["display_name"], "item": item,
-                                     "overrides": dict(overrides or {})})
+                                     "overrides": _live(overrides or {})})
         self.picker.reset()
         self.picker.pack_forget()
         self.error.configure(text="")
@@ -192,11 +205,11 @@ class GroupEditor(ctk.CTkFrame):
                                  text_color=theme.TEXT, font=theme.semi(12), command=lambda m=m: self._customize(m))
             name.pack(side="left", padx=(4, 0))
             custom = bool(m["overrides"])
-            ctk.CTkLabel(chip, text="customised" if custom else "group rules", font=theme.body(10),
+            ctk.CTkLabel(chip, text="+ extra limits" if custom else "group rules", font=theme.body(10),
                          text_color=theme.ACCENT if custom else MUTED).pack(side="left", padx=(2, 4))
             ctk.CTkButton(chip, text="×", width=22, height=22, fg_color="transparent", hover_color=theme.BORDER,
                           text_color=MUTED, command=lambda m=m: self._remove_member(m)).pack(side="left", padx=(0, 4))
-        ctk.CTkLabel(self.members_box, text="Click a member to give it its own version of the group's rules.",
+        ctk.CTkLabel(self.members_box, text="Click a member to give it extra limits on top of the group's.",
                      text_color=MUTED, font=theme.body(11)).pack(anchor="w", pady=(2, 0))
 
     def _customize(self, member):
@@ -251,8 +264,10 @@ class GroupEditor(ctk.CTkFrame):
                 existing = self.draft.find_item(t["targets"][0])
                 item_id = existing["id"] if existing else self.draft.add_item(
                     t["name"], t["targets"], t["source"], t["kind"], t["block_type"], t["app_path"])["id"]
-            types = {r["rule_type"] for r in rules}
-            members[item_id] = {k: v for k, v in m["overrides"].items() if k in types}
+            # a member's extra rules stay whatever the group's rules are: dropping one when the group no longer
+            # has a rule of its kind removed a limit without a word (and asked for the challenge with no reason
+            # to see)
+            members[item_id] = {k: v for k, v in m["overrides"].items() if k in CUSTOMIZABLE}
         added = self.group_id is None
         self.draft.set_group(self.group_id, name, rules, members)
         self.tab.close_editor()
@@ -350,7 +365,8 @@ class GroupsTab(ctk.CTkFrame):
             texts = ctk.CTkFrame(entry, fg_color="transparent")
             texts.pack(side="left", fill="x", expand=True, padx=10, pady=8)
             names = sorted(self.draft.items[i]["display_name"] for i in g["members"] if i in self.draft.items)
-            rules = " · ".join(describe_rule({**r, "usage_owner": f"group:{g['id']}"}, now, usage)
+            pot = {"usage_owner": f"group:{g['id']}"}
+            rules = " · ".join(describe_rule({**r, **pot, "rule_key": f"g{g['id']}{r['rule_type']}"}, now, usage)
                                .replace(":\n", " ").replace("\n", " · ") for r in g["rules"])
             if self.draft.is_group_unsaved(g["id"]):
                 status, color = "Not applied (unsaved)", ORANGE

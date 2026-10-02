@@ -170,7 +170,7 @@ class BlockWatcher:
                            in_use: set[int]) -> list[str]:
         """You opened something inside its blocked hours and it has "N minutes allowed" left: say so once per
         stretch, so you know you are spending the allowance rather than wondering why it isn't blocked."""
-        out, seen = [], set()
+        found = {}
         for item in items:
             if item["id"] not in in_use:
                 continue
@@ -184,13 +184,18 @@ class BlockWatcher:
                     continue
                 pot = allowance_owner(rule)   # a shared group allowance is one notice, not one per member
                 key = (pot, "allowance", until)
-                if key in self.warned or key in seen:
+                if key in self.warned:
                     continue
-                seen.add(key)
-                self.warned[key] = now
-                name = rule["group"]["name"] if pot.startswith("group:") else item["display_name"]
-                out.append(f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
-                           f"{allowed // 60} min allowance left (until {until:%H:%M}).")
+                # two allowances on one pot (a group's per-member one and the member's own extra, ending at the
+                # same minute): the one with least left is what really limits it
+                if key not in found or left < found[key][0]:
+                    name = rule["group"]["name"] if pot.startswith("group:") else item["display_name"]
+                    found[key] = (left, allowed, until, name)
+        out = []
+        for key, (left, allowed, until, name) in found.items():
+            self.warned[key] = now
+            out.append(f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
+                       f"{allowed // 60} min allowance left (until {until:%H:%M}).")
         return out
 
     @staticmethod

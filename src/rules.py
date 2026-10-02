@@ -320,8 +320,16 @@ def counted_rules(item: dict, groups: list[dict]) -> list[dict]:
 
 
 def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
-    """The item's own rules + the rules of every group it's in (with per-member customizations applied).
-    Each rule gets: usage_owner (whose time counts), item_owner, rule_key (stable id), group (None or {id, name})."""
+    """The item's own rules + the rules of every group it's in + any extra rules a group gives this member.
+    Each rule gets: usage_owner (whose time counts), item_owner, rule_key (stable id), group (None or {id, name}),
+    and - for a member's extra rule - extra_of ({id, name} of the group it was set in; its group is None).
+
+    A member's own ("customized") rules never REPLACE the group's - they come ON TOP of them (0.84.3). Before,
+    a customized rule took the place of the group's rule of that kind and counted for that member alone, so a
+    member's "own 3 h" undid a group's shared 2 h, and the member's time no longer filled the group's pot. Now
+    every member always gets every group rule, counted in the group's shared pot as for everyone, and its extras
+    are more rules besides: blocked if any of them blocks, the first limit to run out wins, blocked hours add
+    up and allowed hours narrow. An extra can only make the member stricter, never the group looser."""
     if item.get("disabled"):
         return []      # paused: its own rules and its groups' rules all stop applying
     me = f"item:{item['id']}"
@@ -330,18 +338,21 @@ def effective_rules(item: dict, groups: list[dict]) -> list[dict]:
     for g in groups:
         if item["id"] not in g["members"] or g.get("disabled"):
             continue
-        custom = g["members"][item["id"]] or {}
+        group = {"id": g["id"], "name": g["name"]}
+        pot = f"group:{g['id']}"
         for r in g["rules"]:
             t = r["rule_type"]
-            if t in custom:   # customized for this member: counted for the member alone
-                rule = {**custom[t], "rule_type": t, "usage_owner": me}
-                pot = me
-            else:             # inherited: a group daily (time or switch) limit is one shared total
-                rule = {**r, "usage_owner": f"group:{g['id']}" if t in ("time_limit", "switch_limit") else me}
-                # so is the allowance in its blocked hours, unless the group says each member has its own
-                pot = f"group:{g['id']}" if t == "scheduled" and allowance_shared(r) else me
-            out.append({**rule, "item_owner": me, "allowance_owner": pot, "rule_key": f"g{g['id']}{t}",
-                        "group": {"id": g["id"], "name": g["name"]}})
+            # a group (time or opening) limit is one shared total; so is the allowance in its blocked hours,
+            # unless the group says each member has its own
+            out.append({**r, "usage_owner": pot if t in ("time_limit", "switch_limit") else me, "item_owner": me,
+                        "allowance_owner": pot if t == "scheduled" and allowance_shared(r) else me,
+                        "rule_key": f"g{g['id']}{t}", "group": group})
+        for t, r in sorted((g["members"][item["id"]] or {}).items()):
+            # the member's extra rule: its own time, openings and allowance, on top of the group's. It keeps the
+            # key its usage has been stored under since customizing began (its owner is the member, so it never
+            # mixes with the group's pot), so upgrading doesn't hand back openings or allowance already used.
+            out.append({**r, "rule_type": t, "usage_owner": me, "item_owner": me, "allowance_owner": me,
+                        "rule_key": f"g{g['id']}{t}", "group": None, "extra_of": group})
     return out
 
 
@@ -410,7 +421,11 @@ def item_block(rules: list[dict], now: datetime, usage=no_usage) -> tuple[str, d
     active = [(*b, r) for r in rules if (b := rule_block(r, now, usage))]
     if not active:
         return None
-    return min(active, key=lambda b: REASON_ORDER.index(b[0]))
+    reason = min((b[0] for b in active), key=REASON_ORDER.index)
+    # Of the rules blocking for that reason, the one that blocks longest (None = indefinitely): with a member's
+    # extra rules on top of the group's, two can block at once - group blocked 15-18 and YouTube's own 17-20 is
+    # "until 20:00" at 17:30, not 18:00; the group's day limit and YouTube's own week limit is "next week".
+    return max((b for b in active if b[0] == reason), key=lambda b: datetime.max if b[1] is None else b[1])
 
 
 def usage_targets(rules: list[dict], item_id: int, now: datetime,
@@ -446,6 +461,57 @@ def limit_targets(rules: list[dict], now: datetime,
             if until:
                 put((allowance_owner(r), allowance_bucket(r, until)), r["allowance_min"] * 60)
     return out
+
+
+def block_targets(rules: list[dict], now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> set[tuple[str, str]]:
+    """Every (owner, bucket) rule_block reads for these rules at `now` - to look up just those (Database.usage_of)
+    instead of the whole usage table."""
+    out = set()
+    for r in rules:
+        if r["rule_type"] == "time_limit":
+            out |= {(_owner(r), time_bucket(p, now, clock)) for p in limits(r, TIME_LIMIT_FIELDS)}
+        elif r["rule_type"] == "switch_limit":
+            out |= _opening_targets(r, now, clock)
+        elif r["rule_type"] == "scheduled" and r.get("allowance_min") and r.get("schedule"):
+            until = schedule_until(r["schedule"], now)
+            if until:
+                out.add((allowance_owner(r), allowance_bucket(r, until)))
+    return out
+
+
+CLOSED_GRACE_SEC = 120    # a block ending sooner than this may not close what was just opened: that opening counts
+
+
+def closed_opening(rules: list[dict], targets: set[tuple[str, str]], now: datetime,
+                   usage=no_usage) -> set[tuple[str, str]]:
+    """Which of `targets` (opening-limit counters about to get +1 for a launch or a switch) to count, for an app
+    that is CLOSED when it is blocked. `rules` are its enforced rules (effective_rules), `usage` what is written.
+
+    An opening that is closed at once isn't use, so it doesn't spend shared openings (0.84.3): retrying YouTube
+    while its own limit (or its own hours) block it used to take one of the group's openings each time, and
+    left the other members fewer. So:
+    - already blocked (for longer than CLOSED_GRACE_SEC): none of the opening counters (stats still count);
+    - this opening is the one that goes over a limit: only the counters that go over (that is what blocks it);
+    - otherwise: all of them.
+    Blocks that end within CLOSED_GRACE_SEC count as usual, so an app started just before its block ends -
+    and not closed in time - still has its opening counted. An emergency unlock blocks nothing: all count."""
+    def closes(block) -> bool:
+        return block is not None and (block[1] is None or (block[1] - now).total_seconds() > CLOSED_GRACE_SEC)
+    if not rules:
+        return targets
+    openings = {t for t in targets if t[1].startswith("op:")}
+    if closes(item_block(rules, now, usage)):
+        return targets - openings
+    after = Usage({**getattr(usage, "data", {}), **{t: usage(*t) + 1 for t in openings}},
+                  _clock(usage), getattr(usage, "unlocks", {}))
+    if not closes(item_block(rules, now, after)):
+        return targets
+    clock = _clock(usage)
+    over = {(_owner(r), opening_bucket(r, p, now, clock))
+            for r in rules if r["rule_type"] == "switch_limit"
+            for p, limit in limits(r, OPEN_LIMIT_FIELDS).items()
+            if after(_owner(r), opening_bucket(r, p, now, clock)) > limit}
+    return (targets - openings) | (openings & over)
 
 
 def _opening_targets(rule: dict, now: datetime, clock: LimitClock) -> set[tuple[str, str]]:
@@ -566,30 +632,33 @@ def allowance_note(rule: dict, now: datetime, usage=no_usage) -> str | None:
 
 
 def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = True) -> str:
-    """allowance=False leaves out the "N min allowed..." clause, for a caller that shows it separately."""
+    """allowance=False leaves out the "N min allowed..." clause, for a caller that shows it separately.
+    A group's limit says "(group)" - one total for all its members - and a member's extra rule in a group says
+    "(own)", so a member shows both: "Limit (own): 40m / 1h 00m today" and "Limit (group): 1h 10m / 2h 00m"."""
     kind = rule["rule_type"]
+    own = " (own)" if rule.get("extra_of") else ""
     if kind == "permanent":
         return "Permanent"
     if kind == "scheduled":
         s = load_schedule(rule["schedule"])
         label = "Allowed only" if s["mode"] == ALLOW else "Blocked"
-        text = f"{label}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
+        text = f"{label}{own}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
         note = allowance_note(rule, now, usage) if allowance else None
         return f"{text}\n{note}" if note else text
     if kind == "temporary":
         if rule.get("temp_until"):
             left = datetime.strptime(rule["temp_until"], TIME_FMT) - now
-            return f"Temporary: {duration_text(left.total_seconds())} left"
-        return f"Temporary: {duration_text(rule['duration_min'] * 60)} (starts when saved)"
+            return f"Temporary{own}: {duration_text(left.total_seconds())} left"
+        return f"Temporary{own}: {duration_text(rule['duration_min'] * 60)} (starts when saved)"
     clock = _clock(usage)
-    shared = " (shared)" if _owner(rule).startswith("group:") else ""
+    tag = " (group)" if _owner(rule).startswith("group:") else own
     if kind == "time_limit":
         parts = [f"{duration_text(usage(_owner(rule), time_bucket(p, now, clock)))} / {duration_text(limit * 60)} "
                  f"{period_words(p, now, clock)}" for p, limit in limits(rule, TIME_LIMIT_FIELDS).items()]
-        return f"Limit{shared}: " + "\n".join(parts)
+        return f"Limit{tag}: " + "\n".join(parts)
     if kind == "switch_limit":
         parts = [f"{usage(_owner(rule), opening_bucket(rule, p, now, clock))} / {limit} {period_words(p, now, clock)}"
                  for p, limit in limits(rule, OPEN_LIMIT_FIELDS).items()]
         what = "Switches" if switch_mode(rule) == SWITCH else "Openings"
-        return f"{what}{shared}: " + "\n".join(parts)
+        return f"{what}{tag}: " + "\n".join(parts)
     return kind

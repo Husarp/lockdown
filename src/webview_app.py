@@ -62,7 +62,8 @@ def _windows_for_ui(schedule_json: str) -> list[dict]:
 
 
 def _rules_for_ui(db) -> list[dict]:
-    from rules import (TIME_LIMIT_FIELDS, allowance_left, describe_rule, effective_rules, limits, time_bucket)
+    from rules import (TIME_LIMIT_FIELDS, allowance_left, describe_rule, effective_rules, limits, load_schedule,
+                       time_bucket)
     groups = db.list_groups()
     group_of = {i: g["name"] for g in groups for i in g["members"]}
     now = now_from_db(db)
@@ -76,22 +77,35 @@ def _rules_for_ui(db) -> list[dict]:
                "windows": [], "limitType": "off", "limit": 0, "used": 0,
                "allowOn": False, "allowMin": 0, "allowTimes": 0, "allowActive": False, "allowLeft": 0,
                "words": " · ".join(describe_rule(r, now).splitlines()[0] for r in rules) if rules else ""}
+        mode, allowances = None, []
         for r in rules:
             if r["rule_type"] == "scheduled":
-                row["windows"] = row["windows"] or _windows_for_ui(r.get("schedule") or "")
+                # a member's own blocked hours add to its group's: show them all (of the same kind - blocked, or
+                # allowed only - as the first; the list has one kind)
+                try:
+                    kind = load_schedule(r.get("schedule") or "")["mode"]
+                except (ValueError, KeyError, TypeError):
+                    kind = None
+                if mode is None or kind == mode:
+                    mode = mode or kind
+                    row["windows"] += [w for w in _windows_for_ui(r.get("schedule") or "") if w not in row["windows"]]
                 if r.get("allowance_min"):
-                    row["allowOn"], row["allowMin"] = True, r["allowance_min"]
                     spent = allowance_left(r, now, usage)
-                    if spent:
-                        used_s, allowed_s, _u = spent
-                        row["allowActive"], row["allowLeft"] = True, max(0, round((allowed_s - used_s) / 60))
+                    left = max(0, round((spent[1] - spent[0]) / 60)) if spent else r["allowance_min"]
+                    allowances.append((not spent, left, r["allowance_min"]))
             elif r["rule_type"] == "time_limit":
                 fields = limits(r, TIME_LIMIT_FIELDS)
                 period = "day" if "day" in fields else "week" if "week" in fields else None
                 if period:
-                    row["limitType"] = "daily" if period == "day" else "weekly"
-                    row["limit"] = fields[period]
-                    row["used"] = round(usage(r["usage_owner"], time_bucket(period, now, usage.clock)) / 60)
+                    used = round(usage(r["usage_owner"], time_bucket(period, now, usage.clock)) / 60)
+                    # several limits (its own, a group's, its own extra in a group): the one with least left
+                    if row["limitType"] == "off" or fields[period] - used < row["limit"] - row["used"]:
+                        row["limitType"] = "daily" if period == "day" else "weekly"
+                        row["limit"], row["used"] = fields[period], used
+        if allowances:   # several (the group's, its own extra): the one in use with least left limits it
+            idle, left, minutes = min(allowances)
+            row["allowOn"], row["allowMin"], row["allowActive"], row["allowLeft"] = True, minutes, not idle, \
+                (left if not idle else 0)
         out.append(row)
     return out
 

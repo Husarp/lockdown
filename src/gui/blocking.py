@@ -131,8 +131,11 @@ def group_rule(group: dict, rule: dict) -> dict:
 
 
 def rule_text(rule, now, usage) -> str:
+    """"→ Games · ..." for a group's rule and for a member's extra rule in a group - except inside the group's own
+    box (in_box), which already says whose rules they are."""
     text = describe_rule(rule, now, usage, allowance=False).replace(":\n", ": ").replace("\n", " · ")
-    return f"→ {rule['group']['name']} · {text}" if rule["group"] else text
+    group = rule["group"] or rule.get("extra_of")
+    return f"→ {group['name']} · {text}" if group and not rule.get("in_box") else text
 
 
 def rule_chips(rules: list[dict], now, usage) -> list[tuple]:
@@ -468,26 +471,21 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.live_status.append((m["status"], item))
         for w in (m["line"], m["icon"], m["name"]):
             w.bind("<Button-1>", lambda e, i=item["id"]: self.page.edit_item(i))
-        # its own blockers, and anything customised for it in the group - what it has on top of the box's rules
-        # a disabled member keeps its blockers but none of them apply, so its line doesn't list them
+        # its own blockers, and the extra rules the group gives it - what it has on top of the box's rules (the
+        # group's rules apply to it too: they are the chips at the top of the box). A disabled member keeps its
+        # blockers but none of them apply, so its line doesn't list them.
         own = [] if item.get("disabled") else rule_chips(effective_rules({**item, "rules": item["rules"]}, []),
                                                          now, usage)
-        custom = [] if item.get("disabled") else [t for t in (group["members"].get(item["id"]) or {})]
-        while len(m["chips"]) < len(own) + bool(custom):
-            m["chips"].append(rule_chip(m["own"], "", wraplength=440))
         siblings = [] if item.get("disabled") else effective_rules(item, [group])
+        extras = [{**r, "in_box": True} for r in siblings if (r.get("extra_of") or {}).get("id") == group["id"]]
+        own += rule_chips(extras, now, usage)
+        while len(m["chips"]) < len(own):
+            m["chips"].append(rule_chip(m["own"], "", wraplength=440))
         for chip, (rule, allowance) in zip(m["chips"], own):
             _paint_chip(chip, rule, now, usage, allowance, siblings)
             chip.pack(anchor="w", pady=1)
             self.live_rules.append((chip, rule, allowance, siblings))
-        extra = m["chips"][len(own):]
-        if custom:
-            fg, bg = CHIP_STYLES["neutral"]
-            names = ", ".join(RULE_NAMES[t].lower() for t in custom if t in RULE_NAMES)
-            extra[0].configure(text=f" its own {names} in this group ", text_color=fg, fg_color=bg)
-            extra[0].pack(anchor="w", pady=1)
-            extra = extra[1:]
-        for chip in extra:
+        for chip in m["chips"][len(own):]:
             chip.pack_forget()
 
     def refresh(self, now, usage):

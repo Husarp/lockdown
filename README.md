@@ -17,7 +17,7 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   daily time limits, temporary blocks, stacked rules, locked browser DoH/QUIC policies, closing open connections on block,
   blocked-visit notifications, tray agent at login, single instance, clock-change protection.
 - **Phase 3 done:** app blocking (close politely then force after 10 s / block internet via firewall / both),
-  app browser with icons, daily limits for apps, groups with shared rules + per-member customization,
+  app browser with icons, daily limits for apps, groups with shared rules + extra limits per member (on top of the group's),
   "N minutes allowed during blocked hours", warnings before blocks + reminders while in use + "block started".
 - **Blocking UI:** five tabs — **Overview** (everything with rules as chips, sortable, Edit/Remove), **Groups** (list + editor), **Add** (pick a site or app,
   tick any number of blockers: hours, time limit, opening limit, permanent, temporary), **Site protection** (always-on
@@ -78,8 +78,14 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   front; "Block internet" adds a Windows Firewall rule. "Also close its background processes" (with Close app)
   closes, once the app is gone, what it started and whatever runs from its install folder. Windows' own processes
   can't be blocked.
-- Groups (Blocking > Groups) hold shared rules; members inherit them, a member can be customized, and a group
-  daily limit is one total for all members. Warnings/reminders are set on the Notifications page.
+- Groups (Blocking > Groups) hold shared rules; members inherit them, and a group daily limit is one total for
+  all members. A member can get extra limits ON TOP of the group's (never instead of them): the group's rules
+  always apply to it, its time and openings fill the group's shared limits and its own, blocked hours add up and
+  allowed hours narrow, and the first limit to run out blocks it. E.g. "Fun" 2 h a day with YouTube at most 1 h:
+  YouTube stops at 1 h, which is 1 h of Fun's 2 h. A member can get an extra limit of any kind (hours, time
+  limit, opening limit, temporary), also one the group itself doesn't have. An app that is closed the moment it
+  opens (because it is blocked) doesn't use up the group's openings. Extra limits only tighten - adding or
+  tightening one is free, removing or relaxing one goes through Anti-Bypass. Warnings/reminders are set on the Notifications page.
 - Daily limits: the tray agent checks the windows in front twice a second, reads the active browser tab's address
   (Windows UI Automation — Chrome, Edge, Brave, Firefox, no extension needed) and counts time on limited sites and
   apps; the service blocks the site once the limit is used up,
