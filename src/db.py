@@ -1,6 +1,10 @@
 """SQLite database layer (shared by GUI and service)."""
+import functools
 import json
+import logging
 import sqlite3
+import threading
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -161,6 +165,67 @@ CREATE TABLE IF NOT EXISTS site_history (
     display_name TEXT,
     last_used DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Daily roll-ups, kept forever. Per-minute / per-event detail older than retention.DETAIL_DAYS is added here and
+-- deleted in the same transaction (retention.py), so a day is counted exactly once: raw rows + roll-up rows.
+CREATE TABLE IF NOT EXISTS daily_activity (
+    day TEXT NOT NULL,            -- "YYYY-MM-DD"
+    exe TEXT NOT NULL,
+    site TEXT NOT NULL DEFAULT '',
+    seconds INTEGER NOT NULL DEFAULT 0,
+    active_seconds INTEGER NOT NULL DEFAULT 0,
+    first_minute TEXT,            -- earliest "YYYY-MM-DD HH:MM" it was recorded that day
+    PRIMARY KEY (day, exe, site)
+);
+
+CREATE TABLE IF NOT EXISTS daily_switches (
+    day TEXT NOT NULL,
+    exe TEXT NOT NULL DEFAULT '',
+    site TEXT NOT NULL DEFAULT '',
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, exe, site)
+);
+
+CREATE TABLE IF NOT EXISTS daily_block_events (
+    day TEXT NOT NULL,
+    item_id INTEGER,
+    display_name TEXT,
+    hostname TEXT,
+    reason TEXT,
+    count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS daily_reminders (
+    day TEXT NOT NULL,
+    what TEXT,
+    result TEXT,
+    count INTEGER NOT NULL DEFAULT 0
+);
+
+-- Bumped (by the triggers below, in the same transaction) whenever any connection changes the blocked items or
+-- their rules: list_items() reuses what it loaded until this changes - it was 45 ms with 6 000 items, every 2-5 s.
+CREATE TABLE IF NOT EXISTS change_counter (
+    name TEXT PRIMARY KEY,
+    n INTEGER NOT NULL DEFAULT 0
+);
+CREATE TRIGGER IF NOT EXISTS blocked_items_insert_count AFTER INSERT ON blocked_items BEGIN
+    INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS blocked_items_update_count AFTER UPDATE ON blocked_items BEGIN
+    INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS blocked_items_delete_count AFTER DELETE ON blocked_items BEGIN
+    INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS block_rules_insert_count AFTER INSERT ON block_rules BEGIN
+    INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS block_rules_update_count AFTER UPDATE ON block_rules BEGIN
+    INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER IF NOT EXISTS block_rules_delete_count AFTER DELETE ON block_rules BEGIN
+    INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
+END;
 """
 
 # Columns added after a table was first released: (table, column, definition)
@@ -178,34 +243,148 @@ RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allow
                 "monthly_switch_limit")
 USAGE_DAYS_LOADED = 40   # monthly limits (+ a long day after a reset-time change)
 
+# One per hot WHERE / ORDER BY (see design/rebuild/inventory-perf.md #3-#5). activity and network_log need none: their
+# primary keys start with `minute`, which is what every query on them ranges over.
+INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_switch_events_ts ON switch_events(timestamp)",      # stats.switches, averages
+    "CREATE INDEX IF NOT EXISTS idx_block_events_ts ON block_events(timestamp)",        # blocked_events(day), log
+    "CREATE INDEX IF NOT EXISTS idx_usage_day ON usage(day)",                           # usage_lookup, every tick
+    "CREATE INDEX IF NOT EXISTS idx_reminder_log_what_ts ON reminder_log(what, timestamp)",   # reminders.counts
+    "CREATE INDEX IF NOT EXISTS idx_reminder_log_ts ON reminder_log(timestamp)",        # retention
+    "CREATE INDEX IF NOT EXISTS idx_block_rules_item ON block_rules(item_id)",          # update_item, cascades
+    "CREATE INDEX IF NOT EXISTS idx_block_rules_temp ON block_rules(temp_until) WHERE rule_type = 'temporary'",
+    "CREATE INDEX IF NOT EXISTS idx_group_rules_group ON group_rules(group_id)",        # update_group, cascades
+    "CREATE INDEX IF NOT EXISTS idx_group_rules_temp ON group_rules(temp_until) WHERE rule_type = 'temporary'",
+    "CREATE INDEX IF NOT EXISTS idx_group_members_item ON group_members(item_id)",      # item delete, cleanup
+    "CREATE INDEX IF NOT EXISTS idx_daily_block_events_day ON daily_block_events(day)",
+    "CREATE INDEX IF NOT EXISTS idx_daily_reminders_what_day ON daily_reminders(what, day)",
+]
+# PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
+# MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
+SCHEMA_VERSION = 2   # 2: change_counter + its triggers (0.84.0 review)
+UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
+BUSY_SEC = 10            # everyone else (service, worker threads)
+WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
+# Settings the window may keep in memory while the database is locked (written by a background thread as soon as it
+# is free): only how the window looks / what it last showed. Everything else is written at once (see set_setting).
+DEFERRABLE_PREFIXES = ("ui.", "dash.", "screentime.", "stats.goal_hours", "notify.last_alert", "updates.",
+                       "digest.last")
+
+
+def deferrable(key: str) -> bool:
+    return key.startswith(DEFERRABLE_PREFIXES)
+
+log = logging.getLogger("lockdown.db")
+
+
+def _locked(error: Exception) -> bool:
+    text = str(error).lower()
+    return "locked" in text or "busy" in text
+
+
+def _write(fn):
+    """A write the window must not lose: on its connection (short busy timeout) a lock is retried for up to
+    WRITE_RETRY_SEC - only for the outermost call, outside any open transaction, so nothing is half-done twice."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if not self.ui or self._write_depth or self.conn.in_transaction:
+            self._write_depth += 1
+            try:
+                return fn(self, *args, **kwargs)
+            finally:
+                self._write_depth -= 1
+        deadline = time.monotonic() + WRITE_RETRY_SEC
+        while True:
+            self._write_depth += 1
+            try:
+                return fn(self, *args, **kwargs)
+            except sqlite3.OperationalError as e:
+                if not _locked(e) or self.conn.in_transaction or time.monotonic() >= deadline:
+                    raise
+            finally:
+                self._write_depth -= 1
+            time.sleep(0.05)
+    return wrapper
+
+
 
 class Database:
-    def __init__(self, path: Path = DB_PATH):
+    def __init__(self, path: Path = DB_PATH, ui: bool = False):
+        """ui=True for the window's own connection: a short busy timeout, so a lock held by the service or a
+        worker never freezes the window for 10 s. Settings written while locked are kept in memory (and read
+        back from there) and written by a background thread as soon as the lock is free - never lost."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path, timeout=10, check_same_thread=False)
+        self.path, self.ui = Path(path), ui
+        # (the long timeout while opening: right after an update the service may be busy creating the indexes)
+        self.conn = sqlite3.connect(path, timeout=BUSY_SEC, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        self._write_depth = 0
+        self._items = None                            # (items_version, list_items() result)
+        self._parsed: dict = {}                       # (key, parse) -> (raw text, parsed value)
+        self._pending: dict[str, tuple] = {}          # ui: key -> (newest value, database value when it was set)
+        self._pending_lock = threading.Lock()
+        self._flushed = threading.Condition(self._pending_lock)
+        self._flushing = False
+        self._wal(BUSY_SEC)
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self._migrate()
+        if ui:
+            self.conn.execute(f"PRAGMA busy_timeout={int(UI_BUSY_SEC * 1000)}")
+
+    def _wal(self, timeout: float):
+        """WAL mode (persistent in the file, so normally only read here). Switching a brand-new file to WAL
+        doesn't wait for SQLite's busy handler, so two processes creating it together (first start: service and
+        tray) could fail with "database is locked" - wait for it here instead."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if str(self.conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal":
+                    self.conn.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError as e:
+                if not _locked(e) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.02)
+
+    def _migrate(self):
+        """Create / upgrade the schema - only when PRAGMA user_version says this database hasn't had it yet, so a
+        normal open is two PRAGMAs instead of ~20 queries (it is opened four or more times per session)."""
+        if self.conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+            return
         self.conn.executescript(SCHEMA)
-        for table, column, definition in MIGRATIONS:
-            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
-            if column not in cols:
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        self.conn.execute("BEGIN IMMEDIATE")   # the service may be opening it at the same moment
+        try:
+            for table, column, definition in MIGRATIONS:
+                cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+                if column not in cols:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'site_usage'").fetchone():  # 0.3.x
+                self.conn.execute("INSERT OR IGNORE INTO usage (owner, bucket, seconds, day) "
+                                  "SELECT 'item:' || item_id, 'day:' || date, seconds, date FROM site_usage")
+                self.conn.execute("DROP TABLE site_usage")
+            for statement in INDEXES:
+                self.conn.execute(statement)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
         from importer.popular import add_media_hosts
         add_media_hosts(self)   # one-off: youtube.com also covers googlevideo.com now (the video itself)
         import mojibake
         mojibake.repair_saved(self)   # one-off: text typed before 0.70.1, when AltGr letters arrived wrong
-        if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'site_usage'").fetchone():  # 0.3.x table
-            self.conn.execute("INSERT OR IGNORE INTO usage (owner, bucket, seconds, day) "
-                              "SELECT 'item:' || item_id, 'day:' || date, seconds, date FROM site_usage")
-            self.conn.execute("DROP TABLE site_usage")
+        # one-time statistics for the new indexes (sampled, so it is quick even on a years-old database)
+        self.conn.execute("PRAGMA analysis_limit=1000")
+        self.conn.execute("ANALYZE")
+        self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.conn.commit()
 
     def close(self):
+        self.flush()
         self.conn.close()
 
     # ---------- blocked items ----------
 
+    @_write
     def add_item(self, display_name: str, targets: list[str], item_type: str = "site", source: str = "manual",
                  rules: list[dict] | None = None, notify: str | None = None, block_type: str | None = None,
                  app_path: str | None = None) -> int:
@@ -230,6 +409,7 @@ class Database:
                 f"VALUES ({', '.join('?' * (len(RULE_COLUMNS) + 1))})",
                 (owner_id, *(r.get(c) for c in RULE_COLUMNS)))
 
+    @_write
     def update_item(self, item_id: int, display_name: str, targets: list[str], notify: str | None,
                     rules: list[dict], block_type: str | None = None, app_path: str | None = None,
                     disabled: bool = False):
@@ -242,6 +422,7 @@ class Database:
             self.conn.execute("DELETE FROM block_rules WHERE item_id = ?", (item_id,))
             self._insert_rules("block_rules", "item_id", item_id, rules)
 
+    @_write
     def set_app_path(self, item_id: int, path: str):
         with self.conn:
             self.conn.execute("UPDATE blocked_items SET app_path = ? WHERE id = ?", (path, item_id))
@@ -249,20 +430,35 @@ class Database:
     def item_ids(self) -> set[int]:
         return {r[0] for r in self.conn.execute("SELECT id FROM blocked_items")}
 
+    @_write
     def remove_item(self, item_id: int):
         with self.conn:
             self.conn.execute("DELETE FROM blocked_items WHERE id = ?", (item_id,))
 
+    def items_version(self) -> int:
+        row = self.conn.execute("SELECT n FROM change_counter WHERE name = 'items'").fetchone()
+        return row[0] if row else 0
+
+    def item_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM blocked_items").fetchone()[0]
+
     def list_items(self) -> list[dict]:
-        """All items, each with a 'rules' list of its own rule dicts."""
-        items = [dict(r) for r in self.conn.execute(
-            "SELECT * FROM blocked_items ORDER BY display_name COLLATE NOCASE")]
-        rules: dict[int, list[dict]] = {}
-        for r in self.conn.execute("SELECT * FROM block_rules ORDER BY id"):
-            rules.setdefault(r["item_id"], []).append(dict(r))
-        for item in items:
-            item["rules"] = rules.get(item["id"], [])
-        return items
+        """All items, each with a 'rules' list of its own rule dicts. Loaded again only when change_counter says
+        some connection changed the items or rules; each call gets its own copies (callers may change them)."""
+        version = self.items_version()
+        cached = self._items
+        if cached is None or cached[0] != version or self.conn.in_transaction:
+            items = [dict(r) for r in self.conn.execute(
+                "SELECT * FROM blocked_items ORDER BY display_name COLLATE NOCASE")]
+            rules: dict[int, list[dict]] = {}
+            for r in self.conn.execute("SELECT * FROM block_rules ORDER BY id"):
+                rules.setdefault(r["item_id"], []).append(dict(r))
+            for item in items:
+                item["rules"] = rules.get(item["id"], [])
+            if self.conn.in_transaction:   # (uncommitted: don't remember it)
+                return items
+            cached = self._items = (version, items)
+        return [dict(item, rules=[dict(r) for r in item["rules"]]) for item in cached[1]]
 
     # ---------- groups ----------
 
@@ -276,12 +472,14 @@ class Database:
             groups[r["group_id"]]["members"][r["item_id"]] = json.loads(r["overrides"])
         return list(groups.values())
 
+    @_write
     def add_group(self, name: str, rules: list[dict], members: dict[int, dict] | None = None) -> int:
         with self.conn:
             cur = self.conn.execute("INSERT INTO block_groups (name) VALUES (?)", (name,))
             self._write_group(cur.lastrowid, rules, members or {})
         return cur.lastrowid
 
+    @_write
     def update_group(self, group_id: int, name: str, rules: list[dict], members: dict[int, dict],
                      disabled: bool = False):
         with self.conn:
@@ -297,6 +495,7 @@ class Database:
             self.conn.execute("INSERT INTO group_members (group_id, item_id, overrides) VALUES (?, ?, ?)",
                               (group_id, item_id, json.dumps(overrides or {})))
 
+    @_write
     def remove_group(self, group_id: int):
         with self.conn:
             self.conn.execute("DELETE FROM block_groups WHERE id = ?", (group_id,))
@@ -306,13 +505,16 @@ class Database:
 
     # ---------- evaluation ----------
 
-    def blocks(self, now: datetime | None = None) -> list[dict]:
+    def blocks(self, now: datetime | None = None, usage: Usage | None = None, items: list[dict] | None = None,
+               groups: list[dict] | None = None) -> list[dict]:
         """Every item (site or app) blocked at `now`: {item, reason, until, rule} - by its own rules, its groups,
-        or the mode that's on (made-up items with id None for things a mode blocks that aren't on the list)."""
+        or the mode that's on (made-up items with id None for things a mode blocks that aren't on the list).
+        usage / items / groups: what the caller already loaded for this same tick (one usage_lookup per tick)."""
         now = now or datetime.now()
-        usage = self.usage_lookup(now)
-        groups = self.list_groups()
-        items = [i for i in self.list_items() if not i["disabled"]]   # disabled = paused, nothing applies
+        usage = usage if usage is not None else self.usage_lookup(now)
+        groups = groups if groups is not None else self.list_groups()
+        items = [i for i in (items if items is not None else self.list_items())
+                 if not i["disabled"]]   # disabled = paused, nothing applies
         out = []
         for item in items:
             block = item_block(effective_rules(item, groups), now, usage)
@@ -357,6 +559,7 @@ class Database:
         """Hostnames of all sites that are blocked at `now`."""
         return sorted(self.active_blocks(now))
 
+    @_write
     def delete_expired_temporary(self, now: datetime | None = None) -> int:
         """Remove expired temporary rules, and items left with no rules and no groups. Returns items removed."""
         now = now or datetime.now()
@@ -371,6 +574,7 @@ class Database:
 
     # ---------- usage + history ----------
 
+    @_write
     def add_usage(self, targets, seconds: int, day: date):
         """Add seconds to every (owner, bucket) in targets."""
         with self.conn:
@@ -388,10 +592,11 @@ class Database:
         return Usage(data, self.limit_clock(), {f"item:{i}": u for i, u in self.active_unlocks(now).items()})
 
     def limit_clock(self) -> LimitClock:
-        return LimitClock(self.get_setting(RESET_KEY))
+        return self.parsed(RESET_KEY, LimitClock)   # (a LimitClock never changes once made)
 
     # ---------- emergency unlocks ----------
 
+    @_write
     def add_unlock(self, item_ids: list[int], names: list[str], start: datetime, until: datetime):
         with self.conn:
             self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names) VALUES (?, ?, ?, ?)",
@@ -413,6 +618,7 @@ class Database:
                     out[i] = max(out.get(i, u["until"]), u["until"])
         return out
 
+    @_write
     def add_history(self, hostname: str, display_name: str):
         with self.conn:
             self.conn.execute(
@@ -423,12 +629,14 @@ class Database:
     def history(self) -> list[dict]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM site_history ORDER BY last_used DESC")]
 
+    @_write
     def clear_history(self):
         with self.conn:
             self.conn.execute("DELETE FROM site_history")
 
     # ---------- screen time ----------
 
+    @_write
     def add_activity(self, minute: str, exe: str, site: str, seconds: int, active_seconds: int):
         with self.conn:
             self.conn.execute(
@@ -437,6 +645,7 @@ class Database:
                 "active_seconds = active_seconds + excluded.active_seconds",
                 (minute, exe, site, seconds, active_seconds))
 
+    @_write
     def add_switch(self, timestamp: datetime, exe: str, site: str):
         with self.conn:
             self.conn.execute("INSERT INTO switch_events (timestamp, exe, site) VALUES (?, ?, ?)",
@@ -445,6 +654,7 @@ class Database:
     def categories(self) -> dict[tuple[str, str], str]:
         return {(r[0], r[1]): r[2] for r in self.conn.execute("SELECT kind, name, category FROM categories")}
 
+    @_write
     def set_category(self, kind: str, name: str, category: str):
         with self.conn:
             self.conn.execute("INSERT INTO categories (kind, name, category) VALUES (?, ?, ?) "
@@ -453,6 +663,7 @@ class Database:
 
     # ---------- network log ----------
 
+    @_write
     def add_network(self, rows: list[dict]):
         """rows: {minute, exe, ip, port, domain, count, windows, local}; counts add up, a known domain is kept."""
         with self.conn:
@@ -466,16 +677,20 @@ class Database:
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM network_log WHERE minute >= ? ORDER BY minute DESC, count DESC", (minute,))]
 
+    @_write
     def prune_network(self, before_minute: str):
         with self.conn:
             self.conn.execute("DELETE FROM network_log WHERE minute < ?", (before_minute,))
 
     def block_events_since(self, since: datetime) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
-            "SELECT * FROM block_events WHERE timestamp >= ? ORDER BY id DESC", (since.strftime(TIME_FMT),))]
+            # (+id: sort the few recent rows found through the timestamp index, rather than walk the whole table
+            # newest-first by id - which is what SQLite picks otherwise)
+            "SELECT * FROM block_events WHERE timestamp >= ? ORDER BY +id DESC", (since.strftime(TIME_FMT),))]
 
     # ---------- block events ----------
 
+    @_write
     def add_block_event(self, hostname: str, item_id: int, display_name: str, reason: str,
                         until: datetime | None, now: datetime | None = None):
         now = now or datetime.now()
@@ -494,19 +709,168 @@ class Database:
     def last_block_event_id(self) -> int:
         return self.conn.execute("SELECT COALESCE(MAX(id), 0) FROM block_events").fetchone()[0]
 
+    @_write
+    def write(self, sql: str, args=()) -> int:
+        """One write statement in its own transaction (retried on the window's connection, like the methods above).
+        Returns the rows changed."""
+        with self.conn:
+            return self.conn.execute(sql, args).rowcount
+
     # ---------- settings ----------
+    # Read straight from the database (a primary-key SELECT costs no more than checking whether a cache is stale -
+    # measured), with what the window has waiting for the lock laid over it; parsed() caches the *parsed* value per
+    # distinct text, which is where the time went.
 
     def all_settings(self) -> dict[str, str]:
-        return {r[0]: r[1] for r in self.conn.execute("SELECT key, value FROM settings")}
+        with self._pending_lock:   # (snapshot first: the writer may commit and clear them during the SELECT)
+            pending = {k: v for k, (v, _base) in self._pending.items()}
+        out = {r[0]: r[1] for r in self.conn.execute("SELECT key, value FROM settings")}
+        out.update(pending)
+        return out
 
     def get_setting(self, key: str, default: str | None = None) -> str | None:
+        pending = self._pending.get(key)
+        if pending is not None:
+            return pending[0]
         row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else default
+        return row[0] if row else default
+
+    def parsed(self, key: str, parse, default: str | None = None):
+        """parse(setting text) - worked out once per distinct text, not on every call (protection lists, the clock
+        offset, the limit clock). The result is shared: callers must not change it."""
+        raw = self.get_setting(key, default)
+        hit = self._parsed.get((key, parse))
+        if hit is not None and hit[0] == raw:
+            return hit[1]
+        value = parse(raw)
+        self._parsed[(key, parse)] = (raw, value)
+        return value
 
     def set_setting(self, key: str, value: str):
-        with self.conn:
-            self.conn.execute(
+        """On the window's connection only display settings (DEFERRABLE) may wait in memory for a lock; everything
+        else - Anti-Bypass, modes, protection lists, limits, reminders ... - is written now, retried for up to
+        WRITE_RETRY_SEC like any other structural write, so it can neither be lost nor land late on top of a newer
+        value written elsewhere."""
+        if self.ui and deferrable(key):
+            with self._pending_lock:
+                if self._pending or self._flushing:   # keep the order: queue behind what is already waiting
+                    self._defer(key, value)
+                    return
+            try:
+                self._store_setting(self.conn, key, value)
+            except sqlite3.OperationalError as e:
+                if not _locked(e) or self.conn.in_transaction:
+                    raise
+                with self._pending_lock:
+                    self._defer(key, value)
+        else:
+            self._set_now(key, value)
+
+    @_write
+    def _set_now(self, key: str, value: str):
+        self._store_setting(self.conn, key, value)
+
+    @staticmethod
+    def _store_setting(conn, key: str, value: str):
+        with conn:
+            conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+
+    def _defer(self, key: str, value: str):
+        """(holding _pending_lock) Remember the value - and what the database held when it was set, so that a newer
+        value written meanwhile by another connection is not overwritten - and make sure the writer is on its way."""
+        old = self._pending.get(key)
+        if old is not None:
+            base = old[1]
+        else:
+            row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()   # (WAL: reads
+            base = row[0] if row else None                                                          # never wait)
+        self._pending[key] = (value, base)
+        if not self._flushing:
+            self._flushing = True
+            threading.Thread(target=self._flush_pending, name="lockdown-settings-writer", daemon=True).start()
+
+    @staticmethod
+    def _write_batch(conn, batch: dict) -> list[str]:
+        """Write the waiting values in one IMMEDIATE transaction - each only if the database still holds what it
+        held when the value was set (compare-and-set). Returns the keys skipped because someone wrote them since."""
+        skipped = []
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for key, (value, base) in batch.items():
+                row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+                now = row[0] if row else None
+                if now != base and now != value:
+                    skipped.append(key)
+                    continue
+                conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        return skipped
+
+    def _flush_pending(self):
+        """Writer thread: wait for the lock on a connection of its own and write what is pending; whatever arrives
+        meanwhile goes in the next round. Any database error is retried (logged once) - a waiting value is only
+        dropped by a newer one."""
+        conn, logged = None, False
+        try:
+            conn = sqlite3.connect(self.path, timeout=BUSY_SEC, isolation_level=None)
+            while True:
+                with self._pending_lock:
+                    batch = dict(self._pending)
+                    if not batch:
+                        self._flushing = False
+                        self._flushed.notify_all()
+                        return
+                try:
+                    skipped = self._write_batch(conn, batch)
+                except sqlite3.OperationalError as e:
+                    if not _locked(e) and not logged:
+                        log.exception("Writing settings in the background failed - retrying")
+                        logged = True
+                    time.sleep(0.2 if _locked(e) else 1.0)
+                    continue
+                if skipped:
+                    log.warning("Settings %s were changed elsewhere while waiting for the lock - kept the newer "
+                                "value", ", ".join(skipped))
+                with self._pending_lock:
+                    for k, v in batch.items():
+                        if self._pending.get(k) is v:
+                            del self._pending[k]
+        except Exception:
+            log.exception("Writing settings in the background failed")
+            with self._pending_lock:
+                self._flushing = False
+                self._flushed.notify_all()
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def flush(self, timeout: float = 30) -> bool:
+        """Wait until settings written while the database was locked are on disk (before exit / restart). If the
+        writer thread is gone with values still waiting, one last synchronous attempt. True if nothing is left."""
+        end = time.monotonic() + timeout
+        with self._pending_lock:
+            while self._flushing:
+                left = end - time.monotonic()
+                if left <= 0:
+                    return False
+                self._flushed.wait(left)
+            batch = dict(self._pending)
+        if batch:
+            try:
+                self._write_batch(self.conn, batch)
+            except sqlite3.Error:
+                log.exception("Writing waiting settings failed")
+                return False
+            with self._pending_lock:
+                for k, v in batch.items():
+                    if self._pending.get(k) is v:
+                        del self._pending[k]
+        return not self._pending

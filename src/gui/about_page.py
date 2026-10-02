@@ -126,9 +126,12 @@ class AboutPage(ctk.CTkScrollableFrame):
         self.update_note.configure(text="Asking GitHub...", text_color=MUTED)
         threading.Thread(target=self._ask, daemon=True).start()   # the network, off the Tk thread
 
+    # The worker threads below never call Tk (not even self.after - that is Tcl from the wrong thread, a crash /
+    # hang source): they hand results to the window's call queue, which runs them on the Tk thread.
+
     def _ask(self):
         found = updates.latest_release()
-        self.after(0, self._checked, found)
+        self.app.call_soon(self._checked, found)
 
     def _checked(self, found):
         self.check_btn.configure(state="normal")
@@ -168,13 +171,14 @@ class AboutPage(ctk.CTkScrollableFrame):
             dest = Path(tempfile.gettempdir()) / f"LockdownSetup-{found['version']}.exe"
             updates.download(found["asset"], dest, progress=self._progress)
         except Exception as error:
-            self.after(0, self._failed, error)
+            self.app.call_soon(self._failed, error)
             return
-        self.after(0, self._got, dest)
+        self.app.call_soon(self._got, dest)
 
     def _progress(self, done, total):
+        """(worker thread, once per downloaded chunk) Only the newest value reaches the bar - no flood."""
         if total:
-            self.after(0, self.bar.set, done / total)
+            self.app.call_latest("update-progress", self.bar.set, done / total)
 
     def _failed(self, error):
         self.bar.pack_forget()
@@ -194,7 +198,7 @@ class AboutPage(ctk.CTkScrollableFrame):
     def _close_for_update(self):
         """Not the tray's Exit: that one marks Lockdown as deliberately quit and keeps it off until you log in
         again. An update is meant to come straight back, so only the window and the tray icon go."""
-        self.app.tray.stop()
+        self.app._shutdown()
         self.app.destroy()
 
     def _set(self, key, value):

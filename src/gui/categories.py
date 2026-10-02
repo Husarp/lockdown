@@ -70,8 +70,7 @@ def remove(db, key: str):
     cfg["custom"] = [c for c in cfg.get("custom", []) if c["key"] != key]
     cfg.get("colors", {}).pop(key, None)
     db.set_setting(KEY, json.dumps(cfg))
-    with db.conn:
-        db.conn.execute("DELETE FROM categories WHERE category = ?", (key,))
+    db.write("DELETE FROM categories WHERE category = ?", (key,))
 
 
 # ---------------------------------------------------------------- GUI

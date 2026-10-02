@@ -112,3 +112,27 @@ def test_adding_a_block_is_allowed_even_with_a_challenge(tmp_path, monkeypatch):
     antibypass.save(api.db, {**antibypass.settings(api.db), "phrase": True})
     assert api.save_rule({"id": "new", "n": "Reddit", "kind": "site", "target": "reddit.com",
                           "when": "block", "windows": [], "limitType": "off"})["ok"] is True
+
+
+def test_each_pywebview_thread_gets_its_own_connection(tmp_path, monkeypatch):
+    """Review (0.84.0, perf #2): pywebview calls the Api from several worker threads at once; one shared connection
+    let one thread's write retry / transaction interleave with another's. Each thread now opens its own."""
+    import threading
+    api = _api(tmp_path, monkeypatch)
+    seen, errors = [], []
+
+    def call():
+        try:
+            seen.append(api.db)
+            api.db.add_item(f"s{threading.get_ident()}", [f"s{len(seen)}.com"], "site",
+                            rules=[{"rule_type": "permanent"}])
+        except Exception as e:   # noqa: BLE001
+            errors.append(e)
+    threads = [threading.Thread(target=call) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert len({id(d) for d in seen}) == 4 and all(d.path == api.db.path for d in seen)
+    assert api.db is api.db and len(api.db.list_items()) == 4

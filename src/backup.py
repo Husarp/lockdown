@@ -8,7 +8,8 @@ from datetime import date, timedelta
 
 FORMAT = 1
 RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "clock_zone", "dns_filter.saved",
-                "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last"}
+                "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last",
+                "retention.last_day"}   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
 
 
 def export(db) -> dict:
@@ -128,9 +129,14 @@ def restore(db, data: dict):
 def screen_time_csv(db, path: str, days: int = 365) -> int:
     """Screen time per day and app / site (minutes in front, minutes active) -> CSV. Returns the number of rows."""
     since = (date.today() - timedelta(days=days)).isoformat()
+    # the per-minute detail and, for days retention has rolled up, the daily totals (same day / app / site sums)
     rows = db.conn.execute(
-        "SELECT substr(minute, 1, 10) AS day, exe, site, SUM(seconds), SUM(active_seconds) FROM activity "
-        "WHERE minute >= ? GROUP BY day, exe, site ORDER BY day, SUM(seconds) DESC", (since,)).fetchall()
+        "SELECT day, exe, site, SUM(s), SUM(a) FROM ("
+        " SELECT substr(minute, 1, 10) AS day, exe, site, SUM(seconds) AS s, SUM(active_seconds) AS a FROM activity"
+        "  WHERE minute >= ? GROUP BY day, exe, site"
+        " UNION ALL"
+        " SELECT day, exe, site, seconds AS s, active_seconds AS a FROM daily_activity WHERE day >= ?"
+        ") GROUP BY day, exe, site ORDER BY day, SUM(s) DESC", (since, since)).fetchall()
     categories = db.categories()
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)

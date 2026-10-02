@@ -306,6 +306,21 @@ All settings, blocklists, schedules, and configurations are **always viewable** 
 > windows + workers) so a click is a ~300 ms `show()`. Includes a Phase 0 quick-win (two ~10-line fixes for
 > the worst symptoms) and a phased migration. Full write-up: section 11 of
 > [design/REDESIGN.md](design/REDESIGN.md). **Not started — waiting for the user's go.**
+>
+> **Rebuild Phase 0 (logic + DB) DONE in 0.84.0 (2026-10-02)** — for the current app, no UI change
+> ([design/rebuild/BLUEPRINT.md](design/rebuild/BLUEPRINT.md) §5): indexes on every hot query; migrations once per
+> `PRAGMA user_version` (schema 2) + one-time `ANALYZE`; retention (32 days of minute / event detail, daily totals
+> forever, approved 2026-10-01 — limits, unlocks, settings and rules never pruned; a day goes only once 33 days with
+> data follow it, so a wrong clock can't take recent detail); streaks / averages / time saved / reminder counts in
+> SQL or indexed; parsed settings cached per text (a raw settings cache was measured as no faster and dropped);
+> the item list reused until a trigger-kept change counter moves; 1.5 s busy timeout for the window, only display
+> settings deferred (compare-and-set), enforcement settings written at once; worker threads hand results to a
+> Tk-thread queue; tray menu rebuilt on pystray's thread; generational GC on the Tk thread with `gc.freeze()`;
+> `schtasks` off the start-up path but still `/Create /F` every launch (re-enables a disabled watchdog);
+> thread-local connections for the pywebview Api. Reviewed (data integrity, anti-bypass, threading, perf) and the
+> findings fixed. Benchmark: `scripts/bench_stats.py`. Still to do from the blueprint's logic track (needs the
+> agent): one status snapshot per tick shared by every page, the parsed protection config for all GUI call sites,
+> giving back the space freed by the first roll-up (VACUUM - not done: it locks out the service for seconds).
 
 
 ### 3.1 Layout — Sidebar Navigation
@@ -1805,15 +1820,17 @@ Lockdown/
 ├── requirements.txt
 ├── setup.py
 ├── scripts/
+│   ├── bench_stats.py         # Times Dashboard / Screen Time data work on a big synthetic database
 │   ├── install_service.ps1    # Registers the enforcement service (admin, once)
 │   └── uninstall_service.ps1
-├── tests/                     # pytest
+├── tests/                     # pytest (conftest.py fakes Win32 off Windows so the suite runs on Linux too)
 ├── src/
 │   ├── main.py                # GUI entry point
 │   ├── paths.py               # Shared file locations (ProgramData, hosts)
 │   ├── service.py             # Enforcement service
 │   ├── watchdog.py            # Watchdog service
-│   ├── db.py                  # SQLite database layer
+│   ├── db.py                  # SQLite database layer (indexes, schema version, parsed-settings cache)
+│   ├── retention.py           # Daily roll-up of old per-minute / per-event detail (kept 32 days)
 │   ├── rules.py               # Block rule evaluation (permanent / hours / temporary / daily limit)
 │   ├── trusted_time.py        # Clock-change protection (internet time + tick counter)
 │   ├── alerts.py              # Blocked-visit alert settings + message formatting
@@ -1834,6 +1851,7 @@ Lockdown/
 │   │   └── applist.py         # Installed app enumeration (registry)
 │   ├── gui/
 │   │   ├── app.py             # Main window + sidebar + global search
+│   │   ├── mainthread.py      # Worker -> Tk-thread call queue, Tk-thread garbage collection
 │   │   ├── dashboard.py       # Dashboard / Home view
 │   │   ├── blocking.py        # Unified blocking view (sub-tabs by type)
 │   │   ├── app_browser.py     # App browser popup (for adding apps)

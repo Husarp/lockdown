@@ -1,8 +1,13 @@
 import socket
 import struct
+import sys
 import threading
 
+import pytest
+
 from blocker import dnsfilter
+
+WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="needs Windows: calls the real iphlpapi.SetInterfaceDnsSettings; struct layout uses Windows-sized DWORD")
 
 
 def query(name: str, qtype: int = 1, qid: int = 0x1234) -> bytes:
@@ -70,6 +75,7 @@ def test_plan_points_adapters_at_the_filter_and_keeps_originals():
     assert changes == [("{a}", "127.0.0.1,10.0.0.1", False)] and upstreams[0] == "10.0.0.1"
 
 
+@WINDOWS_ONLY
 def test_set_dns_signature_is_accepted():
     # without admin rights Windows refuses (access denied) - but it must not be "invalid parameter" (87)
     assert dnsfilter.set_dns("{00000000-0000-0000-0000-000000000000}", "") != 87

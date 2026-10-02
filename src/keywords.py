@@ -52,12 +52,21 @@ YOUTUBE_TARGET = ("restrictmoderate.youtube.com",   # YouTube Restricted Mode sw
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
-def settings(db) -> dict:
+def _parse(text: str | None) -> dict:
     try:
-        cfg = json.loads(db.get_setting(SETTINGS_KEY, "") or "{}")
+        cfg = json.loads(text or "{}")
     except ValueError:
         cfg = {}
     return {**DEFAULTS, **cfg}
+
+
+def settings(db) -> dict:
+    return _parse(db.get_setting(SETTINGS_KEY, ""))
+
+
+def settings_shared(db) -> dict:
+    """settings(db) for read-only use (the word check, every 0.5 s): parsed once per saved text. Don't change it."""
+    return db.parsed(SETTINGS_KEY, _parse, "")
 
 
 def save(db, cfg: dict):

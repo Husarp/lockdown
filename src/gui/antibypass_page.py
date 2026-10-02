@@ -431,12 +431,14 @@ class AntiBypassPage(ctk.CTkFrame):
         closes), so its colour is right even if you never leave the tab. Cheap: only repaints on a real change."""
         if not self.winfo_exists():
             return
-        cfg = antibypass.settings(self.db)
-        now = now_from_db(self.db)
-        sig = (antibypass.active(cfg), antibypass.status(cfg, now), bool(antibypass.unlocked_until(cfg, now)))
-        if sig != getattr(self, "_banner_sig", None):
-            self._set_banner()
-        self.after(LIVE_MS, self._live)
+        try:
+            cfg = antibypass.settings(self.db)
+            now = now_from_db(self.db)
+            sig = (antibypass.active(cfg), antibypass.status(cfg, now), bool(antibypass.unlocked_until(cfg, now)))
+            if sig != getattr(self, "_banner_sig", None):
+                self._set_banner()
+        finally:   # (one error must not leave the lock banner frozen for the rest of the session)
+            self.after(LIVE_MS, self._live)
 
     def _banner(self, color, title: str, sub: str):
         """Tint the status banner for the current lock state (red = locked, green = unlocked, grey = off)."""

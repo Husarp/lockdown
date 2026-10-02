@@ -13,6 +13,7 @@ independently of this window regardless.
 Run it (alongside the running app, for now):  .venv\\Scripts\\python.exe src\\webview_app.py
 """
 import sys
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -148,9 +149,27 @@ def _block_type_from_draft(d: dict) -> str | None:
 
 
 class Api:
-    def __init__(self):
+    """pywebview calls these from its own worker threads, several at once: each thread gets its own Database
+    (a shared connection would interleave one thread's transaction / write retry with another's)."""
+
+    def __init__(self, path=None):
         self.window = None
-        self.db = Database()
+        self._db_path = path
+        self._local = threading.local()
+
+    @property
+    def db(self) -> Database:
+        local = self.__dict__.setdefault("_local", threading.local())
+        db = getattr(local, "db", None)
+        if db is None:
+            path = self.__dict__.get("_db_path")
+            db = local.db = Database(path) if path else Database()
+        return db
+
+    @db.setter
+    def db(self, value: Database):   # (tests: use this database file - every thread opens its own connection to it)
+        self._db_path = value.path
+        self.__dict__.setdefault("_local", threading.local()).db = value
 
     def ui_ready(self):
         if self.window:

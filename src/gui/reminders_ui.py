@@ -369,9 +369,10 @@ class RemindersView(ctk.CTkScrollableFrame):
 
         items = reminders.custom_list(self.db)
         week = today - timedelta(days=7)
+        week_counts = reminders.counts_many(self.db, [r["id"] for r in items], week)   # one query for all of them
         for row, r in zip(self.rows.take(len(items)), items):
             row.text.configure(text=r["text"] or "(no text)")
-            c = reminders.counts(self.db, r["id"], week)
+            c = week_counts.get(r["id"], {})
             stats = f"done {c.get('done', 0)}x in 7 days" + (f", 'not done' {c['not done']}x" if c.get("not done")
                                                                 else "")
             row.sub.configure(text=f"{reminders.schedule_text(r)} · {stats}")

@@ -856,6 +856,8 @@ class BlockingPage(ctk.CTkFrame):
             self.after(LIVE_MS, self._live_update)
 
     def _auto_refresh(self):
-        self.draft.refresh_if_clean()   # service may have removed expired blocks
-        self.refresh()                  # countdowns, usage, "blocked now"
-        self.after(REFRESH_MS, self._auto_refresh)
+        try:
+            self.draft.refresh_if_clean()   # service may have removed expired blocks
+            self.refresh()                  # countdowns, usage, "blocked now"
+        finally:   # (one failed refresh must not stop the loop for the rest of the session)
+            self.after(REFRESH_MS, self._auto_refresh)

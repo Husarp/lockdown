@@ -128,14 +128,36 @@ def custom_list(db) -> list[dict]:
 
 
 def log(db, what: str, result: str, now: datetime):
-    with db.conn:
-        db.conn.execute("INSERT INTO reminder_log VALUES (?, ?, ?)", (now.strftime(TIME_FMT), what, result))
+    db.write("INSERT INTO reminder_log VALUES (?, ?, ?)", (now.strftime(TIME_FMT), what, result))
 
 
 def counts(db, what: str, since: datetime) -> dict[str, int]:
-    rows = db.conn.execute("SELECT result, COUNT(*) FROM reminder_log WHERE what = ? AND timestamp >= ? "
-                           "GROUP BY result", (what, since.strftime(TIME_FMT)))
-    return dict(rows.fetchall())
+    return counts_many(db, [what], since).get(what, {})
+
+
+def counts_many(db, whats, since: datetime) -> dict[str, dict[str, int]]:
+    """{what: {result: n}} since `since` for several reminders in one grouped query (the Reminders page used to
+    run one per reminder). Days retention has rolled up count from `daily_reminders`, whole days only: when `since`
+    is not midnight and its own day is already rolled up, that day is left out (the time of day isn't kept there).
+    Every caller asks from a midnight, at most a week back - always inside the detail."""
+    whats = list(dict.fromkeys(whats))
+    if not whats:
+        return {}
+    marks = ", ".join("?" * len(whats))
+    first_day = since.date() if since.time() == time(0) else since.date() + timedelta(days=1)
+    rows = db.conn.execute(
+        f"SELECT what, result, SUM(n) FROM ("
+        f" SELECT what, result, COUNT(*) AS n FROM reminder_log WHERE what IN ({marks}) AND timestamp >= ?"
+        f"  GROUP BY what, result"
+        f" UNION ALL"
+        f" SELECT what, result, SUM(count) AS n FROM daily_reminders WHERE what IN ({marks}) AND day >= ?"
+        f"  GROUP BY what, result"
+        f") GROUP BY what, result",
+        (*whats, since.strftime(TIME_FMT), *whats, first_day.isoformat()))
+    out: dict[str, dict[str, int]] = {}
+    for what, result, n in rows:
+        out.setdefault(what, {})[result] = n
+    return out
 
 
 def loosens_reminder(old: dict, new: dict) -> bool:

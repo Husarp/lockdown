@@ -11,6 +11,7 @@ import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import winreg
 
@@ -37,12 +38,35 @@ def set_identity():
 
 def register_autostart():
     """Start the tray agent hidden at login (per-user, no admin), and a per-user task that brings it back within a
-    minute if it's killed. Re-written each launch so the path stays current."""
+    minute if it's killed. Both are re-written on every launch (anti-bypass: `schtasks /Create /F` also re-enables a
+    watchdog task the user disabled or edited, and restores a deleted Run value) - on a background thread, so the
+    100-300 ms of `schtasks` no longer delays the window."""
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
         winreg.SetValueEx(key, "Lockdown", 0, winreg.REG_SZ, command_line(gui_command("--tray")))
-    subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", "1", "/TN", WATCHDOG_TASK,
-                    "/TR", command_line(gui_command("--watchdog"))], capture_output=True,
-                   creationflags=subprocess.CREATE_NO_WINDOW)
+    done = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", "1", "/TN", WATCHDOG_TASK,
+                           "/TR", command_line(gui_command("--watchdog"))], capture_output=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW)
+    if done.returncode != 0:
+        raise OSError(f"schtasks /Create failed ({done.returncode}): {done.stderr!r}")
+
+
+def _log(message: str):
+    from paths import LOG_PATH
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')},000 {message}\n")
+    except OSError:
+        pass
+
+
+def register_autostart_later():
+    """register_autostart off the UI thread (a failure there must not stop the app starting - it is logged)."""
+    def run():
+        try:
+            register_autostart()
+        except Exception as e:
+            _log(f"WARNING Autostart / watchdog task registration failed: {e!r}")
+    threading.Thread(target=run, name="lockdown-autostart", daemon=True).start()
 
 
 def watchdog_should_start() -> bool:
@@ -53,13 +77,7 @@ def watchdog_should_start() -> bool:
     db = Database()
     if db.get_setting(EXITED_KEY, "0") == "1":   # quit with tray Exit (after the challenge): stay off until login
         return False
-    from paths import LOG_PATH
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')},000 WARNING Tray app wasn't running (closed without "
-                    "Exit) - started again by the watchdog\n")
-    except OSError:
-        pass
+    _log("WARNING Tray app wasn't running (closed without Exit) - started again by the watchdog")
     return True
 
 
@@ -128,7 +146,7 @@ if __name__ == "__main__":
     events: queue.Queue = queue.Queue()
     if not single_instance.acquire(events):
         sys.exit(0)  # already running - it will show its window (no heavy GUI import on this path)
-    register_autostart()
+    register_autostart_later()
     # Heavy import (customtkinter, PIL, COM, every page) happens only for the instance that actually runs the UI -
     # a click while the tray agent is already running exits above without paying it, so "open" is near-instant.
     from gui.app import LockdownApp

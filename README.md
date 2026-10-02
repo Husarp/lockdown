@@ -55,6 +55,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   summary notification, streaks, a month calendar on Screen Time, display settings (⚙) for Dashboard / Screen Time.
 - **Network Log** (Phase 5): which app connected to which site in the last hour (names from the Windows DNS
   cache); table or graph, filters, export; click a row to block the site/app or copy it.
+- **Speed (redesign Phase 0, 0.84.0):** indexed database, statistics summed in SQL, settings parsed once per change, and a month
+  of per-minute detail with daily totals kept forever - the Dashboard of a year-old install loads in about a tenth
+  of the time, and an install no longer gets slower the longer it is used.
 
 See [PLAN.md](PLAN.md) for the full plan and later phases.
 
@@ -92,6 +95,10 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   the network's DNS. If the service stops, Windows falls back to the network's DNS (internet keeps working, lists
   not enforced). Original settings are saved and restored on uninstall or with `service.py restore-dns`.
 - Service log: `C:\ProgramData\Lockdown\lockdown.log`.
+- **Data kept:** per-minute screen time, the switch log, blocked visits and reminder answers for 32 days; older days
+  are rolled into daily totals (kept forever) by the tray app once a day, so charts, streaks, the calendar and the
+  CSV export are unchanged. Only once 33 days with recorded data follow a day is it rolled up, so a wrong clock
+  can't take recent detail. Limit usage, emergency unlocks, settings and rules are never pruned (`src/retention.py`).
 
 ## Install
 
@@ -152,7 +159,13 @@ Or from a terminal in the project folder:
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+The suite also runs on Linux/macOS (`python -m pytest`, needs only `pytest` and `pillow`): `tests/conftest.py`
+fakes the Windows-only modules there, and the few tests that need the real Win32 API skip with a reason.
+
 Set `LOCKDOWN_DATA_DIR` to use a different data folder (e.g. for testing).
+
+`python scripts/bench_stats.py` times the Dashboard / Screen Time data work on a big synthetic database (a year of
+minutes, 6 000 blocked items); `--src <other checkout>/src` measures another version for comparison.
 
 Design: `design/Lockdown Dashboard & Screen Time.dc.html` (Claude Design). Colours/fonts live in `src/gui/theme.py`;
 fonts (Inter, Barlow Condensed - SIL Open Font License, licences next to them) are in `assets/fonts`, the Lucide

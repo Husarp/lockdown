@@ -1,5 +1,13 @@
-"""System tray icon (pystray runs on its own thread)."""
+"""System tray icon (pystray runs on its own thread).
+
+The window drives it from the Tk thread every few seconds, while the icon and its message loop belong to pystray's
+thread. Every touch of the icon (title, picture, balloon) is therefore made only when something actually changed,
+one at a time under a lock - not three cross-thread calls every 3 s as before. The menu is never rebuilt from the Tk
+thread: that destroyed the native menu while pystray's thread might be showing it (TrackPopupMenuEx). The Tk thread
+only marks it out of date; pystray's own thread rebuilds it right before showing it (_Icon).
+"""
 import ctypes
+import threading
 
 import pystray
 from pystray._util import win32
@@ -8,6 +16,21 @@ from gui import icon_art
 from gui.theme import APP_ICON
 
 NIIF_USER, NIIF_LARGE_ICON = 0x4, 0x20
+
+
+class _Icon(pystray.Icon):
+    """update_menu() from any thread only marks the menu out of date; it is rebuilt on pystray's own thread, in
+    the click handler (WM_NOTIFY), just before the menu is shown - so it is never destroyed while it is open."""
+    menu_dirty = False
+
+    def update_menu(self):
+        self.menu_dirty = True
+
+    def _on_notify(self, wparam, lparam):
+        if self.menu_dirty:
+            self.menu_dirty = False
+            self._update_menu()
+        return super()._on_notify(wparam, lparam)
 
 
 class Tray:
@@ -19,7 +42,9 @@ class Tray:
         self.active_mode: str | None = None
         self._icon_state: str | None = None
         self.off = False                         # Lockdown switched off entirely (Anti-Bypass page)
-        self.icon = pystray.Icon(
+        self._title: str | None = None
+        self._lock = threading.Lock()
+        self.icon = _Icon(
             "Lockdown", icon_art.tray_icon("red"), "Lockdown",
             menu=pystray.Menu(
                 pystray.MenuItem("Open Lockdown", lambda: on_open(), default=True),
@@ -44,8 +69,9 @@ class Tray:
     def set_modes(self, modes: list[tuple[str, str]], active: str | None):
         if modes != self.modes or active != self.active_mode:
             self.modes, self.active_mode = modes, active
-            self._refresh_icon()   # a mode turning on/off changes the tray colour (green <-> yellow)
-            self.icon.update_menu()
+            with self._lock:
+                self._refresh_icon()   # a mode turning on/off changes the tray colour (green <-> yellow)
+                self.icon.update_menu()
 
     def _refresh_icon(self):
         """grey = switched off, green = blocking enforced, yellow = a mode is on, red = service down."""
@@ -67,15 +93,24 @@ class Tray:
         hwnd = getattr(self.icon, "_hwnd", None)   # (pystray's own notify can't set the picture)
         if not hwnd:
             return
-        if not getattr(self, "_logo", None):
-            self._logo = ctypes.windll.user32.LoadImageW(None, str(APP_ICON), 1, 48, 48, 0x10)   # icon, from file
-        self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo="")
-        self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo=message[:255], szInfoTitle="Lockdown",
-                           dwInfoFlags=NIIF_USER | NIIF_LARGE_ICON, hBalloonIcon=self._logo)
+        with self._lock:
+            if not getattr(self, "_logo", None):
+                self._logo = ctypes.windll.user32.LoadImageW(None, str(APP_ICON), 1, 48, 48, 0x10)   # from file
+            self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo="")
+            self.icon._message(win32.NIM_MODIFY, win32.NIF_INFO, szInfo=message[:255], szInfoTitle="Lockdown",
+                               dwInfoFlags=NIIF_USER | NIIF_LARGE_ICON, hBalloonIcon=self._logo)
 
-    def update(self, running: bool, status_text: str, off: bool = False):
+    def update(self, running: bool, status_text: str, off: bool = False) -> bool:
+        """Called every 3 s; returns True if anything had to be sent to the icon."""
+        title = f"Lockdown - {status_text}" + ("" if running or off else " (service not running)")
+        if (status_text, running, off, title) == (self.status_text, self.running, self.off, self._title):
+            return False
         self.status_text = status_text
         self.running, self.off = running, off
-        self._refresh_icon()
-        self.icon.title = f"Lockdown - {status_text}" + ("" if running or off else " (service not running)")
-        self.icon.update_menu()
+        with self._lock:
+            self._refresh_icon()
+            if title != self._title:
+                self._title = title
+                self.icon.title = title
+            self.icon.update_menu()   # (the status line in the menu)
+        return True

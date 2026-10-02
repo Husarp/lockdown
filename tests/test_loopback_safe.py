@@ -11,11 +11,15 @@ cut_live_connections reads that cache back to match open connections to names, s
 loopback socket never achieves anything - it only breaks unrelated software."""
 import socket
 import struct
+import sys
 import threading
 
 import pytest
 
 from blocker.connections import MIB_TCP_STATE_ESTAB, MIB_TCPROW, _tcp_rows, close_to, is_loopback
+
+WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="needs Windows: end to end against the real Windows TCP table (iphlpapi)")
+
 
 HELD_TICKS = 15        # the service closes connections every ~2s, so this is 30 seconds of it
 
@@ -74,6 +78,7 @@ def test_connections_that_are_not_established_are_left_alone():
     assert close_to({"142.250.187.206"}, rows=rows, delete=lambda r: True) == []
 
 
+@WINDOWS_ONLY
 def test_a_local_server_stays_reachable_while_a_block_is_on():
     """End to end, with real sockets: a client holds a connection to a local server through 30 seconds' worth
     of the service's closing sweeps, with the blocked site resolving to 127.0.0.1 exactly as the hosts file

@@ -416,9 +416,11 @@ class ModesPage(ctk.CTkFrame):
             self.stop_btn.pack_forget()
 
     def _tick(self):
-        if getattr(self.app, "current_page", None) == "Modes":
-            self._update_now(now_from_db(self.db))
-        self.after(TICK_MS, self._tick)
+        try:
+            if getattr(self.app, "current_page", None) == "Modes":
+                self._update_now(now_from_db(self.db))
+        finally:   # (one error must not freeze the mode's lock / stop state for the rest of the session)
+            self.after(TICK_MS, self._tick)
 
     # ---------- start / stop ----------
 

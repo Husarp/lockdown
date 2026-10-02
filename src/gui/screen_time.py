@@ -110,6 +110,15 @@ class Context:
 
 # ---------------------------------------------------------------- Overview
 
+def week_of(c: "Context", first: date) -> list[dict]:
+    """The minute rows from `first` to today: cut from what the range already loaded when it covers them (7 / 30
+    days), else read (Today / Yesterday)."""
+    if c.start <= first and c.end >= c.today + timedelta(days=1):
+        since = f"{first} 00:00"
+        return [r for r in c.rows if r["minute"] >= since]
+    return stats.activity(c.db, first, c.today + timedelta(days=1))
+
+
 class OverviewView(ctk.CTkScrollableFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
@@ -152,20 +161,21 @@ class OverviewView(ctk.CTkScrollableFrame):
         active, total = stats.totals(c.rows)
         self.cards["Active"].set(stats.hm(active), f"of {stats.hm(total)} at the PC")
         self.cards["Idle"].set(stats.hm(total - active), "screen on, no input")
-        focus = stats.longest_focus(c.rows)
+        minutes = stats.minute_summary(c.rows)   # (once, for both)
+        focus = stats.longest_focus(c.rows, minutes)
         if focus:
             sec, exe, start = focus
             self.cards["Longest focus"].set(stats.hm(sec), f"{appinfo.name_of('app', exe, c.items)}, {start:%H:%M}")
         else:
             self.cards["Longest focus"].set("-")
-        sessions = stats.sessions(c.rows)
+        sessions = stats.sessions(c.rows, minutes)
         avg = sum((e - s).total_seconds() for s, e in sessions) / len(sessions) if sessions else 0
         self.cards["Sessions"].set(str(len(sessions)), f"avg {stats.hm(avg)} each" if sessions else "")
 
         single_day = c.range in ("Today", "Yesterday")
         n = 30 if c.range == "30 days" else 7
         first = c.today - timedelta(days=n - 1)
-        span_rows = stats.activity(c.db, first, c.today + timedelta(days=1))   # bars, heatmap, today's timeline
+        per_day = stats.daily_active(c.db, first, c.today + timedelta(days=1))   # bars (summed in SQL)
         # the day timeline only makes sense for a single day - hide it for the 7 / 30-day ranges (the bars and
         # the heatmap cover those). For Today / Yesterday it shows that day from the first activity (or 06:00).
         if single_day:
@@ -180,11 +190,10 @@ class OverviewView(ctk.CTkScrollableFrame):
             self.timeline_card.pack_forget()
 
         week = [c.today - timedelta(days=6 - i) for i in range(7)]
-        week_rows = [r for r in span_rows if r["minute"][:10] >= week[0].isoformat()]
+        week_rows = week_of(c, week[0])   # heatmap: only 7 days of minutes
         self.heat.set([(DAY_NAMES[d.weekday()][:3], d, m) for d, m in zip(week, stats.hourly_minutes(week_rows, week))])
 
         days = [first + timedelta(days=i) for i in range(n)]
-        per_day = stats.per_day(span_rows)
         values = [per_day.get(d.isoformat(), 0) for d in days]
         with_data = [v for v in values if v]
         self.bars_card.title.configure(text=f"Last {n} days")
@@ -213,7 +222,7 @@ class OverviewView(ctk.CTkScrollableFrame):
         span = 7 if c.range == "7 days" else 30
         self.trend_card.title.configure(text=f"Trend - last {span} days")
         first = c.today - timedelta(days=span - 1)
-        per_day = stats.per_day(stats.activity(c.db, first, c.today + timedelta(days=1)))
+        per_day = stats.daily_active(c.db, first, c.today + timedelta(days=1))
         days = [first + timedelta(days=i) for i in range(span)]
         vals = [per_day.get(d.isoformat(), 0) for d in days]
         unlocks = unlocks_per_day(c.db, first)
@@ -462,9 +471,9 @@ class CalendarView(ctk.CTkScrollableFrame):
         c = self.ctx
         if not c:
             return
-        rows = stats.activity(c.db, day, day + timedelta(days=1))
-        active, _total = stats.totals(rows)
-        ranked = [(n, s) for n, s in stats.per_app(rows).most_common(10) if s >= 60]
+        apps = stats.app_totals(c.db, day, day + timedelta(days=1))   # also for a day retention has rolled up
+        active = sum(apps.values())
+        ranked = [(n, s) for n, s in apps.most_common(10) if s >= 60]
         self.detail.title.configure(text=day.strftime("%A %d %b %Y"))
         self.detail.note.configure(text=f"{stats.hm(active)} active" if active else "nothing recorded")
         self.detail_hint.pack_forget()
@@ -487,8 +496,7 @@ class CalendarView(ctk.CTkScrollableFrame):
             self.month = c.today.replace(day=1)
         first = self.month
         nxt = date(first.year + first.month // 12, first.month % 12 + 1, 1)
-        rows = stats.activity(c.db, first, nxt)
-        per_day = {date.fromisoformat(d): sec for d, sec in stats.per_day(rows).items()}
+        per_day = {date.fromisoformat(d): sec for d, sec in stats.daily_active(c.db, first, nxt).items()}
         goal = goal_seconds(c.db)
         self.title.configure(text=f"{MONTH_NAMES[first.month - 1]} {first.year}")
         self.next.configure(state="disabled" if nxt > c.today else "normal")
@@ -572,9 +580,11 @@ class ScreenTimePage(ctk.CTkFrame):
         self.show_tab(start if start in TABS else "Overview")   # back to the default tab, not the last one
 
     def _auto_refresh(self):
-        if getattr(self.app, "current_page", None) == "Screen Time":
-            self.refresh()
-        self.after(REFRESH_MS, self._auto_refresh)
+        try:
+            if getattr(self.app, "current_page", None) == "Screen Time":
+                self.refresh()
+        finally:   # (one failed refresh must not stop the loop for the rest of the session)
+            self.after(REFRESH_MS, self._auto_refresh)
 
     def refresh(self):
         self.views[self.tab_bar.get()].update_view(Context(self))

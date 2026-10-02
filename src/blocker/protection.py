@@ -60,6 +60,20 @@ def settings(db) -> dict:
     return cfg
 
 
+def _lists_of(text: str | None) -> dict:
+    try:
+        cfg = json.loads(text or "{}")
+    except ValueError:
+        cfg = {}
+    return all_lists(cfg if isinstance(cfg, dict) else {})
+
+
+def list_names(db) -> dict:
+    """all_lists(settings(db)) for read-only use (naming the list in a blocked-visit notice): parsed once per saved
+    text instead of on every alert - the settings hold your hand-made lists, which can be thousands of sites."""
+    return db.parsed(SETTINGS_KEY, _lists_of, "")
+
+
 def manual_lists(cfg: dict) -> dict:
     """Your hand-made lists by key: {key: {"key", "name", "entries": [{"name", "host"}]}}."""
     return {m["key"]: m for m in cfg.get("manual", [])}

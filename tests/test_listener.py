@@ -1,7 +1,12 @@
 import ssl
+import sys
+
+import pytest
 
 from blocker import connections
 from blocker.listener import parse_http_host, parse_sni
+
+WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="needs Windows: reads the real Windows TCP table (iphlpapi.GetTcpTable)")
 
 
 def client_hello(server_name: str) -> bytes:
@@ -36,6 +41,7 @@ def test_resolve_skips_loopback():
     assert connections.resolve(["localhost"]) == set()
 
 
+@WINDOWS_ONLY
 def test_tcp_table_readable():
     rows = connections._tcp_rows()
     assert isinstance(rows, list)

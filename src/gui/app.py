@@ -18,11 +18,12 @@ import digest
 from importer import distracting
 import modes
 import reminders
+import retention
 import updates
 from blocker import protection
 from blocker.apps import minimizes
 from db import Database
-from gui import shortcuts, theme
+from gui import mainthread, shortcuts, theme
 from gui.about_page import AboutPage
 from gui.antibypass_page import AntiBypassPage, ChallengeWindow
 from gui.blocking import BlockingPage
@@ -70,7 +71,6 @@ WATCH_MS = 5000
 UPDATE_FIRST_MS = 90_000      # let the app settle before touching the network
 UPDATE_POLL_MS = 3_600_000    # then look every hour whether a day has passed since the last check
 MINIMIZE_MS = 250
-GC_MS = 2000
 GRACE_SEC = 10   # after a tightening change, this long to undo it (revert only) without the Anti-Bypass challenge
 WORDS_BATCH_MS = 2500   # more tabs closed for blocked words within this: one summary notice instead of one each
 TOAST_CLEAR_MS = 7000   # after a Windows notification, remove Lockdown's Action Center entries (bell) this much later
@@ -81,13 +81,19 @@ PREBUILD_MS = (3000, 500)   # build the other pages in the background: first aft
 class LockdownApp(ctk.CTk):
     def __init__(self, events: queue.Queue, start_hidden: bool = False):
         theme.apply()
-        self.db = Database()
+        self.db = Database(ui=True)   # short busy timeout: a lock elsewhere must not freeze the window
         ctk.set_appearance_mode(self.db.get_setting(APPEARANCE_KEY, "dark"))
         super().__init__()
         # Tk objects may only be touched from this thread. Automatic garbage collection can run in any thread
-        # (and then free a Tk font/image there -> hang), so collect here, periodically, instead.
+        # (and then free a Tk font/image there -> hang), so it stays off and this thread collects instead -
+        # generationally, with everything from startup frozen (see gui/mainthread.py), not a full sweep every 2 s.
         gc.disable()
+        self._gc_tick = 0
+        self._gc_frozen = False
         self._collect_garbage()
+        # Worker threads never touch Tk: they hand their results to this queue, drained here on the Tk thread.
+        self.calls = mainthread.CallQueue()
+        self._drain_calls()
         self.title("Lockdown")
         self.iconbitmap(default=str(theme.APP_ICON))   # (default=: every Lockdown window gets the logo)
         shortcuts.install(self)   # Esc closes pop-ups; Ctrl+Z / Ctrl+Backspace / ... in text boxes
@@ -161,6 +167,23 @@ class LockdownApp(ctk.CTk):
         distracting.seed(self.db)          # games, streaming ... are Distracting by default
         self.after(5000, self._seed_games)
         self.after(UPDATE_FIRST_MS, self._poll_updates)
+        # old per-minute / per-event detail -> daily totals, once a day, on its own thread and connection
+        self.retention = retention.RetentionThread()
+        self.retention.start()
+
+    def call_soon(self, fn, *args):
+        """From any thread: run fn(*args) on the Tk thread shortly."""
+        self.calls.post(fn, *args)
+
+    def call_latest(self, key, fn, *args):
+        """From any thread: like call_soon, but only the newest call per key runs (progress updates)."""
+        self.calls.post_latest(key, fn, *args)
+
+    def _drain_calls(self):
+        try:
+            self.calls.drain(on_error=lambda e: self.report_callback_exception(type(e), e, e.__traceback__))
+        finally:
+            self.after(mainthread.DRAIN_MS, self._drain_calls)
 
     def _check_grab(self):
         """Minimized with a pop-up holding the focus: let go (else the taskbar / Alt+Tab can't restore the window);
@@ -199,13 +222,18 @@ class LockdownApp(ctk.CTk):
 
     def _tick_clock(self):
         if self.clock.winfo_exists():
-            now = now_from_db(self.db)
-            self.clock.configure(text=f"{DAY_NAMES[now.weekday()][:3]} {now:%H:%M}")
-            self.after(10_000, self._tick_clock)
+            try:
+                now = now_from_db(self.db)
+                self.clock.configure(text=f"{DAY_NAMES[now.weekday()][:3]} {now:%H:%M}")
+            finally:   # (one error must not stop the clock for the rest of the session)
+                self.after(10_000, self._tick_clock)
 
     def _collect_garbage(self):
-        gc.collect()
-        self.after(GC_MS, self._collect_garbage)
+        try:
+            self._gc_tick += 1
+            mainthread.collect(self._gc_tick)
+        finally:
+            self.after(mainthread.GC_MS, self._collect_garbage)
 
     def _build_save_bar(self, parent):
         bar = ctk.CTkFrame(parent, fg_color="transparent")
@@ -318,6 +346,9 @@ class LockdownApp(ctk.CTk):
         if todo and not self.exited:
             self._build_page(todo[0])
             self.after(PREBUILD_MS[1], self._prebuild)
+        elif not self._gc_frozen:   # every page is built: what is alive now lives as long as the app
+            self._gc_frozen = True
+            mainthread.freeze_startup()
 
     def show_page(self, name: str):
         if name not in self.pages:
@@ -339,30 +370,33 @@ class LockdownApp(ctk.CTk):
             marker.configure(fg_color=theme.ACCENT if on else "transparent")
 
     def _poll_events(self):
-        self._check_grab()
-        while not self.events.empty():
-            event = self.events.get()
-            if event == "open":
-                self.deiconify()
-                self._maximize()   # reopen from the tray full-size, not at some leftover small size
-                self.lift()
-                self.focus_force()
-            elif event == "exit":
-                self.guard(["Quit Lockdown (blocked-visit notices, time limits and reminders stop until you "
-                            "start it again)"], self._exit)
-                if self.exited:
-                    return
-            elif isinstance(event, tuple) and event[0] == "words":   # from the bad-word check
-                self._word_notice(event[1], event[2])
-            elif isinstance(event, tuple) and event[0] == "mode":   # from the tray menu
-                try:
-                    if event[1]:
-                        self.start_mode(next(m for m in modes.load(self.db) if m["id"] == event[1]), None, False)
-                    else:
-                        self.stop_mode()
-                except (ValueError, StopIteration) as e:
-                    self._show(str(e) or "That mode doesn't exist any more.", force=True)
-        self.after(200, self._poll_events)
+        try:
+            self._check_grab()
+            while not self.events.empty():
+                event = self.events.get()
+                if event == "open":
+                    self.deiconify()
+                    self._maximize()   # reopen from the tray full-size, not at some leftover small size
+                    self.lift()
+                    self.focus_force()
+                elif event == "exit":
+                    self.guard(["Quit Lockdown (blocked-visit notices, time limits and reminders stop until you "
+                                "start it again)"], self._exit)
+                    if self.exited:
+                        return
+                elif isinstance(event, tuple) and event[0] == "words":   # from the bad-word check
+                    self._word_notice(event[1], event[2])
+                elif isinstance(event, tuple) and event[0] == "mode":   # from the tray menu
+                    try:
+                        if event[1]:
+                            self.start_mode(next(m for m in modes.load(self.db) if m["id"] == event[1]), None, False)
+                        else:
+                            self.stop_mode()
+                    except (ValueError, StopIteration) as e:
+                        self._show(str(e) or "That mode doesn't exist any more.", force=True)
+        finally:   # (an error must not stop tray Open / Exit / modes for the rest of the session)
+            if not self.exited:
+                self.after(200, self._poll_events)
 
     def _word_notice(self, word: str, action: str):
         """The first tab closed shows a notice at once; more within WORDS_BATCH_MS become one summary."""
@@ -385,8 +419,14 @@ class LockdownApp(ctk.CTk):
     def _exit(self):
         self.exited = True
         self.db.set_setting(antibypass.EXITED_KEY, "1")
-        self.tray.stop()
+        self._shutdown()
         self.destroy()
+
+    def _shutdown(self):
+        """Before the window goes: stop the background jobs and write any setting still waiting for a lock."""
+        self.retention.stop_event.set()
+        self.db.flush()
+        self.tray.stop()
 
     def restart(self):
         """Start Lockdown again (new theme / accent colour): a helper waits until this one is gone, then launches
@@ -394,9 +434,9 @@ class LockdownApp(ctk.CTk):
         it needs no console input, and it must outlast this process freeing its single-instance port."""
         import subprocess
         from paths import command_line, gui_command
+        self._shutdown()   # first: its flush can wait for a lock, and the helper's delay must start after it
         subprocess.Popen(f'ping -n 4 127.0.0.1 >nul & start "" {command_line(gui_command())}',
                          shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        self.tray.stop()
         self.destroy()
 
     def report_callback_exception(self, exc, value, tb):
@@ -455,26 +495,29 @@ class LockdownApp(ctk.CTk):
             self.pages["Anti-Bypass"].refresh()
 
     def _poll_status(self):
-        heartbeat = float(self.db.get_setting(HEARTBEAT_KEY, "0"))
-        running = time.time() - heartbeat < SERVICE_TIMEOUT_SEC
-        blocked = len(self.db.list_items())
-        off = antibypass.is_off(self.db)
-        if running != self.service_running or off != getattr(self, "was_off", None):
-            self.service_running, self.was_off = running, off
-            for page in ("Blocking", "Dashboard"):   # statuses / the "not enforced" banners depend on it
-                if page in self.pages:
-                    self.pages[page].refresh()
-        self.status_dot.set_state(running)
-        self.status_label.configure(
-            text=("Service running" if running else "Service not running"),
-            text_color=(theme.SUCCESS if running else theme.DANGER))
-        state = modes.active(self.db, now_from_db(self.db))
-        mode_text = f" · {state['mode']['name']} mode" if state else ""
-        self.tray.update(running, "OFF - nothing is enforced" if off else f"{blocked} sites/apps blocked{mode_text}",
-                         off=off)
-        self.tray.set_modes([(m["id"], m["name"]) for m in modes.load(self.db)],
-                            state["mode"]["id"] if state else None)
-        self.after(3000, self._poll_status)
+        try:
+            heartbeat = float(self.db.get_setting(HEARTBEAT_KEY, "0"))
+            running = time.time() - heartbeat < SERVICE_TIMEOUT_SEC
+            blocked = self.db.item_count()   # (not list_items: 45 ms with 6 000 items, every 3 s)
+            off = antibypass.is_off(self.db)
+            if running != self.service_running or off != getattr(self, "was_off", None):
+                self.service_running, self.was_off = running, off
+                for page in ("Blocking", "Dashboard"):   # statuses / the "not enforced" banners depend on it
+                    if page in self.pages:
+                        self.pages[page].refresh()
+            self.status_dot.set_state(running)
+            self.status_label.configure(
+                text=("Service running" if running else "Service not running"),
+                text_color=(theme.SUCCESS if running else theme.DANGER))
+            mode_list = modes.load(self.db)
+            state = modes.active(self.db, now_from_db(self.db), mode_list)
+            mode_text = f" · {state['mode']['name']} mode" if state else ""
+            # (the tray only talks to its icon when something actually changed - see Tray.update)
+            self.tray.update(running, "OFF - nothing is enforced" if off else
+                             f"{blocked} sites/apps blocked{mode_text}", off=off)
+            self.tray.set_modes([(m["id"], m["name"]) for m in mode_list], state["mode"]["id"] if state else None)
+        finally:
+            self.after(3000, self._poll_status)
 
     def _poll_status_once(self):
         state = modes.active(self.db, now_from_db(self.db))
@@ -499,15 +542,17 @@ class LockdownApp(ctk.CTk):
         self.db.set_setting(self._ALERT_KEY, json.dumps(data))
 
     def _poll_block_events(self):
-        events = self.db.block_events_after(self.last_event_id)
-        if events:
-            self.last_event_id = events[-1]["id"]
-            notify_override = {i["id"]: i["notify"] for i in self.db.list_items()}
-            for event in events:
-                if event["hostname"].endswith(".exe"):
-                    win.close_app(event["hostname"])   # ask nicely; the service force-closes after 10 s
-                self._alert(event, notify_override.get(event["item_id"]))
-        self.after(EVENT_POLL_MS, self._poll_block_events)
+        try:
+            events = self.db.block_events_after(self.last_event_id)
+            if events:
+                self.last_event_id = events[-1]["id"]
+                notify_override = {i["id"]: i["notify"] for i in self.db.list_items()}
+                for event in events:
+                    if event["hostname"].endswith(".exe"):
+                        win.close_app(event["hostname"])   # ask nicely; the service force-closes after 10 s
+                    self._alert(event, notify_override.get(event["item_id"]))
+        finally:
+            self.after(EVENT_POLL_MS, self._poll_block_events)
 
     def _alert(self, event: dict, item_notify: str | None):
         now = time.time()
@@ -518,7 +563,7 @@ class LockdownApp(ctk.CTk):
             return
         self.last_alert[event["item_id"]] = now
         self._save_last_alert()   # so a restart doesn't forget the cooldown and re-notify at once
-        lists = protection.all_lists(protection.settings(self.db))   # (your own lists have their own names)
+        lists = protection.list_names(self.db)   # (your own lists have their own names; parsed once, not per alert)
         self._show(alerts.format_message(alerts.get(self.db, f"notify.msg.{reason}"), event, now_from_db(self.db),
                                          lists))
 
@@ -531,18 +576,18 @@ class LockdownApp(ctk.CTk):
                 # announcing every rule you already had as if it had just started
                 self.watcher.prev_blocked = None
                 return
-            now = now_from_db(self.db)
+            now = now_from_db(self.db)   # one clock reading, one load of items / groups / usage for this tick
             settings = {k: alerts.get(self.db, k) for k in alerts.DEFAULTS}
             self._announce_phase(now)
-            for message in self.watcher.check(self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now),
-                                              now, self.usage_tracker.in_use, settings):
+            items, groups, usage = self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now)
+            for message in self.watcher.check(items, groups, usage, now, self.usage_tracker.in_use, settings):
                 self._show(message, force=message in self.watcher.urgent)
-            self.minimize_blocks = {b["item"]["target"].lower(): b for b in self.db.blocks(now)
+            self.minimize_blocks = {b["item"]["target"].lower(): b
+                                    for b in self.db.blocks(now, usage=usage, items=items, groups=groups)
                                     if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
             if digest.due(self.db, now):   # the weekly summary
                 from gui import appinfo
                 from gui.dashboard import goal_seconds
-                items = self.db.list_items()
                 self._show(digest.summary(self.db, now.date(), goal_seconds(self.db),
                                           lambda kind, name: appinfo.name_of(kind, name, items)),
                            action=("See the week", lambda: self._open_on("Screen Time")))
@@ -574,8 +619,9 @@ class LockdownApp(ctk.CTk):
             self.after(UPDATE_POLL_MS, self._poll_updates)
 
     def _ask_github(self):
+        """(worker thread) Never self.after() here - that is a Tk call from the wrong thread."""
         found = updates.latest_release()
-        self.after(0, self._update_found, found)
+        self.call_soon(self._update_found, found)
 
     def _update_found(self, found):
         if found:                       # a failed check is not written down, so it tries again on the next poll

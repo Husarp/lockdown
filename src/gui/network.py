@@ -343,9 +343,11 @@ class NetworkPage(ctk.CTkFrame):
         self.refresh()
 
     def _live(self):
-        if self.live.get() and getattr(self.app, "current_page", None) == "Network Log":
-            self.refresh()
-        self.after(LIVE_MS, self._live)
+        try:
+            if self.live.get() and getattr(self.app, "current_page", None) == "Network Log":
+                self.refresh()
+        finally:   # (one failed refresh must not stop the loop for the rest of the session)
+            self.after(LIVE_MS, self._live)
 
     def on_show(self):
         self.view.set("Table")   # back to the Table view, not the last one

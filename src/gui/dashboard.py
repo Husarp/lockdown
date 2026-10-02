@@ -122,6 +122,39 @@ def when_text(when, now) -> str:
     return f"{when:%H:%M}" if when.date() == now.date() else f"{DAY_NAMES[when.weekday()][:3]} {when:%H:%M}"
 
 
+def upcoming(now, items, groups, usage) -> list[dict]:
+    """Blocks starting / ending within 24 h, and time limits about to run out (items in use)."""
+    horizon = now + timedelta(hours=24)
+    merged: dict[tuple, dict] = {}
+    for item in items:
+        rules = effective_rules(item, groups)
+        block = item_block(rules, now, usage)
+        if block:
+            until, rule = block[1], block[2]
+            if until and until <= horizon:
+                group = rule.get("group")
+                key = ("end", until, group["id"] if group else f"i{item['id']}")
+                title = f"{group['name']} ends" if group else f"{item['display_name']} allowed again"
+                merged.setdefault(key, {"kind": "end", "when": until, "title": title, "names": []})["names"].append(
+                    item["display_name"])
+            continue
+        nb = next_block(rules, now, usage)
+        if nb and nb[0] <= horizon:
+            when, rule = nb
+            key = ("start", when, rule["group"]["id"] if rule.get("group") else f"i{item['id']}")
+            title = f"{rule['group']['name']} starts" if rule.get("group") else f"{item['display_name']} blocked"
+            merged.setdefault(key, {"kind": "start", "when": when, "title": title, "names": []})["names"].append(
+                item["display_name"])
+        for r in rules:
+            if r["rule_type"] == "time_limit" and r.get("daily_limit_min"):
+                left = r["daily_limit_min"] * 60 - usage(r["usage_owner"], time_bucket("day", now, usage.clock))
+                if 0 < left <= 30 * 60:
+                    merged[("limit", item["id"])] = {"kind": "limit", "when": None, "left": left,
+                                                     "title": f"{item['display_name']} limit will be reached",
+                                                     "names": []}
+    return sorted(merged.values(), key=lambda e: (e["when"] is not None, e["when"] or now))
+
+
 class DashboardPage(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
@@ -265,9 +298,11 @@ class DashboardPage(ctk.CTkFrame):
             self.refresh()
 
     def _auto_refresh(self):
-        if getattr(self.app, "current_page", None) == "Dashboard":
-            self.refresh()
-        self.after(REFRESH_MS, self._auto_refresh)
+        try:
+            if getattr(self.app, "current_page", None) == "Dashboard":
+                self.refresh()
+        finally:   # (one failed refresh must not stop the loop for the rest of the session)
+            self.after(REFRESH_MS, self._auto_refresh)
 
     def refresh(self):
         self.last_refresh = time.monotonic()
@@ -309,7 +344,8 @@ class DashboardPage(ctk.CTkFrame):
             what = f"{state['mode']['name']} mode" + (f", {state['phase'][0]}" if state["phase"] else "")
             self.date.configure(text=self.date.cget("text") + f"  ·  {what}" + (f" until {end:%H:%M}" if end else ""))
 
-        self._stat_cards(now, rows, events, items, groups, usage)
+        coming = upcoming(now, items, groups, usage)   # (was worked out twice per refresh)
+        self._stat_cards(now, rows, events, items, groups, usage, coming)
         self._limits(now, items, groups, usage)
         start_hour = min(6, int(rows[0]["minute"][11:13])) if rows else 6
         segments = stats.timeline(rows, today, category)
@@ -321,11 +357,11 @@ class DashboardPage(ctk.CTkFrame):
             entry.square.configure(fg_color=c["color"])
             entry.label.configure(text=c["name"])
         self._week(now)
-        self._coming(now, items, groups, usage)
+        self._coming(now, coming)
         self._visits(today, items)
         self._glance(now, rows, events, items)
 
-    def _stat_cards(self, now, rows, events, items, groups, usage):
+    def _stat_cards(self, now, rows, events, items, groups, usage, coming):
         db, today = self.db, now.date()
         active = stats.totals(rows)[0]
         y = today - timedelta(days=1)
@@ -344,8 +380,7 @@ class DashboardPage(ctk.CTkFrame):
         elif not self.app.service_running:
             self.stat["Blocked now"].set(f"0 of {len(items)}", "Service stopped - not enforced", theme.DANGER)
         else:
-            upcoming = self._upcoming(now, items, groups, usage)
-            starts = [e for e in upcoming if e["kind"] == "start"]
+            starts = [e for e in coming if e["kind"] == "start"]
             note = f"Next: {starts[0]['title']} at {when_text(starts[0]['when'], now)}" if starts \
                 else "Nothing else coming up today"
             self.stat["Blocked now"].set(f"{len(blocked)} of {len(items)}", note)
@@ -422,7 +457,7 @@ class DashboardPage(ctk.CTkFrame):
     def _week(self, now):
         today = now.date()
         start = today - timedelta(days=6)
-        per_day = stats.per_day(stats.activity(self.db, start, today + timedelta(days=1)))
+        per_day = stats.daily_active(self.db, start, today + timedelta(days=1))   # summed in SQL
         since = datetime.combine(start, datetime.min.time())
         unlocks = Counter(u["started"].date() for u in self.db.unlocks_since(since))
         days = []
@@ -434,40 +469,8 @@ class DashboardPage(ctk.CTkFrame):
         self.week.note.configure(text=f"- - daily goal {goal / 3600:g} h" if goal else "")
         self.bars.set(days, goal)
 
-    def _upcoming(self, now, items, groups, usage) -> list[dict]:
-        """Blocks starting / ending within 24 h, and time limits about to run out (items in use)."""
-        horizon = now + timedelta(hours=24)
-        merged: dict[tuple, dict] = {}
-        for item in items:
-            rules = effective_rules(item, groups)
-            block = item_block(rules, now, usage)
-            if block:
-                until, rule = block[1], block[2]
-                if until and until <= horizon:
-                    group = rule.get("group")
-                    key = ("end", until, group["id"] if group else f"i{item['id']}")
-                    title = f"{group['name']} ends" if group else f"{item['display_name']} allowed again"
-                    merged.setdefault(key, {"kind": "end", "when": until, "title": title, "names": []})["names"].append(
-                        item["display_name"])
-                continue
-            nb = next_block(rules, now, usage)
-            if nb and nb[0] <= horizon:
-                when, rule = nb
-                key = ("start", when, rule["group"]["id"] if rule.get("group") else f"i{item['id']}")
-                title = f"{rule['group']['name']} starts" if rule.get("group") else f"{item['display_name']} blocked"
-                merged.setdefault(key, {"kind": "start", "when": when, "title": title, "names": []})["names"].append(
-                    item["display_name"])
-            for r in rules:
-                if r["rule_type"] == "time_limit" and r.get("daily_limit_min"):
-                    left = r["daily_limit_min"] * 60 - usage(r["usage_owner"], time_bucket("day", now, usage.clock))
-                    if 0 < left <= 30 * 60:
-                        merged[("limit", item["id"])] = {"kind": "limit", "when": None, "left": left,
-                                                         "title": f"{item['display_name']} limit will be reached",
-                                                         "names": []}
-        return sorted(merged.values(), key=lambda e: (e["when"] is not None, e["when"] or now))
-
-    def _coming(self, now, items, groups, usage):
-        upcoming = self._upcoming(now, items, groups, usage)[:4]
+    def _coming(self, now, coming):
+        upcoming = coming[:4]
         # the time column is only as wide as it has to be ("07:00"; "Mon 07:00" once something is tomorrow)
         wide = any(e["when"] is not None and e["when"].date() != now.date() for e in upcoming)
         for row, e in zip(self.coming_rows.take(len(upcoming)), upcoming):
@@ -535,8 +538,9 @@ class DashboardPage(ctk.CTkFrame):
             quiet = min(span, key=lambda h: summary["per_hour"].get(h, 0))
             n = summary["per_hour"].get(quiet, 0)
             entries.append(("Quietest hour", f"{quiet:02d}:00 - {quiet + 1:02d}:00", f"{n} switch{'es' * (n != 1)}"))
-        streak = stats.streaks(self.db, now.date(), goal_seconds(self.db))
-        if goal_seconds(self.db):
+        goal = goal_seconds(self.db)
+        streak = stats.streaks(self.db, now.date(), goal)
+        if goal:
             n = streak["goal"]
             entries.append(("Goal streak", f"{n} day{'s' * (n != 1)} in a row", "within your daily goal"))
         n = streak["no_unlock"]

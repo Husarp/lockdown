@@ -114,7 +114,7 @@ def test_weekly_summary(tmp_path):
 
 
 def test_update_keeps_an_older_database(tmp_path):
-    """An update (new program, same C:\ProgramData\Lockdown) opens an older database: new columns are added,
+    r"""An update (new program, same C:\ProgramData\Lockdown) opens an older database: new columns are added,
     nothing is lost."""
     import sqlite3
     path = tmp_path / "old.db"

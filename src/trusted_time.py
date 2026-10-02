@@ -106,6 +106,14 @@ def zone_step(state: dict | None, name: str, offset: float, now_ts: float) -> tu
     return state, state["offset"] - offset, message
 
 
+def _offset(text: str | None) -> timedelta:
+    return timedelta(seconds=float(text or "0"))
+
+
 def now_from_db(db) -> datetime:
-    """Trusted local time for the GUI/tray (uses the offset the service publishes)."""
+    """Trusted local time for the GUI/tray (uses the offset the service publishes). The offset is
+    parsed once per saved value (db.parsed) - pollers call this many times a second."""
+    parsed = getattr(db, "parsed", None)
+    if parsed is not None:
+        return datetime.now() + parsed(OFFSET_KEY, _offset, "0")
     return datetime.now() + timedelta(seconds=float(db.get_setting(OFFSET_KEY, "0")))

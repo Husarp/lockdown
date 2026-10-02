@@ -90,7 +90,7 @@ class WordGuard(threading.Thread):
                     now = time.monotonic()
                     if now - read_at >= SITES_SEC:
                         read_at, sites = now, blocked_sites(db)
-                    self.tick(keywords.settings(db), sense_tab, act, now, sites)
+                    self.tick(keywords.settings_shared(db), sense_tab, act, now, sites)   # (read-only)
                 except Exception:
                     log.exception("Word check failed")
 

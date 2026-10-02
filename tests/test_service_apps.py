@@ -1,7 +1,12 @@
+import sys
 import threading
+
+import pytest
 
 import service
 from blocker import apps
+
+WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="needs Windows: lists real Windows processes (kernel32 Toolhelp / GetProcessTimes)")
 
 
 def full(procs):
@@ -48,6 +53,7 @@ def test_firewall_only_apps_are_not_closed(monkeypatch):
     assert e.events == []
 
 
+@WINDOWS_ONLY
 def test_list_processes_real():
     names = {name for _, name in apps.list_processes()}
     assert "python.exe" in names or "pythonw.exe" in names
@@ -69,6 +75,7 @@ def test_launched_while_blocked_is_killed_at_once(monkeypatch):
     assert killed == [20] and e.events == ["discord.exe"]
 
 
+@WINDOWS_ONLY
 def test_start_time_real():
     import os, time
     started = apps.start_time(os.getpid())
