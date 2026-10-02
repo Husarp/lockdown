@@ -1,5 +1,6 @@
 """Updating without leaving the app: find the installer on the release, refuse to go backwards, and check
 every few hours rather than on every tick."""
+import pytest
 import io
 import json
 from datetime import datetime, timedelta
@@ -115,3 +116,23 @@ def test_a_failed_check_says_nothing_and_is_not_written_down(tmp_path):
     assert updates.latest_release(fetch=boom) is None
     assert not updates.worth_saying(db, None)
     assert updates.due(db, NOW)                    # so it tries again rather than waiting a day
+
+
+def test_installer_is_started_through_the_shell_so_windows_can_ask_for_admin(tmp_path, monkeypatch):
+    """0.84.5: subprocess (CreateProcess) can't start an installer that requires admin - Windows refused with error
+    740, nothing was shown and the update sat at 100%. ShellExecute "runas" shows the admin prompt instead."""
+    import ctypes
+    calls = []
+
+    class Shell32:
+        result = 42
+        def ShellExecuteW(self, hwnd, verb, file, params, folder, show):
+            calls.append((verb, file))
+            return Shell32.result
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"shell32": Shell32()})(), raising=False)
+    updates.install(tmp_path / "setup.exe")
+    assert calls == [("runas", str(tmp_path / "setup.exe"))]
+    Shell32.result = 5                      # refused, or No on the admin prompt: an error the window can show
+    with pytest.raises(OSError):
+        updates.install(tmp_path / "setup.exe")

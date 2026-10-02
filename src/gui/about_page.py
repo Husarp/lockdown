@@ -202,7 +202,16 @@ class AboutPage(ctk.CTkScrollableFrame):
         self.update_note.configure(text="Starting the installer - Lockdown will close. Windows will ask for "
                                         "permission, and may warn that the installer is unsigned.",
                                    text_color=MUTED)
-        updates.install(dest)
+        try:
+            updates.install(dest)
+        except Exception as error:   # it used to fail silently and sit at 100%
+            self.downloading = False
+            self.bar.pack_forget()
+            self.get_btn.configure(state="normal")
+            self.check_btn.configure(state="normal")
+            self.update_note.configure(text=f"The installer didn't start ({error}). Press Download and install "
+                                            "again, or run it yourself: " + str(dest), text_color=theme.WARNING)
+            return
         self.after(1500, self._close_for_update)
 
     def _close_for_update(self):

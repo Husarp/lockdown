@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.84.5 - 2026-10-02 13:40
+- **"Download and install" now really installs - it no longer sits at 100%.** You pressed it and nothing happened after the download. The installer is built to need admin rights, and Lockdown started it with `subprocess` (CreateProcess), which can't ask Windows for them: Windows refused with error 740 ("The requested operation requires elevation"), the error went nowhere, and the bar stayed at 100% with Lockdown still open. This was in every version with in-app updates. It is now started through the Windows shell (`ShellExecute` with "runas"), which shows the admin prompt like double-clicking it does (`updates._run_elevated`). If it still can't start (or you say No on the prompt), the About page now says so and shows where the installer was saved, instead of hanging.
+- Because the bug is in the version you have, **this one update still has to be installed by hand** (download LockdownSetup.exe from the release page and run it). From 0.84.5 on, the banner's Install works.
+- Tests: `test_installer_is_started_through_the_shell_so_windows_can_ask_for_admin`.
+
 ## 0.84.4 - 2026-10-02 10:53
 - **A new version now tells you - and stays on screen until you deal with it.** You were right that it didn't: three causes, all in the window's update check (`gui/app.py` `_poll_updates` / `_update_found`, `updates.py`).
   - **It only looked once a day.** `updates.EVERY_HOURS` was 24 (first check 90 s after start, then a look every hour whether a day had passed), so 0.84.1, 0.84.2 and 0.84.3 - all released within nine hours - could come and go between two checks. Now it checks a minute after every start, then every 3 hours (`EVERY_HOURS = 3`), and when you open the window from the tray if the last check is over an hour old (`OPEN_HOURS`). A check that gets no answer (no network, GitHub refusing) is tried again on the next poll, but never within 15 minutes of the last try (`RETRY_MIN`, `updates.trying`), so it stays far inside GitHub's 60 requests an hour for a caller without an account - at most 4 an hour even with GitHub down all day.

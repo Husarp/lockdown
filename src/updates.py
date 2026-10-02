@@ -14,7 +14,6 @@ later (hidden for SNOOZE_HOURS, then back).
 """
 import json
 import re
-import subprocess
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -114,9 +113,21 @@ def download(url: str, dest, progress=None, opener=None):
 
 
 def install(path, run=None):
-    """Start the downloaded installer. It asks Windows for admin itself; Lockdown closes straight after so its
-    own files can be replaced. `run` is for the tests."""
-    (run or (lambda p: subprocess.Popen([str(p)])))(path)
+    """Start the downloaded installer; Lockdown closes straight after so its own files can be replaced. `run` is
+    for the tests.
+
+    Through the shell (ShellExecute, "runas"), not subprocess: the installer is built to require admin, and
+    CreateProcess - what subprocess uses - can't ask for that. Windows refused with error 740 ("The requested
+    operation requires elevation"), the error went nowhere and the update sat at 100% for good. ShellExecute shows
+    the admin prompt. Raises OSError if it couldn't be started (or you said No), so the caller can say so."""
+    (run or _run_elevated)(path)
+
+
+def _run_elevated(path):
+    import ctypes
+    result = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(path), None, None, 1)
+    if result <= 32:   # ShellExecute: anything up to 32 is an error code (5 = refused / No on the admin prompt)
+        raise OSError(f"the installer could not be started (ShellExecute {result})")
 
 
 # ---------- the automatic check ----------
