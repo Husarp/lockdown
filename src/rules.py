@@ -8,6 +8,7 @@ be an impulse or untrue. Point them to the in-app Anti-Bypass challenge / emerge
 Full rule + rationale: antibypass.py. (Ordinary dev work is fine; this bans only limit-weakening.)
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 """
+import functools
 import json
 from datetime import datetime, time, timedelta
 
@@ -88,7 +89,15 @@ def next_window_start(windows: list[dict], now: datetime) -> datetime | None:
 
 
 def schedule_until(schedule_json: str, now: datetime) -> datetime | None:
-    """If the hours rule blocks at `now`, until when (a datetime), else None."""
+    """If the hours rule blocks at `now`, until when (a datetime), else None.
+
+    Hours are whole minutes, so the answer is the same all through a minute: it is worked out once per rule and
+    minute (the usage tracker asks for every rule in use twice a second - 0.84.2), not on every call."""
+    return _schedule_until(schedule_json, now.replace(second=0, microsecond=0))
+
+
+@functools.lru_cache(maxsize=512)
+def _schedule_until(schedule_json: str, now: datetime) -> datetime | None:
     s = load_schedule(schedule_json)
     ends = [u for u in (window_until(w, now) for w in s["windows"]) if u]
     if s["mode"] == BLOCK:
@@ -417,6 +426,26 @@ def usage_targets(rules: list[dict], item_id: int, now: datetime,
             if until:
                 targets.add((allowance_owner(r), allowance_bucket(r, until)))
     return targets
+
+
+def limit_targets(rules: list[dict], now: datetime,
+                  clock: LimitClock = DEFAULT_CLOCK) -> dict[tuple[str, str], int]:
+    """(owner, bucket) -> the seconds at which it blocks, for the buckets usage_targets fills that have a limit:
+    every time limit, and the allowance of the blocked stretch you are in. The usage tracker writes its time at
+    once when one of them is about to be reached (it batches the rest), so a block starts on time."""
+    out: dict[tuple[str, str], int] = {}
+
+    def put(target, seconds):
+        out[target] = min(out.get(target, seconds), seconds)
+    for r in rules:
+        if r["rule_type"] == "time_limit":
+            for p, limit in limits(r, TIME_LIMIT_FIELDS).items():
+                put((_owner(r), time_bucket(p, now, clock)), limit * 60)
+        elif r["rule_type"] == "scheduled" and r.get("allowance_min"):
+            until = schedule_until(r["schedule"], now)
+            if until:
+                put((allowance_owner(r), allowance_bucket(r, until)), r["allowance_min"] * 60)
+    return out
 
 
 def _opening_targets(rule: dict, now: datetime, clock: LimitClock) -> set[tuple[str, str]]:

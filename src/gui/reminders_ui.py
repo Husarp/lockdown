@@ -1,5 +1,8 @@
 """Reminders on screen (popup + full-screen overlay for the engine in reminders.py) and the Reminders tab of the
 Modes page (sleep, breaks, your own reminders). Changes apply at once."""
+import sys
+import time
+import tkinter
 import uuid
 from datetime import datetime, timedelta
 
@@ -7,7 +10,7 @@ import customtkinter as ctk
 
 import modes
 import reminders
-from gui import theme
+from gui import screens, theme
 from gui.components import Card, Rows, Segmented, eyebrow, hairline, page_head
 from gui.rule_editors import DayToggle
 from gui.widgets import ConfirmButton, ConfirmDialog, Corner
@@ -65,20 +68,47 @@ class ReminderPopup(ctk.CTkToplevel):
         self.geometry(f"+{x}+{y}")
 
 
+def _put(window, rect):
+    """Move a cover back onto `rect` (physical pixels) - only if it is not already exactly there."""
+    if (window.winfo_rootx(), window.winfo_rooty(), window.winfo_width(), window.winfo_height()) != \
+            (rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1]):
+        window.wm_geometry(screens.geometry(rect))
+
+
 class Overlay(ctk.CTkToplevel):
-    """Covers the screen (sleep / breaks). With no buttons it can't be closed - it goes away by itself."""
+    """Covers the screen (sleep / breaks). With no buttons it can't be closed - it goes away by itself.
+
+    The message fills exactly the primary monitor and is centred on it; other monitors get a plain dark cover
+    (see screens.py). It is built hidden and shown once, finished: no title-bar repaint dance, no see-through
+    (a translucent window the size of a screen has to be re-blended every frame something moves behind it),
+    and the countdown runs off the monotonic clock - no database read on the window's thread while it is up."""
     escape_closes = False
+    _deactivate_windows_window_header_manipulation = True   # no title bar to colour: skip CTk's hide/update/show
+    BG = ("#101316", "#0B0D10")
 
     def __init__(self, root, title: str, text: str, until: datetime | None, buttons, on_answer, now):
-        super().__init__(root, fg_color=("#101316", "#0B0D10"))
+        super().__init__(root, fg_color=self.BG)
+        self.withdraw()                       # build it off screen, show it once
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.94)
-        self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         self.protocol("WM_DELETE_WINDOW", lambda: None)
+        main, others = self._plan()
+        self._rect = main.rect
+        if sys.platform.startswith("win"):
+            # draw the widgets at THIS monitor's DPI from the start (customtkinter guessed from wherever the new
+            # window happened to be), so its DPI watcher finds nothing to change and never rescales mid-way
+            try:
+                from customtkinter.windows.widgets.scaling.scaling_tracker import ScalingTracker
+                ScalingTracker.window_dpi_scaling_dict[self] = main.scale
+            except Exception:
+                pass
+        self.wm_geometry(screens.geometry(self._rect))     # physical pixels as they are - not CTk's scaled geometry()
+        self._covers = [self._cover(m.rect) for m in others]
         self.until, self.now = until, now
+        self._end = None if until is None else time.monotonic() + (until - now()).total_seconds()
+        self._shown, self._synced = None, time.monotonic()
         box = ctk.CTkFrame(self, fg_color="transparent")
-        box.place(relx=0.5, rely=0.45, anchor="center")
+        box.place(relx=0.5, rely=screens.CONTENT_RELY, anchor="center")
         ctk.CTkLabel(box, text=title, font=theme.numeral(54), text_color="#E8ECF1").pack()
         ctk.CTkLabel(box, text=text, font=theme.body(16), text_color="#93A0AE", wraplength=600).pack(pady=(6, 10))
         self.clock = ctk.CTkLabel(box, text="", font=theme.numeral(40), text_color=theme.ACCENT[1])
@@ -90,12 +120,88 @@ class Overlay(ctk.CTkToplevel):
             ctk.CTkButton(row, text=label, width=150, height=36, **style,
                           command=lambda a=action: _finish(self, a, on_answer)).pack(side="left", padx=6)
         self._count()
+        self.update_idletasks()
+        self.deiconify()
+        self.lift()
+        self._up = True
+        self.after(self.GUARD_MS, self._guard)
+
+    GUARD_MS = 1000       # re-check where the covers belong (a monitor plugged/unplugged, the window moved)
+    RESYNC_S = 30         # re-read the trusted clock now and then (the PC slept, the clock offset changed)
+
+    def _plan(self):
+        return screens.plan(screens.monitors(), (0, 0, self.winfo_screenwidth(), self.winfo_screenheight()))
+
+    def _cover(self, rect):
+        """A plain dark window over another monitor: nothing to draw, no scaling, gone with the overlay. Like
+        the overlay, Alt+F4 does nothing (Tk would otherwise destroy it and show that monitor)."""
+        cover = tkinter.Toplevel(self, bg=self.BG[1] if ctk.get_appearance_mode() == "Dark" else self.BG[0],
+                                 highlightthickness=0, bd=0)
+        cover.overrideredirect(True)
+        cover.attributes("-topmost", True)
+        cover.protocol("WM_DELETE_WINDOW", lambda: None)
+        cover.wm_geometry(screens.geometry(rect))
+        cover._rect = rect
+        return cover
+
+    def _place(self):
+        """Put the overlay on the monitor that should have it and a cover on every other one - re-reading the
+        monitors, so one unplugged/plugged in (or the primary changed) while it is up is followed, and a window
+        moved off its place (Win+Shift+Arrow, Windows shuffling windows after a display change) goes back."""
+        main, others = self._plan()
+        self._rect = main.rect
+        _put(self, main.rect)
+        if getattr(self, "_up", False) and self.state() != "normal":
+            self.deiconify()      # (while it is still being built it stays hidden)
+        wanted = [m.rect for m in others]
+        alive = [c for c in getattr(self, "_covers", []) if c.winfo_exists()]
+        if [c._rect for c in alive] != wanted:
+            for c in alive:
+                c.destroy()
+            self._covers = [self._cover(r) for r in wanted]
+        else:
+            for c in alive:
+                _put(c, c._rect)
+                if c.state() != "normal":
+                    c.deiconify()
+
+    def _guard(self):
+        try:
+            if not self.winfo_exists():
+                return
+            self._place()
+        except tkinter.TclError:
+            return            # destroyed under us
+        except Exception:
+            pass              # never let a failed check stop the guard
+        self.after(self.GUARD_MS, self._guard)
+
+    def _set_scaling(self, new_widget_scaling, new_window_scaling):
+        """customtkinter resizes a window by the display scaling when it changes; this one is always exactly its
+        monitor, in physical pixels, so it only takes the new factors (its widgets rescale themselves) and goes
+        back to where it belongs - re-read, not the old rectangle: a DPI change is often a display change."""
+        super(ctk.CTkToplevel, self)._set_scaling(new_widget_scaling, new_window_scaling)   # CTkScalingBaseClass's
+        if getattr(self, "_rect", None):
+            try:
+                self._place()
+            except Exception:
+                self.wm_geometry(screens.geometry(self._rect))
 
     def _count(self):
-        if self.until and self.winfo_exists():
-            left = max(0, int((self.until - self.now()).total_seconds()))
-            self.clock.configure(text=f"{left // 60}:{left % 60:02d}")
-            self.after(500, self._count)
+        if self._end is None or not self.winfo_exists():
+            return
+        if time.monotonic() - self._synced >= self.RESYNC_S:
+            self._synced = time.monotonic()
+            try:
+                self._end = self._synced + (self.until - self.now()).total_seconds()
+            except Exception:
+                pass
+        text, wait = screens.countdown(self._end - time.monotonic())
+        if text != self._shown:
+            self._shown = text
+            self.clock.configure(text=text)
+        if wait is not None:
+            self.after(wait, self._count)
 
 
 class ReminderUI:

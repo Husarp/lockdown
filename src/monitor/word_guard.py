@@ -13,11 +13,12 @@ import keywords
 from blocker import site_block
 from blocker.hosts import normalize_host
 from db import Database
+from monitor import usage
 from trusted_time import now_from_db
 
 TICK_SEC = 0.5
 RETRY_SEC = 2   # the same page still there this long after acting: act again (going back -> closing)
-SITES_SEC = 2   # how often the list of blocked sites is re-read
+SITES_SEC = 2   # how often the list of blocked sites is re-read (and at once when a limit runs out - BlockedSites)
 RESTART_SEC = 30   # wait before starting the check again after it fell over
 
 log = logging.getLogger("lockdown.words")
@@ -57,6 +58,25 @@ def blocked_sites(db) -> dict[str, str]:
         if block["item"]["item_type"] == "site":
             out[host] = site_block.tab_action(block["item"].get("block_type")) or "back"
     return out
+
+
+class BlockedSites:
+    """blocked_sites(), read again every SITES_SEC - and at once after the usage tracker has written time that
+    makes a limit or an allowance run out, or an opening (usage.limit_writes, 0.84.2). A site whose minutes just
+    ran out used to stay on screen until the next read, up to SITES_SEC; now it is sent back on the next tick."""
+
+    def __init__(self, read=blocked_sites):
+        self.read = read
+        self.at: float | None = None   # when last read (monotonic)
+        self.writes = None             # usage.limit_writes as it was then
+        self.sites: dict[str, str] = {}
+
+    def get(self, db, now: float) -> dict[str, str]:
+        writes = usage.limit_writes   # (taken first: a write during the read makes the next tick read again)
+        if self.at is None or not 0 <= now - self.at < SITES_SEC or writes != self.writes:
+            self.at, self.writes = now, writes
+            self.sites = self.read(db)
+        return self.sites
 
 
 def site_action(url: str | None, sites: dict) -> str | None:
@@ -99,13 +119,11 @@ class WordGuard(threading.Thread):
         import uiautomation as auto   # COM must be initialized in this thread
         with auto.UIAutomationInitializerInThread():
             db = Database()
-            read_at, sites = 0.0, {}
+            blocked = BlockedSites()
             while not self.stop_event.wait(TICK_SEC):
                 try:
                     now = time.monotonic()
-                    if now - read_at >= SITES_SEC:
-                        read_at, sites = now, blocked_sites(db)
-                    self.tick(keywords.settings_shared(db), sense_tab, act, now, sites)   # (read-only)
+                    self.tick(keywords.settings_shared(db), sense_tab, act, now, blocked.get(db, now))   # (read-only)
                 except Exception:
                     log.exception("Word check failed")
 

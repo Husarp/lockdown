@@ -80,8 +80,9 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   can't be blocked.
 - Groups (Blocking > Groups) hold shared rules; members inherit them, a member can be customized, and a group
   daily limit is one total for all members. Warnings/reminders are set on the Notifications page.
-- Daily limits: the tray agent reads the active browser tab's address (Windows UI Automation — Chrome, Edge, Brave,
-  Firefox, no extension needed) and counts time on limited sites; the service blocks the site once the limit is used up,
+- Daily limits: the tray agent checks the windows in front twice a second, reads the active browser tab's address
+  (Windows UI Automation — Chrome, Edge, Brave, Firefox, no extension needed) and counts time on limited sites and
+  apps; the service blocks the site once the limit is used up,
   until the limit period ends (at the limit reset time).
 - The service keeps its own trusted time (internet time + the Windows tick counter), so changing the Windows clock
   doesn't unlock anything; clock changes are logged.

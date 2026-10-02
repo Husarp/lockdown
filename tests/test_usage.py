@@ -1,7 +1,19 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from db import Database
+from monitor import usage as usage_mod
 from monitor.usage import UsageTracker, items_in_use, match_item
+
+NOON = datetime(2026, 10, 2, 12, 0)
+
+
+def every_2s(monkeypatch) -> UsageTracker:
+    """A tracker whose ticks come 2 s of trusted time apart (each counts those 2 s), counting since NOON."""
+    ticks = iter(range(1, 100_000))
+    monkeypatch.setattr(usage_mod, "now_from_db", lambda db: NOON + timedelta(seconds=2 * next(ticks)))
+    tracker = UsageTracker()
+    tracker.counted_ts = NOON.timestamp()
+    return tracker
 
 ITEMS = [{"id": 1, "target": "youtube.com youtu.be", "item_type": "site"},
          {"id": 2, "target": "reddit.com", "item_type": "site"},
@@ -23,24 +35,24 @@ def test_items_in_use():
     assert items_in_use(None, None, True, ITEMS) == []
 
 
-def test_tick_adds_to_item_group_and_allowance_buckets(tmp_path):
+def test_tick_adds_to_item_group_and_allowance_buckets(tmp_path, monkeypatch):
     db = Database(tmp_path / "t.db")
     discord = db.add_item("Discord", ["discord.exe"], "app")
     gid = db.add_group("Games", [{"rule_type": "time_limit", "daily_limit_min": 60}], {discord: {}})
-    tracker = UsageTracker()
+    tracker = every_2s(monkeypatch)
     tracker.tick(db, lambda: ("discord.exe", None, 0))
     tracker.tick(db, lambda: ("discord.exe", None, 0))
     tracker.tick(db, lambda: ("notepad.exe", None, 0))
-    usage = db.usage_lookup(datetime.now())
-    today = f"day:{datetime.now().date().isoformat()}"
+    usage = db.usage_lookup(NOON)
+    today = f"day:{NOON.date().isoformat()}"
     assert usage(f"item:{discord}", today) == 4
     assert usage(f"group:{gid}", today) == 4          # shared group limit counts too
     assert tracker.in_use == set()
 
 
-def test_screen_time_and_switches(tmp_path):
+def test_screen_time_and_switches(tmp_path, monkeypatch):
     db = Database(tmp_path / "t.db")
-    tracker = UsageTracker()
+    tracker = every_2s(monkeypatch)
     for sense in [("code.exe", None, 0), ("code.exe", None, 0), ("brave.exe", "https://www.youtube.com/x", 0),
                   ("brave.exe", "reddit.com", 400), (None, None, 0), ("code.exe", None, 0)]:
         tracker.tick(db, lambda s=sense: s)

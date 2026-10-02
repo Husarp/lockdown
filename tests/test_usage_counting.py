@@ -55,6 +55,14 @@ def reasons(db, now, item_id):
     return [b["reason"] for b in db.blocks(now) if b["item"]["id"] == item_id]
 
 
+def counting(clock: Clock) -> UsageTracker:
+    """A tracker that has been counting up to the clock's time - so each tick counts the `every` seconds before it,
+    the first one too (a fresh tracker's first tick counts one TICK_SEC: it can't know what came before)."""
+    tracker = UsageTracker()
+    tracker.counted_ts = clock.now.timestamp()
+    return tracker
+
+
 def play(db, tracker, clock, seconds: float, every: float, sense, running=lambda: {"game.exe"}):
     """Tick the real tracker every `every` seconds of trusted time for `seconds`."""
     for _ in range(round(seconds / every)):
@@ -94,13 +102,17 @@ def test_a_long_gap_is_the_pc_asleep_not_play(tmp_path, monkeypatch):
     assert used(db, f"item:{game}", day(clock.now), clock.now) == MAX_GAP_SEC
 
 
-def test_ticks_as_fast_as_before_still_count_a_tick_each(tmp_path, monkeypatch):
+def test_ticks_closer_than_a_tick_still_count_a_tick_each(tmp_path, monkeypatch):
+    """(The wait between ticks is TICK_SEC, so a tick never comes sooner - but if one did, it counts a tick.) Half
+    seconds are kept until they make a whole one: 5 ticks = 2.5 s, 2 written and the half still waiting."""
     db = Database(tmp_path / "t.db")
     game = db.add_item("Game", ["game.exe"], "app")
     clock, tracker = Clock(monkeypatch, EVENING), UsageTracker()
     for _ in range(5):
         tracker.tick(db, lambda: ("game.exe", None, 0))   # (no time passes at all between them)
-    assert used(db, f"item:{game}", day(clock.now), clock.now) == 5 * TICK_SEC
+    tracker.flush(db)
+    assert used(db, f"item:{game}", day(clock.now), clock.now) == int(5 * TICK_SEC)
+    assert tracker.pending[(f"item:{game}", day(clock.now))][0] == pytest.approx(5 * TICK_SEC % 1)
 
 
 # ---------- input or not ----------
@@ -109,7 +121,8 @@ def test_a_game_counts_without_keyboard_or_mouse(tmp_path, monkeypatch):
     """A controller, a cutscene: no input Windows sees. Two hours in front = two hours counted."""
     db = Database(tmp_path / "t.db")
     game = db.add_item("Game", ["game.exe"], "app")
-    clock, tracker = Clock(monkeypatch, EVENING), UsageTracker()
+    clock = Clock(monkeypatch, EVENING)
+    tracker = counting(clock)
     play(db, tracker, clock, 2 * 3600, 2, lambda: ("game.exe", None, 3 * 3600))
     assert used(db, f"item:{game}", day(clock.now), clock.now) == 2 * 3600
 
@@ -130,7 +143,8 @@ def test_youtube_watched_without_touching_anything_uses_up_the_allowance(tmp_pat
     without input stopped counting after 15 minutes, so they were never spent and YouTube stayed open."""
     db = Database(tmp_path / "t.db")
     yt, _gid = _youtube_group(db)
-    clock, tracker = Clock(monkeypatch, datetime(2026, 10, 2, 22, 25)), UsageTracker()
+    clock = Clock(monkeypatch, datetime(2026, 10, 2, 22, 25))
+    tracker = counting(clock)
     assert reasons(db, clock.now, yt) == []                       # the allowance is the way in
     play(db, tracker, clock, 2 * 3600, 2, lambda: ("chrome.exe", "https://www.youtube.com/watch?v=x", 40 * 60),
          running=lambda: {"chrome.exe"})
@@ -160,7 +174,7 @@ def test_unlocked_the_window_in_front_is_reported(monkeypatch):
     monkeypatch.setattr(win, "idle_seconds", lambda: 3600.0)
     monkeypatch.setattr(win, "session_locked", lambda: False)
     monkeypatch.setattr(win, "window_pid", lambda hwnd: 4242)
-    assert usage_mod.sense_desktop() == ("game.exe", None, 3600.0, r"D:\Games\Game\game.exe", 4242)
+    assert usage_mod.sense_desktop() == ("game.exe", None, 3600.0, r"D:\Games\Game\game.exe", 4242, [])
     monkeypatch.setattr(win, "foreground_process", lambda: (1234, "chrome.exe", r"C:\Chrome\chrome.exe"))
     monkeypatch.setattr(browser_url, "browser_url", lambda hwnd: "youtube.com/watch")
     assert usage_mod.sense_desktop()[:2] == ("chrome.exe", "youtube.com/watch")
@@ -194,7 +208,8 @@ def test_the_game_window_from_the_games_folder_counts_for_the_game(tmp_path, mon
 def test_a_target_typed_as_a_full_path_counts(tmp_path, monkeypatch):
     db = Database(tmp_path / "t.db")
     game = db.add_item("Game", [r"C:\Games\Game\Game.exe"], "app")
-    clock, tracker = Clock(monkeypatch, EVENING), UsageTracker()
+    clock = Clock(monkeypatch, EVENING)
+    tracker = counting(clock)
     play(db, tracker, clock, 60, 2, lambda: ("game.exe", None, 0))
     assert used(db, f"item:{game}", day(clock.now), clock.now) == 60
 
@@ -247,7 +262,8 @@ def test_while_the_tray_counts_the_service_does_not(tmp_path, monkeypatch):
     db = Database(tmp_path / "t.db")
     game = db.add_item("Game", ["game.exe"], "app")
     _procs(monkeypatch, [(5, 1, "game.exe")])
-    clock, tracker, e = Clock(monkeypatch, EVENING), UsageTracker(), _bare_enforcer(db)
+    clock = Clock(monkeypatch, EVENING)
+    tracker, e = counting(clock), _bare_enforcer(db)
     for _ in range(300):
         clock += 2
         tracker.tick(db, lambda: ("game.exe", None, 0), running_exes=lambda: {"game.exe"})

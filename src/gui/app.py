@@ -37,7 +37,7 @@ from gui.reminders_ui import ReminderUI, RemindersPage
 from gui.screen_time import ScreenTimePage
 from gui.settings import SettingsPage
 from gui.tray import Tray
-from monitor import win
+from monitor import usage as usage_mod, win
 from monitor.usage import UsageTracker
 from monitor.word_guard import WordGuard
 from rules import DAY_NAMES, TIME_FMT
@@ -158,6 +158,7 @@ class LockdownApp(ctk.CTk):
         self.word_guard.start()   # bad-word check of the browser tab in front (Protection tab)
         self.watcher = alerts.BlockWatcher()
         self.minimize_blocks: dict[str, dict] = {}   # exe -> block, for apps blocked with "Minimize"
+        self.minimize_writes = usage_mod.limit_writes   # (re-read at once when the tracker reaches a limit)
         self._poll_watcher()
         self._poll_minimize()
         self.reminder_ui = ReminderUI(self)
@@ -425,6 +426,7 @@ class LockdownApp(ctk.CTk):
     def _shutdown(self):
         """Before the window goes: stop the background jobs and write any setting still waiting for a lock."""
         self.retention.stop_event.set()
+        self.usage_tracker.stop()   # (writes the time it has counted but not written yet - at most FLUSH_SEC of it)
         self.db.flush()
         self.tray.stop()
 
@@ -582,9 +584,7 @@ class LockdownApp(ctk.CTk):
             items, groups, usage = self.db.list_items(), self.db.list_groups(), self.db.usage_lookup(now)
             for message in self.watcher.check(items, groups, usage, now, self.usage_tracker.in_use, settings):
                 self._show(message, force=message in self.watcher.urgent)
-            self.minimize_blocks = {exe_name(b["item"]["target"]): b
-                                    for b in self.db.blocks(now, usage=usage, items=items, groups=groups)
-                                    if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
+            self._read_minimize_blocks(now, usage, items, groups)
             if digest.due(self.db, now):   # the weekly summary
                 from gui import appinfo
                 from gui.dashboard import goal_seconds
@@ -642,11 +642,22 @@ class LockdownApp(ctk.CTk):
         about._checked(found)
         about._get()
 
+    def _read_minimize_blocks(self, now, usage=None, items=None, groups=None):
+        self.minimize_writes = usage_mod.limit_writes
+        self.minimize_blocks = {exe_name(b["item"]["target"]): b
+                                for b in self.db.blocks(now, usage=usage, items=items, groups=groups)
+                                if b["item"]["item_type"] == "app" and minimizes(b["item"]["block_type"])}
+
     def _poll_minimize(self):
         """Apps blocked with "Minimize": keep them running, but minimize them whenever they come to the front.
-        Also enforces a strict break: while one is on, anything brought to the front is sent back down."""
+        Also enforces a strict break: while one is on, anything brought to the front is sent back down.
+        The list of those apps comes with the watcher (every WATCH_MS) - and at once when the usage tracker has
+        just written time reaching a limit or an allowance (0.84.2), so one whose time ran out is minimized
+        straight away rather than up to WATCH_MS later."""
         try:
             self._enforce_break()
+            if usage_mod.limit_writes != self.minimize_writes and not antibypass.is_off(self.db):
+                self._read_minimize_blocks(now_from_db(self.db))
             if self.minimize_blocks:
                 _hwnd, exe = win.foreground()
                 block = self.minimize_blocks.get(exe)

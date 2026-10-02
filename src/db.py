@@ -589,6 +589,38 @@ class Database:
                     "ON CONFLICT(owner, bucket) DO UPDATE SET seconds = seconds + excluded.seconds",
                     (owner, bucket, seconds, day.isoformat()))
 
+    @_write
+    def add_tracked(self, usage=(), activity=(), switches=(), settings: dict | None = None):
+        """The usage tracker's batch (monitor/usage.py, 0.84.2) in ONE transaction - one commit every couple of
+        seconds instead of three or more on every tick: usage (owner, bucket, day, seconds), screen time
+        (minute, exe, site, seconds, active seconds), switches (timestamp, exe, site) and settings (its
+        counted-until mark, written with the time it covers so the two can never disagree)."""
+        with self.conn:
+            self.conn.executemany(
+                "INSERT INTO usage (owner, bucket, seconds, day) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(owner, bucket) DO UPDATE SET seconds = seconds + excluded.seconds",
+                [(owner, bucket, seconds, day.isoformat() if isinstance(day, date) else day)
+                 for owner, bucket, day, seconds in usage])
+            self.conn.executemany(
+                "INSERT INTO activity (minute, exe, site, seconds, active_seconds) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(minute, exe, site) DO UPDATE SET seconds = seconds + excluded.seconds, "
+                "active_seconds = active_seconds + excluded.active_seconds", list(activity))
+            self.conn.executemany("INSERT INTO switch_events (timestamp, exe, site) VALUES (?, ?, ?)",
+                                  [(ts.strftime(TIME_FMT), exe, site) for ts, exe, site in switches])
+            for key, value in (settings or {}).items():
+                self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def usage_of(self, targets) -> dict[tuple[str, str], int]:
+        """Seconds (or openings) used in each (owner, bucket) - 0 where nothing is written yet. A primary-key
+        lookup each: the tracker asks for the few limits in use, not the whole usage table (usage_lookup)."""
+        out = {}
+        for owner, bucket in targets:
+            row = self.conn.execute("SELECT seconds FROM usage WHERE owner = ? AND bucket = ?",
+                                    (owner, bucket)).fetchone()
+            out[(owner, bucket)] = row[0] if row else 0
+        return out
+
     def usage_lookup(self, now: datetime) -> Usage:
         """usage(owner, bucket) -> seconds, over recently written rows; with the limit clock and active unlocks."""
         since = (now.date() - timedelta(days=USAGE_DAYS_LOADED)).isoformat()
