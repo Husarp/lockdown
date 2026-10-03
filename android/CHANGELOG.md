@@ -1,5 +1,54 @@
 # Changelog — Lockdown Mobile
 
+## 0.5.12 - 2026-10-03 14:32
+- **Fixed: turning grayscale off didn't bring the colour back.** 0.5.10 only switched off grayscale that it had marked as its own, and grayscale turned on by an older build, or by the copy you had before the reinstall for the new signing key (which wiped that mark), had no mark, so it stayed on. Now:
+  - **Switching "Bedtime grayscale" off** (in Settings or Reminders > Bedtime), or switching Bedtime itself off while grayscale is on, gives the colour back straight away, whoever turned it on. Only grayscale is touched, never another colour correction.
+  - Grayscale left on without the mark counts as Lockdown's own while the switch is on, so it also goes off by itself at wake time.
+  - **At wake time the colour comes back within a minute** (the app-blocking service checks every minute), instead of up to 15 minutes or more later.
+  - **When Lockdown isn't allowed to change the screen's colour, it says so.** That permission comes from a one-time adb command, and uninstalling the app removes it. Under the grayscale switch you now get the command and a **Copy command** button. Guardrails > Reliability has a new "Grayscale permission" row while the switch is on. If switching off fails, a message says why and where to turn it off by hand.
+- **A video that is playing stops when its block starts.** Before, the block only covered the screen: the sound went on under it, and after OK, YouTube or the browser carried on in a picture-in-picture window. Now the video is paused and the app is left right away (an app goes to the home screen). The notice stays until you press OK. A picture-in-picture window of a blocked video is kept paused.
+- **How a site is blocked now really happens** (your 2026-10-01 request). In a site's rule editor:
+  - **Go back** makes the browser go back a page.
+  - **Leave the browser** goes to the home screen. Android has no way to close a single tab.
+  - **Cut the connection** lets the site filter stop the site loading. The filter now cuts a site only when this is chosen (it's the default). Without the site filter running, the page is covered instead, and the editor says so.
+  - A site with no method chosen shows its default (Cut the connection) as chosen.
+  - Protection-list sites in the browser now go back too.
+- **The cool-off starts after the phrase, like the PC** (your request). It no longer runs while you type. It starts once the phrase is right, pauses if you change the phrase back to wrong, and the change goes through by itself when it ends.
+- **Searching for members finds your apps** (your request). In a group's Members and a mode's "Also block these", the search now also lists installed apps that aren't on your blocklist yet. An app picked as a group member is added to the list when you save, with no rules of its own (the group's rules govern it). Blocking an app (Block something > An app) has a search box now too.
+- **A member's limits in a group come on top of the group's, never instead (like the PC since 0.84.3).** Every member always gets every group rule, counted in the group's shared total, plus its own extra limits:
+  - Time and openings fill both. With the group at 2 h a day and YouTube's own 1 h, YouTube stops at 1 h, and that hour also counts toward the group's 2 h.
+  - Blocked hours add up and allowed hours narrow.
+  - The group's shared allowance stays shared.
+  - Group editor: a new section, **Extra limits on top of the group's**, where each member gets an "Extra limits" button.
+  - Anti-Bypass: adding or tightening an extra limit is free. Removing or relaxing one, or changing its hours, needs the challenge. Clearing away a temporary extra that has run out is free.
+  - "Blocked until" is the end of the longest of the blocks.
+- **Emergency unlock:**
+  - It runs in trusted time, so a clock set forward no longer gives a longer unlock, and an unlock can't last longer than its minutes.
+  - A use dated in the future still counts.
+  - Permanently blocked apps (by their own rule or a group's) are no longer offered and can't be unlocked.
+  - New tick, **Pause bedtime and break alerts (and bedtime grayscale)**, for the emergency's length. Ticked together with apps it is one use; on its own it is one use too. Your bedtime settings don't change.
+  - The 5-minute "unlocked for editing" window runs in trusted time too.
+- **Updates:** the app now looks through recent GitHub releases for the newest `LockdownMobile-*.apk`, not only the latest release, so a PC-only release on top no longer hides a phone update.
+- **Time counts only while the phone is in use.** Nothing counts while the phone is locked or the screen is off (audio playing kept YouTube's time running before).
+- **A blocked item's time and retries no longer count.** They used to fill its limits and its group's. The opening that goes over a limit still counts.
+- **A browser video in full screen keeps its site.** The address bar is hidden then, and the site used to be lost: no time counted, and no block. The address is now also kept fresh when keywords are off.
+- **Modes:** marking music.youtube.com as Neutral no longer takes the whole YouTube item out of Work, Focus and the other modes (like the PC since 0.84.1).
+- Smaller fixes:
+  - A schedule inside its blocked hours, running on its allowance, shows orange ("soon") instead of "allowed".
+  - "Running low" shows the limit with the least time left.
+  - A site's second and later hostnames lose a typed `www.` or `https://` too, and a target saved with `www.` still matches.
+  - Saving settings no longer writes the whole configuration on the screen's thread. Saves are atomic, and the site filter's thread can't overwrite a change made at the same moment.
+  - Usage counters for weeks, months and openings that ended more than 45 days ago are dropped once a day, so the usage file stops growing.
+  - The pause-before-open countdown no longer disappears after 3 seconds.
+- Tests: new `GroupMergeTest` (14) covers the merge rule (the group's 2 h with YouTube's own 1 h, the group running out first, an old looser extra no longer loosening, blocked hours adding up, allowed hours narrowing, shared and own allowance, openings filling both, the latest "blocked until", a disabled group still counting both ways, Anti-Bypass on extras), emergencies against permanent blocks and with a future date, the orange allowance status, and the neutral subdomain. Also new: `UpdateLogicTest.aPcOnlyReleaseOnTopDoesNotHideThePhoneUpdate`, more prune cases in `UsageCounterTest`. Changed: `RulesEngineTest` (the emergency keeps a permanent block, and a member's extra is a second rule, not a replacement).
+- Found in review:
+  - **Switching grayscale off without the permission now opens Android's Colour correction page** so it can be switched off there in one tap, and the colour comes back by itself within a minute once the permission is granted again (the "ours" mark is kept when Android refuses).
+  - **The copy in the work profile (Island) says it can't change the screen's colour** under the grayscale switch, instead of asking for a permission that wouldn't help: the colour setting belongs to the main profile. It no longer tries.
+  - The grayscale decision is now a pure, tested step (`grayscaleStep`): an unmarked grey screen with the switch on goes off at wake time, grayscale the user set is left alone, and nothing is written when nothing changes.
+  - Opening the group editor, a mode editor or the app picker no longer freezes the screen while every installed app's name is read (now off the main thread). Installed apps not on the list show up once something is typed, instead of burying the members list.
+  - After a site sent you out of the browser, its address is forgotten, so the next page opened isn't judged by it before its address bar is read.
+  - Tests: 6 more (grayscale left on by an older copy, the user's own grayscale left alone, write only on change; removing a member with extra limits, a non-member's extras doing nothing, an extra of a kind the group lacks).
+
 ## 0.5.11 - 2026-10-02 23:22
 - **The app now updates itself.** It checks GitHub when it opens and every time you come back to it (at most every 5 minutes), and when a newer Lockdown Mobile is out, a banner on Home shows the version with **UPDATE** and **✕**. The ✕ hides the banner until the app is next started (coming back from another app doesn't bring it back).
 - **UPDATE downloads the new version inside the app** (progress 0–100%) and hands it to Android's installer — no browser, no Downloads folder. The first time, Android's "Install unknown apps" screen opens for Lockdown; allow it, come back, and the install carries on by itself. Android still asks you to confirm every update.

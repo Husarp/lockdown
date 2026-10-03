@@ -15,7 +15,8 @@ object Emergency {
     fun usesLeft(started: List<LocalDateTime>, now: LocalDateTime, per: String, allowed: Int,
                  clock: LimitClock = LimitClock.DEFAULT): Uses {
         val (key, reset) = clock.period(per, now)
-        val used = started.count { !it.isAfter(now) && clock.period(per, it).first == key }
+        // A start dated after now (the clock was set forward, then back) still counts as used.
+        val used = started.count { it.isAfter(now) || clock.period(per, it).first == key }
         return Uses(maxOf(0, allowed - used), allowed, reset)
     }
 

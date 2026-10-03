@@ -43,6 +43,22 @@ fun bedtimeGrayscaleWanted(toggle: Boolean, s: SleepCfg, mins: Int): Boolean {
     return if (bed <= wake) mins in bed until wake else mins >= bed || mins < wake
 }
 
+/**
+ * One bedtime-grayscale step: what to write and the new "Lockdown turned it on" mark. [mark] is null when it was
+ * never written (a build before 0.5.10, or a reinstall wiped it); [isOn] is null when Android won't say.
+ * Returns (write: true = turn grayscale on, false = turn it off, null = leave it; the mark to keep).
+ * An unmarked grey screen while the switch is on counts as Lockdown's own (left on by an older copy), so it goes off
+ * at wake time; otherwise grayscale nobody marked (the user's own) is never turned off by this.
+ */
+fun grayscaleStep(wanted: Boolean, switchOn: Boolean, mark: Boolean?, isOn: Boolean?): Pair<Boolean?, Boolean?> {
+    val ours = mark ?: (switchOn && isOn != false).takeIf { it }
+    return when {
+        wanted -> (if (isOn == true) null else true) to true
+        ours == true -> (if (isOn == false) null else false) to false
+        else -> null to ours
+    }
+}
+
 @Serializable
 data class BreakCfg(
     val on: Boolean = true,

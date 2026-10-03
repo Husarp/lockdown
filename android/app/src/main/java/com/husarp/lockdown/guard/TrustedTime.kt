@@ -30,6 +30,10 @@ object TrustedTime {
         return max   // clock was set back - keep the last trusted time
     }
 
+    /** [now] as a local date-time, for the rule engine and the screens. */
+    fun local(ctx: Context): java.time.LocalDateTime =
+        java.time.Instant.ofEpochMilli(now(ctx)).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+
     /** How far the clock has been set back from the highest seen (ms), or 0. For a tamper warning. */
     fun setbackMs(ctx: Context): Long {
         if (!Store.config.guardrails.trustedTime) return 0

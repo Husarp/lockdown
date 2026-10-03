@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
@@ -21,16 +22,23 @@ import android.widget.TextView
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
+import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.ItemType
+import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.engine.SleepCfg
 import com.husarp.lockdown.guard.TrustedTime
+import com.husarp.lockdown.remind.Grayscale
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 /**
  * Watches the foreground app / browser tab. It feeds the usage engine (so time and opening limits count),
- * asks the rule engine (plus the active mode) whether to block, covers the screen with an overlay when it
- * should, blocks bad keywords in browsers, and drives the bedtime nudge cadence.
+ * asks the rule engine (plus the active mode) whether to block, and when it should: pauses a video that was
+ * playing, leaves the app / goes back in the browser (the item's block method) and covers the screen with a
+ * notice until OK. It also stops a blocked video carrying on in picture-in-picture, blocks bad keywords in
+ * browsers, and drives the bedtime nudge cadence and bedtime grayscale.
  */
 class BlockService : AccessibilityService() {
 
@@ -39,16 +47,25 @@ class BlockService : AccessibilityService() {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     @Volatile private var currentPkg = ""
-    @Volatile private var lastUrl: String? = null
+    private val lastUrl = HashMap<String, String>()   // browser -> last address read (kept while the bar is hidden)
     private var prevTickPkg = ""
-    private var lastKeywordScan = 0L
+    private var lastBarRead = 0L
     private var lastPausePkg = ""
     private var lastPauseAt = 0L
     private var lastBedtimeNudge = 0L
     private var shownItemId: String? = null
+    private var blockUp = false                       // the block notice is up (stays until OK)
+    private var homeOnOk = false                      // OK still has to leave the page (a "can't load" site)
+    private var allowedKey: String? = null            // what was in front and allowed at the last step
+    private val lastAct = HashMap<String, Long>()     // what was blocked -> when it was last acted on
+    private val blockedAt = HashMap<String, Long>()   // package -> when a block last fired for it (to catch PiP)
+    private val pipCaught = HashSet<Int>()            // picture-in-picture windows of a blocked video
+    private var prunedOn: LocalDate? = null
 
     override fun onServiceConnected() {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        // see every window (picture-in-picture too); also set in the config, this covers a service bound before the update
+        runCatching { serviceInfo = serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS } }
         runCatching { Protection.load(this) }   // so protection lists block in the browser even without the VPN
         handler.post(tick)
         handler.post(bedtimeTick)
@@ -67,15 +84,23 @@ class BlockService : AccessibilityService() {
         val pkg = currentPkg
         val now = Enforce.ldt(TrustedTime.now(this))
         UsageStore.counter.clock = cfg.clock()
+        // Locked or screen off: nothing is being used (audio holding the phone awake used to keep counting).
+        if (!screenInUse()) { UsageStore.record(emptyList(), now); return }
         val mode = ModesStore.current(now)
 
-        val actives = ArrayList<Active>()
+        // The address bar is hidden in a full-screen video: keep the last address read, don't lose the site.
+        if (isBrowser(pkg)) readBar(pkg)
+        val host = if (isBrowser(pkg)) hostOf(lastUrl[pkg]) else null
         val appItem = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
-        if (appItem != null && !appItem.disabled)
+        val siteItem = host?.let { h -> cfg.items.firstOrNull { it.type == ItemType.SITE && !it.disabled && Enforce.hostMatches(it.target, h) } }
+
+        // Count what's in use - but not an item that is blocked: its time behind the notice and its retries
+        // aren't use (they used to fill its limits and the group's). The opening that goes over a limit counts.
+        val actives = ArrayList<Active>()
+        if (appItem != null && !appItem.disabled && !Enforce.itemBlocked(cfg, appItem, now))
             actives.add(Active(appItem, Rules.countedRules(appItem, cfg.groups), launched = pkg != prevTickPkg))
-        val host = if (isBrowser(pkg)) hostOf(lastUrl) else null
-        val siteItem = host?.let { h -> cfg.items.firstOrNull { it.type == ItemType.SITE && !it.disabled && hostMatches(it.target, h) } }
-        if (siteItem != null) actives.add(Active(siteItem, Rules.countedRules(siteItem, cfg.groups)))
+        if (siteItem != null && !Enforce.itemBlocked(cfg, siteItem, now))
+            actives.add(Active(siteItem, Rules.countedRules(siteItem, cfg.groups)))
         UsageStore.record(actives, now)
         prevTickPkg = pkg
 
@@ -84,15 +109,66 @@ class BlockService : AccessibilityService() {
             ?: (if (host != null) Enforce.site(cfg, host, now, mode) else null)
         // Protection lists block in the browser without the VPN. Never gated by the emergency unlock.
         if (verdict == null && host != null && cfg.enabled && Protection.blocked(host))
-            verdict = Verdict(host, "Blocked site", "$host is on a protection list.", null, "back", null)
-        if (verdict != null) showBlock(verdict) else removeOverlay()
+            verdict = Verdict(host, "Blocked site", "$host is on a protection list.", null, "back", null, site = true)
+        val key = "$pkg|${host ?: ""}"
+        if (verdict != null) block(verdict, pkg, key) else allowedKey = key
 
         // pause-before-open: a mindful wait when opening a time-limited app
         if (verdict == null && appItem != null && cfg.settings.pauseBeforeOpen && appItem.rules.isNotEmpty() && pkg != lastPausePkg) {
             val ms = System.currentTimeMillis()
             if (ms - lastPauseAt > 5 * 60_000) { lastPausePkg = pkg; lastPauseAt = ms; showPause(appItem.name, cfg.settings.pauseSec.coerceAtLeast(1)) }
         }
+        watchPip(cfg, now, mode)
     }
+
+    /**
+     * Something in front is blocked. A video already playing is paused (its block started while it was in use),
+     * then the item's block method: a site goes back ("back") or leaves the browser ("close"), or is left to the
+     * site filter ("dns", the page is covered and OK leaves it); an app is left for the home screen. The notice
+     * stays until OK, so nothing carries on behind it.
+     */
+    private fun block(v: Verdict, pkg: String, key: String) {
+        val wasInUse = allowedKey == key
+        allowedKey = null
+        val flags = if (v.site) Enforce.siteFlags(v.blockType) else emptySet()
+        val navigates = !v.site || "back" in flags || "close" in flags
+        showBlock(v, homeOnOk = !navigates)
+        val ms = SystemClock.elapsedRealtime()
+        if (ms - (lastAct[key] ?: -ACT_GAP_MS) < ACT_GAP_MS) return
+        lastAct[key] = ms
+        blockedAt[pkg] = ms
+        if (wasInUse) Media.pause(this)
+        when {
+            v.site && "back" in flags -> performGlobalAction(GLOBAL_ACTION_BACK)
+            navigates -> performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+        // Left the browser: forget the blocked address, so a page opened later isn't judged by it before its bar is read.
+        if (v.site && "back" !in flags && navigates) lastUrl.remove(pkg)
+    }
+
+    /** A blocked video that went on in picture-in-picture (YouTube, a browser's full-screen video) is paused -
+     *  and kept paused while that window stays, notice or no notice. */
+    private fun watchPip(cfg: Config, now: LocalDateTime, mode: ModeState?) {
+        val ws = runCatching { windows }.getOrNull() ?: return
+        val ms = SystemClock.elapsedRealtime()
+        val caught = HashSet<Int>()
+        for (w in ws) {
+            if (!w.isInPictureInPictureMode) continue
+            val p = runCatching { w.root?.packageName?.toString() }.getOrNull() ?: continue
+            val justBlocked = ms - (blockedAt[p] ?: -PIP_CATCH_MS) < PIP_CATCH_MS
+            if (w.id in pipCaught || justBlocked || Enforce.app(cfg, p, now, mode) != null) caught.add(w.id)
+        }
+        pipCaught.clear(); pipCaught.addAll(caught)
+        if (caught.isNotEmpty() && Media.playing(this)) Media.pause(this)
+    }
+
+    private fun screenInUse(): Boolean {
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        val km = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
+        return pm.isInteractive && !km.isKeyguardLocked
+    }
+
+    private fun readBar(pkg: String) { browserBarText()?.let { lastUrl[pkg] = it } }
 
     // Everything here is wrapped: an uncaught exception in an accessibility callback makes Android DISABLE the
     // service (the "it keeps losing the grant" symptom). Nothing this service does is worth that.
@@ -102,24 +178,22 @@ class BlockService : AccessibilityService() {
             if (pkg == packageName || pkg == "com.android.systemui") return@runCatching
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 currentPkg = pkg
-                if (isBrowser(pkg)) lastUrl = browserBarText()
+                if (isBrowser(pkg)) readBar(pkg)
                 handler.post { runCatching { step() } }        // react immediately, don't wait for the next tick
             }
+            if (!isBrowser(pkg)) return@runCatching
 
-            // keyword blocking: watch the address / search bar and block on a match (throttled)
+            // The address changes without a window change (a link, back): keep it fresh, keywords on or off.
+            val ms = System.currentTimeMillis()
+            if (ms - lastBarRead < 400) return@runCatching
+            lastBarRead = ms
+            val text = browserBarText()
+            if (text != null) lastUrl[pkg] = text
+            // keyword blocking: watch the address / search bar and block on a match
             val cfg = Store.config
-            if (cfg.keywords.enabled && isBrowser(pkg)) {
-                val ms = System.currentTimeMillis()
-                if (ms - lastKeywordScan >= 400) {
-                    lastKeywordScan = ms
-                    val text = browserBarText()
-                    if (text != null) lastUrl = text
-                    val hit = Keywords.hit(cfg, text)
-                    if (hit != null) {
-                        showBlock(Verdict(hit, "Blocked search", "\"$hit\" is on your blocked words.", null, "back", null))
-                        performGlobalAction(GLOBAL_ACTION_BACK)
-                    }
-                }
+            if (cfg.keywords.enabled) {
+                val hit = Keywords.hit(cfg, text)
+                if (hit != null) block(Verdict(hit, "Blocked search", "\"$hit\" is on your blocked words.", null, "back", null, site = true), pkg, "$pkg|kw")
             }
         }
     }
@@ -135,10 +209,11 @@ class BlockService : AccessibilityService() {
 
     // ---------- overlay ----------
 
-    private fun showBlock(v: Verdict) {
-        if (overlay != null && shownItemId == v.itemId) return
+    private fun showBlock(v: Verdict, homeOnOk: Boolean) {
+        if (overlay != null && blockUp && shownItemId == v.itemId) return
         removeOverlay()
         shownItemId = v.itemId
+        this.homeOnOk = homeOnOk
         val bg = Color.parseColor("#1A110F"); val onBg = Color.parseColor("#F1DFDA")
         val muted = Color.parseColor("#D8C2BC"); val accent = Color.parseColor("#FFB59C")
         val root = FrameLayout(this).apply { setBackgroundColor(bg) }
@@ -156,12 +231,13 @@ class BlockService : AccessibilityService() {
         col.addView(Button(this).apply {
             text = "OK"; setTextColor(Color.parseColor("#5C1900"))
             setBackgroundColor(accent)
-            setOnClickListener { removeOverlay(); performGlobalAction(GLOBAL_ACTION_HOME) }
+            setOnClickListener { val home = this@BlockService.homeOnOk; removeOverlay(); if (home) { lastUrl.remove(currentPkg); performGlobalAction(GLOBAL_ACTION_HOME) } }
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130); lp.topMargin = 48
             layoutParams = lp
         })
         root.addView(col, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         addOverlay(root)
+        blockUp = overlay === root
     }
 
     private fun showPause(name: String, sec: Int) {
@@ -191,30 +267,37 @@ class BlockService : AccessibilityService() {
     private fun addOverlay(view: View) {
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, 0, PixelFormat.OPAQUE,
+            // not focusable: Back / the browser's back go to the page under it, and the address bar stays readable
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.OPAQUE,
         )
         runCatching { wm?.addView(view, lp); overlay = view }
     }
 
     private fun removeOverlay() {
         overlay?.let { runCatching { wm?.removeView(it) } }
-        overlay = null; shownItemId = null
+        overlay = null; shownItemId = null; blockUp = false
     }
 
     // ---------- bedtime ----------
 
+    /** Every minute: bedtime nudges, bedtime grayscale on/off (colour back within a minute of wake time, not up
+     *  to 15+), and once a day dropping usage counters that can no longer matter. */
     private val bedtimeTick = object : Runnable {
         override fun run() {
             runCatching {
-                val sleep = Store.config.sleep
+                val cfg = Store.config
+                val sleep = cfg.sleep
                 val cal = java.util.Calendar.getInstance()
                 val mins = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+                val now = Enforce.ldt(TrustedTime.now(this@BlockService))
                 val every = bedtimeInterval(sleep, mins)
-                if (every != null) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastBedtimeNudge >= every * 60_000L) { lastBedtimeNudge = now; notifyBedtime() }
+                if (every != null && !Enforce.alertsPaused(cfg, now)) {
+                    val ms = System.currentTimeMillis()
+                    if (ms - lastBedtimeNudge >= every * 60_000L) { lastBedtimeNudge = ms; notifyBedtime() }
                 }
+                if (prunedOn != now.toLocalDate()) { prunedOn = now.toLocalDate(); UsageStore.prune(now) }
             }
+            runCatching { Grayscale.sync(this@BlockService) }
             handler.postDelayed(this, 60_000)
         }
     }
@@ -235,6 +318,8 @@ class BlockService : AccessibilityService() {
 
     companion object {
         private const val TICK_MS = 3000L
+        private const val ACT_GAP_MS = 2000L        // act on the same block at most this often (Back / Home)
+        private const val PIP_CATCH_MS = 15_000L    // a PiP window this soon after its app's block is the blocked video
 
         fun isEnabled(ctx: Context): Boolean {
             val flat = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
@@ -245,11 +330,6 @@ class BlockService : AccessibilityService() {
         }
 
         fun settingsIntent() = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-
-        private fun hostMatches(target: String, host: String): Boolean {
-            val h = host.lowercase().removePrefix("www.")
-            return target.lowercase().split(" ").any { d -> d.isNotBlank() && (h == d || h.endsWith(".$d")) }
-        }
 
         private fun hostOf(text: String?): String? {
             val t = text?.trim()?.lowercase() ?: return null

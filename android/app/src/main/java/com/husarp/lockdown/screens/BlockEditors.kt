@@ -45,31 +45,45 @@ import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Keywords
 import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
+import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.EditorHeader
 import com.husarp.lockdown.ui.ListRow
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
-import java.time.LocalDateTime
 
 @Composable
 fun GroupEditor(group: Group, onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val guard = rememberGuard()
+    val ctx = LocalContext.current
     var draft by remember { mutableStateOf(cfg.groups.firstOrNull { it.id == group.id } ?: group) }
     val cs = MaterialTheme.colorScheme
     var pick by remember { mutableStateOf("") }
     var newSite by remember { mutableStateOf("") }
+    // Installed apps that aren't on the blocklist yet can be members too; picked here, they're added on Save.
+    val installed = rememberInstalledApps()
+    var newApps by remember { mutableStateOf(listOf<Item>()) }
+    var extrasFor by remember { mutableStateOf<String?>(null) }
+    val byId = remember(cfg.items) { cfg.items.associateBy { it.id } }
+    val listedPkgs = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.mapTo(HashSet()) { it.target.lowercase() } }
+
+    fun setMember(id: String, on: Boolean) {
+        draft = if (on) draft.copy(memberIds = (draft.memberIds + id).distinct())
+                else draft.copy(memberIds = draft.memberIds - id, overrides = draft.overrides - id)
+    }
 
     Column(Modifier.fillMaxSize()) {
         EditorHeader(draft.name.ifBlank { "New group" }, onBack = onClose, action = "Save") {
             val original = cfg.groups.firstOrNull { it.id == draft.id }
-            val loosening = original != null && AntiBypass.groupLooser(original, draft, LocalDateTime.now())
+            val loosening = original != null && AntiBypass.groupLooser(original, draft, TrustedTime.local(ctx))
             guard(loosening) {
+                val added = newApps.filter { it.id in draft.memberIds }
                 Store.update { c ->
-                    if (c.groups.any { it.id == draft.id }) c.copy(groups = c.groups.map { if (it.id == draft.id) draft else it })
-                    else c.copy(groups = c.groups + draft)
+                    val items = c.items + added
+                    if (c.groups.any { it.id == draft.id }) c.copy(items = items, groups = c.groups.map { if (it.id == draft.id) draft else it })
+                    else c.copy(items = items, groups = c.groups + draft)
                 }
                 onClose()
             }
@@ -78,7 +92,7 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
             OutlinedTextField(draft.name, { draft = draft.copy(name = it) }, label = { Text("Group name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
             SectionLabel("Shared rules (apply to every member)")
-            Text("A group can carry several rules at once — e.g. scheduled hours AND a shared daily limit.",
+            Text("A group can carry several rules at once — e.g. scheduled hours AND a shared daily limit. Time on any member fills the group's limit.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             RuleFields(draft.rules) { draft = draft.copy(rules = it) }
 
@@ -86,17 +100,35 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
             OutlinedTextField(pick, { pick = it }, placeholder = { Text("Search apps & items") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             // Candidates: apps + items not already blocked-forever + current members. The thousands of permanently
             // blocked imported sites are hidden here — grouping something already blocked forever does nothing.
-            val candidates = cfg.items.filter {
+            // Then the installed apps not on the list yet (the search used to find only items, so nothing came up).
+            val candidates = (cfg.items + newApps).filter {
                 (it.type == ItemType.APP || it.rules.none { r -> r.type == RuleType.PERMANENT } || it.id in draft.memberIds) &&
                     (it.name.contains(pick, true) || it.target.contains(pick, true))
             }
+            val pending = newApps.mapTo(HashSet()) { it.target.lowercase() }
+            val apps = if (pick.isBlank()) emptyList() else installed.filter { a ->   // once something is typed
+                a.pkg.lowercase() !in listedPkgs && a.pkg.lowercase() !in pending &&
+                    (a.label.contains(pick, true) || a.pkg.contains(pick, true))
+            }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
-                if (candidates.isEmpty()) Text("No apps or limitable items yet — block an app first, or add a site below.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                if (candidates.isEmpty() && apps.isEmpty()) Text("Nothing matches. Add a site below.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
                     items(candidates, key = { it.id }) { it2 ->
                         ListRow(title = it2.name, subtitle = if (it2.type == ItemType.APP) "App" else it2.target,
                             trailing = { androidx.compose.material3.Checkbox(checked = it2.id in draft.memberIds, onCheckedChange = { on ->
-                                draft = draft.copy(memberIds = if (on) draft.memberIds + it2.id else draft.memberIds - it2.id)
+                                setMember(it2.id, on)
+                                if (!on && newApps.any { n -> n.id == it2.id }) newApps = newApps.filterNot { n -> n.id == it2.id }
+                            }) })
+                    }
+                    items(apps, key = { "pkg:" + it.pkg }) { a ->
+                        ListRow(title = a.label, subtitle = "App · not on your list yet",
+                            trailing = { androidx.compose.material3.Checkbox(checked = false, onCheckedChange = { on ->
+                                if (on) {
+                                    // no own rule: the group's rules govern it
+                                    val item = Item(java.util.UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP)
+                                    newApps = newApps + item
+                                    setMember(item.id, true)
+                                }
                             }) })
                     }
                 }
@@ -112,6 +144,31 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                         newSite = ""
                     }
                 }) { Text("Add") }
+            }
+
+            // A member's own limits come on top of the group's, never instead (like the PC since 0.84.3).
+            val members = draft.memberIds.mapNotNull { id -> byId[id] ?: newApps.firstOrNull { it.id == id } }
+            if (members.isNotEmpty()) {
+                SectionLabel("Extra limits on top of the group's")
+                Text("The group's rules still apply to every member, and a member's time still fills them. An extra limit " +
+                    "only makes one member stricter — e.g. the group 2 h a day, and YouTube only 1 h of it.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
+                    members.forEach { m ->
+                        val extras = draft.overrides[m.id] ?: emptyMap()
+                        val open = extrasFor == m.id
+                        ListRow(title = m.name, subtitle = if (extras.isEmpty()) "Only the group's rules" else "+ ${extras.size} extra limit${if (extras.size > 1) "s" else ""}",
+                            trailing = { TextButton(onClick = { extrasFor = if (open) null else m.id }) { Text(if (open) "Done" else "Extra limits") } })
+                        if (open) Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text("Extra limits for ${m.name}, on top of the group's", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(8.dp))
+                            RuleFields(extras.values.toList()) { rules ->
+                                val map = rules.associateBy { it.type.name }
+                                draft = draft.copy(overrides = if (map.isEmpty()) draft.overrides - m.id else draft.overrides + (m.id to map))
+                            }
+                        }
+                    }
+                }
             }
 
             TextButton(onClick = { guard(true) { Store.update { c -> c.copy(groups = c.groups.filterNot { it.id == draft.id }) }; onClose() } }) { Text("Delete group") }

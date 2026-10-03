@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
 import java.io.IOException
 import java.lang.ref.WeakReference
@@ -28,7 +28,7 @@ import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
 /**
- * The in-app updater (APP-STANDARDS sections 2 and 3). Asks GitHub for the latest release at launch and on
+ * The in-app updater (APP-STANDARDS sections 2 and 3). Asks GitHub for its recent releases at launch and on
  * every return to the app (at most every 5 minutes), finds the APK by its ".apk" ending, downloads it over
  * the app's own connection into the cache with the progress shown in the app, and hands it to Android's
  * package installer. The APK is deleted once the new version runs.
@@ -36,7 +36,8 @@ import javax.net.ssl.SSLException
  * Only an APK signed with the same release key (~/.keystores/lockdownmobile.jks) installs over this app.
  */
 object Updates {
-    private const val API = "https://api.github.com/repos/Husarp/lockdown/releases/latest"
+    // Recent releases, not /releases/latest: a PC-only release on top would hide the phone's update.
+    private const val API = "https://api.github.com/repos/Husarp/lockdown/releases?per_page=20"
     const val RELEASES_PAGE = "https://github.com/Husarp/lockdown/releases"
     private const val TIMEOUT_MS = 10_000
 
@@ -54,7 +55,7 @@ object Updates {
 
     data class State(
         val latest: Latest? = null,              // newest version found on GitHub (may equal the current one)
-        val pageUrl: String = RELEASES_PAGE,     // the latest release's page, for GITHUB
+        val pageUrl: String = RELEASES_PAGE,     // the page of the release carrying the newest APK, for GITHUB
         val checking: Boolean = false,
         val message: String? = null,             // answer to a manual CHECK NOW
         val bannerHidden: Boolean = false,
@@ -158,20 +159,23 @@ object Updates {
 
     private class HttpStatus(val code: Int) : IOException("HTTP $code")
 
-    /** Latest release: its APK (null when the release has none) and its page. Blocking; call off the main thread. */
+    /** The newest APK among recent releases (null when none has one) and its release page. Blocking; off the main thread. */
     private fun fetchLatest(): Pair<Latest?, String> {
         val c = open(API).apply { setRequestProperty("Accept", "application/vnd.github+json") }
         try {
             if (c.responseCode != 200) throw HttpStatus(c.responseCode)
-            val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
-            val page = j.optString("html_url", RELEASES_PAGE)
-            val arr = j.optJSONArray("assets")
-            val assets = (0 until (arr?.length() ?: 0)).map { i ->
-                val a = arr!!.getJSONObject(i)
-                UpdateLogic.Asset(a.getString("name"), a.getString("browser_download_url"), a.optLong("size", -1))
+            val list = JSONArray(c.inputStream.bufferedReader().use { it.readText() })
+            val releases = (0 until list.length()).map { i ->
+                val j = list.getJSONObject(i)
+                val arr = j.optJSONArray("assets")
+                val assets = (0 until (arr?.length() ?: 0)).map { k ->
+                    val a = arr!!.getJSONObject(k)
+                    UpdateLogic.Asset(a.getString("name"), a.getString("browser_download_url"), a.optLong("size", -1))
+                }
+                UpdateLogic.Release(j.optString("html_url", RELEASES_PAGE), assets, j.optBoolean("draft"), j.optBoolean("prerelease"))
             }
-            val apk = UpdateLogic.pickApk(assets)?.let { (a, v) -> Latest(v, a.name, a.url, a.size, page) }
-            return apk to page
+            val (rel, a, v) = UpdateLogic.newestApk(releases) ?: return null to RELEASES_PAGE
+            return Latest(v, a.name, a.url, a.size, rel.page) to rel.page
         } finally { c.disconnect() }
     }
 

@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -31,7 +32,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.AntiBypass
 import kotlinx.coroutines.delay
-import java.time.LocalDateTime
 import kotlin.random.Random
 
 /**
@@ -42,20 +42,22 @@ import kotlin.random.Random
 @Composable
 fun rememberGuard(): (loosening: Boolean, onPass: () -> Unit) -> Unit {
     val cfg by Store.state.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     val ab = cfg.antibypass
     var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     pending?.let { onPass ->
         ChallengeDialog(onPass = {
             // Passing opens a short unlock window (like the PC), so a run of loosening edits doesn't re-challenge each one.
-            val now = LocalDateTime.now()
+            // In trusted time: setting the clock back can't stretch it.
+            val now = TrustedTime.local(ctx)
             Store.update { it.copy(antibypass = it.antibypass.copy(unlockedFrom = now.toString(), unlockedUntil = now.plusMinutes(AntiBypass.UNLOCK_MIN).toString())) }
             pending = null; onPass()
         }, onCancel = { pending = null })
     }
     return { loosening, onPass ->
         // "free" is true when no challenge is set OR the unlock window is open — either way, run it now.
-        if (!loosening || AntiBypass.status(ab, LocalDateTime.now()) == "free") onPass() else pending = onPass
+        if (!loosening || AntiBypass.status(ab, TrustedTime.local(ctx)) == "free") onPass() else pending = onPass
     }
 }
 
@@ -64,7 +66,7 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
     val ab = cfg.antibypass
-    val now = LocalDateTime.now()
+    val now = TrustedTime.local(LocalContext.current)
 
     val phrase = remember { AntiBypass.phraseFor(ab) }
     val words = remember(phrase) { phrase.split(" ").filter { it.isNotBlank() } }
@@ -74,12 +76,6 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
     var gridError by remember { mutableStateOf(false) }
     var waitLeft by remember { mutableIntStateOf(ab.waitMin * 60) }
 
-    // Cool-off ticks whenever a wait is set. (Bug fix: it used to skip the countdown when a phrase was also
-    // required, so "Confirm change" could never enable even with the phrase typed correctly.)
-    if (ab.waitMin > 0) {
-        LaunchedEffect(Unit) { while (waitLeft > 0) { delay(1000); waitLeft-- } }
-    }
-
     val needPhrase = ab.phrase
     val useGrid = needPhrase && ab.grid
     val phraseOk = !needPhrase || (if (useGrid) gridDone else typed.trim() == phrase.trim())
@@ -87,6 +83,13 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
     val waitOk = ab.waitMin == 0 || waitLeft <= 0
     val hoursOk = !ab.hours || AntiBypass.inHours(ab, now)
     val canPass = phraseOk && waitOk && hoursOk
+
+    // The cool-off starts once the phrase is typed right (like the PC), not while it's being typed; it holds if
+    // the phrase is changed back to wrong. When it runs out, the change goes through by itself.
+    if (ab.waitMin > 0) {
+        LaunchedEffect(phraseOk && hoursOk) { if (phraseOk && hoursOk) while (waitLeft > 0) { delay(1000); waitLeft-- } }
+        LaunchedEffect(canPass) { if (canPass) onPass() }
+    }
 
     AlertDialog(
         onDismissRequest = onCancel,
@@ -127,8 +130,9 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
                     }
                     if (ab.waitMin > 0 && waitLeft > 0) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Cool-off: ${waitLeft}s", style = MaterialTheme.typography.bodyMedium,
-                            color = cs.onSurfaceVariant)
+                        Text(if (phraseOk) "Cool-off: ${waitLeft}s — the change goes through when it ends."
+                            else "Then a cool-off of ${ab.waitMin} min, starting once the phrase is right.",
+                            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                     }
                 }
             }

@@ -134,15 +134,16 @@ object Modes {
 
     // ---------- what it blocks ----------
 
-    /** An item's category: chosen for its app / one of its sites, else Distracting. Keys: "app:<pkg>" / "site:<host>". */
+    /** An item's category: chosen for its app / one of its own hostnames, else Distracting. Keys: "app:<pkg>" /
+     *  "site:<host>". Distracting wins (PC 0.84.1): music.youtube.com under Neutral used to make the whole YouTube
+     *  item Neutral (the first match won), so Work / Focus stopped blocking it. The main hostname is Distracting
+     *  unless chosen otherwise; the item's other hostnames only count where something was chosen for them. */
     fun itemCategory(item: Item, categories: Map<String, String>): String {
         if (item.type == ItemType.APP) return categories["app:${item.target.lowercase()}"] ?: "distracting"
         val hosts = item.target.lowercase().split(" ").filter { it.isNotEmpty() }
-        for ((k, cat) in categories) if (k.startsWith("site:")) {
-            val name = k.removePrefix("site:")
-            if (hosts.any { name == it || name.endsWith(".$it") }) return cat
-        }
-        return "distracting"
+        if (hosts.isEmpty()) return "distracting"
+        val chosen = listOf(categories["site:${hosts[0]}"] ?: "distracting") + hosts.drop(1).mapNotNull { categories["site:$it"] }
+        return if ("distracting" in chosen) "distracting" else chosen[0]
     }
 
     private fun toTarget(item: Item): ModeTarget {

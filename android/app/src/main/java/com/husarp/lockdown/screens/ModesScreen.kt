@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Mode
 import com.husarp.lockdown.engine.Modes
 import com.husarp.lockdown.engine.Pomodoro
@@ -126,15 +127,31 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
 
             SectionLabel("Also block these")
             var pick by remember { mutableStateOf("") }
-            OutlinedTextField(pick, { pick = it }, placeholder = { Text("Search items") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(pick, { pick = it }, placeholder = { Text("Search apps & items") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             val shown = cfg.items.filter { it.name.contains(pick, true) || it.target.contains(pick, true) }
+            // Installed apps that aren't on the blocklist can be blocked by the mode too (as a mode extra): the
+            // search used to look only at the list, so an app not on it never came up.
+            // (Shown once something is typed - the hundreds of installed apps would bury the list - or when already picked.)
+            val installed = rememberInstalledApps()
+            val listedPkgs = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.mapTo(HashSet()) { it.target.lowercase() } }
+            fun isExtra(pkg: String) = draft.extra.any { it.kind == ItemType.APP && it.targets == listOf(pkg) }
+            val apps = installed.filter { a -> a.pkg.lowercase() !in listedPkgs &&
+                ((pick.isNotBlank() && (a.label.contains(pick, true) || a.pkg.contains(pick, true))) || isExtra(a.pkg)) }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
-                if (cfg.items.isEmpty()) Text("No blocked items yet.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                if (shown.isEmpty() && apps.isEmpty()) Text("Nothing matches.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
                 androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
                     items(shown, key = { it.id }) { it2 ->
                         ListRow(title = it2.name, subtitle = it2.target, trailing = {
                             Checkbox(checked = it2.id in draft.items, onCheckedChange = { on ->
                                 draft = draft.copy(items = if (on) draft.items + it2.id else draft.items - it2.id)
+                            })
+                        })
+                    }
+                    items(apps, key = { "pkg:" + it.pkg }) { a ->
+                        ListRow(title = a.label, subtitle = "App · not on your list", trailing = {
+                            Checkbox(checked = isExtra(a.pkg), onCheckedChange = { on ->
+                                draft = draft.copy(extra = if (on) draft.extra + com.husarp.lockdown.engine.ModeExtra(a.label, ItemType.APP, listOf(a.pkg))
+                                    else draft.extra.filterNot { it.kind == ItemType.APP && it.targets == listOf(a.pkg) })
                             })
                         })
                     }

@@ -108,7 +108,17 @@ class UsageCounterTest {
         c.counters["item:1\u0000day:2026-09-28"] = 60
         c.counters["item:1\u0000win:i1SCHEDULED:2000-01-01T10:00"] = 30
         c.counters["group:7\u0000week:w2026-09-28"] = 42
+        c.counters["group:7\u0000week:w2000-01-03"] = 7
+        c.counters["group:7\u0000month:m2026-09"] = 8
+        c.counters["group:7\u0000month:m2000-01"] = 9
+        c.counters["item:1\u0000op:g7SWITCH_LIMIT:2000-01-01T03:00"] = 3
+        c.counters["item:1\u0000op:g7SWITCH_LIMIT:2026-09-28"] = 2
         c.prune(t0)
+        assertNull(c.counters["group:7\u0000week:w2000-01-03"])            // old week, month, openings: gone
+        assertNull(c.counters["group:7\u0000month:m2000-01"])
+        assertNull(c.counters["item:1\u0000op:g7SWITCH_LIMIT:2000-01-01T03:00"])
+        assertEquals(8, c.usage("group:7", "month:m2026-09"))
+        assertEquals(2, c.usage("item:1", "op:g7SWITCH_LIMIT:2026-09-28"))
         assertNull(c.counters["item:1\u0000day:2000-01-01"])               // old day: gone
         assertFalse(c.counters.containsKey("item:1\u0000win:i1SCHEDULED:2000-01-01T10:00"))  // past window: gone
         assertEquals(60, c.usage("item:1", "day:2026-09-28"))              // current day: kept

@@ -82,8 +82,15 @@ object Rules {
         r.monthlySwitchLimit?.let { put("month", it) }
     }
 
-    // ---------- effective rules (item + groups, with per-member overrides) ----------
+    // ---------- effective rules (item + groups, plus a member's extra limits) ----------
 
+    /**
+     * The item's own rules + every rule of every group it's in + the extra rules a group gives this member
+     * ([Group.overrides], keyed by rule type). A member's extras never REPLACE the group's rules - they come ON
+     * TOP of them (PC 0.84.3): every member always gets every group rule, counted in the group's shared pot, and
+     * its extras are more rules besides, with their own pot. Blocked if any rule blocks, so the first limit to run
+     * out wins, blocked hours add up and allowed hours narrow. An extra can only make the member stricter.
+     */
     fun effectiveRules(item: Item, groups: List<Group>): List<EffRule> {
         if (item.disabled) return emptyList()
         val me = "item:${item.id}"
@@ -91,21 +98,20 @@ object Rules {
         for (r in item.rules) out.add(EffRule(r, me, me, me, "i${item.id}${r.type.name}"))
         for (g in groups) {
             if (item.id !in g.memberIds || g.disabled) continue
-            val custom = g.overrides[item.id] ?: emptyMap()
+            val pot = "group:${g.id}"
             for (r in g.rules) {
                 val t = r.type
-                val eff: Rule
-                val owner: String
-                val pot: String
-                if (t.name in custom) {                       // customised for this member: counted alone
-                    eff = custom.getValue(t.name).copy(type = t)
-                    owner = me; pot = me
-                } else {                                       // inherited: group time/switch limits are one shared pot
-                    eff = r
-                    owner = if (t == RuleType.TIME_LIMIT || t == RuleType.SWITCH_LIMIT) "group:${g.id}" else me
-                    pot = if (t == RuleType.SCHEDULED && r.allowanceShared) "group:${g.id}" else me
-                }
-                out.add(EffRule(eff, owner, me, pot, "g${g.id}${t.name}", g.id, g.name))
+                // a group time / opening limit is one shared total; so is the allowance in its blocked hours,
+                // unless the group says each member has its own
+                val owner = if (t == RuleType.TIME_LIMIT || t == RuleType.SWITCH_LIMIT) pot else me
+                val allowance = if (t == RuleType.SCHEDULED && r.allowanceShared) pot else me
+                out.add(EffRule(r, owner, me, allowance, "g${g.id}${t.name}", g.id, g.name))
+            }
+            for ((typeName, r) in (g.overrides[item.id] ?: emptyMap()).toSortedMap()) {
+                val t = runCatching { RuleType.valueOf(typeName) }.getOrNull() ?: continue
+                // the member's own time, openings and allowance; same key as the PC's (its owner is the member,
+                // so it never mixes with the group's pot)
+                out.add(EffRule(r.copy(type = t), me, me, me, "g${g.id}${t.name}", extraOf = g.name))
             }
         }
         return out
@@ -204,13 +210,20 @@ object Rules {
         }
     }
 
-    /** (reason, until, rule) for the most important rule blocking the item now, else null. */
+    /** (reason, until, rule) for the most important rule blocking the item now, else null. Of the rules blocking
+     *  for that reason, the one that blocks longest (null = indefinitely), since a member's extras and the group's
+     *  rules can block at once. An emergency unlock lifts every block except a permanent one (PC 0.84.7). */
     fun itemBlock(effRules: List<EffRule>, now: LocalDateTime, usage: Usage = noUsage,
                   clock: LimitClock = LimitClock.DEFAULT, unlockedUntil: LocalDateTime? = null): Block? {
-        if (unlockedUntil != null && now.isBefore(unlockedUntil)) return null      // emergency unlock
-        val active = effRules.mapNotNull { eff -> ruleBlock(eff, now, usage, clock)?.let { Block(it.first, it.second, eff) } }
-        return active.minByOrNull { it.reason.ordinal }
+        val unlocked = unlockedUntil != null && now.isBefore(unlockedUntil)
+        val active = effRules.filter { !unlocked || it.rule.type == RuleType.PERMANENT }
+            .mapNotNull { eff -> ruleBlock(eff, now, usage, clock)?.let { Block(it.first, it.second, eff) } }
+        val top = active.minOfOrNull { it.reason.ordinal } ?: return null
+        return active.filter { it.reason.ordinal == top }.maxBy { it.until ?: LocalDateTime.MAX }
     }
+
+    /** Does any of these rules block for good? (The emergency unlock never offers or frees such an item.) */
+    fun permanent(effRules: List<EffRule>) = effRules.any { it.rule.type == RuleType.PERMANENT }
 
     /** "blocked" / "soon" (nearly out of time, or hours start soon) / "allowed" - for a rule's status colour. */
     fun ruleState(eff: EffRule, now: LocalDateTime, usage: Usage = noUsage, clock: LimitClock = LimitClock.DEFAULT): String {
@@ -227,6 +240,7 @@ object Rules {
             }
             RuleType.SCHEDULED -> {
                 val sched = r.schedule ?: return "allowed"
+                if (scheduleUntil(sched, now) != null) return "soon"     // inside blocked hours, on its allowance
                 val start = nextWindowStart(sched.windows, now)
                 if (start != null && !start.isAfter(now.plusMinutes(SOON_MIN))) return "soon"
             }

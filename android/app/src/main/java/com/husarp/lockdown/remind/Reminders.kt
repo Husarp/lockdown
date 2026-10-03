@@ -45,29 +45,85 @@ object Reminders {
 }
 
 /**
- * Bedtime grayscale (Android's daltonizer, needs WRITE_SECURE_SETTINGS). [sync] writes the wanted state both ways,
- * so turning the toggle or Bedtime off brings colour back. It only turns off grayscale Lockdown itself turned on,
- * never one the user set in Android's accessibility settings.
+ * Bedtime grayscale (Android's daltonizer, needs WRITE_SECURE_SETTINGS - granted once over adb, and lost when the
+ * app is uninstalled and installed again). [sync] writes the wanted state both ways; on its own it only turns off
+ * grayscale Lockdown itself turned on, never one the user set in Android's accessibility settings. Switching the
+ * grayscale (or Bedtime) off by hand gives the colour back whoever turned it on ([switchedOff]).
  */
 object Grayscale {
+    const val GRANT = "adb shell pm grant com.husarp.lockdown android.permission.WRITE_SECURE_SETTINGS"
+    private const val ENABLED = "accessibility_display_daltonizer_enabled"
+    private const val MODE = "accessibility_display_daltonizer"     // 0 = grayscale
+    private const val APPLIED = "applied"
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("gray", Context.MODE_PRIVATE)
+
+    /** Lockdown may change the screen's colour (the one-time adb grant is there). */
+    fun canWrite(ctx: Context) =
+        ctx.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+
+    /** This is a second copy in another profile (Island / work profile). The screen's colour setting belongs to the
+     *  main profile, so this copy can never grey the screen or bring the colour back - only the main copy can. */
+    fun otherProfile(ctx: Context): Boolean =
+        runCatching { !ctx.getSystemService(android.os.UserManager::class.java).isSystemUser }.getOrDefault(false)
+
+    /** Grayscale (not another colour correction) is on right now; null when Android won't say (newer Android
+     *  can refuse apps reading hidden settings) - then Lockdown writes rather than guess it's already right. */
+    fun isOn(ctx: Context): Boolean? = runCatching {
+        val cr = ctx.contentResolver
+        android.provider.Settings.Secure.getInt(cr, ENABLED, 0) == 1 && android.provider.Settings.Secure.getInt(cr, MODE, -1) == 0
+    }.getOrNull()
+
     fun sync(ctx: Context) {
+        if (otherProfile(ctx)) return               // not this copy's screen (and it never has the permission)
         val cfg = Store.config
         val now = Calendar.getInstance()
         val mins = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
-        apply(ctx, com.husarp.lockdown.engine.bedtimeGrayscaleWanted(cfg.settings.bedtimeGrayscale, cfg.sleep, mins))
+        val paused = com.husarp.lockdown.block.Enforce.alertsPaused(cfg,
+            com.husarp.lockdown.block.Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(ctx)))
+        val p = prefs(ctx)
+        val wanted = !paused && com.husarp.lockdown.engine.bedtimeGrayscaleWanted(cfg.settings.bedtimeGrayscale, cfg.sleep, mins)
+        val mark = if (p.contains(APPLIED)) p.getBoolean(APPLIED, false) else null
+        val (write, newMark) = com.husarp.lockdown.engine.grayscaleStep(wanted, cfg.settings.bedtimeGrayscale, mark, isOn(ctx))
+        // The mark only changes once the write went through: refused (no permission), it is tried again next minute.
+        val ok = runCatching {
+            val cr = ctx.contentResolver
+            if (write == true) { android.provider.Settings.Secure.putInt(cr, MODE, 0); android.provider.Settings.Secure.putInt(cr, ENABLED, 1) }
+            if (write == false) android.provider.Settings.Secure.putInt(cr, ENABLED, 0)
+        }.isSuccess
+        if (ok && newMark != null && newMark != mark) p.edit().putBoolean(APPLIED, newMark).apply()
     }
 
-    private fun apply(ctx: Context, on: Boolean) = runCatching {
-        val cr = ctx.contentResolver
-        val p = ctx.getSharedPreferences("gray", Context.MODE_PRIVATE)
-        if (on) {
-            android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer", 0) // 0 = grayscale
-            android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer_enabled", 1)
-            p.edit().putBoolean("applied", true).apply()
-        } else if (p.getBoolean("applied", false)) {
-            android.provider.Settings.Secure.putInt(cr, "accessibility_display_daltonizer_enabled", 0)
-            p.edit().putBoolean("applied", false).apply()
+    /**
+     * The grayscale switch (or Bedtime) was switched off by hand: colour back now, even if the mark that Lockdown
+     * turned it on is missing. Only grayscale is touched, never another colour correction. False when Android
+     * refused (the permission is missing) - then it says so.
+     */
+    fun switchedOff(ctx: Context): Boolean {
+        if (otherProfile(ctx)) {
+            prefs(ctx).edit().putBoolean(APPLIED, false).apply()
+            android.widget.Toast.makeText(ctx, "This is Lockdown's copy in your work profile: it can't change the " +
+                "screen's colour. Use Lockdown in your main profile.", android.widget.Toast.LENGTH_LONG).show()
+            return false
         }
+        if (isOn(ctx) == false) { prefs(ctx).edit().putBoolean(APPLIED, false).apply(); return true }
+        val ok = runCatching { android.provider.Settings.Secure.putInt(ctx.contentResolver, ENABLED, 0) }.getOrDefault(false)
+        // Refused: keep the mark, so the colour comes back by itself within a minute once the permission is granted.
+        prefs(ctx).edit().putBoolean(APPLIED, !ok).apply()
+        if (!ok) {
+            android.widget.Toast.makeText(ctx, "Couldn't turn grayscale off: Lockdown's permission is missing. " +
+                "Turn Colour correction off on the page that opens; Guardrails shows how to fix the permission.",
+                android.widget.Toast.LENGTH_LONG).show()
+            openColourSettings(ctx)
+        }
+        return ok
+    }
+
+    /** Android's own colour-correction page (where grayscale can be switched off by hand), else Accessibility. */
+    fun openColourSettings(ctx: Context) {
+        val flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+        runCatching { ctx.startActivity(android.content.Intent("android.settings.ACCESSIBILITY_COLOR_SPACE_SETTINGS").addFlags(flags)) }
+            .recoverCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(flags)) }
     }
 }
 
@@ -113,7 +169,9 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
 
         // Bedtime nudges are driven by the accessibility service (fine escalation cadence), not here.
         val sleep = cfg.sleep
-        if (cfg.breaks.on) notify(2, "Take a break", "Step away from the screen for a moment.")
+        val paused = com.husarp.lockdown.block.Enforce.alertsPaused(cfg,
+            com.husarp.lockdown.block.Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(applicationContext)))
+        if (cfg.breaks.on && !paused) notify(2, "Take a break", "Step away from the screen for a moment.")
         cfg.customs.filter { it.on && it.text.isNotBlank() }.forEachIndexed { i, c -> notify(100 + i, "Reminder", c.text) }
 
         // tamper watchdog: nudge if a protection that should be on has been switched off

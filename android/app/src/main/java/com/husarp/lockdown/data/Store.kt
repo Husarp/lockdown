@@ -3,9 +3,12 @@ package com.husarp.lockdown.data
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** The single source of truth: the Config JSON, loaded once and observed by the UI. */
 object Store {
@@ -21,13 +24,28 @@ object Store {
         if (file.exists()) runCatching { _state.value = json.decodeFromString<Config>(file.readText()) }
     }
 
-    /** Change the config and persist it. */
+    // Saves run on one background thread (a toggle used to write the whole multi-MB config on the UI thread),
+    // one after another, always the newest state, through a temp file so a crash mid-write can't corrupt it.
+    private val writer = Executors.newSingleThreadExecutor()
+    private val dirty = AtomicBoolean(false)
+
+    /** Change the config and persist it. Atomic: the UI and the VPN thread can't overwrite each other's change. */
     fun update(block: (Config) -> Config) {
-        _state.value = block(_state.value)
+        _state.updateAndGet(block)
         persist()
     }
 
-    private fun persist() = runCatching { file.writeText(json.encodeToString(_state.value)) }
+    private fun persist() {
+        if (!dirty.compareAndSet(false, true)) return          // a save is already queued; it writes the newest state
+        writer.execute {
+            dirty.set(false)
+            runCatching {
+                val tmp = File(file.path + ".tmp")
+                tmp.writeText(json.encodeToString(_state.value))
+                if (!tmp.renameTo(file)) file.writeText(tmp.readText())
+            }
+        }
+    }
 
     /** The whole config as JSON (for exporting / syncing to the other profile). */
     fun exportJson(): String = json.encodeToString(_state.value)

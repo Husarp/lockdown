@@ -45,7 +45,9 @@ import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.ItemType
+import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.guard.AdminReceiver
+import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
@@ -65,7 +67,7 @@ fun GuardrailsScreen() {
     var pickUnlock by remember { mutableStateOf(false) }
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { nowMs = System.currentTimeMillis(); delay(1000) } }
-    val now = remember(nowMs) { LocalDateTime.now() }
+    val now = remember(nowMs) { TrustedTime.local(ctx) }     // trusted time: the clock set forward or back changes nothing
     val ab = cfg.antibypass
 
     fun setAb(newAb: AntiBypassCfg) {
@@ -111,6 +113,8 @@ fun GuardrailsScreen() {
                 ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             HealthRow("Uninstall protection", isAdmin(ctx)) { }
+            if (cfg.settings.bedtimeGrayscale && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
+                HealthRow("Grayscale permission", com.husarp.lockdown.remind.Grayscale.canWrite(ctx)) { copyGrant(ctx) }
         }
 
         SectionLabel("Before loosening anything")
@@ -137,7 +141,7 @@ fun GuardrailsScreen() {
 
         SectionLabel("Emergency unlock")
         Card(color = cs.surfaceContainer) {
-            val uses = Emergency.usesLeft(cfg.unlocks.mapNotNull { runCatching { LocalDateTime.parse(it) }.getOrNull() }, LocalDateTime.now(), cfg.emergency.per, cfg.emergency.uses, cfg.clock())
+            val uses = Emergency.usesLeft(cfg.unlocks.mapNotNull { runCatching { LocalDateTime.parse(it) }.getOrNull() }, now, cfg.emergency.per, cfg.emergency.uses, cfg.clock())
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
                 Text("Unblock chosen items for ${cfg.emergency.minutes} min", style = MaterialTheme.typography.titleSmall)
                 Text("${uses.left} of ${uses.allowed} left", style = MaterialTheme.typography.titleMedium)
@@ -174,28 +178,43 @@ fun GuardrailsScreen() {
 @Composable
 private fun EmergencyDialog(onDismiss: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     val picked = remember { mutableStateOf(setOf<String>()) }
+    var alerts by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Emergency unlock") },
         text = {
-            val apps = cfg.items.filter { it.type == ItemType.APP }
-            Column {
-                Text("Unblock an app for ${cfg.emergency.minutes} minutes (one use). Blocked sites and protection lists stay on.")
-                if (apps.isEmpty()) Text("No blocked apps to unlock.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Never a permanently blocked app (its own rule or a group's): the emergency can't free those (PC 0.84.7).
+            val apps = remember(cfg.items, cfg.groups) {
+                cfg.items.filter { it.type == ItemType.APP && !Rules.permanent(Rules.effectiveRules(it, cfg.groups)) }
+            }
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Unblock an app for ${cfg.emergency.minutes} minutes (one use). Blocked sites, permanent blocks and protection lists stay on.")
+                if (apps.isEmpty()) Text("No apps the emergency can unlock.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 apps.forEach { item ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = item.id in picked.value, onCheckedChange = { on -> picked.value = if (on) picked.value + item.id else picked.value - item.id })
                         Text(item.name)
                     }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = alerts, onCheckedChange = { alerts = it })
+                    Text("Pause bedtime and break alerts (and bedtime grayscale)")
+                }
             }
         },
         confirmButton = {
-            TextButton(enabled = picked.value.isNotEmpty(), onClick = {
-                val now = LocalDateTime.now()
+            TextButton(enabled = picked.value.isNotEmpty() || alerts, onClick = {
+                val now = TrustedTime.local(ctx)                  // trusted time: a clock set forward gives no longer unlock
                 val until = now.plusMinutes(cfg.emergency.minutes.toLong())
-                Store.update { it.copy(unlockUntil = until.toString(), unlockItems = picked.value.toList(), unlocks = it.unlocks + now.toString()) }
+                Store.update {
+                    var c = it.copy(unlocks = it.unlocks + now.toString())   // items and alerts together: one use
+                    if (picked.value.isNotEmpty()) c = c.copy(unlockUntil = until.toString(), unlockItems = picked.value.toList())
+                    if (alerts) c = c.copy(alertsPausedUntil = until.toString())
+                    c
+                }
+                if (alerts) com.husarp.lockdown.remind.Grayscale.sync(ctx)
                 onDismiss()
             }) { Text("Unlock") }
         },

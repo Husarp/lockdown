@@ -33,6 +33,7 @@ data class Config(
     val unlocks: List<String> = emptyList(),           // emergency-unlock start times (ISO), for the weekly/daily quota
     val unlockUntil: String? = null,                   // current emergency unlock end (ISO), or null
     val unlockItems: List<String> = emptyList(),       // item ids the current unlock covers
+    val alertsPausedUntil: String? = null,             // an emergency paused bedtime + break alerts until (ISO), or null
     val resetHour: Int = 0,                            // custom limit-day start (default midnight)
     val resetMin: Int = 0,
 ) {

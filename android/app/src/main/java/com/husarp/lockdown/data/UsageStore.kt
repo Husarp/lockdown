@@ -36,6 +36,7 @@ object UsageStore {
         maybeFlush()
     }
 
+    /** Drop counters that can no longer matter (called once a day by the service). */
     fun prune(now: LocalDateTime = LocalDateTime.now()) {
         counter.prune(now)
         flush()

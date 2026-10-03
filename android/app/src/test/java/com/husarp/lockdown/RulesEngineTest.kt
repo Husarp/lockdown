@@ -94,9 +94,12 @@ class RulesEngineTest {
         assertEquals(Reason.PERMANENT, b.reason)     // permanent outranks schedule
     }
 
-    @Test fun emergency_unlock_allows_everything() {
+    @Test fun emergency_unlock_lifts_every_block_but_a_permanent_one() {
+        val until = LocalDateTime.of(2026, 9, 28, 13, 0)
+        val sched = eff(Rule(RuleType.SCHEDULED, schedule = Schedule(SchedMode.BLOCK, listOf(Window(listOf(0), "00:00", "23:59")))))
+        assertNull(Rules.itemBlock(listOf(sched), monNoon, unlockedUntil = until))
         val perm = eff(Rule(RuleType.PERMANENT))
-        assertNull(Rules.itemBlock(listOf(perm), monNoon, unlockedUntil = LocalDateTime.of(2026, 9, 28, 13, 0)))
+        assertEquals(Reason.PERMANENT, Rules.itemBlock(listOf(perm, sched), monNoon, unlockedUntil = until)!!.reason)
     }
 
     @Test fun group_limit_is_a_shared_pot() {
@@ -107,14 +110,18 @@ class RulesEngineTest {
         assertEquals("group:7", effs[0].usageOwner)   // inherited group limit counts against the shared pot
     }
 
-    @Test fun group_override_counts_per_member() {
+    @Test fun a_member_extra_comes_on_top_of_the_group_rule() {
         val item = Item("1", "YT", "youtube.com", ItemType.SITE)
-        val override = Rule(RuleType.TIME_LIMIT, dailyLimitMin = 30)
+        val extra = Rule(RuleType.TIME_LIMIT, dailyLimitMin = 30)
         val group = Group("7", "Fun", rules = listOf(Rule(RuleType.TIME_LIMIT, dailyLimitMin = 90)),
-            memberIds = listOf("1"), overrides = mapOf("1" to mapOf("TIME_LIMIT" to override)))
+            memberIds = listOf("1"), overrides = mapOf("1" to mapOf("TIME_LIMIT" to extra)))
         val effs = Rules.effectiveRules(item, listOf(group))
-        assertEquals("item:1", effs[0].usageOwner)   // customised -> counted for the member alone
-        assertEquals(30, effs[0].rule.dailyLimitMin)
+        assertEquals(2, effs.size)                    // the group's rule is kept, the extra is added
+        assertEquals("group:7", effs[0].usageOwner)   // the group's limit: the shared pot
+        assertEquals(90, effs[0].rule.dailyLimitMin)
+        assertEquals("item:1", effs[1].usageOwner)    // the extra: the member's own pot
+        assertEquals(30, effs[1].rule.dailyLimitMin)
+        assertEquals("Fun", effs[1].extraOf)
     }
 
     @Test fun disabled_item_has_no_rules_but_still_counts() {

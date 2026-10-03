@@ -1,7 +1,9 @@
 package com.husarp.lockdown.engine
 
 import java.time.Duration
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.YearMonth
 
 /** One item currently in the foreground, with its counted rules (item + groups). */
 data class Active(val item: Item, val counted: List<EffRule>, val launched: Boolean = false)
@@ -63,24 +65,37 @@ class UsageCounter(
 
     private fun key(owner: String, bucket: String) = "$owner\u0000$bucket"
 
-    /** Drop buckets that can no longer matter, so the store stays small. */
+    /** Drop buckets that can no longer matter, so the store stays small: days, weeks, months and opening counts
+     *  whose period ended more than [KEEP_DAYS] days ago, and allowance windows that have ended. */
     fun prune(now: LocalDateTime) {
-        val cutoff = now.toLocalDate().minusDays(45).toString()
+        val cutoff = now.toLocalDate().minusDays(KEEP_DAYS)
         val it = counters.entries.iterator()
         while (it.hasNext()) {
             val bucket = it.next().key.substringAfter('\u0000')
-            val stale = when {
-                bucket.startsWith("day:") || bucket.startsWith("sw:") -> bucket.substringAfter(':') < cutoff
-                bucket.startsWith("win:") -> runCatching {
+            val kind = bucket.substringBefore(':')
+            val stale = when (kind) {
+                "day", "week", "month", "sw" -> periodEnd(bucket.substringAfter(':'))?.isBefore(cutoff) ?: false
+                "op" -> periodEnd(bucket.removePrefix("op:").substringAfter(':'))?.isBefore(cutoff) ?: false
+                "win" -> runCatching {
                     LocalDateTime.parse(bucket.removePrefix("win:").substringAfter(':')).isBefore(now)
                 }.getOrDefault(false)
-                else -> false                                     // week/month/op buckets: keep (tiny, self-expire)
+                else -> false
             }
             if (stale) it.remove()
         }
     }
 
+    /** When a period key ends: "2026-09-28" / "2026-09-28T03:00" (a day), "w2026-09-28" (a week), "m2026-09". */
+    private fun periodEnd(key: String): LocalDate? = runCatching {
+        when {
+            key.startsWith("w") -> LocalDate.parse(key.substring(1, 11)).plusDays(8)
+            key.startsWith("m") -> YearMonth.parse(key.substring(1, 8)).plusMonths(1).atDay(2)
+            else -> LocalDate.parse(key.substring(0, 10)).plusDays(2)    // a limit day may run into the next
+        }
+    }.getOrNull()
+
     companion object {
         const val MAX_TICK_SEC = 120L
+        const val KEEP_DAYS = 45L
     }
 }

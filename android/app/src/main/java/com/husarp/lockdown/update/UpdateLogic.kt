@@ -41,6 +41,19 @@ object UpdateLogic {
         assets.mapNotNull { a -> apkVersion(a.name)?.let { a to it } }
             .maxWithOrNull { p, q -> compare(p.second, q.second) }
 
+    /** A GitHub release: its page and files. */
+    data class Release(val page: String, val assets: List<Asset>, val draft: Boolean = false, val prerelease: Boolean = false)
+
+    /**
+     * The newest Android update across recent releases: the PC and the phone share the repo, so a PC-only release
+     * (no .apk) must not hide the phone's update on the one before it. Drafts and pre-releases don't count.
+     * Returns (release, apk, version), or null when none of them carries an APK.
+     */
+    fun newestApk(releases: List<Release>): Triple<Release, Asset, String>? =
+        releases.filter { !it.draft && !it.prerelease }
+            .mapNotNull { r -> pickApk(r.assets)?.let { (a, v) -> Triple(r, a, v) } }
+            .maxWithOrNull { p, q -> compare(p.third, q.third) }
+
     /** True when GitHub may be asked again ([lastMs] = time of the last ask, 0 = never). */
     fun mayCheck(nowMs: Long, lastMs: Long, gapMs: Long = MIN_CHECK_GAP_MS): Boolean =
         lastMs == 0L || nowMs - lastMs >= gapMs || nowMs < lastMs

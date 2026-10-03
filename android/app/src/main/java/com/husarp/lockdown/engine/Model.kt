@@ -62,7 +62,7 @@ data class Group(
     val disabled: Boolean = false,
     val rules: List<Rule> = emptyList(),
     val memberIds: List<String> = emptyList(),
-    // per-member customisations: itemId -> (RuleType.name -> replacement Rule)
+    // a member's extra limits, ON TOP of the group's rules (never instead): itemId -> (RuleType.name -> Rule)
     val overrides: Map<String, Map<String, Rule>> = emptyMap(),
 )
 
@@ -75,6 +75,7 @@ data class EffRule(
     val ruleKey: String,         // stable id for buckets
     val groupId: String? = null,
     val groupName: String? = null,
+    val extraOf: String? = null, // a member's extra rule: the name of the group it was set in
 )
 
 /** Why an item is blocked. Order = priority (most important first), matching the PC's REASON_ORDER. */

@@ -36,20 +36,39 @@ data class Verdict(
     val until: LocalDateTime?,
     val blockType: String,
     val itemId: String?,
+    val site: Boolean = false,                 // a site in the browser (blockType: "dns,close,back"), not an app
 )
 
 /** The live blocking decision: the tested engine (rules + groups + limit clock + usage) plus the active mode. */
 object Enforce {
     fun ldt(ms: Long): LocalDateTime = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDateTime()
 
+    /** The emergency unlock's end for [itemId], or null. In trusted time, and never longer than the unlock can
+     *  run from now: one started with the clock set forward (then set back) doesn't hold for days. */
     private fun emergencyUntil(cfg: Config, itemId: String, now: LocalDateTime): LocalDateTime? =
         cfg.unlockUntil?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
-            ?.takeIf { now.isBefore(it) && itemId in cfg.unlockItems }
+            ?.takeIf { now.isBefore(it) && !it.isAfter(now.plusMinutes(cfg.emergency.minutes + 1L)) && itemId in cfg.unlockItems }
 
-    private fun hostMatches(target: String, host: String): Boolean {
+    /** An emergency paused the bedtime and break alerts (PC 0.84.7) - same cap as the unlock. */
+    fun alertsPaused(cfg: Config, now: LocalDateTime): Boolean =
+        cfg.alertsPausedUntil?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
+            ?.let { now.isBefore(it) && !it.isAfter(now.plusMinutes(cfg.emergency.minutes + 1L)) } ?: false
+
+    fun hostMatches(target: String, host: String): Boolean {
         val h = host.lowercase().removePrefix("www.")
-        return target.lowercase().split(" ").any { d -> d.isNotBlank() && (h == d || h.endsWith(".$d")) }
+        return target.lowercase().split(" ").any { t -> val d = t.removePrefix("www."); d.isNotBlank() && (h == d || h.endsWith(".$d")) }
     }
+
+    /** Is [item] blocked by its own rules (and groups) right now? Mode blocks aside - for not counting its use. */
+    fun itemBlocked(cfg: Config, item: Item, now: LocalDateTime): Boolean {
+        if (!cfg.enabled || item.disabled) return false
+        val unlock = if (item.type == ItemType.APP) emergencyUntil(cfg, item.id, now) else null
+        return Rules.itemBlock(Rules.effectiveRules(item, cfg.groups), now, UsageStore.counter.usage, cfg.clock(), unlock) != null
+    }
+
+    /** The site flags in force: "dns" (cut the connection), "close", "back"; none set means "dns". */
+    fun siteFlags(blockType: String): Set<String> =
+        blockType.split(",").map { it.trim() }.filterTo(HashSet()) { it.isNotEmpty() }.ifEmpty { setOf("dns") }
 
     /** Verdict for a foreground app package, or null if allowed. */
     fun app(cfg: Config, pkg: String, now: LocalDateTime, mode: ModeState?, label: String = pkg): Verdict? {
@@ -78,12 +97,12 @@ object Enforce {
         if (item != null) {
             val eff = Rules.effectiveRules(item, cfg.groups)
             val block = Rules.itemBlock(eff, now, UsageStore.counter.usage, cfg.clock(), null)
-            if (block != null) return verdict(item.name, block, item.blockType.ifEmpty { "dns" }, item.id)
+            if (block != null) return verdict(item.name, block, item.blockType.ifEmpty { "dns" }, item.id).copy(site = true)
         }
         if (Modes.blocking(mode)) {
             val targets = Modes.targets(mode!!.mode, cfg.items, cfg.groups, cfg.categories)
             if (Modes.blockedHosts(targets).any { host.lowercase() == it || host.lowercase().endsWith(".$it") })
-                return Verdict(host, "$host is off in ${mode.mode.name}", modeSub(mode), mode.until, "dns", item?.id)
+                return Verdict(host, "$host is off in ${mode.mode.name}", modeSub(mode), mode.until, "dns", item?.id, site = true)
         }
         return null
     }

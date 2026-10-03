@@ -42,6 +42,19 @@ class UpdateLogicTest {
         assertNull(UpdateLogic.pickApk(listOf(Asset("LockdownSetup-0.84.7.exe", "u1", 1))))
     }
 
+    @Test fun aPcOnlyReleaseOnTopDoesNotHideThePhoneUpdate() {
+        val pc10 = UpdateLogic.Release("p10", listOf(Asset("LockdownSetup-0.84.10.exe", "e10", 1)))
+        val pc9 = UpdateLogic.Release("p9", listOf(Asset("LockdownSetup-0.84.9.exe", "e9", 1), Asset("LockdownMobile-0.5.12.apk", "a12", 2)))
+        val pc8 = UpdateLogic.Release("p8", listOf(Asset("LockdownMobile-0.5.11.apk", "a11", 2)))
+        val (rel, apk, v) = UpdateLogic.newestApk(listOf(pc10, pc9, pc8))!!
+        assertEquals("p9", rel.page); assertEquals("a12", apk.url); assertEquals("0.5.12", v)
+        // drafts and pre-releases don't count; no APK anywhere -> no Android update
+        val draft = UpdateLogic.Release("d", listOf(Asset("LockdownMobile-0.6.0.apk", "d", 2)), draft = true)
+        val pre = UpdateLogic.Release("b", listOf(Asset("LockdownMobile-0.6.1.apk", "b", 2)), prerelease = true)
+        assertEquals("0.5.12", UpdateLogic.newestApk(listOf(draft, pre, pc10, pc9))!!.third)
+        assertNull(UpdateLogic.newestApk(listOf(pc10)))
+    }
+
     @Test fun asksGithubAtMostEveryFiveMinutes() {
         val t = 1_000_000_000L
         assertTrue(UpdateLogic.mayCheck(t, 0))                       // never asked yet

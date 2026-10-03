@@ -18,7 +18,7 @@ object Live {
         return if (soon) Status.SOON else Status.ALLOWED
     }
 
-    /** Fraction of the tightest daily-limit rule used (0..1), or null if the item has no time limit. */
+    /** The daily limit with the least time left (fraction used 0..1, minutes left), or null if none. */
     fun dayLimitFraction(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now()): Pair<Float, Int>? {
         val usage = UsageStore.counter.usage
         val clock = cfg.clock()
@@ -29,7 +29,7 @@ object Live {
             val used = usage(eff.usageOwner, Rules.timeBucket("day", now, clock))
             val frac = (used.toFloat() / (limit * 60)).coerceIn(0f, 1f)
             val leftMin = (limit - used / 60).coerceAtLeast(0)
-            if (best == null || frac > best!!.first) best = frac to leftMin
+            if (best == null || leftMin < best!!.second) best = frac to leftMin
         }
         return best
     }

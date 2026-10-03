@@ -95,7 +95,11 @@ private fun RemList(open: (RemPage) -> Unit) {
                     Text("Bedtime", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Switch(checked = cfg.sleep.on, onCheckedChange = { on ->
                         if (on) { Store.update { it.copy(sleep = it.sleep.copy(on = true)) }; Grayscale.sync(ctx) }
-                        else guard(cfg.sleep.guarded) { Store.update { it.copy(sleep = it.sleep.copy(on = false)) }; Grayscale.sync(ctx) }
+                        else guard(cfg.sleep.guarded) {
+                            Store.update { it.copy(sleep = it.sleep.copy(on = false)) }
+                            // Bedtime off by hand: colour back now, whoever turned grayscale on (only while bedtime grayscale is on)
+                            if (Store.config.settings.bedtimeGrayscale) Grayscale.switchedOff(ctx) else Grayscale.sync(ctx)
+                        }
                     })
                 }
                 Spacer(Modifier.height(10.dp))
@@ -169,7 +173,13 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 Text("Escalating nudges", style = MaterialTheme.typography.titleSmall)
                 cfg.sleep.tiers.forEach { Text("From ${it.from}: every ${it.every} min", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
             }
-            SwitchRowInline("Grayscale the screen at bedtime", cfg.settings.bedtimeGrayscale) { on -> Store.update { it.copy(settings = it.settings.copy(bedtimeGrayscale = on)) }; Grayscale.sync(ctx) }
+            Column {
+                SwitchRowInline("Grayscale the screen at bedtime", cfg.settings.bedtimeGrayscale) { on ->
+                    Store.update { it.copy(settings = it.settings.copy(bedtimeGrayscale = on)) }
+                    if (on) Grayscale.sync(ctx) else Grayscale.switchedOff(ctx)
+                }
+                GrayscaleNote(cfg.settings.bedtimeGrayscale)
+            }
             SwitchRowInline("Important (need the challenge to turn off)", cfg.sleep.guarded) { on -> Store.update { it.copy(sleep = it.sleep.copy(guarded = on)) } }
         }
     }

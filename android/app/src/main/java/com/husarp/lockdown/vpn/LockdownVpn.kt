@@ -94,7 +94,10 @@ class LockdownVpn : VpnService() {
         val host = Dns.queriedName(packet, len) ?: return
         val nowLdt = Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(this))
         val mode = ModesStore.current(nowLdt)
-        val blocked = Enforce.site(cfg, host, nowLdt, mode) != null ||
+        // A blocked site is cut off here only when its block method includes "cut the connection" ("dns", the
+        // default); "go back" / "close" alone are done by the accessibility service in the browser.
+        val verdict = Enforce.site(cfg, host, nowLdt, mode)
+        val blocked = (verdict != null && "dns" in Enforce.siteFlags(verdict.blockType)) ||
             (cfg.enabled && com.husarp.lockdown.block.Protection.blocked(host))
         if (cfg.settings.networkLog) NetLog.add(host, blocked)
         if (blocked) {

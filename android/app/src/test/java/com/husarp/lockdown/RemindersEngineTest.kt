@@ -5,6 +5,7 @@ import com.husarp.lockdown.engine.CustomCfg
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.engine.SleepCfg
 import com.husarp.lockdown.engine.bedtimeGrayscaleWanted
+import com.husarp.lockdown.engine.grayscaleStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -146,5 +147,27 @@ class RemindersEngineTest {
         val day = SleepCfg(on = true, bedtime = "13:00", wake = "15:00")          // same-day window
         assertTrue(bedtimeGrayscaleWanted(true, day, 14 * 60))
         assertFalse(bedtimeGrayscaleWanted(true, day, 15 * 60))
+    }
+
+    @Test fun grayscale_left_on_by_an_older_copy_goes_off_at_wake_time() {
+        // Adam's bug: after the reinstall the "Lockdown turned it on" mark was gone, so the grey screen was
+        // taken for the user's own and never turned off. With the switch on, an unmarked grey screen is ours.
+        assertEquals(false to false, grayscaleStep(wanted = false, switchOn = true, mark = null, isOn = true))
+        assertEquals(false to false, grayscaleStep(wanted = false, switchOn = true, mark = null, isOn = null))   // Android won't say: write
+        assertEquals(null to null, grayscaleStep(wanted = false, switchOn = true, mark = null, isOn = false))    // colour already back
+    }
+
+    @Test fun grayscale_the_user_set_is_left_alone() {
+        assertEquals(null to null, grayscaleStep(wanted = false, switchOn = false, mark = null, isOn = true))   // switch off, never ours
+        assertEquals(null to false, grayscaleStep(wanted = false, switchOn = true, mark = false, isOn = true))  // turned on in Android's settings
+    }
+
+    @Test fun grayscale_goes_on_at_bedtime_and_off_after_writing_only_on_change() {
+        assertEquals(true to true, grayscaleStep(wanted = true, switchOn = true, mark = null, isOn = false))
+        assertEquals(null to true, grayscaleStep(wanted = true, switchOn = true, mark = true, isOn = true))     // already on: no write
+        assertEquals(true to true, grayscaleStep(wanted = true, switchOn = true, mark = true, isOn = null))     // can't tell: write
+        assertEquals(false to false, grayscaleStep(wanted = false, switchOn = true, mark = true, isOn = true))  // wake time
+        assertEquals(false to false, grayscaleStep(wanted = false, switchOn = false, mark = true, isOn = true)) // switch off at night
+        assertEquals(null to false, grayscaleStep(wanted = false, switchOn = true, mark = true, isOn = false))  // already off
     }
 }

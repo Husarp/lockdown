@@ -85,9 +85,13 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
                 }) { Text("A group") }
             }
             ItemType.APP -> {
-                val apps = remember { Apps.launchable(ctx) }
+                val apps = rememberInstalledApps()
+                var q by remember { mutableStateOf("") }
+                OutlinedTextField(q, { q = it }, placeholder = { Text("Search apps") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+                val shown = apps.filter { it.label.contains(q, true) || it.pkg.contains(q, true) }
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(apps) { a ->
+                    items(shown, key = { it.pkg }) { a ->
                         com.husarp.lockdown.ui.ListRow(
                             title = a.label, subtitle = a.pkg,
                             leading = { com.husarp.lockdown.ui.AppIcon(a.pkg, a.label) },
@@ -108,7 +112,10 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(host, { host = it }, label = { Text("Hostname(s), space-separated") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     TextButton(onClick = {
-                        val h = host.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.")
+                        // each hostname cleaned, not just the first ("www.a.com www.b.com" used to keep the second www.)
+                        val h = host.trim().lowercase().split(Regex("\\s+")).map {
+                            it.removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/")
+                        }.filter { it.isNotEmpty() }.distinct().joinToString(" ")
                         if (h.isNotEmpty()) {
                             val item = Item(UUID.randomUUID().toString().take(8), name.ifBlank { h.substringBefore(" ") }, h, ItemType.SITE,
                                 rules = listOf(Rule(RuleType.PERMANENT)))
@@ -126,6 +133,7 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
 @Composable
 fun RuleEditor(item: Item, onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
     var draft by remember { mutableStateOf(cfg.items.firstOrNull { it.id == item.id } ?: item) }
@@ -133,7 +141,7 @@ fun RuleEditor(item: Item, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         EditorHeader(title = draft.name, onBack = onClose, action = "Save") {
             val original = cfg.items.firstOrNull { it.id == draft.id }
-            val loosening = original != null && AntiBypass.itemLooser(original, draft, LocalDateTime.now())
+            val loosening = original != null && AntiBypass.itemLooser(original, draft, com.husarp.lockdown.guard.TrustedTime.local(ctx))
             guard(loosening) {
                 Store.update { c -> c.copy(items = c.items.map { if (it.id == draft.id) draft else it }) }
                 onClose()
@@ -304,17 +312,29 @@ private fun DaysRow(days: List<Int>, onChange: (List<Int>) -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BlockTypeChips(item: Item, onChange: (String) -> Unit) {
-    val flags = item.blockType.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toMutableSet()
+    val cfg by Store.state.collectAsStateWithLifecycle()
+    val cs = MaterialTheme.colorScheme
+    // none set means the default ("close" for an app, "dns" for a site) - show it chosen, as it is enforced
+    val flags = item.blockType.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        .ifEmpty { listOf(if (item.type == ItemType.APP) "close" else "dns") }.toMutableSet()
     val options = if (item.type == ItemType.APP)
         listOf("close" to "Close", "background" to "Kill background", "minimize" to "Minimise", "internet" to "Cut internet")
-    else listOf("dns" to "Can't load", "close" to "Close tab", "back" to "Go back")
+    else listOf("dns" to "Cut the connection", "back" to "Go back", "close" to "Leave the browser")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (key, label) ->
             Chip(label, key in flags) {
                 val f = flags.toMutableSet(); if (key in f) f.remove(key) else f.add(key)
-                onChange(f.joinToString(","))
+                if (f.isNotEmpty()) onChange(f.joinToString(","))
             }
         }
+    }
+    if (item.type == ItemType.SITE) {
+        val note = buildString {
+            append("Go back: the browser goes back a page. Leave the browser: back to the home screen. ")
+            append("Cut the connection: the site can't load at all")
+            append(if (cfg.settings.siteFilterOn) "." else " - this needs the site filter (Settings > Site filter), which is off; until then the page is covered instead.")
+        }
+        Text(note, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
     }
 }
 
@@ -354,4 +374,15 @@ fun sentence(item: Item): String {
             "$verb $name ${w?.start ?: ""}–${w?.end ?: ""}."
         }
     }
+}
+
+/** The phone's launchable apps, read off the main thread (reading every app's name took up to a second and froze
+ *  the screen when an editor opened); empty until ready. */
+@Composable
+fun rememberInstalledApps(): List<com.husarp.lockdown.block.InstalledApp> {
+    val ctx = LocalContext.current
+    val apps by androidx.compose.runtime.produceState(emptyList<com.husarp.lockdown.block.InstalledApp>()) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { Apps.launchable(ctx) }.getOrDefault(emptyList()) }
+    }
+    return apps
 }

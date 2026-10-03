@@ -155,9 +155,6 @@ object AntiBypass {
         return rulesLooser(old.rules, new.rules, now)
     }
 
-    private fun memberRules(g: Group, member: String): Map<RuleType, Rule> =
-        g.rules.associate { r -> r.type to (g.overrides[member]?.get(r.type.name)?.copy(type = r.type) ?: r) }
-
     fun groupLooser(old: Group, new: Group?, now: LocalDateTime): Boolean {
         // Removing a group that has no rules and no members enforces nothing, so it can't loosen anything -
         // no challenge needed to clean up empty groups.
@@ -165,11 +162,17 @@ object AntiBypass {
         if (newlyDisabled(old, new)) return true
         if (rulesLooser(old.rules, new.rules, now)) return true
         if (!new.memberIds.containsAll(old.memberIds)) return true
-        for (member in old.memberIds) {
-            if (member !in new.memberIds) continue                    // removal already caught above
-            val before = memberRules(old, member)
-            val after = memberRules(new, member)
-            if (before.any { (t, r) -> ruleLooser(r, after[t], now) }) return true
+        // A member's extra rules come on top of the group's (PC 0.84.3): adding or tightening one is free, but
+        // removing or relaxing one (or changing its hours) hands that member time back, so it is loosening.
+        for ((member, extras) in old.overrides) {
+            if (member !in old.memberIds) continue                    // not a member: its extras enforced nothing
+            val after = new.overrides[member] ?: emptyMap()
+            for ((typeName, r) in extras) {
+                val t = runCatching { RuleType.valueOf(typeName) }.getOrNull() ?: continue
+                val before = r.copy(type = t)
+                if (t == RuleType.TEMPORARY && before.tempUntil != null && !tempEnd(before, now).isAfter(now)) continue  // run out: free to clear
+                if (ruleLooser(before, after[typeName]?.copy(type = t), now)) return true
+            }
         }
         return false
     }
