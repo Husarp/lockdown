@@ -25,6 +25,9 @@ PERIOD_WORDS = {"day": "today", "week": "this week", "month": "this month"}
 TIME_LIMIT_FIELDS = {"day": "daily_limit_min", "week": "weekly_limit_min", "month": "monthly_limit_min"}
 OPEN_LIMIT_FIELDS = {"day": "daily_switch_limit", "week": "weekly_switch_limit", "month": "monthly_switch_limit"}
 RESET_KEY = "limits.reset"   # setting: JSON written by change_reset()
+# A daily time limit can have its own amount on each weekday (0.84.12): JSON [Mon, ..., Sun], minutes or null (no
+# limit that day). When set, it takes the place of daily_limit_min, which is then empty.
+DAY_LIMITS_FIELD = "daily_limit_days"
 
 
 def parse_hhmm(text: str) -> time:
@@ -284,9 +287,62 @@ def switch_mode(rule: dict) -> str:
     return rule.get("switch_mode") or VISIT
 
 
-def limits(rule: dict, fields: dict) -> dict[str, int]:
-    """{period: limit} for the periods the rule sets."""
-    return {p: rule[f] for p, f in fields.items() if rule.get(f) is not None}
+def day_limits(rule: dict) -> list[int | None] | None:
+    """The amount on each weekday (Mon..Sun, None = no limit that day) of a daily time limit set per weekday,
+    or None for one amount every day."""
+    text = rule.get(DAY_LIMITS_FIELD)
+    if not text:
+        return None
+    try:
+        days = json.loads(text) if isinstance(text, str) else text
+    except ValueError:
+        return None
+    if not isinstance(days, list) or len(days) != 7:
+        return None
+    return [d if isinstance(d, int) and d > 0 else None for d in days]
+
+
+def make_day_limits(amounts: list[int | None]) -> tuple[int | None, str | None]:
+    """(daily_limit_min, daily_limit_days) for the amounts on Mon..Sun: the same every day is stored as one amount
+    (how every limit was before 0.84.12); otherwise the per-weekday list."""
+    amounts = [a or None for a in amounts]
+    if len(set(amounts)) == 1:
+        return amounts[0], None
+    return None, json.dumps(amounts)
+
+
+def limit_weekday(now: datetime, clock: "LimitClock") -> int:
+    """The weekday (0 = Monday) of the limit day containing now: the one it started on - with a 03:00 reset,
+    Saturday 01:00 is still Friday's day. (A reset at 12:00 or later: the day most of it falls on, as for weeks.)"""
+    return (clock.day(now)[0] + timedelta(hours=12)).weekday()
+
+
+def limits(rule: dict, fields: dict, now: datetime | None = None, clock: "LimitClock | None" = None) -> dict[str, int]:
+    """{period: limit} for the periods the rule sets. A daily time limit set per weekday gives the amount of the
+    limit day containing `now` (none that day: no "day" entry). Without `now`: every period the rule sets on any
+    day, the day one at its largest - which periods its time is counted in."""
+    out = {p: rule[f] for p, f in fields.items() if rule.get(f) is not None}
+    days = day_limits(rule) if fields is TIME_LIMIT_FIELDS else None
+    if days is None:
+        return out
+    out.pop("day", None)
+    amount = (max((d for d in days if d), default=None) if now is None
+              else days[limit_weekday(now, clock or DEFAULT_CLOCK)])
+    return {"day": amount, **out} if amount else out
+
+
+def day_limits_text(days: list[int | None], fmt=lambda minutes: duration_text(minutes * 60)) -> str:
+    """[180]*5 + [120]*2 -> '3h 00m Mon–Fri, 2h 00m Sat–Sun' (fmt: how an amount is written); a day without a
+    limit reads 'no limit'."""
+    runs: list[list[int]] = []
+    for d in range(7):
+        if runs and days[d] == days[runs[-1][-1]]:
+            runs[-1].append(d)
+        else:
+            runs.append([d])
+    def span(r):
+        return DAY_NAMES[r[0]][:3] if len(r) == 1 else f"{DAY_NAMES[r[0]][:3]}–{DAY_NAMES[r[-1]][:3]}"
+    return ", ".join(f"{fmt(days[r[0]]) if days[r[0]] else 'no limit'} {span(r)}" for r in runs)
 
 
 def time_bucket(period: str, now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> str:
@@ -386,7 +442,7 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
         return "schedule", (None if until == datetime.max else until)
     clock = _clock(usage)
     if kind == "time_limit":   # blocked until the end of every period whose limit is used up
-        ends = [clock.period(p, now)[1] for p, limit in limits(rule, TIME_LIMIT_FIELDS).items()
+        ends = [clock.period(p, now)[1] for p, limit in limits(rule, TIME_LIMIT_FIELDS, now, clock).items()
                 if usage(_owner(rule), time_bucket(p, now, clock)) >= limit * 60]
         return ("limit", max(ends)) if ends else None
     if kind == "switch_limit":  # the openings up to the limit are allowed; the next one is blocked
@@ -413,7 +469,7 @@ def rule_state(rule: dict, now: datetime, usage=no_usage) -> str:
         fields = TIME_LIMIT_FIELDS if time_based else OPEN_LIMIT_FIELDS
         used = [usage(_owner(rule), time_bucket(p, now, clock)) / max(limit * 60, 1) if time_based
                 else usage(_owner(rule), opening_bucket(rule, p, now, clock)) / max(limit, 1)
-                for p, limit in limits(rule, fields).items()]
+                for p, limit in limits(rule, fields, now, clock).items()]
         return "soon" if used and max(used) >= NEARLY else "allowed"
     if kind == "scheduled" and rule.get("schedule"):
         if allowance_left(rule, now, usage):   # inside its hours, on the allowance: still allowed, not for long
@@ -465,7 +521,7 @@ def limit_targets(rules: list[dict], now: datetime,
         out[target] = min(out.get(target, seconds), seconds)
     for r in rules:
         if r["rule_type"] == "time_limit":
-            for p, limit in limits(r, TIME_LIMIT_FIELDS).items():
+            for p, limit in limits(r, TIME_LIMIT_FIELDS, now, clock).items():
                 put((_owner(r), time_bucket(p, now, clock)), limit * 60)
         elif r["rule_type"] == "scheduled" and r.get("allowance_min"):
             until = schedule_until(r["schedule"], now)
@@ -588,7 +644,7 @@ def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = 
             elif in_use and r.get("allowance_min"):   # inside the stretch, using the allowance
                 left = r["allowance_min"] * 60 - usage(allowance_owner(r), allowance_bucket(r, until))
                 found.append((now + timedelta(seconds=max(0, left)), r))
-        elif kind == "time_limit" and in_use and (lims := limits(r, TIME_LIMIT_FIELDS)):
+        elif kind == "time_limit" and in_use and (lims := limits(r, TIME_LIMIT_FIELDS, now, _clock(usage))):
             left = min(limit * 60 - usage(_owner(r), time_bucket(p, now, _clock(usage))) for p, limit in lims.items())
             found.append((now + timedelta(seconds=max(0, left)), r))
     return min(found, key=lambda f: f[0]) if found else None
@@ -666,8 +722,11 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = T
     clock = _clock(usage)
     tag = " (group)" if _owner(rule).startswith("group:") else own
     if kind == "time_limit":
+        lims = limits(rule, TIME_LIMIT_FIELDS, now, clock)
         parts = [f"{duration_text(usage(_owner(rule), time_bucket(p, now, clock)))} / {duration_text(limit * 60)} "
-                 f"{period_words(p, now, clock)}" for p, limit in limits(rule, TIME_LIMIT_FIELDS).items()]
+                 f"{period_words(p, now, clock)}" for p, limit in lims.items()]
+        if "day" not in lims and day_limits(rule):   # set per weekday, and not on this one
+            parts.insert(0, f"no limit {period_words('day', now, clock)}")
         return f"Limit{tag}: " + "\n".join(parts)
     if kind == "switch_limit":
         parts = [f"{usage(_owner(rule), opening_bucket(rule, p, now, clock))} / {limit} {period_words(p, now, clock)}"

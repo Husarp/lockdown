@@ -146,8 +146,9 @@ def upcoming(now, items, groups, usage) -> list[dict]:
             merged.setdefault(key, {"kind": "start", "when": when, "title": title, "names": []})["names"].append(
                 item["display_name"])
         for r in rules:
-            if r["rule_type"] == "time_limit" and r.get("daily_limit_min"):
-                left = r["daily_limit_min"] * 60 - usage(r["usage_owner"], time_bucket("day", now, usage.clock))
+            # (a limit set per weekday: today's amount)
+            if r["rule_type"] == "time_limit" and (day := limits(r, TIME_LIMIT_FIELDS, now, usage.clock).get("day")):
+                left = day * 60 - usage(r["usage_owner"], time_bucket("day", now, usage.clock))
                 # several day limits (the group's, its own extra): the row is the one with least left
                 if 0 < left <= 30 * 60 and left < merged.get(("limit", item["id"]), {}).get("left", left + 1):
                     merged[("limit", item["id"])] = {"kind": "limit", "when": None, "left": left,
@@ -433,7 +434,7 @@ class DashboardPage(ctk.CTkFrame):
                 is_time = r["rule_type"] == "time_limit"
                 group = r["usage_owner"].startswith("group:")
                 best = None
-                for period, limit in limits(r, TIME_LIMIT_FIELDS if is_time else OPEN_LIMIT_FIELDS).items():
+                for period, limit in limits(r, TIME_LIMIT_FIELDS if is_time else OPEN_LIMIT_FIELDS, now, clock).items():
                     bucket = time_bucket(period, now, clock) if is_time else opening_bucket(r, period, now, clock)
                     used = usage(r["usage_owner"], bucket)
                     frac = used / (limit * 60 if is_time else max(limit, 1))

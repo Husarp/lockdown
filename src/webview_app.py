@@ -62,8 +62,8 @@ def _windows_for_ui(schedule_json: str) -> list[dict]:
 
 
 def _rules_for_ui(db) -> list[dict]:
-    from rules import (TIME_LIMIT_FIELDS, allowance_left, describe_rule, effective_rules, limits, load_schedule,
-                       time_bucket)
+    from rules import (DAY_LIMITS_FIELD, TIME_LIMIT_FIELDS, allowance_left, describe_rule, effective_rules, limits,
+                       load_schedule, time_bucket)
     groups = db.list_groups()
     group_of = {i: g["name"] for g in groups for i in g["members"]}
     now = now_from_db(db)
@@ -76,7 +76,7 @@ def _rules_for_ui(db) -> list[dict]:
                "enabled": not item.get("disabled"), "group": group_of.get(item["id"]), "when": _block_action(item),
                "windows": [], "limitType": "off", "limit": 0, "used": 0,
                "allowOn": False, "allowMin": 0, "allowTimes": 0, "allowActive": False, "allowLeft": 0,
-               "words": " · ".join(describe_rule(r, now).splitlines()[0] for r in rules) if rules else ""}
+               "words": " · ".join(describe_rule(r, now, usage).splitlines()[0] for r in rules) if rules else ""}
         mode, allowances = None, []
         for r in rules:
             if r["rule_type"] == "scheduled":
@@ -94,7 +94,7 @@ def _rules_for_ui(db) -> list[dict]:
                     left = max(0, round((spent[1] - spent[0]) / 60)) if spent else r["allowance_min"]
                     allowances.append((not spent, left, r["allowance_min"]))
             elif r["rule_type"] == "time_limit":
-                fields = limits(r, TIME_LIMIT_FIELDS)
+                fields = limits(r, TIME_LIMIT_FIELDS, now, usage.clock)   # set per weekday: today's amount
                 period = "day" if "day" in fields else "week" if "week" in fields else None
                 if period:
                     used = round(usage(r["usage_owner"], time_bucket(period, now, usage.clock)) / 60)
@@ -102,6 +102,10 @@ def _rules_for_ui(db) -> list[dict]:
                     if row["limitType"] == "off" or fields[period] - used < row["limit"] - row["used"]:
                         row["limitType"] = "daily" if period == "day" else "weekly"
                         row["limit"], row["used"] = fields[period], used
+        # an own daily limit set per weekday: kept as it is when the row is saved back (the web view shows only
+        # today's amount, and can't edit the others)
+        row["limitDays"] = next((r.get(DAY_LIMITS_FIELD) for r in item["rules"]
+                                 if r["rule_type"] == "time_limit" and r.get(DAY_LIMITS_FIELD)), None)
         if allowances:   # several (the group's, its own extra): the one in use with least left limits it
             idle, left, minutes = min(allowances)
             row["allowOn"], row["allowMin"], row["allowActive"], row["allowLeft"] = True, minutes, not idle, \
@@ -146,10 +150,15 @@ def _rules_from_draft(d: dict) -> list[dict]:
             if d.get("allowOn") and d.get("allowMin"):
                 rule["allowance_min"] = int(d["allowMin"])
             rules.append(rule)
-    if d.get("limitType") == "daily" and d.get("limit"):
-        rules.append({"rule_type": "time_limit", "daily_limit_min": int(d["limit"])})
+    # a daily limit set per weekday (in the app) is kept as it is, whatever the row shows today - today's amount,
+    # "off" on a day without one, or a weekly limit when that is the one with least left
+    limit = {"daily_limit_days": d["limitDays"]} if d.get("limitDays") else {}
+    if d.get("limitType") == "daily" and d.get("limit") and not limit:
+        limit["daily_limit_min"] = int(d["limit"])
     elif d.get("limitType") == "weekly" and d.get("limit"):
-        rules.append({"rule_type": "time_limit", "weekly_limit_min": int(d["limit"])})
+        limit["weekly_limit_min"] = int(d["limit"])
+    if limit:
+        rules.append({"rule_type": "time_limit", **limit})
     if not rules:
         rules.append({"rule_type": "permanent"})
     return rules

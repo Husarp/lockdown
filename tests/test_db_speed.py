@@ -454,7 +454,8 @@ def test_schema_changes_come_with_a_schema_version_bump():
     text = dbmod.SCHEMA + repr(dbmod.MIGRATIONS) + repr(dbmod.INDEXES)
     pinned = {2: "bd713ebe83619146", 3: "bd713ebe83619146",   # 3: same schema; re-runs the media-hosts one-off (0.84.1)
               4: "9667f9c57d6187a4",                          # 4: emergency_unlocks.alerts (0.84.7)
-              5: "378a5d0d1e176d1b"}                          # 5: how a group's members are blocked (0.84.11)
+              5: "378a5d0d1e176d1b",                          # 5: how a group's members are blocked (0.84.11)
+              6: "8cc40a7d06ab4b25"}                          # 6: a daily time limit per weekday (0.84.12)
     assert pinned.get(SCHEMA_VERSION) == hashlib.sha256(text.encode()).hexdigest()[:16], \
         (SCHEMA_VERSION, hashlib.sha256(text.encode()).hexdigest()[:16])
 

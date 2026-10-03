@@ -325,7 +325,7 @@ def test_an_older_database_gets_the_columns_and_its_groups_unchanged(tmp_path):
     raw.commit()
     raw.close()
     db = Database(path)
-    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 5
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 5
     [g] = db.list_groups()
     assert (g["app_block"], g["site_block"], g["member_blocks"]) == (None, None, {})
     assert _way(db, yt) == "dns,back"

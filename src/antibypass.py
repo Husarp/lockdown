@@ -38,7 +38,7 @@ from datetime import datetime, timedelta
 import block_method
 from blocker.apps import block_flags
 from blocker.site_block import site_flags
-from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, next_window_start,
+from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, day_limits, next_window_start,
                    window_until)
 
 SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": bool, "windows": [...],
@@ -166,15 +166,30 @@ def rule_looser(old: dict, new: dict | None, now: datetime) -> bool:
         return (new.get("schedule") != old.get("schedule")
                 or (new.get("allowance_min") or 0) > (old.get("allowance_min") or 0)
                 or (allowance_shared(old) and not allowance_shared(new)))
+    if kind == "time_limit" and any(_raised(a, b) for a, b in zip(_per_weekday(old), _per_weekday(new))):
+        return True
     if kind in ("time_limit", "switch_limit"):
         fields = TIME_LIMIT_FIELDS if kind == "time_limit" else OPEN_LIMIT_FIELDS
         for field in fields.values():
+            if field == TIME_LIMIT_FIELDS["day"]:
+                continue                     # (compared weekday by weekday above)
             if old.get(field) is not None and (new.get(field) is None or new[field] > old[field]):
                 return True
         if kind == "switch_limit":
             return (new.get("switch_mode") != old.get("switch_mode")
                     or (new.get("visit_gap_min") or 0) > (old.get("visit_gap_min") or 0))
     return False
+
+
+def _per_weekday(rule: dict) -> list[int | None]:
+    """A time limit's daily amount on each weekday Mon..Sun (None = no limit that day): one amount for all days,
+    or set per weekday (0.84.12)."""
+    return day_limits(rule) or [rule.get(TIME_LIMIT_FIELDS["day"])] * 7
+
+
+def _raised(old: int | None, new: int | None) -> bool:
+    """A limit that was there is gone or bigger."""
+    return old is not None and (new is None or new > old)
 
 
 def rules_looser(old: list[dict], new: list[dict], now: datetime) -> bool:

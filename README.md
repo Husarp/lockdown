@@ -26,7 +26,10 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   stretches as bars; Day / 3 days / Week; emergency unlocks marked; summary cards for the day). Site suggestions while typing,
   popular sites suggested while typing (small typos are fine). **Auto-save** is on by default; turn it off to stage changes until you
   press **Save changes** (unsaved items then show "Not applied").
-- **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week), a configurable **limit reset
+- **Limits per day / week / month** (stackable, e.g. 2 h a day + max 8 h a week). The daily time limit can have its
+  own amount on each weekday (0.84.12: untick "Same every day", e.g. 3 h Mon–Fri and 2 h Sat–Sun; an empty day has
+  no daily limit). The day is the limit day: with a 03:00 reset, Saturday 01:00 still gets Friday's amount. Raising
+  a day's amount or clearing it goes through Anti-Bypass; lowering is free. A configurable **limit reset
   time** (Settings; a change never ends the current limit day, week or month early), and **Emergency unlock**
   (Blocking > Overview: unblock chosen items for 20 min - blocked yet or not, e.g. before your allowance runs out; the
   time still counts toward your limits - and/or pause the bedtime and break alerts; also "Emergency (N left)" on the

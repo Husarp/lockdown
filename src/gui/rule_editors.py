@@ -7,9 +7,9 @@ import customtkinter as ctk
 
 from gui import theme
 from gui.components import Segmented, help_icon
-from rules import (ALLOW, BLOCK, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS, SWITCH, TIME_FMT,
-                   TIME_LIMIT_FIELDS, VISIT, allowance_shared, days_text, duration_text, load_schedule,
-                   make_schedule)
+from rules import (ALLOW, BLOCK, DAY_LIMITS_FIELD, DAY_NAMES, DEFAULT_VISIT_GAP_MIN, OPEN_LIMIT_FIELDS, PERIODS,
+                   SWITCH, TIME_FMT, TIME_LIMIT_FIELDS, VISIT, allowance_shared, day_limits, day_limits_text,
+                   days_text, duration_text, load_schedule, make_day_limits, make_schedule)
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
              "4 hours": 240, "8 hours": 480, "24 hours": 1440}
@@ -207,11 +207,39 @@ def _set(entry, text: str):
 
 
 class LimitEditor(ctk.CTkFrame):
-    """Time limit per day / week / month - any combination; each one blocks until its period ends."""
+    """Time limit per day / week / month - any combination; each one blocks until its period ends. The daily one
+    can have its own amount on each weekday (0.84.12): untick "Same every day" for a Mon..Sun grid."""
+
+    QUICK = {"Mon–Fri": range(5), "Sat–Sun": range(5, 7), "Every day": range(7)}
 
     def __init__(self, master, shared: bool = False):
         super().__init__(master, fg_color="transparent")
         self.entries = _period_entries(self, "Shared limit" if shared else "At most", 58 if shared else 64)
+        same = ctk.CTkFrame(self, fg_color="transparent")
+        same.pack(anchor="w", pady=(6, 0))
+        self.same = ctk.CTkCheckBox(same, text="Same every day", checkbox_width=18, checkbox_height=18,
+                                    command=self._same_changed)
+        self.same.pack(side="left")
+        help_icon(same, "Untick to give each weekday its own daily limit, e.g. 3h Monday to Friday and 2h at the "
+                        "weekend. Leave a day empty for no daily limit that day.\nA day starts at the limit reset "
+                        "time: with a 03:00 reset, Saturday 01:00 still counts as Friday.").pack(side="left", padx=8)
+        # the Mon..Sun grid (shown when "Same every day" is off)
+        self.grid_box = ctk.CTkFrame(self, fg_color="transparent")
+        self.day_entries = []
+        for i, day in enumerate(DAY_NAMES):
+            ctk.CTkLabel(self.grid_box, text=day[:3], text_color=MUTED, height=18).grid(row=0, column=i, padx=2)
+            entry = ctk.CTkEntry(self.grid_box, width=42 if shared else 50, justify="center")
+            entry.grid(row=1, column=i, padx=2)
+            self.day_entries.append(entry)
+        fill = ctk.CTkFrame(self.grid_box, fg_color="transparent")
+        fill.grid(row=2, column=0, columnspan=7, sticky="w", pady=(4, 0))
+        ctk.CTkLabel(fill, text="Fill").pack(side="left", padx=(2, 6))
+        self.fill = ctk.CTkEntry(fill, width=50, justify="center")
+        self.fill.pack(side="left")
+        ctk.CTkLabel(fill, text="into", text_color=MUTED).pack(side="left", padx=6)
+        for label, days in self.QUICK.items():
+            ctk.CTkButton(fill, text=label, width=10, height=26, **theme.OUTLINE,
+                          command=lambda d=days: self._fill(d)).pack(side="left", padx=(0, 4))
         note = ("For all members together. " if shared else "") + \
             "E.g. 45m, 2h, 1h30; leave empty for no limit. Counted while the app is in front / the site is the " \
             "active browser tab; resets at the limit reset time (Settings)."
@@ -219,26 +247,70 @@ class LimitEditor(ctk.CTkFrame):
         # (the group editor's is the narrow one). Measuring it in a <Configure> handler and re-wrapping the label
         # made the app hang - the taller label flipped the scrollbar on, the scrollbar took width away, the label
         # re-wrapped, and CTk's scrollbar redraws by calling update_idletasks, so it span forever.
-        label = ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=300 if shared else 480,
-                             justify="left", anchor="w")
-        label.pack(anchor="w", fill="x", pady=(4, 0))
+        self.note = ctk.CTkLabel(self, text=note, text_color=MUTED, wraplength=300 if shared else 480,
+                                 justify="left", anchor="w")
+        self.note.pack(anchor="w", fill="x", pady=(4, 0))
         self.load(None)
+
+    def _fill(self, days):
+        for d in days:
+            _set(self.day_entries[d], self.fill.get().strip())
+
+    def _same_changed(self):
+        """The tick was changed by hand: carry the amount over (one amount -> every day; back -> the first day's)."""
+        day = self.entries["day"]
+        if self.same.get():
+            first = next((e.get().strip() for e in self.day_entries if e.get().strip()), "")
+            self._show_grid(False)
+            _set(day, first)
+        else:
+            for entry in (*self.day_entries, self.fill):
+                _set(entry, day.get().strip())
+            _set(day, "")
+            self._show_grid(True)
+
+    def _show_grid(self, on: bool):
+        """Per weekday: the grid shows, and the single "per day" box is greyed out."""
+        if on:   # (a disabled CTkEntry looks just like an empty one: drop its fill so it reads as off)
+            day = self.entries["day"]
+            day.configure(state="disabled", fg_color=day.cget("bg_color"))
+            self.grid_box.pack(anchor="w", pady=(4, 0), before=self.note)
+        else:
+            self.entries["day"].configure(state="normal", fg_color=self.entries["week"].cget("fg_color"))
+            self.grid_box.pack_forget()
 
     def load(self, rule: dict | None):
         rule = rule or {"daily_limit_min": 30}
+        self._show_grid(False)
         for p, entry in self.entries.items():
             _set(entry, format_duration(rule.get(TIME_LIMIT_FIELDS[p])))
+        days = day_limits(rule)
+        for entry, minutes in zip(self.day_entries, days or [None] * 7):
+            _set(entry, format_duration(minutes))
+        _set(self.fill, "")
+        self.same.deselect() if days else self.same.select()
+        self._show_grid(bool(days))
 
     def value(self) -> dict:
-        rule = {"rule_type": "time_limit"}
+        rule = {"rule_type": "time_limit", DAY_LIMITS_FIELD: None}
         for p, entry in self.entries.items():
-            minutes = parse_duration(entry.get())
-            if minutes is not None and not 1 <= minutes <= PERIOD_MAX_MIN[p]:
-                raise ValueError(f"The limit {PERIOD_LABELS[p]} must be between 1m and {PERIOD_MAX_MIN[p] // 60}h.")
-            rule[TIME_LIMIT_FIELDS[p]] = minutes
-        if not any(rule[f] for f in TIME_LIMIT_FIELDS.values()):
+            if p == "day" and not self.same.get():
+                continue
+            rule[TIME_LIMIT_FIELDS[p]] = self._read(entry.get(), p)
+        if not self.same.get():
+            rule[TIME_LIMIT_FIELDS["day"]], rule[DAY_LIMITS_FIELD] = make_day_limits(
+                [self._read(e.get(), "day", DAY_NAMES[i]) for i, e in enumerate(self.day_entries)])
+        if not any(rule[f] for f in (*TIME_LIMIT_FIELDS.values(), DAY_LIMITS_FIELD)):
             raise ValueError("Fill in at least one time limit (per day, week or month).")
         return rule
+
+    @staticmethod
+    def _read(text: str, period: str, day: str = "") -> int | None:
+        minutes = parse_duration(text)
+        if minutes is not None and not 1 <= minutes <= PERIOD_MAX_MIN[period]:
+            what = f"on {day}" if day else PERIOD_LABELS[period]
+            raise ValueError(f"The limit {what} must be between 1m and {PERIOD_MAX_MIN[period] // 60}h.")
+        return minutes
 
 
 class SwitchEditor(ctk.CTkFrame):
@@ -399,8 +471,10 @@ def summary(rule_type: str, editor) -> str:
             text += f" · +{rule['allowance_min']} min" + ("" if allowance_shared(rule) else " each")
         return text
     if rule_type == "time_limit":
-        return " · ".join(f"{format_duration(rule[f])} {PERIOD_LABELS[p]}" for p, f in TIME_LIMIT_FIELDS.items()
-                          if rule.get(f))
+        parts = [f"{format_duration(rule[f])} {PERIOD_LABELS[p]}" for p, f in TIME_LIMIT_FIELDS.items() if rule.get(f)]
+        if days := day_limits(rule):
+            parts.insert(0, f"per day {day_limits_text(days, format_duration)}")
+        return " · ".join(parts)
     if rule_type == "switch_limit":
         return " · ".join(f"{rule[f]} opens {PERIOD_LABELS[p]}" for p, f in OPEN_LIMIT_FIELDS.items()
                           if rule.get(f) is not None)

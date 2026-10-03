@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS block_rules (
     item_id INTEGER NOT NULL REFERENCES blocked_items(id) ON DELETE CASCADE,
     rule_type TEXT NOT NULL,      -- permanent, scheduled, time_limit, switch_limit, temporary
     daily_limit_min INTEGER,      -- time_limit: minutes per day / week / month (any combination)
+    daily_limit_days TEXT,        -- time_limit: JSON [Mon..Sun] minutes or null, instead of daily_limit_min
     weekly_limit_min INTEGER,
     monthly_limit_min INTEGER,
     daily_switch_limit INTEGER,   -- switch_limit: openings per day / week / month (any combination)
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS group_rules (
     group_id INTEGER NOT NULL REFERENCES block_groups(id) ON DELETE CASCADE,
     rule_type TEXT NOT NULL,
     daily_limit_min INTEGER,      -- a group daily limit is one shared total
+    daily_limit_days TEXT,        -- the same per weekday (see block_rules)
     schedule TEXT,
     temp_until DATETIME,
     allowance_min INTEGER,
@@ -243,13 +245,14 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("blocked_items", "disabled", "INTEGER"), ("block_groups", "disabled", "INTEGER"),
               ("emergency_unlocks", "alerts", "INTEGER"),
               ("block_groups", "app_block", "TEXT"), ("block_groups", "site_block", "TEXT"),
-              ("block_groups", "member_blocks", "TEXT")]
+              ("block_groups", "member_blocks", "TEXT"),
+              ("block_rules", "daily_limit_days", "TEXT"), ("group_rules", "daily_limit_days", "TEXT")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
                for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
 RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "allowance_shared",
                 "daily_switch_limit",
                 "switch_mode", "visit_gap_min", "weekly_limit_min", "monthly_limit_min", "weekly_switch_limit",
-                "monthly_switch_limit")
+                "monthly_switch_limit", "daily_limit_days")
 USAGE_DAYS_LOADED = 40   # monthly limits (+ a long day after a reset-time change)
 
 # One per hot WHERE / ORDER BY (see design/rebuild/inventory-perf.md #3-#5). activity and network_log need none: their
@@ -270,8 +273,9 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 5   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 6   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
+#                      6: a daily time limit per weekday (0.84.12)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
