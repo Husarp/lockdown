@@ -229,6 +229,35 @@ def site_of(url: str | None) -> str:
         return ""
 
 
+# The sites a browser window in front showed lately: host -> when (time.monotonic()), noted by the tracker (the
+# foreground window and the one in front on every other monitor) and by the tab check (word_guard, which sends a
+# blocked tab back within half a second). A "<site> is blocked" notice is shown only when you were opening that
+# site (0.84.10, LockdownApp._check_visits) - not for a page, a program or the DNS filter reaching it in the
+# background (an embedded video, thumbnails, Discord's link previews, a browser's preconnect).
+SHOWN_KEEP_SEC = 60
+_shown: dict[str, float] = {}
+_shown_lock = threading.Lock()   # (written by the tracker's and the tab check's threads, read by the window's)
+
+
+def note_shown(url: str | None):
+    host = site_of(url)
+    if not host:
+        return
+    now = time.monotonic()
+    with _shown_lock:
+        _shown[host] = now
+        if len(_shown) > 50:
+            for h, t in list(_shown.items()):
+                if not 0 <= now - t <= SHOWN_KEEP_SEC:
+                    del _shown[h]
+
+
+def shown_since(since: float) -> set[str]:
+    """Hosts a browser window in front showed at or after `since` (time.monotonic())."""
+    with _shown_lock:
+        return {h for h, t in _shown.items() if t >= since}
+
+
 class UsageTracker(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -342,6 +371,8 @@ class UsageTracker(threading.Thread):
         path = more[0] if more else None
         pid = more[1] if len(more) > 1 else None
         others = more[2] if len(more) > 2 else ()
+        for shown in (url, *(o[1] for o in others)):   # (before any database read: a lock can't lose a sighting)
+            note_shown(shown)
         published = members(db) if exe or others else {}
         owners = owners_of(db, pid, published) if exe else frozenset()
         now = now_from_db(db)

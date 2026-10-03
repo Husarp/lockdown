@@ -117,7 +117,10 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
 - Site icons are downloaded once from Google's favicon service and cached in `%LOCALAPPDATA%\Lockdown\icons`
   (a letter icon is shown when offline).
 - The service also listens on `127.0.0.1:80/443`: when a browser tries to open a blocked site, it records which
-  site and why; the tray agent turns that into a notification (configurable on the Notifications page).
+  site and why; the tray agent turns that into a notification (configurable on the Notifications page) - only when
+  a browser window in front (focused, or in front on another monitor) shows that site around then, i.e. you tried
+  to open it (0.84.10). Hits from embedded videos, thumbnails, other programs or the DNS filter are recorded
+  (network log, Blocked visits) but stay silent.
 - **Notifications (0.84.7):** Windows' own notifications by default (package `windows-toasts`), with their buttons.
   While a full-screen app (a game) is in front Lockdown never draws a window of its own: everything, held
   reminders too, goes out as a normal Windows notification, which Windows may hold in the notification centre.

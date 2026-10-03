@@ -79,6 +79,16 @@ def should_notify(event: dict, item_notify: str | None, enabled: bool, last_show
     return last_shown is None or now_ts - last_shown >= cooldown_min * 60
 
 
+def opened_in_front(event: dict, shown: set[str], targets=()) -> bool:
+    """Was a blocked visit you opening the site? Only if a browser window in front showed it (`shown`:
+    usage.shown_since) - the blocked item's own sites (`targets`; a hit on googlevideo.com while youtube.com is in
+    front is YouTube) or, for a protection list, the name visited. A background hit - a page in front embedding a
+    YouTube video, thumbnails, another program, the DNS filter answering for something - is still recorded (the
+    network log, Blocked visits) but says nothing (0.84.10)."""
+    names = {h.lower().removeprefix("www.") for h in (*targets, event["hostname"]) if h}
+    return any(s == n or s.endswith("." + n) for s in shown for n in names)
+
+
 def _when_text(when: datetime, now: datetime) -> str:
     return when.strftime("%H:%M") if when.date() == now.date() else f"{DAY_NAMES[when.weekday()]} {when:%H:%M}"
 

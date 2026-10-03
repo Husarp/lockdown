@@ -151,6 +151,8 @@ class WordGuard(threading.Thread):
         """sites: {hostname: "close" / "back"} from blocked_sites().
         sense() -> (window, address, title[, address bar hidden]) - sense_tab()."""
         tab = sense() if (cfg["enabled"] or sites) else None
+        if tab:
+            usage.note_shown(tab[1])   # (a blocked-visit notice needs it: sent back before the tracker saw it)
         word = tab and cfg["enabled"] and keywords.find(tab[1], tab[2], cfg)
         action = cfg["action"] if word else (site_action(tab[1], sites or {}) if tab else None)
         if not action:

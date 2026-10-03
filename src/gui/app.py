@@ -5,6 +5,7 @@ import threading
 import time
 import traceback
 import webbrowser
+from datetime import datetime
 
 # Import COM libraries on the main thread: background threads importing them at the same time can deadlock.
 import comtypes.client  # noqa: F401
@@ -69,6 +70,11 @@ LAYOUT_W, LAYOUT_H = 1280, 780
 MIN_SCALE = 0.62        # below this it would be unreadable
 SERVICE_TIMEOUT_SEC = 15
 EVENT_POLL_MS = 1000
+# A blocked visit to a site is announced only if a browser window in front showed that site from this long before
+# the visit was seen until this long after (the tab check sends the tab back within a second; the address bar may
+# be read a moment after the browser connected) - else it was a background hit and stays silent (0.84.10).
+VISIT_FRONT_SEC = 10
+VISIT_LAG_MAX_SEC = 30   # a visit seen late (this window busy) is looked for in front from up to this long before
 WATCH_MS = 5000
 UPDATE_FIRST_MS = 60_000      # let the app settle before touching the network, then check (0.84.4: every start)
 UPDATE_POLL_MS = 60_000       # then every minute: is a check due (every updates.EVERY_HOURS), has a snooze run out
@@ -118,6 +124,7 @@ class LockdownApp(ctk.CTk):
         self.pages: dict[str, ctk.CTkFrame] = {}
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         self.last_event_id = self.db.last_block_event_id()  # only notify about new visits
+        self.visits: dict[tuple, tuple] = {}                 # site visits waiting to be seen in front (_check_visits)
         self.last_alert = self._load_last_alert()            # item id -> when last notified (kept across restarts)
         self._grace: dict[str, tuple] = {}                   # domain -> (revert-to state, expiry) for grace-undo
         self.popup: Popup | None = None
@@ -578,13 +585,40 @@ class LockdownApp(ctk.CTk):
             events = self.db.block_events_after(self.last_event_id)
             if events:
                 self.last_event_id = events[-1]["id"]
-                notify_override = {i["id"]: i["notify"] for i in self.db.list_items()}
+                items = {i["id"]: i for i in self.db.list_items()}
+                seen, now = time.monotonic(), now_from_db(self.db)
                 for event in events:
+                    item = items.get(event["item_id"]) or {}
                     if event["hostname"].endswith(".exe"):
                         win.close_app(event["hostname"])   # ask nicely; the service force-closes after 10 s
-                    self._alert(event, notify_override.get(event["item_id"]))
+                        self._alert(event, item.get("notify"))
+                    else:   # a site: only if you were opening it (0.84.10)
+                        # (looked for in front from the visit's own time: this window may have been busy a while)
+                        try:
+                            lag = (now - datetime.strptime(event["timestamp"], TIME_FMT)).total_seconds()
+                        except (TypeError, ValueError):
+                            lag = 0.0
+                        since = seen - min(max(lag, 0.0), VISIT_LAG_MAX_SEC) - VISIT_FRONT_SEC
+                        self.visits[(event["item_id"], event["hostname"])] = (event, item, seen, since)
+            self._check_visits()
         finally:
             self.after(EVENT_POLL_MS, self._poll_block_events)
+
+    def _check_visits(self):
+        """Announce a blocked site only when you tried to open it: a browser window in front (the focused one, or
+        the one in front on another monitor) showed it within VISIT_FRONT_SEC of the visit. The service records
+        every connection to a blocked site, and most are nobody opening it - a page embedding a YouTube video,
+        thumbnails, Discord's link previews, a browser's preconnect, and since 0.84.9 the DNS filter answering
+        for youtube.com whatever asks - so "YouTube is blocked" came up with YouTube nowhere on screen. Those
+        stay in the network log and Blocked visits, silently."""
+        now = time.monotonic()
+        for key, (event, item, seen, since) in list(self.visits.items()):
+            targets = item.get("target", "").split()
+            if alerts.opened_in_front(event, usage_mod.shown_since(since), targets):
+                del self.visits[key]
+                self._alert(event, item.get("notify"))
+            elif not 0 <= now - seen <= VISIT_FRONT_SEC:
+                del self.visits[key]
 
     def _alert(self, event: dict, item_notify: str | None):
         now = time.time()
