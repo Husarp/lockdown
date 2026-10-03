@@ -1,12 +1,15 @@
 package com.husarp.lockdown.data
 
+import com.husarp.lockdown.engine.AlertsCfg
 import com.husarp.lockdown.engine.AntiBypassCfg
+import com.husarp.lockdown.engine.BlockPause
 import com.husarp.lockdown.engine.BreakCfg
 import com.husarp.lockdown.engine.CustomCfg
 import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.KeywordsCfg
 import com.husarp.lockdown.engine.LimitClock
+import com.husarp.lockdown.engine.ResetCarry
 import com.husarp.lockdown.engine.SleepCfg
 import kotlinx.serialization.Serializable
 import java.time.LocalTime
@@ -30,14 +33,18 @@ data class Config(
     val guardrails: Guardrails = Guardrails(),
     val categories: Map<String, String> = emptyMap(),  // "app:<pkg>" / "site:<host>" -> productive|neutral|distracting
     val settings: Settings = Settings(),
+    val alerts: AlertsCfg = AlertsCfg(),               // block notices, warnings, "block started" (engine/Alerts.kt)
     val unlocks: List<String> = emptyList(),           // emergency-unlock start times (ISO), for the weekly/daily quota
     val unlockUntil: String? = null,                   // current emergency unlock end (ISO), or null
     val unlockItems: List<String> = emptyList(),       // item ids the current unlock covers
     val alertsPausedUntil: String? = null,             // an emergency paused bedtime + break alerts until (ISO), or null
+    val pause: BlockPause? = null,                     // "Pause my blocks" (engine/Pause.kt), or null. Not carried by an import
     val resetHour: Int = 0,                            // custom limit-day start (default midnight)
     val resetMin: Int = 0,
+    val resetCarry: ResetCarry? = null,                // what the last change of the reset time keeps running
 ) {
-    fun clock() = LimitClock(resetTime = LocalTime.of(resetHour.coerceIn(0, 23), resetMin.coerceIn(0, 59)))
+    fun resetTime(): LocalTime = LocalTime.of(resetHour.coerceIn(0, 23), resetMin.coerceIn(0, 59))
+    fun clock() = LimitClock.of(resetTime(), resetCarry)
 }
 
 @Serializable
@@ -58,7 +65,7 @@ data class ProtectionCfg(
 data class Guardrails(
     val uninstallProtection: Boolean = false,          // device-admin so it can't be uninstalled while on
     val persist: Boolean = true,                       // keep the service alive; restart on kill/boot
-    val trustedTime: Boolean = true,                   // ignore the clock being set backwards
+    val trustedTime: Boolean = true,                   // ignore the clock being changed; a new time zone after 24 h
 )
 
 @Serializable
@@ -68,7 +75,6 @@ data class Settings(
     val siteFilterOn: Boolean = false,                 // whether the DNS-filter VPN should run
     val pauseBeforeOpen: Boolean = false,
     val pauseSec: Int = 10,
-    val openCapPerDay: Int = 0,                         // 0 = off
     val bedtimeGrayscale: Boolean = false,
     val forceSafeSearch: Boolean = true,
     val weeklyDigest: Boolean = false,

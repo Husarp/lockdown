@@ -2,6 +2,7 @@ package com.husarp.lockdown
 
 import com.husarp.lockdown.engine.BreakCfg
 import com.husarp.lockdown.engine.CustomCfg
+import com.husarp.lockdown.engine.ReminderTier
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.engine.SleepCfg
 import com.husarp.lockdown.engine.bedtimeGrayscaleWanted
@@ -54,6 +55,167 @@ class RemindersEngineTest {
         assertFalse(early.show.any { it.key == "sleep" })                 // 15-min tier: not yet
         val later = e.tick(LocalDateTime.of(2026, 9, 28, 23, 26), 999.0, s, noBreak, emptyList())
         assertTrue(later.show.any { it.key == "sleep" })                  // back after 15 min
+    }
+
+    private fun at(day: Int, h: Int, m: Int) = LocalDateTime.of(2026, 9, day, h, m)
+
+    /** Dismiss the bedtime screen at [dismissAt]; true if it is back [after] minutes later (and not a minute before). */
+    private fun backAfter(s: SleepCfg, dismissAt: LocalDateTime, after: Long): Boolean {
+        val e = RemindersEngine()
+        assertTrue(e.tick(dismissAt, 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })
+        e.answer("sleep", "dismiss", dismissAt, s, noBreak, emptyList())
+        val early = e.tick(dismissAt.plusMinutes(after - 1), 999.0, s, noBreak, emptyList())
+        val due = e.tick(dismissAt.plusMinutes(after), 999.0, s, noBreak, emptyList())
+        return early.show.none { it.key == "sleep" } && due.show.any { it.key == "sleep" }
+    }
+
+    @Test fun bedtime_at_22_follows_your_own_steps() {
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "07:00",
+            tiers = listOf(ReminderTier("22:00", 20), ReminderTier("23:30", 10), ReminderTier("01:00", 2)))
+        assertTrue(backAfter(s, at(28, 22, 5), 20))
+        assertTrue(backAfter(s, at(28, 23, 40), 10))
+        assertTrue(backAfter(s, at(29, 1, 30), 2))                        // after midnight: the next morning's step
+    }
+
+    @Test fun a_step_before_bedtime_counts_from_bedtime() {
+        // (Android used to drop it and fall back to a fixed 15)
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "07:00", tiers = listOf(ReminderTier("21:00", 30)))
+        assertTrue(backAfter(s, at(28, 22, 1), 30))
+        assertTrue(RemindersEngine.stepFromBedtime(s, "21:00"))
+        assertFalse(RemindersEngine.stepFromBedtime(s, "23:00"))
+        assertFalse(RemindersEngine.stepFromBedtime(s, "02:00"))          // the small hours are their own time
+    }
+
+    @Test fun steps_follow_a_bedtime_after_midnight() {
+        // 00:00 is before a 00:30 bedtime: it counts from bedtime (it used to be dated after wake and never apply)
+        val s = SleepCfg(on = true, bedtime = "00:30", wake = "07:00", tiers = listOf(ReminderTier("00:00", 5), ReminderTier("03:00", 1)))
+        assertTrue(backAfter(s, at(29, 0, 40), 5))
+        assertTrue(backAfter(s, at(29, 3, 10), 1))
+        assertTrue(RemindersEngine.stepFromBedtime(s, "00:00"))
+        assertFalse(RemindersEngine.stepFromBedtime(s, "03:00"))
+        val late = SleepCfg(on = true, bedtime = "01:00", wake = "07:00", repeat = 9, tiers = listOf(ReminderTier("23:00", 20)))
+        assertTrue(backAfter(late, at(29, 1, 10), 20))
+        assertTrue(RemindersEngine.stepFromBedtime(late, "23:00"))
+    }
+
+    @Test fun two_steps_at_the_same_time_use_the_more_frequent() {
+        val s = SleepCfg(on = true, bedtime = "23:00", wake = "07:00", tiers = listOf(ReminderTier("23:00", 15), ReminderTier("23:00", 1)))
+        assertTrue(backAfter(s, at(28, 23, 10), 1))
+    }
+
+    @Test fun a_bad_time_never_stops_the_rest() {
+        // a half-typed time saved by an older editor: that reminder is skipped, bedtime still comes
+        val bad = listOf(CustomCfg("a", text = "Water", kind = "times", times = listOf("9", "25:00")),
+            CustomCfg("b", text = "Walk", kind = "random", window = listOf("9am", "")))
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "07:00")
+        val e = RemindersEngine()
+        assertTrue(e.tick(at(28, 22, 5), 999.0, s, noBreak, bad).show.any { it.key == "sleep" })
+        // a bad bedtime: bedtime is off, a break still comes
+        val r = RemindersEngine().tick(t0, 0.0, SleepCfg(on = true, bedtime = "2"), BreakCfg(on = true, every = 1), bad, dt = 60.0)
+        assertTrue(r.show.any { it.key == "break" })
+    }
+
+    @Test fun a_swiped_strict_break_counts_as_a_snooze() {
+        val b = BreakCfg(on = true, every = 1, strict = true, maxSnooze = 1, snooze = 5)
+        val e = RemindersEngine()
+        assertTrue(e.tick(t0, 0.0, noSleep, b, emptyList(), dt = 60.0).show.any { it.key == "break" })
+        e.answer("break", "swipe", t0, noSleep, b, emptyList())
+        assertNotNull(e.tick(t0.plusMinutes(5), 0.0, noSleep, b, emptyList(), dt = 5.0).startBreak)   // out of snoozes
+        // not strict: swiped is waved away, use starts counting again
+        val loose = BreakCfg(on = true, every = 1)
+        val f = RemindersEngine()
+        f.tick(t0, 0.0, noSleep, loose, emptyList(), dt = 60.0)
+        f.answer("break", "swipe", t0, noSleep, loose, emptyList())
+        assertFalse(f.tick(t0.plusSeconds(5), 0.0, noSleep, loose, emptyList(), dt = 5.0).show.any { it.key == "break" })
+    }
+
+    @Test fun no_steps_or_before_the_first_one_uses_the_flat_repeat() {
+        val none = SleepCfg(on = true, bedtime = "22:00", wake = "07:00", repeat = 5, tiers = emptyList())
+        assertTrue(backAfter(none, at(28, 22, 10), 5))
+        val later = SleepCfg(on = true, bedtime = "20:00", wake = "07:00", repeat = 5, tiers = listOf(ReminderTier("21:00", 15)))
+        assertTrue(backAfter(later, at(28, 20, 10), 5))
+        assertTrue(backAfter(later, at(28, 21, 10), 15))
+    }
+
+    @Test fun default_steps_start_at_bedtime() {
+        val s = SleepCfg(on = true)                                       // 23:00 → 15, 00:00 → 5, 03:00 → 1
+        assertEquals("23:00", s.tiers.first().from)
+        assertTrue(backAfter(s, at(28, 23, 0), 15))
+        assertTrue(backAfter(s, at(29, 0, 30), 5))
+        assertTrue(backAfter(s, at(29, 3, 30), 1))
+    }
+
+    @Test fun heads_up_off_sends_none_and_custom_texts_are_used() {
+        val off = SleepCfg(on = true, bedtime = "22:00", before = 0)
+        assertFalse(RemindersEngine().tick(at(28, 21, 50), 999.0, off, noBreak, emptyList()).show.any { it.key == "sleep-warn" })
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "06:30", before = 15, warnText = "Wrap up by {bedtime}",
+            text = "Bed! Up at {wake}")
+        val e = RemindersEngine()
+        assertEquals("Wrap up by 22:00", e.tick(at(28, 21, 50), 999.0, s, noBreak, emptyList()).show.single { it.key == "sleep-warn" }.text)
+        assertEquals("Bed! Up at 06:30", e.tick(at(28, 22, 0), 999.0, s, noBreak, emptyList()).show.single { it.key == "sleep" }.text)
+    }
+
+    @Test fun off_tonight_and_snooze_hold_the_bedtime_screen() {
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "07:00")
+        val e = RemindersEngine()
+        e.tick(at(28, 22, 0), 999.0, s, noBreak, emptyList())
+        e.answer("sleep", "off_tonight", at(28, 22, 0), s, noBreak, emptyList())
+        assertFalse(e.tick(at(29, 3, 0), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })
+        assertTrue(e.tick(at(29, 22, 0), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })   // next night again
+        val z = RemindersEngine()
+        z.tick(at(28, 22, 0), 999.0, s, noBreak, emptyList())
+        z.answer("sleep", "snooze:15", at(28, 22, 0), s, noBreak, emptyList())
+        assertFalse(z.tick(at(28, 22, 14), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })
+        assertTrue(z.tick(at(28, 22, 15), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })
+    }
+
+    @Test fun bedtime_screen_offers_the_emergency_only_with_uses_left() {
+        val s = SleepCfg(on = true, bedtime = "22:00")
+        val with = RemindersEngine().tick(at(28, 22, 0), 999.0, s, noBreak, emptyList(), emergencyLeft = 2).show.single { it.key == "sleep" }
+        assertEquals(listOf("dismiss", "disable", "emergency"), with.buttons.map { it.action })
+        assertEquals("Emergency (2 left)", with.buttons.last().label)
+        val none = RemindersEngine().tick(at(28, 22, 0), 999.0, s, noBreak, emptyList(), emergencyLeft = 0).show.single { it.key == "sleep" }
+        assertEquals(listOf("dismiss", "disable"), none.buttons.map { it.action })
+    }
+
+    @Test fun an_emergency_pause_holds_bedtime_and_ends_a_strict_break() {
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "07:00")
+        val e = RemindersEngine()
+        assertTrue(e.tick(at(28, 22, 0), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })
+        val paused = e.tick(at(28, 22, 1), 999.0, s, noBreak, emptyList(), paused = true)
+        assertTrue("sleep" in paused.close)                               // the screen goes
+        assertFalse(e.tick(at(28, 22, 10), 999.0, s, noBreak, emptyList(), paused = true).show.any { it.key == "sleep" })
+        assertTrue(e.tick(at(28, 22, 21), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" })   // back after it
+
+        val b = BreakCfg(on = true, every = 1, strict = true, maxSnooze = 0, length = 10)
+        val k = RemindersEngine()
+        assertNotNull(k.tick(t0, 0.0, noSleep, b, emptyList(), dt = 60.0).startBreak)
+        assertTrue(k.tick(t0.plusMinutes(1), 0.0, noSleep, b, emptyList(), paused = true).breakEnded)
+    }
+
+    @Test fun no_warning_while_paused() {
+        val s = SleepCfg(on = true, bedtime = "22:00", before = 30)
+        assertFalse(RemindersEngine().tick(at(28, 21, 40), 999.0, s, noBreak, emptyList(), paused = true).show.any { it.key == "sleep-warn" })
+    }
+
+    @Test fun break_snooze_follows_its_setting() {
+        val b = BreakCfg(on = true, every = 1, snooze = 10)
+        val e = RemindersEngine()
+        assertTrue(e.tick(t0, 0.0, noSleep, b, emptyList(), dt = 60.0).show.any { it.key == "break" })
+        e.answer("break", "snooze", t0, noSleep, b, emptyList())
+        assertFalse(e.tick(t0.plusMinutes(9), 0.0, noSleep, b, emptyList()).show.any { it.key == "break" })
+        assertTrue(e.tick(t0.plusMinutes(10), 0.0, noSleep, b, emptyList()).show.any { it.key == "break" })
+    }
+
+    @Test fun break_waits_for_its_interval_and_resets_when_away() {
+        val b = BreakCfg(on = true, every = 45)
+        val e = RemindersEngine()
+        var shown = false
+        for (i in 1..40 * 60 / 5) shown = shown || e.tick(t0.plusSeconds(i * 5L), 0.0, noSleep, b, emptyList()).show.any { it.key == "break" }
+        assertFalse(shown)                                                // 40 min of use: not yet
+        e.tick(t0.plusMinutes(41), 400.0, noSleep, b, emptyList())        // screen off 6+ min = a break
+        for (i in 1..10 * 60 / 5) shown = shown || e.tick(t0.plusMinutes(48).plusSeconds(i * 5L), 0.0, noSleep, b, emptyList()).show.any { it.key == "break" }
+        assertFalse(shown)                                                // counting from zero again
     }
 
     @Test fun custom_interval_fires_after_use() {

@@ -16,14 +16,13 @@ import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.husarp.lockdown.R
 import com.husarp.lockdown.data.Store
-import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 private const val CHANNEL = "reminders"
 private const val WORK = "lockdown-reminders"
 private const val DIGEST = "lockdown-digest"
 
-/** Schedules a 15-minute reminder check and a weekly screen-time digest. Coarse but battery-friendly. */
+/** Schedules a 15-minute check (tamper watchdog, daily goal, clock) and a weekly screen-time digest. */
 object Reminders {
     fun schedule(ctx: Context) {
         val wm = WorkManager.getInstance(ctx)
@@ -77,10 +76,9 @@ object Grayscale {
     fun sync(ctx: Context) {
         if (otherProfile(ctx)) return               // not this copy's screen (and it never has the permission)
         val cfg = Store.config
-        val now = Calendar.getInstance()
-        val mins = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
-        val paused = com.husarp.lockdown.block.Enforce.alertsPaused(cfg,
-            com.husarp.lockdown.block.Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(ctx)))
+        val now = com.husarp.lockdown.block.Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(ctx))   // trusted time
+        val mins = now.hour * 60 + now.minute
+        val paused = com.husarp.lockdown.block.Enforce.alertsPaused(cfg, now) || com.husarp.lockdown.block.Enforce.silenced(cfg, now)
         val p = prefs(ctx)
         val wanted = !paused && com.husarp.lockdown.engine.bedtimeGrayscaleWanted(cfg.settings.bedtimeGrayscale, cfg.sleep, mins)
         val mark = if (p.contains(APPLIED)) p.getBoolean(APPLIED, false) else null
@@ -167,12 +165,7 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
     override fun doWork(): Result {
         val cfg = Store.config
 
-        // Bedtime nudges are driven by the accessibility service (fine escalation cadence), not here.
-        val sleep = cfg.sleep
-        val paused = com.husarp.lockdown.block.Enforce.alertsPaused(cfg,
-            com.husarp.lockdown.block.Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(applicationContext)))
-        if (cfg.breaks.on && !paused) notify(2, "Take a break", "Step away from the screen for a moment.")
-        cfg.customs.filter { it.on && it.text.isNotBlank() }.forEachIndexed { i, c -> notify(100 + i, "Reminder", c.text) }
+        // Bedtime, breaks and your own reminders run in the accessibility service (ReminderRunner), on their settings.
 
         // tamper watchdog: nudge if a protection that should be on has been switched off
         if (cfg.enabled && !com.husarp.lockdown.block.BlockService.isEnabled(applicationContext))
@@ -183,9 +176,11 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         if (cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext))
             notify(8, "Island apps not covered", "Lockdown in Island isn't checking in or can't block - open it there.")
 
-        // daily screen-time goal (once a day)
+        // daily screen-time goal (once a day) - held while a pause silences alerts (PC 0.84.8); the tamper notices above
+        // and below are never silenced
+        val silent = com.husarp.lockdown.block.Enforce.silenced(cfg, com.husarp.lockdown.guard.TrustedTime.local(applicationContext))
         val budget = cfg.settings.dailyGoalMin
-        if (budget > 0) {
+        if (budget > 0 && !silent) {
             val total = runCatching {
                 com.husarp.lockdown.usage.Usage.range(applicationContext, com.husarp.lockdown.usage.Usage.dayBounds(0).first, System.currentTimeMillis()).totalMs
             }.getOrDefault(0)
@@ -200,8 +195,8 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         }
 
         // clock-tamper warning
-        if (com.husarp.lockdown.guard.TrustedTime.setbackMs(applicationContext) > 5 * 60_000)
-            notify(6, "Clock changed", "The phone's clock was set back - Lockdown's timers ignore that.")
+        if (kotlin.math.abs(com.husarp.lockdown.guard.TrustedTime.driftMs(applicationContext)) > 5 * 60_000)
+            notify(6, "Clock changed", "The phone's clock was changed - Lockdown's limits and timers ignore that.")
 
         // bedtime grayscale: drain the screen's colour during the sleep window (needs WRITE_SECURE_SETTINGS)
         Grayscale.sync(applicationContext)

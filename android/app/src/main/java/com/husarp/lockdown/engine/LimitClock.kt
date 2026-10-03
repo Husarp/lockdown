@@ -1,5 +1,6 @@
 package com.husarp.lockdown.engine
 
+import kotlinx.serialization.Serializable
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -21,6 +22,11 @@ class LimitClock(
         if (carryUntil != null && carryStart != null && !now.isBefore(carryStart) && now.isBefore(carryUntil)) {
             return carryStart to carryUntil
         }
+        return naturalDay(now)
+    }
+
+    /** (start, end) of the limit day containing [now] by [resetTime] alone, ignoring a carried (stretched) day. */
+    fun naturalDay(now: LocalDateTime): Pair<LocalDateTime, LocalDateTime> {
         var start = LocalDateTime.of(now.toLocalDate(), resetTime)
         if (start.isAfter(now)) start = start.minusDays(1)
         return start to start.plusDays(1)
@@ -64,5 +70,49 @@ class LimitClock(
     companion object {
         private val KEY_FMT = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
         val DEFAULT = LimitClock()
+
+        private fun at(s: String?) = s?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
+
+        /** The clock for reset time [time], with what a change of it carries (the running day stretched at most
+         *  two days from its start, a second change can't stack). */
+        fun of(time: LocalTime, carry: ResetCarry?): LimitClock {
+            val start = at(carry?.dayStart)
+            val until = at(carry?.switch)?.let { u -> start?.let { minOf(u, it.plusDays(2)) } ?: u }
+            val holds = carry?.holds.orEmpty().mapNotNull { (k, h) -> at(h.until)?.let { k to (h.key to it) } }.toMap()
+            return LimitClock(time, start, until, holds)
+        }
+
+        /** An earlier reset time ends a limit day sooner than it would have - a way to get limits back early, so
+         *  starting it now goes through the challenge. A later one only makes a day longer (PC reset_is_looser). */
+        fun resetLooser(old: LocalTime, new: LocalTime) = new.isBefore(old)
+
+        /** A reset moved across 12:00 (either way) changes which weekday the coming days count as (a day from 12:00
+         *  or later is named after the next date), which can skip a weekday's limit or count one twice - so it
+         *  goes through the challenge, even the "from when the day ends" way. */
+        fun crossesNoon(old: LocalTime, new: LocalTime) = old.isBefore(LocalTime.NOON) != new.isBefore(LocalTime.NOON)
+
+        /** What changing the reset to [new] carries (PC change_reset). The running day is never cut short: a later
+         *  time keeps it running to that time (at most a day past its own end); an earlier one leaves it alone and
+         *  takes over when it ends. The running week and month never end before they would have. Free. */
+        fun change(clock: LimitClock, new: LocalTime, now: LocalDateTime): ResetCarry {
+            val (start, end) = clock.day(now)
+            val switch = maxOf(end, minOf(LocalDateTime.of(end.toLocalDate(), new), start.plusDays(2)))
+            return ResetCarry(start.toString(), switch.toString(), holds(clock, now))
+        }
+
+        /** The new reset time from this moment: the running limit day ends now and a fresh one starts, so its
+         *  limits start over - only behind the challenge (PC apply_reset_now). The week and month are still held. */
+        fun startNow(clock: LimitClock, now: LocalDateTime) = ResetCarry(holds = holds(clock, now))
+
+        private fun holds(clock: LimitClock, now: LocalDateTime) =
+            listOf("week", "month").associateWith { clock.period(it, now).let { (k, u) -> PeriodHold(k, u.toString()) } }
     }
 }
+
+/** A changed reset time: the day running then lasts from [dayStart] to [switch]; [holds] keep the running week and
+ *  month ("week"/"month" -> its key and end) from ending early. Kept in the config, so the Island copy has it too. */
+@Serializable
+data class ResetCarry(val dayStart: String? = null, val switch: String? = null, val holds: Map<String, PeriodHold> = emptyMap())
+
+@Serializable
+data class PeriodHold(val key: String, val until: String)

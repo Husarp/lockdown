@@ -58,11 +58,13 @@ object Store {
 
     /**
      * Parse an imported config, or null if it can't be read. The current challenge unlock window is kept: a file
-     * can't bring its own (e.g. one ending years from now) and so skip every later challenge.
+     * can't bring its own (e.g. one ending years from now) and so skip every later challenge. A running "Pause my
+     * blocks" is kept too (as on the PC): a file neither brings one in nor ends the one running.
      */
     fun decodeImport(text: String, current: Config): Config? =
         runCatching { json.decodeFromString<Config>(text) }.getOrNull()?.let { c ->
-            c.copy(antibypass = c.antibypass.copy(unlockedFrom = current.antibypass.unlockedFrom, unlockedUntil = current.antibypass.unlockedUntil))
+            c.copy(antibypass = c.antibypass.copy(unlockedFrom = current.antibypass.unlockedFrom, unlockedUntil = current.antibypass.unlockedUntil),
+                pause = current.pause)
         }
 
     val config get() = _state.value

@@ -47,7 +47,6 @@ import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.Status
 import com.husarp.lockdown.ui.fmtDuration
 import com.husarp.lockdown.usage.Usage
-import java.time.LocalDateTime
 
 @Composable
 fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardrails: () -> Unit) {
@@ -62,7 +61,7 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
         }
     }
     val goalMin = cfg.settings.dailyGoalMin
-    val now = LocalDateTime.now()
+    val now = com.husarp.lockdown.guard.TrustedTime.local(ctx)
     val modeState = ModesStore.current(now)
     // Cheap prefilter (rule type only, no engine) before the per-item engine check, so thousands of imported
     // items don't freeze Home. Only items that actually have a limit can be "running low".

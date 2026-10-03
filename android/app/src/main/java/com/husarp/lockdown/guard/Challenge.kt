@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,10 +39,11 @@ import kotlin.random.Random
 /**
  * Returns `guard(loosening, onPass)`: for a tightening change it runs at once; for a loosening one it runs the
  * Anti-Bypass challenge first (type a phrase, wait out a cool-off, or only inside allowed hours). Tightening is
- * never gated - coming back to your rules is never the thing to stand in the way of.
+ * never gated - coming back to your rules is never the thing to stand in the way of. [onCancel] runs when the
+ * challenge is closed without passing.
  */
 @Composable
-fun rememberGuard(): (loosening: Boolean, onPass: () -> Unit) -> Unit {
+fun rememberGuard(onCancel: () -> Unit = {}): (loosening: Boolean, onPass: () -> Unit) -> Unit {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val ab = cfg.antibypass
@@ -53,7 +56,7 @@ fun rememberGuard(): (loosening: Boolean, onPass: () -> Unit) -> Unit {
             val now = TrustedTime.local(ctx)
             Store.update { it.copy(antibypass = it.antibypass.copy(unlockedFrom = now.toString(), unlockedUntil = now.plusMinutes(AntiBypass.UNLOCK_MIN).toString())) }
             pending = null; onPass()
-        }, onCancel = { pending = null })
+        }, onCancel = { pending = null; onCancel() })
     }
     return { loosening, onPass ->
         // "free" is true when no challenge is set OR the unlock window is open — either way, run it now.
@@ -117,8 +120,11 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
                                     style = MaterialTheme.typography.bodyLarge, color = cs.primary)
                             }
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(value = typed, onValueChange = { typed = it },
+                            // Typed, not pasted (PC block_paste): a chunk dropped in at once - the clipboard, or a known
+                            // custom phrase from the keyboard's clipboard history - is ignored. No suggestions either.
+                            OutlinedTextField(value = typed, onValueChange = { if (AntiBypass.typedNotPasted(typed, it)) typed = it },
                                 label = { Text("Type the phrase") }, singleLine = false,
+                                keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = KeyboardType.Password),
                                 isError = typed.isNotBlank() && !onTrack)
                             if (typed.isNotBlank() && !phraseOk) {
                                 Spacer(Modifier.height(6.dp))
@@ -178,7 +184,7 @@ private fun WordGrid(words: List<String>, onDone: () -> Unit, onStatus: (String,
                         value = if (lit) typed else "",
                         onValueChange = onValueChange@{ new ->
                             if (!lit) return@onValueChange
-                            if (new.length - typed.length > 1) return@onValueChange   // ignore a pasted chunk
+                            if (!AntiBypass.typedNotPasted(typed, new)) return@onValueChange   // ignore a pasted chunk
                             typed = new
                             val word = words[index]
                             when {
@@ -199,6 +205,7 @@ private fun WordGrid(words: List<String>, onDone: () -> Unit, onStatus: (String,
                         enabled = lit,
                         isError = lit && error,
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = KeyboardType.Password),
                         textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.Center),
                         modifier = Modifier.weight(1f),
                     )

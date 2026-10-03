@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.Protection
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.AntiBypass
+import com.husarp.lockdown.engine.BlockMethod
 import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
@@ -71,13 +72,13 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
 
     fun setMember(id: String, on: Boolean) {
         draft = if (on) draft.copy(memberIds = (draft.memberIds + id).distinct())
-                else draft.copy(memberIds = draft.memberIds - id, overrides = draft.overrides - id)
+                else draft.copy(memberIds = draft.memberIds - id, overrides = draft.overrides - id, memberBlocks = draft.memberBlocks - id)
     }
 
     Column(Modifier.fillMaxSize()) {
         EditorHeader(draft.name.ifBlank { "New group" }, onBack = onClose, action = "Save") {
             val original = cfg.groups.firstOrNull { it.id == draft.id }
-            val loosening = original != null && AntiBypass.groupLooser(original, draft, TrustedTime.local(ctx))
+            val loosening = original != null && AntiBypass.groupLooser(original, draft, TrustedTime.local(ctx), byId, byId + newApps.associateBy { it.id })
             guard(loosening) {
                 val added = newApps.filter { it.id in draft.memberIds }
                 Store.update { c ->
@@ -94,7 +95,21 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
             SectionLabel("Shared rules (apply to every member)")
             Text("A group can carry several rules at once — e.g. scheduled hours AND a shared daily limit. Time on any member fills the group's limit.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            RuleFields(draft.rules) { draft = draft.copy(rules = it) }
+            RuleFields(draft.rules, group = true) { draft = draft.copy(rules = it) }
+
+            // How the group blocks its member sites (PC 0.84.11). Apps have one way on Android.
+            SectionLabel("How member sites are blocked")
+            val way = draft.siteBlock
+            if (way == null) {
+                Text("Each site the way it's set itself.", style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { draft = draft.copy(siteBlock = "dns") }) { Text("Choose for this group") }
+            } else {
+                SiteWayChips(BlockMethod.flags(way)) { f -> if (f.isNotEmpty()) draft = draft.copy(siteBlock = f.joinToString(",")) }
+                Text("When this group blocks a site, this way is used, whatever the site's own setting. A site's own rules keep its own way.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                TextButton(onClick = { draft = draft.copy(siteBlock = null) }) { Text("Each site its own way") }
+            }
+            Text("Apps: a notice covers them and they go to the home screen.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
 
             SectionLabel("Members")
             OutlinedTextField(pick, { pick = it }, placeholder = { Text("Search apps & items") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -165,6 +180,17 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                             RuleFields(extras.values.toList()) { rules ->
                                 val map = rules.associateBy { it.type.name }
                                 draft = draft.copy(overrides = if (map.isEmpty()) draft.overrides - m.id else draft.overrides + (m.id to map))
+                            }
+                            if (m.type == ItemType.SITE) {
+                                // the group's way shown chosen and greyed: a member can only add to it
+                                val base = BlockMethod.strength(BlockMethod.inGroup(m, draft, own = false))
+                                val own = BlockMethod.flags(draft.memberBlocks[m.id]).filterTo(HashSet()) { draft.memberBlocks[m.id] != null && it !in base }
+                                Spacer(Modifier.height(8.dp))
+                                Text("How ${m.name} is blocked in this group", style = MaterialTheme.typography.titleSmall)
+                                SiteWayChips(own, locked = base) { f ->
+                                    val add = f - base
+                                    draft = draft.copy(memberBlocks = if (add.isEmpty()) draft.memberBlocks - m.id else draft.memberBlocks + (m.id to add.joinToString(",")))
+                                }
                             }
                         }
                     }

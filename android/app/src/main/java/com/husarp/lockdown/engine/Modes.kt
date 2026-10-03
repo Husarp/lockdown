@@ -146,6 +146,11 @@ object Modes {
         return if ("distracting" in chosen) "distracting" else chosen[0]
     }
 
+    /** Re-marking something as [new] loosens when a mode blocks its [old] category (null = none chosen) but not
+     *  [new] - e.g. Distracting -> Productive while Work blocks Distracting. More blocked is free. */
+    fun categoryLooser(modes: List<Mode>, old: String?, new: String): Boolean =
+        old != null && modes.any { old in it.categories && new !in it.categories }
+
     private fun toTarget(item: Item): ModeTarget {
         val bt = item.blockType.ifEmpty { if (item.type == ItemType.APP) "close" else "" }
         return ModeTarget(item.name, item.target, item.type, bt, item.id)

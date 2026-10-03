@@ -27,6 +27,9 @@ data class Rule(
     val dailyLimitMin: Int? = null,
     val weeklyLimitMin: Int? = null,
     val monthlyLimitMin: Int? = null,
+    // time_limit: a daily amount for each weekday Mon..Sun (null = no limit that day), set instead of dailyLimitMin
+    // (PC 0.84.12). All days the same is kept as one dailyLimitMin, so old rules read as before.
+    val dailyLimitDays: List<Int?>? = null,
     // switch_limit: opens per period (any combination)
     val dailySwitchLimit: Int? = null,
     val weeklySwitchLimit: Int? = null,
@@ -64,6 +67,11 @@ data class Group(
     val memberIds: List<String> = emptyList(),
     // a member's extra limits, ON TOP of the group's rules (never instead): itemId -> (RuleType.name -> Rule)
     val overrides: Map<String, Map<String, Rule>> = emptyMap(),
+    // how the group blocks its member sites (PC 0.84.11): "dns,close,back" flags like an item's; null = not chosen,
+    // each member is blocked its own way (every group from before)
+    val siteBlock: String? = null,
+    // what a member site adds on top of that, in this group: itemId -> flags (only ever more, never less)
+    val memberBlocks: Map<String, String> = emptyMap(),
 )
 
 /** A rule flattened for evaluation: the rule plus who owns its usage counters (item vs shared group pot). */
@@ -76,6 +84,7 @@ data class EffRule(
     val groupId: String? = null,
     val groupName: String? = null,
     val extraOf: String? = null, // a member's extra rule: the name of the group it was set in
+    val extraOfId: String? = null,   // ... and that group's id
 )
 
 /** Why an item is blocked. Order = priority (most important first), matching the PC's REASON_ORDER. */

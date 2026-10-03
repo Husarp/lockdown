@@ -99,6 +99,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Done / Snooze / Dismiss on a reminder notification. -->
+        <receiver
+            android:name=".remind.ReminderActionReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".widget.ScreenTimeWidget"
             android:exported="false">

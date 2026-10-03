@@ -11,6 +11,7 @@ object Live {
         if (item.disabled) return Status.PAUSED
         val eff = Rules.effectiveRules(item, cfg.groups)
         if (eff.isEmpty()) return Status.ALLOWED
+        if (com.husarp.lockdown.block.Enforce.paused(cfg, now)) return Status.PAUSED    // "Pause my blocks"
         val usage = UsageStore.usage
         val clock = cfg.clock()
         if (Rules.itemBlock(eff, now, usage, clock) != null) return Status.BLOCKED
@@ -24,7 +25,8 @@ object Live {
         val clock = cfg.clock()
         var best: Pair<Float, Int>? = null
         for (eff in Rules.effectiveRules(item, cfg.groups)) {
-            val limit = eff.rule.dailyLimitMin ?: continue
+            if (eff.rule.type != com.husarp.lockdown.engine.RuleType.TIME_LIMIT) continue
+            val limit = Rules.timeLimits(eff.rule, now, clock)["day"] ?: continue     // today's amount
             if (limit <= 0) continue
             val used = usage(eff.usageOwner, Rules.timeBucket("day", now, clock))
             val frac = (used.toFloat() / (limit * 60)).coerceIn(0f, 1f)

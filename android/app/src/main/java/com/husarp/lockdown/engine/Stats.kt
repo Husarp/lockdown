@@ -17,7 +17,9 @@ import java.time.LocalDateTime
 data class MinuteRow(val minute: LocalDateTime, val app: String, val site: String, val seconds: Int, val active: Int)
 
 /** A switch to a new foreground app/site. */
-data class SwitchEvent(val ts: LocalDateTime, val app: String, val site: String)
+/** Something came to the front. [switch] false: not a switch - a visit picking up again after the screen was off
+ *  or home was in front (same app), or, with an empty [app], the end of the running visit. */
+data class SwitchEvent(val ts: LocalDateTime, val app: String, val site: String, val switch: Boolean = true)
 
 object Stats {
     const val SESSION_GAP_MIN = 5L
@@ -126,9 +128,11 @@ object Stats {
     private fun targetOf(e: SwitchEvent): Pair<String, String> =
         if (e.site.isNotEmpty()) "site" to e.site else "app" to e.app
 
-    /** (target, seconds) for each visit (until the next switch; the last until [now], at most 30 min). */
+    /** (target, seconds) for each visit (until the next event - a switch or the visit's end; the last until [now],
+     *  at most 30 min). An end event (empty app) starts no visit. */
     fun visits(events: List<SwitchEvent>, now: LocalDateTime): List<Pair<Pair<String, String>, Double>> =
-        events.mapIndexed { i, e ->
+        events.mapIndexedNotNull { i, e ->
+            if (e.app.isEmpty()) return@mapIndexedNotNull null
             val end = if (i + 1 < events.size) events[i + 1].ts else minOf(now, e.ts.plusMinutes(30))
             targetOf(e) to maxOf(0.0, Duration.between(e.ts, end).seconds.toDouble())
         }
@@ -143,13 +147,14 @@ object Stats {
 
     fun switchSummary(events: List<SwitchEvent>, now: LocalDateTime): SwitchSummary {
         val vs = visits(events, now)
+        val sw = events.filter { it.switch }
         val byTarget = LinkedHashMap<Pair<String, String>, MutableList<Double>>()
         for ((target, sec) in vs) byTarget.getOrPut(target) { ArrayList() }.add(sec)
         val ranked = byTarget.entries.sortedByDescending { it.value.size }
             .map { Triple(it.key, it.value.size, it.value.average()) }
         return SwitchSummary(
-            count = events.size,
-            perHour = events.groupingBy { it.ts.hour }.eachCount(),
+            count = sw.size,
+            perHour = sw.groupingBy { it.ts.hour }.eachCount(),
             short = vs.count { it.second < SHORT_VISIT_SEC },
             targets = ranked,
             avgVisit = if (vs.isEmpty()) 0.0 else vs.sumOf { it.second } / vs.size,
@@ -161,6 +166,37 @@ object Stats {
         avgSec < 60 && count >= 10 -> "checking"
         avgSec >= 3 * 60 -> "focused"
         else -> "mixed"
+    }
+
+    /** Level 0-4 per (weekday Mon..Sun, hour): the average over the [days] that fall on that weekday. */
+    fun weekdayHeatmap(rows: List<MinuteRow>, days: List<LocalDate>): List<List<Int>> {
+        val perDay = hourlyMinutes(rows, days)
+        return (0..6).map { wd ->
+            val idx = days.indices.filter { days[it].dayOfWeek.value - 1 == wd }
+            (0..23).map { h ->
+                val m = if (idx.isEmpty()) 0.0 else idx.sumOf { perDay[it][h] } / idx.size
+                when { m < 1 -> 0; m < 15 -> 1; m < 30 -> 2; m < 45 -> 3; else -> 4 }
+            }
+        }
+    }
+
+    // ---------- time saved ----------
+
+    /** Blocked tries x your usual visit length on that app / site (from [history]; 5 min when there's none). */
+    fun timeSaved(blocked: List<BlockedVisit>, items: List<Item>, history: List<SwitchEvent>, now: LocalDateTime): Double {
+        val lengths = LinkedHashMap<String, MutableList<Double>>()
+        for ((target, sec) in visits(history, now)) lengths.getOrPut(target.second) { ArrayList() }.add(sec)
+        val byId = items.associateBy { it.id }
+        val usual = HashMap<List<String>, Double>()
+        var total = 0.0
+        for (b in blocked) {
+            val names = byId[b.itemId]?.target?.lowercase()?.split(" ")?.filter { it.isNotEmpty() } ?: listOf(b.target)
+            total += usual.getOrPut(names) {
+                val secs = lengths.filterKeys { n -> names.any { h -> n == h || n.endsWith(".$h") } }.values.flatten()
+                if (secs.isEmpty()) DEFAULT_VISIT_SEC.toDouble() else secs.average()
+            }
+        }
+        return total
     }
 
     // ---------- streaks / goal ----------

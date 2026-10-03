@@ -34,6 +34,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
 import com.husarp.lockdown.data.Settings
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.LimitClock
+import com.husarp.lockdown.engine.ResetCarry
+import java.time.LocalTime
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Rule
@@ -135,6 +138,10 @@ fun SettingsScreen() {
             }
         }
 
+        ResetTimeCard()
+
+        NotificationsCard()
+
         Card {
             Column(Modifier.padding(16.dp)) {
                 Text("Permissions", style = MaterialTheme.typography.titleSmall)
@@ -216,8 +223,17 @@ fun SettingsScreen() {
         }
 
         Text("Extras", style = MaterialTheme.typography.titleMedium)
-        Toggle("Pause before opening", "A short countdown before a limited app opens.", s.pauseBeforeOpen) { set { c -> c.copy(pauseBeforeOpen = it) } }
-        Toggle("Daily open cap", "Limit how many times a blocked app can be opened (set per app; 0 = off).", s.openCapPerDay > 0) { set { c -> c.copy(openCapPerDay = if (it) 10 else 0) } }
+        // A wait you set yourself: turning it off or shortening it needs the challenge, longer is free.
+        Toggle("Pause before opening", "A ${s.pauseSec}-second countdown before a limited app opens.", s.pauseBeforeOpen) { on ->
+            if (on) set { c -> c.copy(pauseBeforeOpen = true) } else guard(true) { set { c -> c.copy(pauseBeforeOpen = false) } }
+        }
+        if (s.pauseBeforeOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Countdown", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            val shorter = (s.pauseSec - 5).coerceAtLeast(5)
+            TextButton(onClick = { guard(true) { set { c -> c.copy(pauseSec = shorter) } } }, enabled = s.pauseSec > 5) { Text("−5") }
+            Text("${s.pauseSec} s", style = MaterialTheme.typography.titleMedium)
+            TextButton(onClick = { set { c -> c.copy(pauseSec = (c.pauseSec + 5).coerceAtMost(60)) } }, enabled = s.pauseSec < 60) { Text("+5") }
+        }
         Toggle("Bedtime grayscale", "Drain the screen's colour at bedtime. Needs a one-time adb permission.", s.bedtimeGrayscale) {
             set { c -> c.copy(bedtimeGrayscale = it) }
             if (it) com.husarp.lockdown.remind.Grayscale.sync(ctx) else com.husarp.lockdown.remind.Grayscale.switchedOff(ctx)
@@ -266,5 +282,87 @@ private fun Toggle(title: String, blurb: String, checked: Boolean, onChange: (Bo
             }
             Switch(checked = checked, onCheckedChange = onChange)
         }
+    }
+}
+
+/**
+ * "When limits reset" (PC Settings). A later time is free: it only makes the day you are in longer. An earlier one
+ * asks which way: start a fresh limit day now (the challenge first, since today's limits start over) or let the new
+ * time take over when the running day ends (free, nothing starts over). Kept in the config, so the Island copy
+ * counts by the same day.
+ */
+@Composable
+private fun ResetTimeCard() {
+    val ctx = LocalContext.current
+    val cfg by Store.state.collectAsStateWithLifecycle()
+    val guard = com.husarp.lockdown.guard.rememberGuard()
+    val cur = "%02d:%02d".format(cfg.resetHour, cfg.resetMin)
+    var text by remember(cur) { mutableStateOf(cur) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var ask by remember { mutableStateOf<LocalTime?>(null) }
+    val now = com.husarp.lockdown.guard.TrustedTime.local(ctx)
+    val end = cfg.clock().day(now).second
+
+    fun save(t: LocalTime, carry: (LimitClock, java.time.LocalDateTime) -> ResetCarry) {
+        val at = com.husarp.lockdown.guard.TrustedTime.local(ctx)
+        Store.update { c -> c.copy(resetHour = t.hour, resetMin = t.minute, resetCarry = carry(c.clock(), at)) }
+    }
+
+    Card {
+        Column(Modifier.padding(16.dp)) {
+            Text("When limits reset", style = MaterialTheme.typography.titleSmall)
+            Text("Time limits and opening limits start over at this time every day (weekly ones on Monday, monthly ones on the 1st, at the same time). Screen time keeps normal days.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(text, { text = it; error = null }, label = { Text("Reset at") }, singleLine = true,
+                    isError = error != null, modifier = Modifier.width(120.dp))
+                TextButton(onClick = {
+                    val t = validTime(text)?.let { com.husarp.lockdown.engine.Rules.parseHhmm(it) }
+                    when {
+                        t == null -> error = "The time must look like 04:00."
+                        t == cfg.resetTime() -> error = "That's already the reset time."
+                        LimitClock.resetLooser(cfg.resetTime(), t) -> ask = t
+                        else -> guard(LimitClock.crossesNoon(cfg.resetTime(), t)) { save(t) { clock, at -> LimitClock.change(clock, t, at) } }
+                    }
+                }) { Text("Change") }
+            }
+            error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            Text("The limit day you are in ends ${whenText(end, now)}.", Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+
+    ask?.let { t ->
+        val endText = whenText(end, now)
+        val noon = LimitClock.crossesNoon(cfg.resetTime(), t)   // weekdays shift: both ways ask
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { ask = null },
+            title = { Text("Move the reset back to %02d:%02d".format(t.hour, t.minute)) },
+            text = {
+                Text("The limit day you are in runs until $endText.\n\n" +
+                    "Start now: it ends at once and today's limits start over. This asks for the challenge first.\n\n" +
+                    "From $endText: the new time takes over when it ends, and nothing starts over." +
+                    (if (noon) " Moving it across 12:00 asks for the challenge too, as the days shift onto other weekdays." else ""))
+            },
+            confirmButton = {
+                TextButton(onClick = { ask = null; guard(true) { save(t) { clock, at -> LimitClock.startNow(clock, at) } } }) { Text("Start now") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { ask = null }) { Text("Cancel") }
+                    TextButton(onClick = { ask = null; guard(noon) { save(t) { clock, at -> LimitClock.change(clock, t, at) } } }) { Text("From $endText") }
+                }
+            },
+        )
+    }
+}
+
+/** "at 03:00", "tomorrow at 03:00" or "on Tue 6 at 03:00". */
+private fun whenText(t: java.time.LocalDateTime, now: java.time.LocalDateTime): String {
+    val hm = "%02d:%02d".format(t.hour, t.minute)
+    return when (t.toLocalDate()) {
+        now.toLocalDate() -> "at $hm"
+        now.toLocalDate().plusDays(1) -> "tomorrow at $hm"
+        else -> "on " + t.format(java.time.format.DateTimeFormatter.ofPattern("EEE d")) + " at $hm"
     }
 }

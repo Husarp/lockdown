@@ -118,10 +118,15 @@ fun InsightsScreen() {
                                 Box(Modifier.fillMaxWidth((a.ms.toFloat() / topMax).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(cs.primary))
                             }
                         }
+                        CategoryMenu(a.pkg)
                     }
                 }
                 if (d.perApp.isEmpty()) Text("No usage yet. Grant usage access in Settings.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                else Text("Mark an app Distracting and modes like Work and Focus block it.", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
+            val (back, len) = ranges[range].second
+            InsightsHistory(back, len)
         }
     }
 }

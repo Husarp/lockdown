@@ -92,6 +92,7 @@ class MainActivity : ComponentActivity() {
     // that was waiting on Android's "install unknown apps" screen.
     override fun onResume() {
         super.onResume()
+        com.husarp.lockdown.remind.ReminderRunner.appVisible = true
         com.husarp.lockdown.update.Updates.onResume(this)
     }
 
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        com.husarp.lockdown.remind.ReminderRunner.appVisible = false
         com.husarp.lockdown.update.Updates.onPause()
         super.onPause()
     }
@@ -124,6 +126,7 @@ fun App(askOff: MutableState<Boolean>) {
             guard(true) { com.husarp.lockdown.data.Store.update { it.copy(enabled = false) } }
         }
     }
+    com.husarp.lockdown.screens.BedtimeAsk()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val here = Dest.entries.firstOrNull { it.route == route } ?: Dest.HOME
@@ -152,7 +155,9 @@ fun App(askOff: MutableState<Boolean>) {
             }
         },
     ) { pad ->
-        NavHost(nav, startDestination = Dest.HOME.route, modifier = Modifier.padding(pad)) {
+        androidx.compose.foundation.layout.Column(Modifier.padding(pad)) {
+        com.husarp.lockdown.screens.PauseBanner()
+        NavHost(nav, startDestination = Dest.HOME.route) {
             composable(Dest.HOME.route) {
                 HomeScreen(
                     onOpenBlocking = { nav.go(Dest.BLOCKING) },
@@ -167,6 +172,7 @@ fun App(askOff: MutableState<Boolean>) {
             composable(Dest.REMINDERS.route) { ReminderScreen() }
             composable(Dest.GUARDRAILS.route) { GuardrailsScreen() }
             composable(Dest.SETTINGS.route) { SettingsScreen() }
+        }
         }
     }
 }

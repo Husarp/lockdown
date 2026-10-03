@@ -48,7 +48,6 @@ import com.husarp.lockdown.ui.EditorHeader
 import com.husarp.lockdown.ui.ListRow
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
-import java.time.LocalDateTime
 
 private val CATS = listOf("distracting" to "Distracting", "neutral" to "Neutral", "productive" to "Productive")
 
@@ -65,7 +64,7 @@ private fun ModeList(onEdit: (Mode) -> Unit) {
     val active by ModesStore.active.collectAsStateWithLifecycle()
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
-    val now = LocalDateTime.now()
+    val now = com.husarp.lockdown.guard.TrustedTime.local(androidx.compose.ui.platform.LocalContext.current)     // trusted time, as the blocking uses
     val current = ModesStore.current(now)
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -105,6 +104,7 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
     var byHand by remember { mutableStateOf(mode.schedule == null) }
     var durationMin by remember { mutableStateOf(90) }
     var locked by remember { mutableStateOf(false) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     fun persist() = ModesStore.saveModes(ModesStore.modes.value.filter { it.id != draft.id } + draft)
 
@@ -181,8 +181,9 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 }
                 Button(onClick = {
                     persist()
-                    val until = if (durationMin > 0) LocalDateTime.now().plusMinutes(durationMin.toLong()) else null
-                    ModesStore.start(draft.id, until, locked)
+                    val now = com.husarp.lockdown.guard.TrustedTime.local(ctx)   // trusted time: a changed clock doesn't shorten it
+                    val until = if (durationMin > 0) now.plusMinutes(durationMin.toLong()) else null
+                    ModesStore.start(draft.id, until, locked, now)
                     onClose()
                 }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Start now")

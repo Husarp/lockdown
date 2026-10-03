@@ -1,5 +1,90 @@
 # Changelog — Lockdown Mobile
 
+## 0.5.14 - 2026-10-03 22:26
+Bedtime, breaks, reminders, rules, protection, notifications and Insights now work like on the PC. If you use the Island link, update both copies: an older copy ignores the new settings.
+
+### Reminders & bedtime
+- **Bedtime covers the screen, like on the PC.** At bedtime the screen goes dark with "Time for bed" and three buttons:
+  - **Dismiss**: it comes back after the current step's interval.
+  - **Disable alerts**: asks for the challenge in the app, then "Off tonight" or "Snooze 15 min". Cancelling, or leaving it for 2 minutes, counts as Dismiss.
+  - **Emergency (N left)**: asks first, then uses one emergency unlock and pauses bedtime and break alerts for its length.
+- **The "comes back" steps can be edited.** Bedtime > Comes back after you dismiss it: change a step's time and minutes, remove it with ×, or add one with **+ Add step**.
+  - A step earlier than bedtime counts from bedtime, also with a bedtime after midnight. With no steps, it comes back every 5 min.
+  - New installs start with 15 min from bedtime, 5 from 00:00 and 1 from 03:00. Changing the bedtime moves only the step that was at bedtime.
+  - Two steps at the same time use the more frequent one.
+- **The rest of the Bedtime settings work now:** the heads-up before bedtime (0 turns it off), a mode that starts at bedtime until wake-up, and your own "Heads-up says" and "Bedtime says" texts.
+- **Breaks follow their settings.** A break comes after the minutes of use you set, and 5 minutes with the screen off counts as one. The notification has Start break, Snooze and Dismiss. 20-20-20 shows its tip every 20 minutes of use.
+  - A strict break covers the screen until it's over, after the snoozes you allow. Its Emergency button asks first.
+  - New in the editor: the snooze length, how many snoozes a strict break allows, the break's own text, and Important. A break can be at most 60 minutes.
+- **A break or bedtime never blocks a call.** Both screens step aside while the phone rings or a call is on, and on the lock screen, so its emergency call works. A strict break has a **Phone** button that opens the dialer.
+- **Your own reminders follow their settings:** every N minutes of use, set times or a random time, the days and hours you chose, "did you do it?" and "stop after N done". The notification has Done, Snooze and Dismiss.
+- **Reminders are paced:** at most one interruption every 20 minutes, and ones due together come as one. One you keep waving away asks half as often for the rest of the day.
+- **Turning notifications off doesn't stop breaks.** Swiping away a strict break counts as a snooze. With notifications off, breaks and Important reminders come full screen instead.
+- The old 15-minute "Take a break" and reminder notifications, which ignored all these settings, are gone.
+- Reminders now post on Android 8 to 12 too.
+- A time that isn't a real time (like "9") can't be saved in a reminder, and an old one no longer stops bedtime and breaks.
+- Turning off "Important" on Bedtime now asks for the challenge, as on the PC.
+- With the Island link, only main Lockdown sends these, so nothing comes twice.
+
+### Rules
+- **A daily time limit can differ by weekday.** Untick **Same every day** for a Mon–Sun list: tick a day and set its amount, or leave it unticked for no limit that day. **Fill [amount] into Mon–Fri / Sat–Sun / Every day** sets several at once. Works for items, a group's shared limit and a member's extra limits.
+  - The day follows the reset time: with a 03:00 reset, Saturday 01:00 still counts as Friday.
+  - Raising or clearing a day needs the challenge. Lowering one is free.
+- **Per day, per week and per month together.** Time and opening limits can combine them; whichever runs out first blocks. The last one can't be switched off: turn off the whole limit instead.
+- **Scheduled hours can have several windows:** **+ Add hours**, or × to remove one.
+- **Opening limits:** set how long a site must be left before coming back counts as a new visit (5 min unless set). Longer needs the challenge.
+- **Group allowance** can be **Shared by all** or **Each member**. Each member needs the challenge.
+- **A group chooses how its member sites are blocked:** Cut the connection, Go back or Leave the browser. A member site can only add ways to the group's. A weaker way needs the challenge. Groups set up before keep blocking each site its own way.
+- **Apps no longer show block options that did nothing.** "Kill background", "Minimise" and "Cut internet" all did the same as Close, so they're gone. Android can't cut one app's internet next to the site filter.
+- **Mark apps and sites Productive, Neutral or Distracting**, in an item's editor or next to each app in Insights > Top apps. Work, Study, Focus and Do Not Disturb block what's Distracting. Making something less distracting than a mode blocks needs the challenge.
+- **Settings > When limits reset** (new). Moving it later is free: the running day just gets longer. Moving it earlier asks:
+  - **Start now**: today's limits start over. Needs the challenge.
+  - **From [end of the running day]**: free, nothing starts over.
+  - Moving it across 12:00 always needs the challenge. A change never cuts the running week or month short, and can't skip a stricter weekday's limit.
+
+### Protection
+- **Pause my blocks (new).** Guardrails > Pause my blocks: 30 min, 1 h, 2 h, 4 h or Rest of the day (until the next reset, never more than a day). Starting needs the challenge.
+  - Every app and site on your list stops blocking, then blocks again by itself. Protection lists, blocked words and SafeSearch stay on, and your time still counts.
+  - **Silence alerts too** also holds bedtime, break, reminder and warning alerts. Otherwise a note says when your blocks are back in a few minutes.
+  - **Resume now** (a bar over every page) ends it early, with no challenge.
+  - The Island copy pauses too. An imported settings file neither starts nor ends a pause.
+- **The emergency unlock works for sites too.** Tick sites next to apps. Permanent blocks still can't be unlocked, also not through a broader site.
+- **Emergency settings can be changed** in Guardrails: on or off, length (5–60 min), uses (1–10), per day or per week. Anything looser needs the challenge.
+- **More challenge settings, as on the PC:** phrase length (30 to 250 characters), numbers and capitals, your own phrase, a cool-off of 1 to 60 min, and "Only in hours" with your own days and times.
+  - Anything weaker, including setting or changing your own phrase, needs the challenge. Stricter saves at once.
+  - The phrase can't be pasted, and the keyboard gives no suggestions there.
+  - After passing the challenge once, the 5-minute unlock stays open for the next changes.
+- **Trusted time, as on the PC.** Lockdown keeps its own clock from internet time and the time since the phone started. Setting the clock forward or back no longer ends a block early.
+  - A new time zone only counts after 24 hours. Guardrails shows when one is waiting.
+  - Bedtime grayscale, modes, temporary blocks and the block notice use it too. The "Clock changed" notice also comes for a clock set forward.
+- **Pause before opening** has a countdown length (5 to 60 s). Shortening it or turning it off needs the challenge.
+- **"Daily open cap" is gone.** It did nothing. Use an app's Opening limit instead.
+
+### Notifications
+- **Settings > Notifications (new), as on the PC:**
+  - **Warn me before something gets blocked**, 1 to 60 min before, like "YouTube: 4 min of the time limit left." It can repeat every 1 to 10 min while you use it.
+  - **Notify me when a block starts.** Blocks from the same group come as one line.
+  - Also "Emergency unlock ends in 4 min", and how much of your allowance is left when you open something in blocked hours.
+  - Island apps are warned about too. A silent pause holds these, and a mode with **Mute notifications** lets through only the ones about the app in front.
+- **The block notice follows these settings.** Per reason, choose whether it says why. If not, a quiet notice shows only the name and goes once you're back out. The block is the same either way.
+  - **Don't explain the same one again within** 1 to 60 min (30 unless set).
+  - Write your own message for each reason, with {site}, {reason} and {until}.
+  - Each app or site can choose for itself: As in Settings, Say why, or Quiet.
+
+### Insights
+- **Lockdown keeps its own history now**, like the PC: each minute's detail for 32 days, then daily totals for good. It starts filling from this version.
+- **New cards:**
+  - **Your patterns**: Productive / Neutral / Distracting time, sessions, longest focus, switches, and time saved by blocks.
+  - **Top sites**: time per site.
+  - **Streaks**: days within your daily goal, and days without an emergency unlock.
+  - **When you use it**: a heatmap of your hours.
+  - **Export screen time (CSV)** for the last 365 days.
+- Only real use counts: not blocked tries, time with the screen off, the home screen, Lockdown itself or the keyboard. A phone locked overnight isn't one long visit.
+- Island app time is counted. Sites in Island browsers aren't yet.
+
+### Tests
+- 70 new: `RemindersEngineTest` (16), `RulesParityTest` (21), `PauseAndTimeTest` (16) and `AlertsAndHistoryTest` (17).
+
 ## 0.5.13 - 2026-10-03 20:33
 - **Island link (new).** Lockdown in Island (your work profile) can now follow Lockdown in your main profile. You set your rules in one place, and an app's limits count in both profiles together. Set it up once:
   1. Install this version in both profiles.

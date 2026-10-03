@@ -12,6 +12,7 @@ class LockdownApp : Application() {
         super.onCreate()
         Store.init(this)
         UsageStore.init(this)
+        com.husarp.lockdown.data.History.init(this)
         ModesStore.init(this)
         Reminders.schedule(this)
         IslandLink.init(this)

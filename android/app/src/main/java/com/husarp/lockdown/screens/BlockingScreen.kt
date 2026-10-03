@@ -93,7 +93,7 @@ private fun BlockList(
     val cfg by Store.state.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
     var query by remember { mutableStateOf("") }
-    val now = LocalDateTime.now()
+    val now = com.husarp.lockdown.guard.TrustedTime.local(androidx.compose.ui.platform.LocalContext.current)
 
     val matches = cfg.items.filter { it.name.contains(query, true) || it.target.contains(query, true) }
     // The blocked list can be thousands long, so it stays collapsed and paginates: 20 rows at a time, loading 20
@@ -197,8 +197,8 @@ fun ruleSummary(item: Item): String {
         when (r.type) {
             com.husarp.lockdown.engine.RuleType.PERMANENT -> "Always blocked"
             com.husarp.lockdown.engine.RuleType.TEMPORARY -> "Temporary"
-            com.husarp.lockdown.engine.RuleType.TIME_LIMIT -> "${r.dailyLimitMin ?: r.weeklyLimitMin ?: r.monthlyLimitMin ?: 0} min limit"
-            com.husarp.lockdown.engine.RuleType.SWITCH_LIMIT -> "${r.dailySwitchLimit ?: 0} opens"
+            com.husarp.lockdown.engine.RuleType.TIME_LIMIT -> timeLimitText(r)
+            com.husarp.lockdown.engine.RuleType.SWITCH_LIMIT -> openingLimitText(r)
             com.husarp.lockdown.engine.RuleType.SCHEDULED -> "Scheduled hours"
         }
     }

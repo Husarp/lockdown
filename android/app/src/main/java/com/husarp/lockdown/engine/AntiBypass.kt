@@ -94,10 +94,15 @@ object AntiBypass {
     private fun phraseStrength(cfg: AntiBypassCfg): Int =
         cfg.customPhrase.ifEmpty { null }?.replace(" ", "")?.length ?: cfg.length
 
-    /** Anti-Bypass itself weakened: a challenge off, a shorter/simpler phrase, grid dropped, other hours, less wait. */
+    /** A challenge field's edit was typed (one character at a time, or a deletion), not a pasted chunk (PC block_paste). */
+    fun typedNotPasted(old: String, new: String): Boolean = new.length - old.length <= 1
+
+    /** Anti-Bypass itself weakened: a challenge off, a shorter/simpler phrase, grid dropped, other hours, less wait.
+     *  Setting or changing your own phrase counts too: one you know is weaker than a random one of the same length. */
     fun settingsLooser(old: AntiBypassCfg, new: AntiBypassCfg): Boolean =
         (new.waitMin < old.waitMin) ||
             (old.phrase && (!new.phrase || phraseStrength(new) < phraseStrength(old) ||
+                (new.customPhrase.isNotEmpty() && new.customPhrase != old.customPhrase) ||
                 (old.grid && !new.grid) || (old.complex && !new.complex))) ||
             (old.hours && (!new.hours || new.windows != old.windows))
 
@@ -105,7 +110,10 @@ object AntiBypass {
 
     private fun tempEnd(r: Rule, now: LocalDateTime): LocalDateTime = at(r.tempUntil) ?: now
 
-    private fun timeFields(r: Rule) = listOf(r.dailyLimitMin, r.weeklyLimitMin, r.monthlyLimitMin)
+    private fun timeFields(r: Rule) = listOf(r.weeklyLimitMin, r.monthlyLimitMin)   // the day: weekday by weekday
+
+    /** A time limit's daily amount on each weekday Mon..Sun (null = no limit that day). */
+    private fun perWeekday(r: Rule): List<Int?> = Rules.dayLimits(r) ?: List(7) { r.dailyLimitMin }
     private fun switchFields(r: Rule) = listOf(r.dailySwitchLimit, r.weeklySwitchLimit, r.monthlySwitchLimit)
 
     private fun limitsLooser(old: List<Int?>, new: List<Int?>): Boolean =
@@ -119,9 +127,11 @@ object AntiBypass {
             RuleType.SCHEDULED -> old.schedule != new.schedule ||
                 (new.allowanceMin ?: 0) > (old.allowanceMin ?: 0) ||
                 (old.allowanceShared && !new.allowanceShared)
-            RuleType.TIME_LIMIT -> limitsLooser(timeFields(old), timeFields(new))
+            // raising any weekday's amount, or clearing a day's limit, loosens; lowering one is free (PC 0.84.12)
+            RuleType.TIME_LIMIT -> limitsLooser(perWeekday(old), perWeekday(new)) || limitsLooser(timeFields(old), timeFields(new))
             RuleType.SWITCH_LIMIT -> limitsLooser(switchFields(old), switchFields(new)) ||
-                old.switchMode != new.switchMode || (new.visitGapMin ?: 0) > (old.visitGapMin ?: 0)
+                old.switchMode != new.switchMode ||
+                (new.visitGapMin ?: Rules.DEFAULT_VISIT_GAP_MIN) > (old.visitGapMin ?: Rules.DEFAULT_VISIT_GAP_MIN)   // unset = 5 min
             RuleType.PERMANENT -> false
         }
     }
@@ -155,13 +165,16 @@ object AntiBypass {
         return rulesLooser(old.rules, new.rules, now)
     }
 
-    fun groupLooser(old: Group, new: Group?, now: LocalDateTime): Boolean {
+    /** [oldItems] / [newItems]: the items by id before and after, to compare how the group blocks each member. */
+    fun groupLooser(old: Group, new: Group?, now: LocalDateTime,
+                    oldItems: Map<String, Item> = emptyMap(), newItems: Map<String, Item> = oldItems): Boolean {
         // Removing a group that has no rules and no members enforces nothing, so it can't loosen anything -
         // no challenge needed to clean up empty groups.
         if (new == null) return old.rules.isNotEmpty() || old.memberIds.isNotEmpty()
         if (newlyDisabled(old, new)) return true
         if (rulesLooser(old.rules, new.rules, now)) return true
         if (!new.memberIds.containsAll(old.memberIds)) return true
+        if (BlockMethod.waysLooser(old, new, oldItems, newItems)) return true     // a weaker way to block a member
         // A member's extra rules come on top of the group's (PC 0.84.3): adding or tightening one is free, but
         // removing or relaxing one (or changing its hours) hands that member time back, so it is loosening.
         for ((member, extras) in old.overrides) {

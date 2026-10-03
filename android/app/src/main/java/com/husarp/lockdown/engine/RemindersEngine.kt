@@ -31,7 +31,9 @@ data class SleepCfg(
     val mode: String = "",                      // mode to start at bedtime (empty = none)
     val warnText: String = "",
     val text: String = "",
-    val tiers: List<ReminderTier> = listOf(ReminderTier("21:00", 15), ReminderTier("00:00", 5), ReminderTier("03:00", 1)),
+    // "Comes back every N min after you dismiss it, from HH:MM": the latest step that has passed wins. A step set
+    // earlier in the evening than bedtime counts from bedtime. No steps: back every [repeat] min.
+    val tiers: List<ReminderTier> = listOf(ReminderTier("23:00", 15), ReminderTier("00:00", 5), ReminderTier("03:00", 1)),
     val guarded: Boolean = false,               // dismissing needs the anti-bypass challenge
 )
 
@@ -135,13 +137,23 @@ class RemindersEngine(private val rng: Random = Random.Default) {
     private val streak = HashMap<String, Int>()               // key -> dismissed in a row
     private val backedOff = HashMap<String, LocalDate>()      // key -> the day it asks half as often
 
-    /** One tick. [idleSec] = seconds since the last input; [quiet] = Do-not-disturb / a muting mode (things wait). */
+    /** One tick. [idleSec] = seconds since the last input; [quiet] = Do-not-disturb / a muting mode (things wait);
+     *  [paused] = an emergency paused the bedtime and break alerts; [emergencyLeft] = uses left, offered on the
+     *  bedtime screen as "Emergency (N left)"; [silent] = "Pause my blocks" silenced every alert (PC 0.84.8): as
+     *  [paused], and your own reminders hold too (one on screen goes) until it ends. */
     fun tick(now: LocalDateTime, idleSec: Double, sleep: SleepCfg, brk: BreakCfg, customs: List<CustomCfg>,
-             dt: Double = TICK_SEC.toDouble(), quiet: Boolean = false): TickResult {
+             dt: Double = TICK_SEC.toDouble(), quiet: Boolean = false, paused: Boolean = false,
+             emergencyLeft: Int = 0, silent: Boolean = false): TickResult {
         val out = Out(now)
         val using = idleSec < USING_IDLE_SEC
-        val breakDue: BreakCfg? = breaks(now, idleSec, using, dt, brk, out)
-        this.sleep(now, sleep, quiet, out)
+        val held = paused || silent
+        val breakDue: BreakCfg? = breaks(now, idleSec, using, dt, brk, held, out)
+        this.sleep(now, sleep, quiet, held, emergencyLeft, out)
+        if (silent) {
+            for (key in open.filter { it.startsWith("custom:") || it.startsWith("check:") }) { grouped.remove(key); close(key, out) }
+            pending.clear(); folded.clear()
+            return out.build()
+        }
         custom(now, using, dt, customs, quiet, out)
         if (breakDue != null && !quiet) {
             absorb(customs, out)
@@ -152,7 +164,15 @@ class RemindersEngine(private val rng: Random = Random.Default) {
 
     // ---------- breaks ----------
 
-    private fun breaks(now: LocalDateTime, idleSec: Double, using: Boolean, dt: Double, b: BreakCfg, out: Out): BreakCfg? {
+    private fun breaks(now: LocalDateTime, idleSec: Double, using: Boolean, dt: Double, b: BreakCfg, paused: Boolean, out: Out): BreakCfg? {
+        if (paused) {
+            // Emergency: the screen is yours until it ends - no break prompt, and a strict break stops. Use keeps
+            // counting, so the next prompt comes when it's due.
+            close("break", out)
+            if (breakUntil != null) { breakUntil = null; breakSnoozes = 0; out.breakEnded = true }
+            if (idleSec >= BREAK_RESET_SEC) continuous = 0.0 else if (using && b.on) continuous += dt
+            return null
+        }
         breakUntil?.let { until ->
             if (!now.isBefore(until)) {
                 out.breakEnded = true; breakUntil = null; continuous = 0.0; breakSnoozes = 0
@@ -218,8 +238,10 @@ class RemindersEngine(private val rng: Random = Random.Default) {
 
     // ---------- sleep ----------
 
+    // A time that doesn't parse (a half-typed "2" saved by an older editor) never throws here: bedtime is then
+    // off, and a reminder's bad time is skipped - one bad field must not stop everything else on the tick.
     private fun night(s: SleepCfg, now: LocalDateTime): Pair<LocalDateTime, LocalDateTime>? {
-        val bedT = Rules.parseHhmm(s.bedtime); val wakeT = Rules.parseHhmm(s.wake)
+        val bedT = hm(s.bedtime) ?: return null; val wakeT = hm(s.wake) ?: return null
         for (day in listOf(now.toLocalDate().minusDays(1), now.toLocalDate())) {
             val bed = LocalDateTime.of(day, bedT)
             var wake = LocalDateTime.of(day, wakeT)
@@ -229,28 +251,31 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         return null
     }
 
+    /** A step's time is placed in the night counted from bedtime; one in the daytime gap before bedtime (at or
+     *  after wake) counts from bedtime. Two steps at the same time: the more frequent one. */
     private fun sleepInterval(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): Int {
-        val wakeT = Rules.parseHhmm(s.wake)
+        val wakeT = hm(s.wake) ?: return s.repeat
+        val wakeOff = sinceBed(bed.toLocalTime(), wakeT).let { if (it == 0) 1440 else it }
         var best: Pair<LocalDateTime, Int>? = null
-        for (t in s.tiers.sortedBy { Rules.parseHhmm(it.from) }) {
-            val tierT = Rules.parseHhmm(t.from)
-            val whenAt = when {
-                tierT >= bed.toLocalTime() -> LocalDateTime.of(bed.toLocalDate(), tierT)
-                tierT < wakeT -> LocalDateTime.of(bed.toLocalDate().plusDays(1), tierT)
-                else -> bed
-            }
-            if (!whenAt.isAfter(now) && (best == null || whenAt.isAfter(best!!.first))) best = whenAt to t.every
+        for (t in s.tiers) {
+            val tierT = hm(t.from) ?: continue
+            val off = sinceBed(bed.toLocalTime(), tierT)
+            val whenAt = if (off >= wakeOff) bed else bed.plusMinutes(off.toLong())
+            if (whenAt.isAfter(now)) continue
+            val b = best
+            if (b == null || whenAt.isAfter(b.first) || (whenAt == b.first && t.every < b.second)) best = whenAt to t.every
         }
         return best?.let { maxOf(1, it.second) } ?: s.repeat
     }
 
-    private fun sleep(now: LocalDateTime, s: SleepCfg, quiet: Boolean, out: Out) {
+    private fun sleep(now: LocalDateTime, s: SleepCfg, quiet: Boolean, paused: Boolean, emergencyLeft: Int, out: Out) {
         val night = if (s.on) night(s, now) else null
         if (night == null) { close("sleep", out); return }
         val (bed, wake) = night
         val key = bed.toString()
+        if (paused) { close("sleep", out); close("sleep-warn", out) }   // nothing on screen until it ends, then as before
         if (now.isBefore(bed)) {
-            if ("warn|$key" !in fired) {
+            if ("warn|$key" !in fired && !paused) {
                 fired.add("warn|$key")
                 popup("sleep-warn", "Bedtime soon",
                     message(s.warnText, SLEEP_WARN_TEXT, "bedtime" to hhmm(bed), "wake" to hhmm(wake), "time" to hhmm(now)),
@@ -263,10 +288,13 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             sleepNext[key] = now
             if (s.mode.isNotEmpty()) out.startMode = s.mode to wake
         }
-        if (!now.isBefore(sleepNext[key] ?: now) && "sleep" !in open && !quiet) {
+        if (!now.isBefore(sleepNext[key] ?: now) && "sleep" !in open && !quiet && !paused) {
+            val buttons = arrayListOf(RButton("Dismiss", "dismiss"), RButton("Disable alerts", "disable"))
+            // the sanctioned way out, no challenge: it costs an emergency use
+            if (emergencyLeft > 0) buttons.add(RButton("Emergency ($emergencyLeft left)", "emergency"))
             overlay("sleep", "Time for bed",
                 message(s.text, SLEEP_TEXT, "time" to hhmm(now), "bedtime" to hhmm(bed), "wake" to hhmm(wake)),
-                null, listOf(RButton("Dismiss", "dismiss"), RButton("Disable alerts", "disable")), out)
+                null, buttons, out)
         }
     }
 
@@ -274,8 +302,8 @@ class RemindersEngine(private val rng: Random = Random.Default) {
 
     private fun allowedNow(r: CustomCfg, now: LocalDateTime): Boolean {
         if ((now.dayOfWeek.value - 1) !in r.days) return false
-        if (r.hours && r.kind != "times") {
-            val start = Rules.parseHhmm(r.window[0]); val end = Rules.parseHhmm(r.window[1])
+        val start = r.window.getOrNull(0)?.let(::hm); val end = r.window.getOrNull(1)?.let(::hm)
+        if (r.hours && r.kind != "times" && start != null && end != null) {   // a bad window doesn't hold it back
             val t = now.toLocalTime()
             val inside = if (start < end) t >= start && t < end else t >= start || t < end
             if (!inside) return false
@@ -305,7 +333,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
                     }
                 }
                 "times" -> for (t in r.times) {
-                    val at = LocalDateTime.of(today, Rules.parseHhmm(t))
+                    val at = LocalDateTime.of(today, hm(t) ?: continue)
                     val mark = "${r.id}|$today|$t"
                     if (!now.isBefore(at) && now.isBefore(at.plusMinutes(LATE_FIRE_MIN)) && mark !in fired) {
                         fired.add(mark); fire(r, now, customs, out)
@@ -313,9 +341,9 @@ class RemindersEngine(private val rng: Random = Random.Default) {
                 }
                 else -> {
                     val rk = "${r.id}|$today"
+                    val lo = r.window.getOrNull(0)?.let(::hm)?.let { it.hour * 60 + it.minute } ?: continue
+                    val hi = r.window.getOrNull(1)?.let(::hm)?.let { it.hour * 60 + it.minute } ?: continue
                     val pick = randomAt.getOrPut(rk) {
-                        val lo = Rules.parseHhmm(r.window[0]).let { it.hour * 60 + it.minute }
-                        val hi = Rules.parseHhmm(r.window[1]).let { it.hour * 60 + it.minute }
                         val m = rng.nextInt(lo, maxOf(lo + 1, hi))
                         LocalTime.of(m / 60, m % 60)
                     }
@@ -403,9 +431,16 @@ class RemindersEngine(private val rng: Random = Random.Default) {
 
     // ---------- answers ----------
 
-    fun answer(key: String, action: String, now: LocalDateTime, sleep: SleepCfg, brk: BreakCfg, customs: List<CustomCfg>): TickResult {
+    /** [given] "swipe": the notification went away without an answer (swiped, or Android removed it). A strict
+     *  break's counts as a snooze, so it still starts on its own; a break or reminder's as waved away. */
+    fun answer(key: String, given: String, now: LocalDateTime, sleep: SleepCfg, brk: BreakCfg, customs: List<CustomCfg>): TickResult {
         val out = Out(now)
         open.remove(key)
+        val action = if (given != "swipe") given else when {
+            key == "break" -> if (brk.strict) "snooze" else "dismiss"
+            key.startsWith("custom:") -> "dismiss"
+            else -> "close"
+        }
         when {
             key == "break" -> {
                 val fld = ArrayList(folded); folded.clear()
@@ -543,11 +578,28 @@ class RemindersEngine(private val rng: Random = Random.Default) {
 
         private fun hhmm(t: LocalDateTime) = "%02d:%02d".format(t.hour, t.minute)
 
+        /** "HH:MM", or null if it isn't a time. */
+        private fun hm(t: String): LocalTime? = runCatching { Rules.parseHhmm(t) }.getOrNull()
+
+        /** Minutes from bedtime to [t], going forward through the night (0..1439). */
+        private fun sinceBed(bed: LocalTime, t: LocalTime): Int =
+            ((t.hour * 60 + t.minute) - (bed.hour * 60 + bed.minute) + 1440) % 1440
+
         /** Your own wording if you wrote any, else the standard text, with {placeholders} filled in. */
         fun message(custom: String, default: String, vararg values: Pair<String, String>): String {
             var t = custom.trim().ifEmpty { default }
             for ((k, v) in values) t = t.replace("{$k}", v)
             return t
+        }
+
+        /** A step in the daytime gap before bedtime (wake → bedtime): it counts from bedtime, as the bedtime screen
+         *  only starts then. The same test the engine uses. */
+        fun stepFromBedtime(s: SleepCfg, from: String): Boolean {
+            val t = hm(from) ?: return false
+            val bed = hm(s.bedtime) ?: return false
+            val wake = hm(s.wake) ?: return false
+            val wakeOff = sinceBed(bed, wake).let { if (it == 0) 1440 else it }
+            return sinceBed(bed, t) >= wakeOff
         }
 
         /** A change that weakens a guarded (important) reminder - turning it off, or dropping its guard. */

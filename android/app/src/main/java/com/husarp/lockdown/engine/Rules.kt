@@ -70,10 +70,54 @@ object Rules {
     fun allowanceBucket(eff: EffRule, until: LocalDateTime) =
         "win:${eff.ruleKey}:${until.format(WIN_FMT)}"
 
-    private fun timeLimits(r: Rule): Map<String, Int> = buildMap {
-        r.dailyLimitMin?.let { put("day", it) }
-        r.weeklyLimitMin?.let { put("week", it) }
-        r.monthlyLimitMin?.let { put("month", it) }
+    /** The amount on each weekday (Mon..Sun, null = no limit that day) of a daily time limit set per weekday,
+     *  or null for one amount every day. */
+    fun dayLimits(r: Rule): List<Int?>? =
+        r.dailyLimitDays?.takeIf { it.size == 7 }?.map { if (it != null && it > 0) it else null }
+
+    /** (dailyLimitMin, dailyLimitDays) for the amounts on Mon..Sun: the same every day is kept as one amount (how
+     *  every limit was before), otherwise the per-weekday list. */
+    fun makeDayLimits(amounts: List<Int?>): Pair<Int?, List<Int?>?> {
+        val a = amounts.map { if (it != null && it > 0) it else null }
+        return if (a.toSet().size == 1) a[0] to null else null to a
+    }
+
+    /** The weekday (0 = Monday) of the limit day containing [now]: the one it started on - with a 03:00 reset,
+     *  Saturday 01:00 is still Friday's. (A reset at 12:00 or later: the date most of the day falls on.) */
+    fun limitWeekday(now: LocalDateTime, clock: LimitClock): Int = clock.day(now).first.plusHours(12).dayOfWeek.value - 1
+
+    /** The weekday the reset time alone gives [now] - differs from [limitWeekday] only while a changed reset
+     *  stretches the running day over the next weekday's. */
+    private fun naturalWeekday(now: LocalDateTime, clock: LimitClock): Int = clock.naturalDay(now).first.plusHours(12).dayOfWeek.value - 1
+
+    private val DAY_ABBR = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    /** [180]*5 + [120]*2 -> "3h 00m Mon–Fri, 2h 00m Sat–Sun"; a day without a limit reads "no limit". */
+    fun dayLimitsText(days: List<Int?>, fmt: (Int) -> String = ::minutesText): String {
+        val runs = ArrayList<MutableList<Int>>()
+        for (d in 0..6) if (runs.isNotEmpty() && days[d] == days[runs.last().last()]) runs.last().add(d) else runs.add(mutableListOf(d))
+        return runs.joinToString(", ") { r ->
+            val span = if (r.size == 1) DAY_ABBR[r[0]] else "${DAY_ABBR[r.first()]}–${DAY_ABBR[r.last()]}"
+            "${days[r[0]]?.let(fmt) ?: "no limit"} $span"
+        }
+    }
+
+    /** 70 -> "1h 10m", 45 -> "45m". */
+    fun minutesText(min: Int): String = if (min >= 60) "${min / 60}h %02dm".format(min % 60) else "${min}m"
+
+    /** {period: minutes} of a time limit. A daily limit set per weekday gives the amount of the limit day containing
+     *  [now] (none that day: no "day"); while a changed reset stretches that day over the next weekday's, the
+     *  stricter of the two, so moving the reset later can't skip a weekday's amount. Without [now]: the day one at its largest - which periods time counts in. */
+    fun timeLimits(r: Rule, now: LocalDateTime? = null, clock: LimitClock = LimitClock.DEFAULT): Map<String, Int> {
+        val days = dayLimits(r)
+        val day = if (days == null) r.dailyLimitMin
+                  else if (now == null) days.filterNotNull().maxOrNull()
+                  else listOfNotNull(days[limitWeekday(now, clock)], days[naturalWeekday(now, clock)]).minOrNull()
+        return buildMap {
+            day?.let { put("day", it) }
+            r.weeklyLimitMin?.let { put("week", it) }
+            r.monthlyLimitMin?.let { put("month", it) }
+        }
     }
 
     private fun switchLimits(r: Rule): Map<String, Int> = buildMap {
@@ -111,7 +155,7 @@ object Rules {
                 val t = runCatching { RuleType.valueOf(typeName) }.getOrNull() ?: continue
                 // the member's own time, openings and allowance; same key as the PC's (its owner is the member,
                 // so it never mixes with the group's pot)
-                out.add(EffRule(r.copy(type = t), me, me, me, "g${g.id}${t.name}", extraOf = g.name))
+                out.add(EffRule(r.copy(type = t), me, me, me, "g${g.id}${t.name}", extraOf = g.name, extraOfId = g.id))
             }
         }
         return out
@@ -196,7 +240,7 @@ object Rules {
                 return Reason.SCHEDULE to (if (until == LocalDateTime.MAX) null else until)
             }
             RuleType.TIME_LIMIT -> {
-                val ends = timeLimits(r).mapNotNull { (p, limit) ->
+                val ends = timeLimits(r, now, clock).mapNotNull { (p, limit) ->
                     if (usage(eff.usageOwner, timeBucket(p, now, clock)) >= limit * 60) clock.period(p, now).second else null
                 }
                 return if (ends.isNotEmpty()) Reason.LIMIT to ends.max() else null
@@ -222,6 +266,62 @@ object Rules {
         return active.filter { it.reason.ordinal == top }.maxBy { it.until ?: LocalDateTime.MAX }
     }
 
+    /** Every rule blocking the item now (all reasons), for how it is blocked (BlockMethod.blockingWay). */
+    fun blockingRules(effRules: List<EffRule>, now: LocalDateTime, usage: Usage = noUsage,
+                      clock: LimitClock = LimitClock.DEFAULT, unlockedUntil: LocalDateTime? = null): List<EffRule> {
+        val unlocked = unlockedUntil != null && now.isBefore(unlockedUntil)
+        return effRules.filter { (!unlocked || it.rule.type == RuleType.PERMANENT) && ruleBlock(it, now, usage, clock) != null }
+    }
+
+    /** When the next blocked stretch of a schedule starts (it isn't blocking now). */
+    private fun scheduleNextStart(s: Schedule, now: LocalDateTime): LocalDateTime? =
+        if (s.mode == SchedMode.BLOCK) nextWindowStart(s.windows, now)
+        else s.windows.mapNotNull { windowUntil(it, now) }.minOrNull()
+
+    /** (used seconds, allowed seconds, end of this blocked stretch) for "N minutes allowed during blocked hours"
+     *  while inside such a stretch, else null. */
+    fun allowanceLeft(eff: EffRule, now: LocalDateTime, usage: Usage = noUsage): Triple<Int, Int, LocalDateTime>? {
+        val r = eff.rule
+        if (r.type != RuleType.SCHEDULED || (r.allowanceMin ?: 0) <= 0) return null
+        val until = r.schedule?.let { scheduleUntil(it, now) } ?: return null
+        if (until == LocalDateTime.MAX) return null
+        return Triple(usage(eff.allowanceOwner, allowanceBucket(eff, until)), r.allowanceMin!! * 60, until)
+    }
+
+    /**
+     * When the next block starts for an item that isn't blocked now (PC next_block), or null. Time limits and the
+     * allowance are only predicted while it's [inUse]. During an emergency unlock: its end, if the item is blocked
+     * then ([NextBlock.eff] null).
+     */
+    fun nextBlock(effRules: List<EffRule>, now: LocalDateTime, usage: Usage = noUsage, clock: LimitClock = LimitClock.DEFAULT,
+                  inUse: Boolean = false, unlockedUntil: LocalDateTime? = null): NextBlock? {
+        if (unlockedUntil != null && now.isBefore(unlockedUntil))
+            return if (itemBlock(effRules, unlockedUntil, usage, clock) != null) NextBlock(unlockedUntil, null) else null
+        val found = ArrayList<NextBlock>()
+        for (eff in effRules) {
+            val r = eff.rule
+            when (r.type) {
+                RuleType.SCHEDULED -> {
+                    val sched = r.schedule ?: continue
+                    val until = scheduleUntil(sched, now)
+                    if (until == null) scheduleNextStart(sched, now)?.let { found.add(NextBlock(it, eff)) }
+                    else if (inUse) allowanceLeft(eff, now, usage)?.let { (used, allowed, _) ->
+                        found.add(NextBlock(now.plusSeconds(maxOf(0, allowed - used).toLong()), eff))
+                    }
+                }
+                RuleType.TIME_LIMIT -> if (inUse) {
+                    val lims = timeLimits(r, now, clock)
+                    if (lims.isNotEmpty()) {
+                        val left = lims.minOf { (p, limit) -> limit * 60 - usage(eff.usageOwner, timeBucket(p, now, clock)) }
+                        found.add(NextBlock(now.plusSeconds(maxOf(0, left).toLong()), eff))
+                    }
+                }
+                else -> {}
+            }
+        }
+        return found.minByOrNull { it.at }
+    }
+
     /** Does any of these rules block for good? (The emergency unlock never offers or frees such an item.) */
     fun permanent(effRules: List<EffRule>) = effRules.any { it.rule.type == RuleType.PERMANENT }
 
@@ -232,7 +332,7 @@ object Rules {
         when (r.type) {
             RuleType.TIME_LIMIT, RuleType.SWITCH_LIMIT -> {
                 val timeBased = r.type == RuleType.TIME_LIMIT
-                val fractions = (if (timeBased) timeLimits(r) else switchLimits(r)).map { (p, limit) ->
+                val fractions = (if (timeBased) timeLimits(r, now, clock) else switchLimits(r)).map { (p, limit) ->
                     if (timeBased) usage(eff.usageOwner, timeBucket(p, now, clock)).toDouble() / maxOf(limit * 60, 1)
                     else usage(eff.usageOwner, openingBucket(eff, p, now, clock)).toDouble() / maxOf(limit, 1)
                 }
