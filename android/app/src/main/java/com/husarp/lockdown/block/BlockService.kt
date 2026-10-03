@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -29,6 +30,7 @@ import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.engine.SleepCfg
 import com.husarp.lockdown.guard.TrustedTime
+import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.remind.Grayscale
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -63,6 +65,7 @@ class BlockService : AccessibilityService() {
     private var prunedOn: LocalDate? = null
 
     override fun onServiceConnected() {
+        connected = true
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         // see every window (picture-in-picture too); also set in the config, this covers a service bound before the update
         runCatching { serviceInfo = serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS } }
@@ -87,6 +90,13 @@ class BlockService : AccessibilityService() {
         // Locked or screen off: nothing is being used (audio holding the phone awake used to keep counting).
         if (!screenInUse()) { UsageStore.record(emptyList(), now); return }
         val mode = ModesStore.current(now)
+        // Island link: an Island app in front is the helper's to count and block - unless main's last app is still
+        // on screen too (split screen). A blocked video in picture-in-picture stays paused either way.
+        // In the helper, only what its own profile has in front is its business (when it can tell, with usage access).
+        if ((IslandLink.islandInFront() && !onScreen(pkg)) ||
+            (IslandLink.isHelper && pkg != IslandLink.localFront && com.husarp.lockdown.usage.Usage.hasAccess(this))) {
+            UsageStore.record(emptyList(), now); watchPip(cfg, now, mode); return
+        }
 
         // The address bar is hidden in a full-screen video: keep the last address read, don't lose the site.
         if (isBrowser(pkg)) readBar(pkg)
@@ -162,6 +172,13 @@ class BlockService : AccessibilityService() {
         if (caught.isNotEmpty() && Media.playing(this)) Media.pause(this)
     }
 
+    /** [pkg] has an app window on screen (this profile's windows only). */
+    private fun onScreen(pkg: String): Boolean {
+        val ws = runCatching { windows }.getOrNull() ?: return false
+        return ws.any { w -> w.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+            runCatching { w.root?.packageName?.toString() }.getOrNull() == pkg }
+    }
+
     private fun screenInUse(): Boolean {
         val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
         val km = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
@@ -178,6 +195,7 @@ class BlockService : AccessibilityService() {
             if (pkg == packageName || pkg == "com.android.systemui") return@runCatching
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 currentPkg = pkg
+                IslandLink.islandFront = null                   // a main-profile window came to the front
                 if (isBrowser(pkg)) readBar(pkg)
                 handler.post { runCatching { step() } }        // react immediately, don't wait for the next tick
             }
@@ -291,7 +309,7 @@ class BlockService : AccessibilityService() {
                 val mins = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
                 val now = Enforce.ldt(TrustedTime.now(this@BlockService))
                 val every = bedtimeInterval(sleep, mins)
-                if (every != null && !Enforce.alertsPaused(cfg, now)) {
+                if (every != null && !Enforce.alertsPaused(cfg, now) && !IslandLink.isHelper) {   // main sends the helper's
                     val ms = System.currentTimeMillis()
                     if (ms - lastBedtimeNudge >= every * 60_000L) { lastBedtimeNudge = ms; notifyBedtime() }
                 }
@@ -314,12 +332,17 @@ class BlockService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
-    override fun onDestroy() { removeOverlay(); handler.removeCallbacksAndMessages(null); super.onDestroy() }
+    override fun onUnbind(intent: Intent?): Boolean { connected = false; return super.onUnbind(intent) }
+    override fun onDestroy() { connected = false; removeOverlay(); handler.removeCallbacksAndMessages(null); super.onDestroy() }
 
     companion object {
         private const val TICK_MS = 3000L
         private const val ACT_GAP_MS = 2000L        // act on the same block at most this often (Back / Home)
         private const val PIP_CATCH_MS = 15_000L    // a PiP window this soon after its app's block is the blocked video
+
+        /** The service really runs (bound by Android), not just ticked in Settings. Same process as its readers. */
+        @Volatile var connected = false
+            private set
 
         fun isEnabled(ctx: Context): Boolean {
             val flat = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false

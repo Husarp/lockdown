@@ -11,7 +11,7 @@ object Live {
         if (item.disabled) return Status.PAUSED
         val eff = Rules.effectiveRules(item, cfg.groups)
         if (eff.isEmpty()) return Status.ALLOWED
-        val usage = UsageStore.counter.usage
+        val usage = UsageStore.usage
         val clock = cfg.clock()
         if (Rules.itemBlock(eff, now, usage, clock) != null) return Status.BLOCKED
         val soon = eff.any { Rules.ruleState(it, now, usage, clock) == "soon" }
@@ -20,7 +20,7 @@ object Live {
 
     /** The daily limit with the least time left (fraction used 0..1, minutes left), or null if none. */
     fun dayLimitFraction(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now()): Pair<Float, Int>? {
-        val usage = UsageStore.counter.usage
+        val usage = UsageStore.usage
         val clock = cfg.clock()
         var best: Pair<Float, Int>? = null
         for (eff in Rules.effectiveRules(item, cfg.groups)) {

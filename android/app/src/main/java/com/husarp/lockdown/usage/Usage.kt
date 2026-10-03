@@ -5,6 +5,7 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import java.util.Calendar
@@ -20,7 +21,9 @@ object Usage {
     /** Has the user granted "usage access" in Settings? */
     fun hasAccess(ctx: Context): Boolean {
         val ops = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = ops.unsafeCheckOpNoThrow(
+        val mode = if (Build.VERSION.SDK_INT >= 29) ops.unsafeCheckOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName,
+        ) else @Suppress("DEPRECATION") ops.checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName,
         )
         return mode == AppOpsManager.MODE_ALLOWED

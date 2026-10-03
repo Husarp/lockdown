@@ -2,7 +2,10 @@ package com.husarp.lockdown.data
 
 import android.content.Context
 import com.husarp.lockdown.engine.Active
+import com.husarp.lockdown.engine.Usage
 import com.husarp.lockdown.engine.UsageCounter
+import com.husarp.lockdown.link.Batch
+import com.husarp.lockdown.link.LinkUsage
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -20,6 +23,14 @@ object UsageStore {
 
     lateinit var counter: UsageCounter
         private set
+
+    // Island helper only (empty elsewhere): main's last snapshot and the batch sent but not yet acked. The counter
+    // itself then holds the helper's own time not yet sent.
+    @Volatile var base: Map<String, Int> = emptyMap()
+    @Volatile var inflight: Batch? = null
+
+    /** What the rules read: this copy's counters, plus (in the Island helper) main's and the batch in flight. */
+    val usage: Usage = { o, b -> counter.usage(o, b) + LinkUsage.extra(base, inflight, o, b) }
 
     fun init(ctx: Context) {
         file = File(ctx.filesDir, "usage.json")
@@ -40,6 +51,11 @@ object UsageStore {
     fun prune(now: LocalDateTime = LocalDateTime.now()) {
         counter.prune(now)
         flush()
+    }
+
+    /** Main: add the Island helper's time (main looper only, like [record]). */
+    fun addDeltas(d: Map<String, Int>) {
+        for ((k, v) in d) counter.counters[k] = (counter.counters[k] ?: 0) + v
     }
 
     private fun maybeFlush() {

@@ -1,5 +1,6 @@
 package com.husarp.lockdown
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,7 +23,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,8 +56,17 @@ enum class Dest(val route: String, val label: String, val icon: ImageVector, val
 }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_TURN_OFF = "turn_off"
+        const val ACTION_TURN_OFF = "com.husarp.lockdown.TURN_OFF"
+    }
+
+    // The Quick Settings tile asked to turn Lockdown off: App() runs it through the challenge.
+    private val askOff = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) takeTurnOff(intent)
         // if the filter should be on but the process was killed, bring it back (consent already granted)
         val cfg = com.husarp.lockdown.data.Store.config
         if (cfg.settings.siteFilterOn && cfg.guardrails.persist &&
@@ -64,10 +77,14 @@ class MainActivity : ComponentActivity() {
         }
         // A fresh start (not a rotation): the update banner may show again, and an installed update's APK goes.
         if (savedInstanceState == null) com.husarp.lockdown.update.Updates.onAppStart(this)
+        // Island helper: (re)start its service - also how main's "Fix" wakes it up.
+        if (com.husarp.lockdown.link.IslandLink.isHelper) runCatching { com.husarp.lockdown.link.LinkService.start(this) }
         enableEdgeToEdge()
         setContent {
             val cfg by com.husarp.lockdown.data.Store.state.collectAsStateWithLifecycle()
-            LockdownTheme(pref = cfg.settings.theme) { App() }
+            val helper by com.husarp.lockdown.link.IslandLink.helper.collectAsStateWithLifecycle()
+            // The linked copy in Island has no editing screens: main holds the rules.
+            LockdownTheme(pref = cfg.settings.theme) { if (helper) com.husarp.lockdown.screens.HelperScreen() else App(askOff) }
         }
     }
 
@@ -78,6 +95,18 @@ class MainActivity : ComponentActivity() {
         com.husarp.lockdown.update.Updates.onResume(this)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeTurnOff(intent)
+    }
+
+    private fun takeTurnOff(i: Intent?) {
+        if (i?.action != ACTION_TURN_OFF || !i.getBooleanExtra(EXTRA_TURN_OFF, false)) return
+        if (i.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return    // reopened from Recents: not a new tap
+        i.removeExtra(EXTRA_TURN_OFF)
+        askOff.value = true
+    }
+
     override fun onPause() {
         com.husarp.lockdown.update.Updates.onPause()
         super.onPause()
@@ -86,8 +115,15 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App() {
+fun App(askOff: MutableState<Boolean>) {
     val nav = rememberNavController()
+    val guard = com.husarp.lockdown.guard.rememberGuard()
+    LaunchedEffect(askOff.value) {
+        if (askOff.value) {
+            askOff.value = false
+            guard(true) { com.husarp.lockdown.data.Store.update { it.copy(enabled = false) } }
+        }
+    }
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val here = Dest.entries.firstOrNull { it.route == route } ?: Dest.HOME

@@ -206,8 +206,8 @@ fun ProtectionEditor(onClose: () -> Unit) {
             }
             SectionLabel("Allowed exceptions")
             ExceptionList(cfg.protection.allowed,
-                onAdd = { host -> Store.update { c -> c.copy(protection = c.protection.copy(allowed = (c.protection.allowed + host).distinct())) } },
-                onRemove = { host -> guard(true) { Store.update { c -> c.copy(protection = c.protection.copy(allowed = c.protection.allowed - host)) } } })
+                onAdd = { host -> guard(true) { Store.update { c -> c.copy(protection = c.protection.copy(allowed = (c.protection.allowed + host).distinct())) } } },
+                onRemove = { host -> Store.update { c -> c.copy(protection = c.protection.copy(allowed = c.protection.allowed - host)) } })
         }
     }
 }

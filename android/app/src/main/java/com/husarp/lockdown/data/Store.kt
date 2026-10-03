@@ -51,8 +51,19 @@ object Store {
     fun exportJson(): String = json.encodeToString(_state.value)
 
     /** Replace the whole config from exported JSON. Returns false if it can't be parsed. */
-    fun importJson(text: String): Boolean =
-        runCatching { _state.value = json.decodeFromString<Config>(text); persist(); true }.getOrDefault(false)
+    fun importJson(text: String): Boolean {
+        _state.value = decodeImport(text, _state.value) ?: return false
+        persist(); return true
+    }
+
+    /**
+     * Parse an imported config, or null if it can't be read. The current challenge unlock window is kept: a file
+     * can't bring its own (e.g. one ending years from now) and so skip every later challenge.
+     */
+    fun decodeImport(text: String, current: Config): Config? =
+        runCatching { json.decodeFromString<Config>(text) }.getOrNull()?.let { c ->
+            c.copy(antibypass = c.antibypass.copy(unlockedFrom = current.antibypass.unlockedFrom, unlockedUntil = current.antibypass.unlockedUntil))
+        }
 
     val config get() = _state.value
 }

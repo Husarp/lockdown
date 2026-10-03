@@ -115,6 +115,9 @@ fun GuardrailsScreen() {
             HealthRow("Uninstall protection", isAdmin(ctx)) { }
             if (cfg.settings.bedtimeGrayscale && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
                 HealthRow("Grayscale permission", com.husarp.lockdown.remind.Grayscale.canWrite(ctx)) { copyGrant(ctx) }
+            val link by com.husarp.lockdown.link.IslandLink.mainState.collectAsStateWithLifecycle()
+            if (link.state.isNotEmpty() && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // Fix opens Lockdown in Island
+                HealthRow("Island helper checking in", com.husarp.lockdown.link.IslandLink.healthy(ctx)) { com.husarp.lockdown.link.IslandLink.openOtherProfile(ctx) }
         }
 
         SectionLabel("Before loosening anything")

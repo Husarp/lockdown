@@ -114,8 +114,13 @@ fun SettingsScreen() {
     val importCfg = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val text = runCatching { ctx.contentResolver.openInputStream(uri)!!.bufferedReader().readText() }.getOrNull()
-        importMsg = if (text != null && Store.importJson(text)) "All settings imported." else "Couldn't read that file."
-        com.husarp.lockdown.remind.Grayscale.sync(ctx)
+        if (text == null || Store.decodeImport(text, Store.config) == null) { importMsg = "Couldn't read that file."; return@rememberLauncherForActivityResult }
+        // Replacing everything can drop any limit or block, so an import always asks for the challenge (free when no
+        // challenge is set or the unlock window is open), like any other loosening.
+        guard(true) {
+            importMsg = if (Store.importJson(text)) "All settings imported." else "Couldn't read that file."
+            com.husarp.lockdown.remind.Grayscale.sync(ctx)
+        }
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -146,6 +151,8 @@ fun SettingsScreen() {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+
+        IslandLinkCard()
 
         Card {
             Column(Modifier.padding(16.dp)) {
@@ -194,11 +201,14 @@ fun SettingsScreen() {
                             )
                         }
                         Switch(checked = onList, onCheckedChange = { want ->
-                            Store.update {
-                                it.copy(protection = it.protection.copy(
-                                    enabled = if (want) (it.protection.enabled + def.key).distinct() else it.protection.enabled - def.key))
+                            val apply = {
+                                Store.update {
+                                    it.copy(protection = it.protection.copy(
+                                        enabled = if (want) (it.protection.enabled + def.key).distinct() else it.protection.enabled - def.key))
+                                }
+                                com.husarp.lockdown.block.Protection.load(ctx)
                             }
-                            com.husarp.lockdown.block.Protection.load(ctx)
+                            if (want) apply() else guard(true) { apply() }
                         })
                     }
                 }
@@ -213,7 +223,7 @@ fun SettingsScreen() {
             if (it) com.husarp.lockdown.remind.Grayscale.sync(ctx) else com.husarp.lockdown.remind.Grayscale.switchedOff(ctx)
         }
         GrayscaleNote(s.bedtimeGrayscale)
-        Toggle("Force SafeSearch", "Keep SafeSearch and YouTube Restricted Mode on through the filter.", s.forceSafeSearch) { set { c -> c.copy(forceSafeSearch = it) } }
+        Toggle("Force SafeSearch", "Keep SafeSearch and YouTube Restricted Mode on through the filter.", s.forceSafeSearch) { on -> if (on) set { c -> c.copy(forceSafeSearch = true) } else guard(true) { set { c -> c.copy(forceSafeSearch = false) } } }
         Toggle("Weekly digest", "A weekly notification with your screen time.", s.weeklyDigest) { set { c -> c.copy(weeklyDigest = it) } }
         Toggle("Network log", "Record DNS lookups the filter sees.", s.networkLog) { set { c -> c.copy(networkLog = it) } }
         Card {

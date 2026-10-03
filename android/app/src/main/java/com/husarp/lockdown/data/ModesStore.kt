@@ -7,6 +7,7 @@ import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Modes
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -54,6 +55,21 @@ object ModesStore {
     }
 
     fun current(now: LocalDateTime = LocalDateTime.now()): ModeState? = Modes.active(now, _modes.value, _active.value)
+
+    /** The mode list and the running mode, for the Island helper. */
+    @Serializable
+    data class Snapshot(val modes: List<Mode>, val active: ModeActive?)
+
+    fun exportJson(modes: List<Mode> = _modes.value, active: ModeActive? = _active.value): String = json.encodeToString(Snapshot(modes, active))
+
+    /** The Island helper takes main's modes as they are. False if it can't be read. */
+    fun replace(text: String): Boolean {
+        val s = runCatching { json.decodeFromString<Snapshot>(text) }.getOrNull() ?: return false
+        saveModes(s.modes)
+        _active.value = s.active
+        persistActive()
+        return true
+    }
 
     private fun persistActive() = runCatching {
         activeFile.writeText(json.encodeToString(_active.value))

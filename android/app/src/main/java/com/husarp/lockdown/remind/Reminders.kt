@@ -179,6 +179,9 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
             notify(3, "App blocking is off", "Lockdown's accessibility service was turned off - open the app to turn it back on.")
         if (cfg.settings.siteFilterOn && !com.husarp.lockdown.vpn.LockdownVpn.active)
             notify(4, "Site filter stopped", "The site filter isn't running - open Lockdown to restart it.")
+        val link = com.husarp.lockdown.link.IslandLink
+        if (cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext))
+            notify(8, "Island apps not covered", "Lockdown in Island isn't checking in or can't block - open it there.")
 
         // daily screen-time goal (once a day)
         val budget = cfg.settings.dailyGoalMin

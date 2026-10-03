@@ -63,7 +63,7 @@ object Enforce {
     fun itemBlocked(cfg: Config, item: Item, now: LocalDateTime): Boolean {
         if (!cfg.enabled || item.disabled) return false
         val unlock = if (item.type == ItemType.APP) emergencyUntil(cfg, item.id, now) else null
-        return Rules.itemBlock(Rules.effectiveRules(item, cfg.groups), now, UsageStore.counter.usage, cfg.clock(), unlock) != null
+        return Rules.itemBlock(Rules.effectiveRules(item, cfg.groups), now, UsageStore.usage, cfg.clock(), unlock) != null
     }
 
     /** The site flags in force: "dns" (cut the connection), "close", "back"; none set means "dns". */
@@ -76,7 +76,7 @@ object Enforce {
         val item = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
         if (item != null && !item.disabled) {
             val eff = Rules.effectiveRules(item, cfg.groups)
-            val block = Rules.itemBlock(eff, now, UsageStore.counter.usage, cfg.clock(), emergencyUntil(cfg, item.id, now))
+            val block = Rules.itemBlock(eff, now, UsageStore.usage, cfg.clock(), emergencyUntil(cfg, item.id, now))
             if (block != null) return verdict(item.name, block, item.blockType.ifEmpty { "close" }, item.id)
         }
         if (item != null && emergencyUntil(cfg, item.id, now) != null) return null
@@ -96,7 +96,7 @@ object Enforce {
         val item = cfg.items.firstOrNull { it.type == ItemType.SITE && !it.disabled && hostMatches(it.target, host) }
         if (item != null) {
             val eff = Rules.effectiveRules(item, cfg.groups)
-            val block = Rules.itemBlock(eff, now, UsageStore.counter.usage, cfg.clock(), null)
+            val block = Rules.itemBlock(eff, now, UsageStore.usage, cfg.clock(), null)
             if (block != null) return verdict(item.name, block, item.blockType.ifEmpty { "dns" }, item.id).copy(site = true)
         }
         if (Modes.blocking(mode)) {

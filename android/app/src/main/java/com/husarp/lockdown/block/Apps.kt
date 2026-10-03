@@ -7,15 +7,17 @@ import android.content.pm.PackageManager
 data class InstalledApp(val pkg: String, val label: String)
 
 object Apps {
-    /** Launchable apps (things with a home-screen icon), minus ourselves, sorted by name. */
+    /** Launchable apps (things with a home-screen icon), minus ourselves, sorted by name. In main, with Island
+     *  linked, apps installed only in Island are added too ("Name (Island)"), so they can get rules. */
     fun launchable(ctx: Context): List<InstalledApp> {
         val pm = ctx.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        return pm.queryIntentActivities(intent, 0)
+        val mine = pm.queryIntentActivities(intent, 0)
             .mapNotNull { it.activityInfo?.packageName }
             .distinct()
             .filter { it != ctx.packageName }
             .map { InstalledApp(it, label(pm, it)) }
+        return (mine + com.husarp.lockdown.link.IslandLink.islandOnly(ctx, mine.mapTo(HashSet()) { it.pkg }))
             .sortedBy { it.label.lowercase() }
     }
 

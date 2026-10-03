@@ -4,6 +4,7 @@ import android.app.Application
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
+import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.remind.Reminders
 
 class LockdownApp : Application() {
@@ -13,5 +14,6 @@ class LockdownApp : Application() {
         UsageStore.init(this)
         ModesStore.init(this)
         Reminders.schedule(this)
+        IslandLink.init(this)
     }
 }

@@ -1,5 +1,32 @@
 # Changelog — Lockdown Mobile
 
+## 0.5.13 - 2026-10-03 20:33
+- **Island link (new).** Lockdown in Island (your work profile) can now follow Lockdown in your main profile. You set your rules in one place, and an app's limits count in both profiles together. Set it up once:
+  1. Install this version in both profiles.
+  2. In your main Lockdown: Settings > Island (work profile) > **Link Island**. A code shows for 3 minutes.
+  3. In Lockdown in Island: Settings > **Link to your main Lockdown**, type the code and tap Link. This replaces the Island copy's own rules, so it asks for its challenge.
+  4. Still in Island, grant what the "Needed here" list asks for: Usage access, Display over other apps, Battery not restricted and Notifications.
+  - If you use AFWall, allow Lockdown in both profiles, or the two copies can't reach each other.
+- What the link does:
+  - Lockdown in Island shows "Managed by your main Lockdown" and has no editing screens. Rules, groups, limits, modes, keywords and emergency unlocks all come from main, and changes reach Island within a few seconds.
+  - Time and openings in Island count toward the same limits as in the main profile: a minute of YouTube in each profile is 2 minutes toward YouTube's limit. Groups are shared the same way.
+  - Island apps get the same block notice. Its button is **Leave**, which goes to the home screen.
+  - Force-stopping main Lockdown doesn't free Island apps. The Island copy keeps blocking with the last rules and time it had, and sends the time used once main is back.
+  - **Unlinking needs the challenge**, and only main can do it: Settings > Island > Unlink. It finishes the next time the Island copy checks in and confirms it got the unlink. The Island copy then stands on its own again, with the same rules and the time already used. If the Island copy is gone, **Forget Island now** (also behind the challenge) drops the link.
+  - **Linking a new copy needs the challenge too**, once a link is there: it replaces the working one. So does typing a new link code in the linked Island copy.
+  - Guardrails > Reliability has a new row, "Island helper checking in". It turns red when Lockdown in Island hasn't checked in for 10 minutes (not while Island is paused), or when it checks in but can't block (Usage access or Display over other apps was taken away there). **Fix** opens it. Main also sends a notification, "Island apps not covered", when that happens.
+  - Using a main-profile app next to an Island app in split screen still counts and blocks the main app.
+  - Apps installed only in Island now show in the app pickers as "Name (Island)", so they can get rules.
+  - With no linked Island copy nothing changes, and Lockdown opens no connection.
+- What Island can't do yet: keywords and site addresses in Island browsers, and catching picture-in-picture, need Lockdown's accessibility service, which Android usually doesn't allow in a work profile. If your phone allows it, turn it on in the Island copy and those work too. The Island copy shows it as on only when it really runs. Without it, blocking an Island app can take about a second.
+- **Four ways round Anti-Bypass are closed.** Each of these now asks for the challenge, like any other loosening:
+  - **Settings > Import all settings.** An import replaces everything, so it always asks first. An imported file also can't bring its own "unlocked for editing" window.
+  - **Turning Lockdown off from the Quick Settings tile.** The tile opens the app and asks there. Turning it on from the tile is still instant.
+  - **Turning "Force SafeSearch" off** in Settings.
+  - **Adding an allowed exception** to the protection lists. Removing one is free now, as it only blocks more.
+- Turning a protection list off from Settings asks for the challenge too, as it already did in the protection-list editor.
+- Tests: new `IslandLinkTest` (28) covers the link code, the signing (a changed message, a replay, a reply sent back the other way and a wrong secret all fail, and an oversized message is refused), shared limits across the two profiles, a lost reply not counting twice, time used offline arriving later, unlinking keeping every second (and not counting a batch twice), the app in front staying put while you move between its screens or use split screen, and the pairing code's 3 minutes and 5 tries. New `StoreImportTest` (3) covers the import fixes.
+
 ## 0.5.12 - 2026-10-03 14:32
 - **Fixed: turning grayscale off didn't bring the colour back.** 0.5.10 only switched off grayscale that it had marked as its own, and grayscale turned on by an older build, or by the copy you had before the reinstall for the new signing key (which wiped that mark), had no mark, so it stayed on. Now:
   - **Switching "Bedtime grayscale" off** (in Settings or Reminders > Bedtime), or switching Bedtime itself off while grayscale is on, gives the colour back straight away, whoever turned it on. Only grayscale is touched, never another colour correction.
