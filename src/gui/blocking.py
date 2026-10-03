@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 
 import customtkinter as ctk
 
+import block_method
 import emergency
 from blocker import site_block
 from blocker.apps import block_flags
@@ -696,8 +697,12 @@ class AddTab(ctk.CTkScrollableFrame):
         self.title.configure(text=f"Edit {item['display_name']}")
         self.submit_btn.configure(text="Save")
         self.picker.load_item(item)
-        groups = ", ".join(g["name"] for g in self.draft.groups_of(item_id))
-        self.info.configure(text=f"Also in groups: {groups} (edit those in the Groups tab)" if groups else "")
+        in_groups = self.draft.groups_of(item_id)
+        groups = ", ".join(g["name"] for g in in_groups)
+        # "When blocked" below is its own way: a group that chose how its members are blocked uses its own (0.84.11)
+        chose = [g["name"] for g in in_groups if block_method.group_way(g, block_method.kind(item)) is not None]
+        note = f" - when {', '.join(chose)} blocks it, that group's way of blocking applies" if chose else ""
+        self.info.configure(text=f"Also in groups: {groups} (edit those in the Groups tab){note}" if groups else "")
         self.error.configure(text="")
         self.disable_btn.configure(text="Enable" if item.get("disabled") else "Disable")
         self.disable_btn.pack(side="right")

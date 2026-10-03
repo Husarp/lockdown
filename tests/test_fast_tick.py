@@ -222,10 +222,12 @@ def test_a_failed_write_loses_nothing(tmp_path, monkeypatch):
 # ---------- the block starts on time ----------
 
 def _youtube_allowance(db):
-    """YouTube in a group blocked 21:00-05:00 with 15 minutes allowed in those hours (one pot)."""
+    """YouTube in a group blocked 21:00-05:00 with 15 minutes allowed in those hours (one pot), its members sent
+    back when blocked (with only "can't load" the tab check leaves the tab to the network - 0.84.11)."""
     yt = db.add_item("YouTube", ["youtube.com"], "site", rules=[])
     sched = rules.make_schedule("block", [(list(range(7)), "21:00", "05:00")])
-    gid = db.add_group("Evening", [{"rule_type": "scheduled", "schedule": sched, "allowance_min": 15}], {yt: {}})
+    gid = db.add_group("Evening", [{"rule_type": "scheduled", "schedule": sched, "allowance_min": 15}], {yt: {}},
+                       {"site_block": "dns,back"})
     return yt, gid
 
 

@@ -18,6 +18,7 @@ from trusted_time import now_from_db
 
 TICK_SEC = 0.5
 RETRY_SEC = 2   # the same page still there this long after acting: act again (going back -> closing)
+CLOSE_GAP_SEC = 10   # after closing a tab, another blocked tab of that window is left alone this long (0.84.11)
 SITES_SEC = 2   # how often the list of blocked sites is re-read (and at once when a limit runs out - BlockedSites)
 RESTART_SEC = 30   # wait before starting the check again after it fell over
 
@@ -67,16 +68,18 @@ def act(hwnd: int, action: str) -> bool:
 
 
 def blocked_sites(db) -> dict[str, str]:
-    """{hostname: "close" / "back"} for every site blocked right now.
+    """{hostname: "close" / "back"} for every site blocked right now whose way of being blocked says so - its
+    own, or its group's (block_method, through db.blocks).
 
-    A site that is only "sent nowhere" (dns) gets "back" too, as a backstop: a page that was already open when its
-    block began keeps playing over the connections it has - IPv6 and QUIC ones can't be cut from outside the
-    browser - so a YouTube tab stayed usable all night (0.84.1). Going back off it (closing the tab if that
-    doesn't leave the page) ends that. A page that really can't load loses nothing by it."""
+    A site that is only "can't load" (dns) is left to the network: its tabs are never closed or sent back. 0.84.1
+    sent those back too (closing the tab when that didn't leave the page), as a backstop for a page already open
+    when the block began - which closed YouTube videos you had chosen only to stop loading, several at once
+    (0.84.11). The network covers that page now: its open connections are cut, browsers can't use QUIC while a
+    site is blocked, and its video hosts are firewalled, IPv4 and IPv6 (0.84.9, service.update_video_block)."""
     out = {}
     for host, block in db.active_blocks(now_from_db(db)).items():
-        if block["item"]["item_type"] == "site":
-            out[host] = site_block.tab_action(block["item"].get("block_type")) or "back"
+        if block["item"]["item_type"] == "site" and (action := site_block.tab_action(block["item"].get("block_type"))):
+            out[host] = action
     return out
 
 
@@ -122,7 +125,7 @@ class WordGuard(threading.Thread):
         super().__init__(daemon=True)
         self.on_block = on_block
         self.stop_event = threading.Event()
-        self.last: tuple | None = None   # ((hwnd, address, title), when we acted)
+        self.last: tuple | None = None   # ((hwnd, address, title), when we acted, "close" / "back")
 
     def run(self):
         """Keep checking, whatever happens: starting up (COM, opening the database while the service holds it)
@@ -160,19 +163,30 @@ class WordGuard(threading.Thread):
             return
         first = not (self.last and self.last[0] == tab)
         if not first:
-            if now - self.last[1] < RETRY_SEC:
-                return          # just acted - give the browser a moment
-            action = "close"    # going back didn't leave the page
+            # just acted - give the browser a moment (after closing a tab, as long as before the next one: two tabs
+            # showing the same page look alike)
+            if now - self.last[1] < (CLOSE_GAP_SEC if self.last[2] == "close" and not word else RETRY_SEC):
+                return
+            action = "close"    # going back didn't leave the page (or closing didn't happen)
+        elif self.last and self.last[0][0] == tab[0] and not word and self.last[2] == "close":
+            # a tab was just closed in this window and the one now in front is blocked too: Lockdown brought it
+            # to the front, you didn't open it. One tab at a time - closing it at once closed every YouTube tab
+            # of the window in a row (0.84.11). It is dealt with like any other only if it is still in front
+            # CLOSE_GAP_SEC later.
+            if now - self.last[1] < CLOSE_GAP_SEC:
+                return
+            if len(tab) > 3 and tab[3]:
+                action = "close"    # (no address bar: going back would only seek the video)
         elif self.last and self.last[0][0] == tab[0]:
-            # we just acted on this window and it still shows something blocked: going back on a YouTube video
+            # we just sent this window back and it still shows something blocked: going back on a YouTube video
             # lands on the one before, still YouTube - it hopped back through the history while the video
-            # played (0.84.9). Close it.
+            # played (0.84.9). It is the same tab: close it.
             action = "close"
         elif not word and len(tab) > 3 and tab[3]:
             # no address bar (a full-screen video): going back would only seek the video or hop to the one
             # before - close the tab (0.84.9)
             action = "close"
         if do(tab[0], action):
-            self.last = (tab, now)
+            self.last = (tab, now, action)
             if first and word:  # one notice per detection; a blocked site has its own alert already
                 self.on_block(word, action)

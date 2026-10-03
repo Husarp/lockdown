@@ -372,9 +372,10 @@ def test_a_neutral_subdomain_doesnt_take_youtube_out_of_work_mode(tmp_path):
     assert reasons(db, EVENING, yt) == []
 
 
-def test_any_blocked_site_in_front_is_sent_back(tmp_path, monkeypatch):
-    """A tab already open when the block began keeps playing (IPv6 / QUIC connections can't be cut from outside):
-    the tab check now acts on every blocked site in front, not only on those set to close / go back."""
+def test_only_sites_set_to_close_or_go_back_are_acted_on_in_front(tmp_path, monkeypatch):
+    """0.84.1 sent every blocked site in front back, "can't load" ones too (an open page kept playing). That closed
+    YouTube videos Adam chose only to stop loading (0.84.11): the network stops those now (connections cut, no QUIC,
+    video hosts firewalled), so the tab check acts only on a site set to close the tab / go back."""
     from monitor import word_guard
     db = Database(tmp_path / "t.db")
     db.add_item("YouTube", ["youtube.com"], "site", rules=[{"rule_type": "permanent"}])          # dns only
@@ -383,8 +384,8 @@ def test_any_blocked_site_in_front_is_sent_back(tmp_path, monkeypatch):
                    block_type="dns,close")
     monkeypatch.setattr(word_guard, "now_from_db", lambda db: EVENING)
     sites = word_guard.blocked_sites(db)
-    assert sites == {"youtube.com": "back", "reddit.com": "close"}
-    assert word_guard.site_action("https://www.youtube.com/watch?v=1", sites) == "back"
+    assert sites == {"reddit.com": "close"}
+    assert word_guard.site_action("https://www.youtube.com/watch?v=1", sites) is None
 
 
 def test_the_tab_check_starts_again_after_failing_to_start(monkeypatch):

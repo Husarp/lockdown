@@ -17,7 +17,8 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   daily time limits, temporary blocks, stacked rules, locked browser DoH/QUIC policies, closing open connections on block,
   blocked-visit notifications, tray agent at login, single instance, clock-change protection.
 - **Phase 3 done:** app blocking (close politely then force after 10 s / block internet via firewall / both),
-  app browser with icons, daily limits for apps, groups with shared rules + extra limits per member (on top of the group's),
+  app browser with icons, daily limits for apps, groups with shared rules + extra limits per member (on top of the group's)
+  and their own way of blocking members (close / minimize / cut internet; can't load / close the tab / go back),
   "N minutes allowed during blocked hours", warnings before blocks + reminders while in use + "block started".
 - **Blocking UI:** five tabs — **Overview** (everything with rules as chips, sortable, Edit/Remove), **Groups** (list + editor), **Add** (pick a site or app,
   tick any number of blockers: hours, time limit, opening limit, permanent, temporary), **Site protection** (always-on
@@ -108,6 +109,17 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   limit, opening limit, temporary), also one the group itself doesn't have. An app that is closed the moment it
   opens (because it is blocked) doesn't use up the group's openings. Extra limits only tighten - adding or
   tightening one is free, removing or relaxing one goes through Anti-Bypass. Warnings/reminders are set on the Notifications page.
+- **How a group's members are blocked (0.84.11):** the group editor's "How members are blocked" chooses it for all
+  members - apps: Close app (+ its background processes) / Minimize / Block internet; sites: Can't load it / Close
+  the tab / Go back. A member's extra-limits window can add to that for that member only (the group's way is
+  greyed there - a member can never be weaker than its group). A group with nothing ticked blocks each member the
+  way it was set when it was added (every group from before 0.84.11). A block by the item's own rules keeps the
+  item's own way; blocked by both, it does both. Making the way weaker (e.g. "close" -> "block internet", "close
+  the tab" dropped) goes through Anti-Bypass; stronger is free.
+- **Sites set to "Can't load it" only are never closed or sent back** by the tray (0.84.11): a page that was
+  already open, e.g. a playing video, is stopped by the network (its connections cut, QUIC off, its video hosts
+  firewalled). "Close the tab" closes the tab in front once; another blocked tab that comes to the front after it
+  is left alone for 10 s, so several tabs are never closed at once.
 - Daily limits: the tray agent checks the windows in front twice a second, reads the active browser tab's address
   (Windows UI Automation — Chrome, Edge, Brave, Firefox, no extension needed) and counts time on limited sites and
   apps; the service blocks the site once the limit is used up,

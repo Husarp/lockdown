@@ -22,7 +22,11 @@ def export(db) -> dict:
         "items": [{k: item[k] for k in ("id", "display_name", "target", "item_type", "source", "notify", "block_type",
                                          "app_path")} | {"rules": [_rule(r) for r in item["rules"]]} for item in items],
         "groups": [{"name": g["name"], "rules": [_rule(r) for r in g["rules"]],
-                    "members": {str(i): o for i, o in g["members"].items()}} for g in db.list_groups()],
+                    "members": {str(i): o for i, o in g["members"].items()},
+                    # how its members are blocked (0.84.11; absent / None: as each member is set)
+                    "app_block": g.get("app_block"), "site_block": g.get("site_block"),
+                    "member_blocks": {str(i): w for i, w in (g.get("member_blocks") or {}).items()}}
+                   for g in db.list_groups()],
         "categories": [{"kind": k, "name": n, "category": c} for (k, n), c in db.categories().items()],
         "settings": {k: _without_unlock(k, v) for k, v in db.all_settings().items() if k not in RUNTIME_KEYS},
     }
@@ -121,7 +125,9 @@ def restore(db, data: dict):
                                                item.get("notify"), item.get("block_type"), item.get("app_path"))
     for g in data.get("groups", []):
         members = {new_ids[i]: o for i, o in g.get("members", {}).items() if i in new_ids}
-        db.add_group(g["name"], g.get("rules", []), members)
+        ways = {"app_block": g.get("app_block"), "site_block": g.get("site_block"),
+                "member_blocks": {new_ids[i]: w for i, w in (g.get("member_blocks") or {}).items() if i in new_ids}}
+        db.add_group(g["name"], g.get("rules", []), members, ways)
     for c in data.get("categories", []):
         db.set_category(c["kind"], c["name"], c["category"])
     for key, value in data.get("settings", {}).items():

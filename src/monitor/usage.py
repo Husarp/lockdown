@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 
+import block_method
 import modes
 import pause
 import json
@@ -456,12 +457,15 @@ class UsageTracker(threading.Thread):
         """The opening counters to add 1 to: not the ones an app that is closed at once would spend
         (rules.closed_opening) - so retrying a blocked member doesn't use up the group's openings (0.84.3).
         Only for an app Lockdown closes when blocked: one that is only minimized or cut off the internet can
-        still be used, so its openings count. Anything that can't be read counts everything."""
+        still be used, so its openings count. Only the rules whose block closes it count here: a group that
+        cuts its members' internet only doesn't close them, whatever the app's own setting (0.84.11). Anything
+        that can't be read counts everything."""
         if not any(t[1].startswith("op:") for t in targets) or item["item_type"] != "app" \
-                or not kills(item.get("block_type")) or names_of(item["target"]) & PROTECTED:
+                or names_of(item["target"]) & PROTECTED:
             return targets
         try:
-            rules = effective_rules(item, groups)
+            by_id = {g["id"]: g for g in groups}
+            rules = [r for r in effective_rules(item, groups) if kills(block_method.rule_way(item, by_id, r))]
             if not rules:
                 return targets
             unlocks = {f"item:{i}": u for i, u in db.active_unlocks(now).items()}

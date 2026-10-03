@@ -38,7 +38,17 @@ def _item_key(item: dict) -> tuple:
 def _group_key(group: dict) -> tuple:
     members = tuple(sorted((i, json.dumps({t: _rule_key(r) for t, r in (o or {}).items()}, sort_keys=True))
                            for i, o in group["members"].items()))
-    return group["name"], bool(group.get("disabled")), _rules_key(group["rules"]), members
+    return group["name"], bool(group.get("disabled")), _rules_key(group["rules"]), members, _ways_key(group)
+
+
+def _ways_key(group: dict) -> tuple:
+    """How its members are blocked (block_method)."""
+    return (group.get("app_block") or None, group.get("site_block") or None,
+            tuple(sorted((i, w) for i, w in (group.get("member_blocks") or {}).items()
+                         if w and i in group["members"])))
+
+
+WAY_KEYS = ("app_block", "site_block", "member_blocks")
 
 
 def _finalize(rule: dict, now) -> dict:
@@ -199,13 +209,17 @@ class Draft:
         self.settings[key] = value
         self._changed()
 
-    def set_group(self, group_id: int | None, name: str, rules: list[dict], members: dict[int, dict]) -> int:
-        """Create (group_id None) or replace a group. Members: {item_id: {rule_type: customized rule}}."""
+    def set_group(self, group_id: int | None, name: str, rules: list[dict], members: dict[int, dict],
+                  ways: dict | None = None) -> int:
+        """Create (group_id None) or replace a group. Members: {item_id: {rule_type: customized rule}}.
+        ways: {app_block, site_block, member_blocks} - how its members are blocked; None keeps the group's."""
         if group_id is None:
             group_id = self._new_id()
-        was = self.groups.get(group_id, {}).get("disabled", 0)
+        before = self.groups.get(group_id, {})
+        ways = ways if ways is not None else {k: before.get(k) for k in WAY_KEYS}
         self.groups[group_id] = {"id": group_id, "name": name, "rules": rules, "members": members,
-                                 "disabled": was}
+                                 "disabled": before.get("disabled", 0),
+                                 **{k: ways.get(k) for k in WAY_KEYS}}
         self._drop_orphans()
         self._changed()
         return group_id
@@ -260,10 +274,13 @@ class Draft:
                        for i, o in g["members"].items()}
             members = {i: o for i, o in members.items() if i in existing}
             rules = [_finalize(r, now) for r in g["rules"]]
+            ways = {"app_block": g.get("app_block"), "site_block": g.get("site_block"),
+                    "member_blocks": {new_ids.get(i, i): w for i, w in (g.get("member_blocks") or {}).items()
+                                      if new_ids.get(i, i) in members}}
             if group_id < 0:
-                self.db.add_group(g["name"], rules, members)
+                self.db.add_group(g["name"], rules, members, ways)
             elif group_id in saved_group_ids and self.is_group_unsaved(group_id):
-                self.db.update_group(group_id, g["name"], rules, members, bool(g.get("disabled")))
+                self.db.update_group(group_id, g["name"], rules, members, bool(g.get("disabled")), ways)
         for group_id in set(self.saved_groups) - set(self.groups):
             self.db.remove_group(group_id)
 

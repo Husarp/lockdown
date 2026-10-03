@@ -11,7 +11,8 @@ from pathlib import Path
 import modes
 import pause
 from paths import DB_PATH
-from rules import RESET_KEY, TIME_FMT, LimitClock, Usage, effective_rules, item_block
+from block_method import blocking_way
+from rules import RESET_KEY, TIME_FMT, LimitClock, Usage, effective_rules, item_block, rule_block
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS blocked_items (
@@ -52,6 +53,9 @@ CREATE TABLE IF NOT EXISTS block_groups (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     disabled INTEGER,             -- 1 = paused: its rules stop applying to every member
+    app_block TEXT,               -- how its app members are blocked (blocker.apps flags); NULL = as each is set
+    site_block TEXT,              -- how its site members are blocked (blocker.site_block flags); NULL = the same
+    member_blocks TEXT,           -- JSON {item_id: flags}: what a member adds on top of the group's way
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -237,7 +241,9 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("group_rules", "switch_mode", "TEXT"), ("group_rules", "visit_gap_min", "INTEGER"),
               ("block_rules", "allowance_shared", "INTEGER"), ("group_rules", "allowance_shared", "INTEGER"),
               ("blocked_items", "disabled", "INTEGER"), ("block_groups", "disabled", "INTEGER"),
-              ("emergency_unlocks", "alerts", "INTEGER")]
+              ("emergency_unlocks", "alerts", "INTEGER"),
+              ("block_groups", "app_block", "TEXT"), ("block_groups", "site_block", "TEXT"),
+              ("block_groups", "member_blocks", "TEXT")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
                for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
 RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "allowance_shared",
@@ -264,8 +270,8 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 4   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
-#                      4: emergency_unlocks.alerts (0.84.7)
+SCHEMA_VERSION = 5   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+#                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -472,28 +478,50 @@ class Database:
     # ---------- groups ----------
 
     def list_groups(self) -> list[dict]:
-        """All groups: {id, name, rules: [...], members: {item_id: {rule_type: extra rule on top of the group's}}}."""
+        """All groups: {id, name, rules: [...], members: {item_id: {rule_type: extra rule on top of the group's}},
+        app_block / site_block (how its members are blocked, None = as each member is set), member_blocks
+        ({item_id: what that member adds on top of the group's way}) - block_method."""
         groups = {r["id"]: {**dict(r), "rules": [], "members": {}} for r in self.conn.execute(
             "SELECT * FROM block_groups ORDER BY name COLLATE NOCASE")}
         for r in self.conn.execute("SELECT * FROM group_rules ORDER BY id"):
             groups[r["group_id"]]["rules"].append(dict(r))
         for r in self.conn.execute("SELECT * FROM group_members"):
             groups[r["group_id"]]["members"][r["item_id"]] = json.loads(r["overrides"])
+        for g in groups.values():
+            try:
+                ways = json.loads(g.get("member_blocks") or "{}")
+            except ValueError:
+                ways = {}
+            g["member_blocks"] = {int(i): w for i, w in ways.items() if w and int(i) in g["members"]}
         return list(groups.values())
 
+    @staticmethod
+    def _ways(ways: dict) -> tuple:
+        """(app_block, site_block, member_blocks JSON) to store from {app_block, site_block, member_blocks}."""
+        members = {str(i): w for i, w in (ways.get("member_blocks") or {}).items() if w}
+        return ways.get("app_block") or None, ways.get("site_block") or None, json.dumps(members) if members else None
+
     @_write
-    def add_group(self, name: str, rules: list[dict], members: dict[int, dict] | None = None) -> int:
+    def add_group(self, name: str, rules: list[dict], members: dict[int, dict] | None = None,
+                  ways: dict | None = None) -> int:
+        """ways: {app_block, site_block, member_blocks} - how members are blocked (None: as each member is set)."""
         with self.conn:
-            cur = self.conn.execute("INSERT INTO block_groups (name) VALUES (?)", (name,))
+            cur = self.conn.execute("INSERT INTO block_groups (name, app_block, site_block, member_blocks) "
+                                    "VALUES (?, ?, ?, ?)", (name, *self._ways(ways or {})))
             self._write_group(cur.lastrowid, rules, members or {})
         return cur.lastrowid
 
     @_write
     def update_group(self, group_id: int, name: str, rules: list[dict], members: dict[int, dict],
-                     disabled: bool = False):
+                     disabled: bool = False, ways: dict | None = None):
+        """ways: as for add_group; None keeps what the group has (a caller that only renames it changes nothing
+        else)."""
         with self.conn:
             self.conn.execute("UPDATE block_groups SET name = ?, disabled = ? WHERE id = ?",
                               (name, int(bool(disabled)), group_id))
+            if ways is not None:
+                self.conn.execute("UPDATE block_groups SET app_block = ?, site_block = ?, member_blocks = ? "
+                                  "WHERE id = ?", (*self._ways(ways), group_id))
             self.conn.execute("DELETE FROM group_rules WHERE group_id = ?", (group_id,))
             self.conn.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
             self._write_group(group_id, rules, members)
@@ -529,8 +557,13 @@ class Database:
                  if not i["disabled"]]   # disabled = paused, nothing applies
         out = []
         for item in items:
-            block = item_block(effective_rules(item, groups), now, usage)
+            rules = effective_rules(item, groups)
+            block = item_block(rules, now, usage)
             if block:
+                # how it is blocked: a group's block goes the group's way (+ the member's own), 0.84.11
+                way = blocking_way(item, groups, [r for r in rules if rule_block(r, now, usage)])
+                if way != item.get("block_type"):
+                    item = {**item, "block_type": way}
                 out.append({"item": item, "reason": block[0], "until": block[1], "rule": block[2]})
         # a blocked category stands for everything in it: put the real sites and apps in the list, keeping the
         # category's own reason. Anything already blocked in its own right keeps that block.

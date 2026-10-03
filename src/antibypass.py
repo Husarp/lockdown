@@ -35,6 +35,7 @@ import random
 import string
 from datetime import datetime, timedelta
 
+import block_method
 from blocker.apps import block_flags
 from blocker.site_block import site_flags
 from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, next_window_start,
@@ -202,12 +203,16 @@ def newly_disabled(old: dict, new: dict) -> bool:
     return bool(new.get("disabled")) and not old.get("disabled")
 
 
-def group_looser(old: dict, new: dict | None, now: datetime) -> bool:
+def group_looser(old: dict, new: dict | None, now: datetime, old_items: dict | None = None,
+                 new_items: dict | None = None) -> bool:
+    """old_items / new_items ({id: item}, saved and edited): to compare how each member is blocked."""
     if new is None:
         return True
     if newly_disabled(old, new):
         return True
     if rules_looser(old["rules"], new["rules"], now) or not set(old["members"]) <= set(new["members"]):
+        return True
+    if old_items is not None and ways_looser(old, new, old_items, new_items or old_items):
         return True
     # A member's extra rules come on top of the group's (0.84.3): adding or tightening one is free, but removing
     # or relaxing one hands that member time back, so it is loosening like any other rule.
@@ -222,6 +227,23 @@ def group_looser(old: dict, new: dict | None, now: datetime) -> bool:
     return False
 
 
+def ways_looser(old: dict, new: dict, old_items: dict, new_items: dict) -> bool:
+    """How the group blocks a member got weaker for any member it keeps (0.84.11): its "How members are blocked"
+    or a member's own way in it - e.g. "close the tab" dropped, or "close" turned into "minimize". Compared per
+    member, as each one ends up (block_method.in_group), so a group's first choice is compared with the way each
+    member was blocked before it had one. Adding to it is free."""
+    for member in set(old["members"]) & set(new["members"]):
+        before = old_items.get(member)
+        if before is None:
+            continue
+        after = new_items.get(member) or before
+        k = block_method.kind(before)
+        if not block_method.strength(k, block_method.in_group(before, old)) \
+                <= block_method.strength(k, block_method.in_group(after, new)):
+            return True
+    return False
+
+
 def draft_changes(saved_items: dict, items: dict, saved_groups: dict, groups: dict, now: datetime) -> list[str]:
     """What in these edits loosens a block, as short descriptions (empty = nothing, save freely)."""
     out = []
@@ -232,7 +254,7 @@ def draft_changes(saved_items: dict, items: dict, saved_groups: dict, groups: di
             out.append(f"{what} {old['display_name']}")
     for group_id, old in saved_groups.items():
         new = groups.get(group_id)
-        if group_looser(old, new, now):
+        if group_looser(old, new, now, saved_items, items):
             what = "Remove" if new is None else "Disable" if newly_disabled(old, new) else "Loosen"
             out.append(f"{what} group {old['name']}")
     return out

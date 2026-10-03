@@ -197,9 +197,13 @@ def test_autoplay_in_full_screen_still_counts_as_youtube(firefox):
 def test_a_full_screen_firefox_evening_is_counted_blocked_and_closed(tmp_path, monkeypatch, firefox):
     """Adam's setup (group blocks 21:00-05:00 with 15 minutes allowed, 2 h a day; YouTube 1 h a day), a
     playlist in full screen in Firefox from 21:00 - its address bar never readable, a new video every 4 minutes.
-    It used to count nothing (no address ever read): no block at all, and nothing for the tab check to see."""
+    It used to count nothing (no address ever read): no block at all, and nothing for the tab check to see.
+    (The group sends its sites back here: one that is only "can't load" is left to the network - 0.84.11,
+    test_group_block_ways.py.)"""
     db = Database(tmp_path / "t.db")
     yt, _gid = _youtube_group(db)
+    group = db.list_groups()[0]
+    db.update_group(_gid, group["name"], group["rules"], group["members"], ways={"site_block": "dns,back"})
     clock = Clock(monkeypatch, datetime(2026, 10, 2, 21, 0))
     monkeypatch.setattr(word_guard, "now_from_db", lambda d: clock.now)
     tracker = counting(clock)
