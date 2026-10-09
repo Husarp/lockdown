@@ -346,6 +346,9 @@ class RemindersEngineTest {
         assertEquals(0 to -1, grayscaleRestore(prevEnabled = 0, prevMode = -1))      // a phone that stores "off" as -1
         assertEquals(1 to 13, grayscaleRestore(prevEnabled = 1, prevMode = 13))      // the user's own correction comes back on
         assertEquals(0 to 12, grayscaleRestore(prevEnabled = 1, prevMode = 0))       // grey already on at bedtime: colour back
+        assertEquals(1 to 12, grayscaleRestore(prevEnabled = 1, prevMode = null))    // correction on, mode never picked: Android's default
+        assertEquals(1 to 0, grayscaleRestore(prevEnabled = 1, prevMode = 0, ownGrey = true))  // the user's own grey comes back
+        assertEquals(0 to 12, grayscaleRestore(prevEnabled = 0, prevMode = 0, ownGrey = true)) // own flag only keeps grey that was on
     }
 
     @Test fun a_whole_night_ends_with_the_screen_as_it_was() {
@@ -368,8 +371,28 @@ class RemindersEngineTest {
         assertEquals(false, mark)
     }
 
+    @Test fun grayscale_the_user_had_on_before_bedtime_comes_back_at_wake() {
+        var enabled = 1; var mode: Int? = 0                                        // the user's own grey all day
+        fun isOn() = enabled == 1 && mode == 0
+        var mark: Boolean? = false; var prev: Triple<Int, Int?, Boolean>? = null   // Lockdown's last step: colour back
+        fun tick(wanted: Boolean) {
+            val on = isOn()
+            val (write, newMark) = grayscaleStep(wanted, switchOn = true, mark = mark, isOn = on)
+            if (newMark == true && mark != true) prev = Triple(enabled, mode, mark == false && on)
+            if (write == true) { mode = 0; enabled = 1 }
+            if (write == false) grayscaleRestore(prev?.first, prev?.second, prev?.third ?: false).let { enabled = it.first; mode = it.second; prev = null }
+            if (newMark != null) mark = newMark
+        }
+        tick(wanted = true); assertTrue(isOn())                                     // bedtime
+        tick(wanted = false); assertEquals(1 to 0, enabled to mode)                // wake: still the user's grey
+        assertEquals(false, mark)
+        tick(wanted = false); assertEquals(1 to 0, enabled to mode)                // and left alone after
+        assertFalse(grayscaleStuck(wanted = false, switchOn = true, mark = mark, isOn = isOn()))  // no "turn off" card
+    }
+
     @Test fun turn_grayscale_off_now_shows_only_when_grey_outside_bedtime_and_maybe_ours() {
-        assertTrue(grayscaleStuck(wanted = false, switchOn = true, mark = false, isOn = true))   // grey in the day, switch on
+        assertTrue(grayscaleStuck(wanted = false, switchOn = true, mark = null, isOn = true))    // grey in the day, switch on, no mark
+        assertFalse(grayscaleStuck(wanted = false, switchOn = true, mark = false, isOn = true))  // the user's own after Lockdown's colour-back
         assertTrue(grayscaleStuck(wanted = false, switchOn = false, mark = true, isOn = true))   // ours, switch already off
         assertFalse(grayscaleStuck(wanted = true, switchOn = true, mark = true, isOn = true))    // bedtime: no way around it
         assertFalse(grayscaleStuck(wanted = false, switchOn = false, mark = false, isOn = true)) // the user's own, switch off

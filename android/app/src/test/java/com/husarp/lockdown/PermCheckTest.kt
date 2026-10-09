@@ -53,9 +53,9 @@ class PermCheckTest {
     }
 
     @Test fun siteFilterStates() {
-        assertNull(PermCheck.vpn(wanted = false, allowed = true, running = false))
-        assertEquals(Perm.ON, PermCheck.vpn(wanted = true, allowed = true, running = true))
-        assertEquals(Perm.NOT_RUNNING, PermCheck.vpn(wanted = true, allowed = true, running = false))
-        assertEquals(Perm.OFF, PermCheck.vpn(wanted = true, allowed = false, running = false))
+        assertNull(PermCheck.vpn(wanted = false, running = false))
+        assertNull(PermCheck.vpn(wanted = false, running = true))
+        assertEquals(Perm.ON, PermCheck.vpn(wanted = true, running = true))
+        assertEquals(Perm.NOT_RUNNING, PermCheck.vpn(wanted = true, running = false))
     }
 }

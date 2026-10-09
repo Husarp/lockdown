@@ -36,12 +36,11 @@ object PermCheck {
     fun notificationsOn(sdk: Int, permissionGranted: Boolean, appEnabled: Boolean): Boolean =
         (sdk < 33 || permissionGranted) && appEnabled
 
-    /** The site filter you turned on: running, allowed but not running (Start), or Android's VPN permission gone
-     *  (another VPN app took it). Null while it's off. */
-    fun vpn(wanted: Boolean, allowed: Boolean, running: Boolean): Perm? = when {
+    /** The site filter you turned on: running, or not running (Start). Null while it's off. Android's VPN
+     *  permission isn't checked: its only check (VpnService.prepare) takes the VPN over from another app. */
+    fun vpn(wanted: Boolean, running: Boolean): Perm? = when {
         !wanted -> null
         running -> Perm.ON
-        allowed -> Perm.NOT_RUNNING
-        else -> Perm.OFF
+        else -> Perm.NOT_RUNNING
     }
 }

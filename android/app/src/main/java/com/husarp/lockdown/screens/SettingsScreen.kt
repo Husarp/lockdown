@@ -133,8 +133,13 @@ fun SettingsScreen() {
     val a11y = remember(fresh) { Perms.a11y(ctx) }
     val usage = remember(fresh) { Usage.hasAccess(ctx) }
     val notes = remember(fresh) { Perms.notifications(ctx) }
-    val vpn = remember(fresh, s.siteFilterOn) { PermCheck.vpn(s.siteFilterOn, LockdownVpn.prepare(ctx) == null, LockdownVpn.active) }
-    fun startVpn() { val i = LockdownVpn.prepare(ctx); if (i != null) vpnConsent.launch(i) else LockdownVpn.start(ctx) }
+    // Never Android's VpnService.prepare() here: when allowed before, it takes the VPN over from another app.
+    val vpn = remember(fresh, s.siteFilterOn) { PermCheck.vpn(s.siteFilterOn, LockdownVpn.active) }
+    fun startVpn() = runCatching { LockdownVpn.prepare(ctx) }.fold(
+        { i -> if (i != null) vpnConsent.launch(i) else LockdownVpn.start(ctx) },
+        { android.widget.Toast.makeText(ctx, "Couldn't start the site filter: Android keeps the VPN for another app " +
+            "(Always-on VPN or \"Block connections without VPN\").", android.widget.Toast.LENGTH_LONG).show() },
+    )
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card {
@@ -167,11 +172,11 @@ fun SettingsScreen() {
                         else guard(true) { LockdownVpn.stop(ctx) }
                     })
                 }
-                // switched on, but not running (or Android's VPN permission went to another app): say so, one tap starts it
-                if (vpn == Perm.NOT_RUNNING || vpn == Perm.OFF) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (vpn == Perm.NOT_RUNNING) "On, but not running." else "On, but Android's VPN permission went to another app.",
+                // switched on, but not running: say so, one tap starts it (asks Android's VPN permission again if needed)
+                if (vpn == Perm.NOT_RUNNING) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("On, but not running.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { startVpn() }) { Text(if (vpn == Perm.NOT_RUNNING) "Start" else "Allow") }
+                    TextButton(onClick = { startVpn() }) { Text("Start") }
                 }
                 Text("Optional. Blocks sites everywhere via a local VPN, but can interfere with other apps. Leave it off — Lockdown still blocks sites and protection lists in the browser without it.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

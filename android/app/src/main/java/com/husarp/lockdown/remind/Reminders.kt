@@ -58,6 +58,7 @@ object Grayscale {
     private const val APPLIED = "applied"
     private const val PREV_ENABLED = "prev_enabled"   // the colour correction from before Lockdown took the screen over
     private const val PREV_MODE = "prev_mode"
+    private const val PREV_OWN = "prev_own"           // that was grayscale the user turned on after Lockdown's last colour-back
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("gray", Context.MODE_PRIVATE)
 
@@ -92,9 +93,11 @@ object Grayscale {
         if (otherProfile(ctx)) return               // not this copy's screen (and it never has the permission)
         val p = prefs(ctx)
         val mark = mark(p)
-        val (write, newMark) = com.husarp.lockdown.engine.grayscaleStep(wanted(ctx), Store.config.settings.bedtimeGrayscale, mark, isOn(ctx))
-        // Taking the screen over: keep its colour correction as it is now, to put back at wake time.
-        if (newMark == true && mark != true) keepPrev(ctx)
+        val on = isOn(ctx)
+        val (write, newMark) = com.husarp.lockdown.engine.grayscaleStep(wanted(ctx), Store.config.settings.bedtimeGrayscale, mark, on)
+        // Taking the screen over: keep its colour correction as it is now, to put back at wake time. Grey already on
+        // after Lockdown's last colour-back (mark false) is the user's own.
+        if (newMark == true && mark != true) keepPrev(ctx, ownGrey = mark == false && on == true)
         // The mark only changes once Android took the write (and the screen shows it): refused, it is tried again next minute.
         val ok = when (write) {
             true -> runCatching {
@@ -108,38 +111,41 @@ object Grayscale {
         if (ok && newMark != null && newMark != mark) p.edit().putBoolean(APPLIED, newMark).apply()
     }
 
-    private fun keepPrev(ctx: Context) {
+    private fun keepPrev(ctx: Context, ownGrey: Boolean) {
         val cr = ctx.contentResolver
         val enabled = runCatching { android.provider.Settings.Secure.getInt(cr, ENABLED, 0) }.getOrNull()
         val mode = runCatching { android.provider.Settings.Secure.getString(cr, MODE)?.toIntOrNull() }.getOrNull()
         prefs(ctx).edit().apply {
             if (enabled != null) putInt(PREV_ENABLED, enabled) else remove(PREV_ENABLED)
             if (mode != null) putInt(PREV_MODE, mode) else remove(PREV_MODE)
+            putBoolean(PREV_OWN, ownGrey)
         }.apply()
     }
 
     /** Colour back, with the colour correction as it was before ([com.husarp.lockdown.engine.grayscaleRestore]). True once Android took it and
-     *  the screen isn't grey any more. */
+     *  the screen shows it (not grey any more, or grey again when that was the user's own). */
     private fun restore(ctx: Context): Boolean {
         val p = prefs(ctx)
         val (enabled, mode) = com.husarp.lockdown.engine.grayscaleRestore(
             if (p.contains(PREV_ENABLED)) p.getInt(PREV_ENABLED, 0) else null,
             if (p.contains(PREV_MODE)) p.getInt(PREV_MODE, 0) else null,
+            p.getBoolean(PREV_OWN, false),
         )
+        val grey = enabled == 1 && mode == com.husarp.lockdown.engine.DALTONIZER_GRAYSCALE
         val cr = ctx.contentResolver
         val ok = runCatching {
             // grayscale off first; the user's own correction gets its mode back before it's switched on
             if (enabled == 0) android.provider.Settings.Secure.putInt(cr, ENABLED, 0) && android.provider.Settings.Secure.putInt(cr, MODE, mode)
             else android.provider.Settings.Secure.putInt(cr, MODE, mode) && android.provider.Settings.Secure.putInt(cr, ENABLED, 1)
-        }.getOrDefault(false) && isOn(ctx) != true
-        if (ok) p.edit().remove(PREV_ENABLED).remove(PREV_MODE).apply()
+        }.getOrDefault(false) && isOn(ctx) != !grey
+        if (ok) p.edit().remove(PREV_ENABLED).remove(PREV_MODE).remove(PREV_OWN).apply()
         return ok
     }
 
     /**
      * The grayscale switch (or Bedtime) was switched off by hand: colour back now, even if the mark that Lockdown
      * turned it on is missing. Only grayscale is touched, never another colour correction (one from before bedtime
-     * comes back). False when Android refused (the permission is missing) - then it says so.
+     * comes back, also grayscale the user had on themselves). False when Android refused (the permission is missing) - then it says so.
      */
     @Synchronized fun switchedOff(ctx: Context): Boolean {
         if (otherProfile(ctx)) {

@@ -69,21 +69,25 @@ const val DALTONIZER_DEFAULT = 12
 
 /**
  * What Lockdown writes to give the colour back: (correction on 1/0, mode). [prevEnabled] and [prevMode] are the
- * colour-correction settings from just before Lockdown took the screen over (null = unknown or never set). A colour
- * correction of the user's own (not grayscale) comes back as it was. Otherwise correction goes off, and the mode is
- * never left on grayscale: Android's Colour correction switch, tile or shortcut would turn the screen grey again
- * later, and some phones read the mode alone. Grayscale that was already on when bedtime took it over goes off too
- * (it can't be told apart from grey an older copy left on).
+ * colour-correction settings from just before Lockdown took the screen over (null = unknown; a mode never set is
+ * Android's default). A colour correction of the user's own (not grayscale) comes back as it was. Otherwise
+ * correction goes off, and the mode is never left on grayscale: Android's Colour correction switch, tile or shortcut
+ * would turn the screen grey again later, and some phones read the mode alone. Grayscale that was already on when
+ * bedtime took it over goes off too (it can't be told apart from grey an older copy left on), unless [ownGrey]:
+ * Lockdown's last step was giving the colour back, so that grey was the user's own - it comes back as it was.
  */
-fun grayscaleRestore(prevEnabled: Int?, prevMode: Int?): Pair<Int, Int> {
-    val own = prevEnabled == 1 && prevMode != null && prevMode != DALTONIZER_GRAYSCALE
-    return (if (own) 1 else 0) to (prevMode?.takeIf { it != DALTONIZER_GRAYSCALE } ?: DALTONIZER_DEFAULT)
+fun grayscaleRestore(prevEnabled: Int?, prevMode: Int?, ownGrey: Boolean = false): Pair<Int, Int> {
+    val mode = prevMode ?: DALTONIZER_DEFAULT
+    if (ownGrey && prevEnabled == 1 && mode == DALTONIZER_GRAYSCALE) return 1 to DALTONIZER_GRAYSCALE
+    val own = prevEnabled == 1 && mode != DALTONIZER_GRAYSCALE
+    return (if (own) 1 else 0) to (if (mode == DALTONIZER_GRAYSCALE) DALTONIZER_DEFAULT else mode)
 }
 
-/** The screen is grey outside bedtime and it may be Lockdown's doing (its mark, or the bedtime grayscale switch is
- *  on): the app offers "Turn grayscale off now". Grayscale the user set with the switch off is left alone. */
+/** The screen is grey outside bedtime and it may be Lockdown's doing (its mark, or no mark and the bedtime grayscale
+ *  switch on): the app offers "Turn grayscale off now". Grayscale the user set after Lockdown gave the colour back
+ *  (mark false), or with the switch off, is left alone. */
 fun grayscaleStuck(wanted: Boolean, switchOn: Boolean, mark: Boolean?, isOn: Boolean?): Boolean =
-    isOn == true && !wanted && (switchOn || mark == true)
+    isOn == true && !wanted && (mark == true || (mark == null && switchOn))
 
 @Serializable
 data class BreakCfg(
