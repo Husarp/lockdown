@@ -116,8 +116,10 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
             // Candidates: apps + items not already blocked-forever + current members. The thousands of permanently
             // blocked imported sites are hidden here — grouping something already blocked forever does nothing.
             // Then the installed apps not on the list yet (the search used to find only items, so nothing came up).
+            // With nothing typed only the current members show; past items come up as suggestions once you type.
             val candidates = (cfg.items + newApps).filter {
-                (it.type == ItemType.APP || it.rules.none { r -> r.type == RuleType.PERMANENT } || it.id in draft.memberIds) &&
+                if (pick.isBlank()) it.id in draft.memberIds
+                else (it.type == ItemType.APP || it.rules.none { r -> r.type == RuleType.PERMANENT } || it.id in draft.memberIds) &&
                     (it.name.contains(pick, true) || it.target.contains(pick, true))
             }
             val pending = newApps.mapTo(HashSet()) { it.target.lowercase() }
@@ -126,7 +128,8 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                     (a.label.contains(pick, true) || a.pkg.contains(pick, true))
             }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
-                if (candidates.isEmpty() && apps.isEmpty()) Text("Nothing matches. Add a site below.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                if (pick.isBlank()) Text("Type to find apps or sites.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                else if (candidates.isEmpty() && apps.isEmpty()) Text("Nothing matches. Add a site below.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
                 // one list in name order: an app already on your list sits in its place among the others, not apart
                 val rows = (candidates.map { it.name to it } + apps.map { it.label to it }).sortedBy { it.first.lowercase() }.map { it.second }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {

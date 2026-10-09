@@ -128,7 +128,8 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
             SectionLabel("Also block these")
             var pick by remember { mutableStateOf("") }
             OutlinedTextField(pick, { pick = it }, placeholder = { Text("Search apps & items") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            val shown = cfg.items.filter { it.name.contains(pick, true) || it.target.contains(pick, true) }
+            // With nothing typed only what this mode already blocks shows; the rest comes up as suggestions once you type.
+            val shown = cfg.items.filter { if (pick.isBlank()) it.id in draft.items else it.name.contains(pick, true) || it.target.contains(pick, true) }
             // Installed apps that aren't on the blocklist can be blocked by the mode too (as a mode extra): the
             // search used to look only at the list, so an app not on it never came up.
             // (Shown once something is typed - the hundreds of installed apps would bury the list - or when already picked.)
@@ -136,9 +137,10 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
             val listedPkgs = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.mapTo(HashSet()) { it.target.lowercase() } }
             fun isExtra(pkg: String) = draft.extra.any { it.kind == ItemType.APP && it.targets == listOf(pkg) }
             val apps = installed.filter { a -> a.pkg.lowercase() !in listedPkgs &&
-                ((pick.isNotBlank() && (a.label.contains(pick, true) || a.pkg.contains(pick, true))) || isExtra(a.pkg)) }
+                (if (pick.isBlank()) isExtra(a.pkg) else a.label.contains(pick, true) || a.pkg.contains(pick, true)) }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
-                if (shown.isEmpty() && apps.isEmpty()) Text("Nothing matches.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                if (pick.isBlank()) Text("Type to find apps or sites.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                else if (shown.isEmpty() && apps.isEmpty()) Text("Nothing matches.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
                 // one list in name order: an app already on your list sits in its place among the others, not apart
                 val rows = (shown.map { it.name to it } + apps.map { it.label to it }).sortedBy { it.first.lowercase() }.map { it.second }
                 androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
