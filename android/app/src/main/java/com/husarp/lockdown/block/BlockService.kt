@@ -27,6 +27,7 @@ import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
+import com.husarp.lockdown.engine.Browsers
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Rules
@@ -134,7 +135,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
         // The address bar is hidden in a full-screen video: keep the last address read, don't lose the site.
         if (isBrowser(pkg)) readBar(pkg)
-        val host = if (isBrowser(pkg)) hostOf(lastUrl[pkg]) else null
+        val host = if (isBrowser(pkg)) Browsers.hostOf(pkg, lastUrl[pkg]) else null
         val appItem = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
         val siteItem = host?.let { h -> cfg.items.firstOrNull { it.type == ItemType.SITE && !it.disabled && Enforce.hostMatches(it.target, h) } }
         inUseIds = setOfNotNull(appItem?.takeIf { !it.disabled }?.id, siteItem?.id)
@@ -241,7 +242,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         return pm.isInteractive && !km.isKeyguardLocked
     }
 
-    private fun readBar(pkg: String) { browserBarText()?.let { lastUrl[pkg] = it } }
+    private fun readBar(pkg: String) { browserBarText(pkg)?.let { lastUrl[pkg] = it } }
 
     // Everything here is wrapped: an uncaught exception in an accessibility callback makes Android DISABLE the
     // service (the "it keeps losing the grant" symptom). Nothing this service does is worth that.
@@ -261,7 +262,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             val ms = System.currentTimeMillis()
             if (ms - lastBarRead < 400) return@runCatching
             lastBarRead = ms
-            val text = browserBarText()
+            val text = browserBarText(pkg)
             if (text != null) lastUrl[pkg] = text
             // keyword blocking: watch the address / search bar and block on a match
             val cfg = Store.config
@@ -286,9 +287,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         return pkg in keyboards
     }
 
-    private fun browserBarText(): String? {
+    private fun browserBarText(pkg: String): String? {
         val root = rootInActiveWindow ?: return null
-        for (id in URL_BAR_IDS) {
+        for (id in Browsers.barIds(pkg)) {
             val nodes = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull() ?: continue
             nodes.firstOrNull()?.text?.let { return it.toString() }
         }
@@ -623,29 +624,6 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
         fun settingsIntent() = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
 
-        private fun hostOf(text: String?): String? {
-            val t = text?.trim()?.lowercase() ?: return null
-            if (t.isEmpty() || " " in t) return null                 // a search phrase, not a host
-            val noScheme = t.substringAfter("://", t)
-            val host = noScheme.substringBefore('/').substringBefore('?').removePrefix("www.")
-            return if ("." in host) host else null
-        }
-
-        private fun isBrowser(pkg: String) = pkg in BROWSERS
-
-        private val BROWSERS = setOf(
-            "com.android.chrome", "com.brave.browser", "com.brave.browser.bt1", "com.microsoft.emmx",
-            "com.sec.android.app.sbrowser", "org.mozilla.firefox", "com.opera.browser", "com.duckduckgo.mobile.android",
-        )
-
-        private val URL_BAR_IDS = listOf(
-            "com.android.chrome:id/url_bar",
-            "com.brave.browser:id/url_bar",
-            "com.brave.browser.bt1:id/url_bar",
-            "com.microsoft.emmx:id/url_bar",
-            "com.sec.android.app.sbrowser:id/location_bar_edit_text",
-            "org.mozilla.firefox:id/mozac_browser_toolbar_url_view",
-            "org.mozilla.firefox:id/url_bar_title",
-        )
+        private fun isBrowser(pkg: String) = Browsers.isBrowser(pkg)
     }
 }

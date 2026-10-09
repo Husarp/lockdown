@@ -2,8 +2,11 @@ package com.husarp.lockdown
 
 import com.husarp.lockdown.vpn.Dns
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.ByteBuffer
 
 class DnsTest {
 
@@ -14,6 +17,7 @@ class DnsTest {
         assertEquals("strict.bing.com", Dns.safeHost("bing.com"))
         assertEquals("safe.duckduckgo.com", Dns.safeHost("duckduckgo.com"))
         assertEquals("restrictmoderate.youtube.com", Dns.safeHost("m.youtube.com"))
+        assertEquals("restrictmoderate.youtube.com", Dns.safeHost("www.youtube-nocookie.com"))   // Duck Player
         assertNull(Dns.safeHost("example.com"))
         assertNull(Dns.safeHost("notgoogle.com"))
     }
@@ -51,5 +55,31 @@ class DnsTest {
         val ips = Dns.extractA(ans)
         assertEquals(1, ips.size)
         assertEquals(listOf(1, 2, 3, 4), ips[0].map { it.toInt() and 0xFF })
+    }
+
+    @Test fun encrypted_dns_servers_are_known_with_their_subdomains() {
+        for (h in listOf("dns.google", "chrome.cloudflare-dns.com", "mozilla.cloudflare-dns.com", "one.one.one.one",
+            "dns.quad9.net", "abc123.dns.nextdns.io", "family.adguard-dns.com", "doh.opendns.com", "DNS.Google.",
+            "use-application-dns.net"))
+            assertTrue(h, Dns.encryptedDns(h))
+        for (h in listOf("google.com", "www.google.com", "cloudflare.com", "nextdns.io", "quad9.net", "example.com",
+            "notdns.google", "dns.google.evil.com", "duckduckgo.com", "com", ""))
+            assertFalse(h, Dns.encryptedDns(h))
+    }
+
+    /** An IPv4 packet: 20-byte header with [proto], then a transport header with [dstPort], padded to 60 bytes. */
+    private fun packet(proto: Int, dstPort: Int): ByteBuffer {
+        val b = ByteBuffer.allocate(60)
+        b.put(0, 0x45.toByte()); b.put(9, proto.toByte())
+        b.putShort(20, 40000.toShort()); b.putShort(22, dstPort.toShort())
+        return b
+    }
+
+    @Test fun only_udp_53_is_a_query() {
+        assertTrue(Dns.isQuery(packet(17, 53), 60))
+        assertFalse(Dns.isQuery(packet(6, 853), 60))      // Android's DNS-over-TLS probe of the sentinel
+        assertFalse(Dns.isQuery(packet(6, 53), 60))       // DNS over TCP
+        assertFalse(Dns.isQuery(packet(17, 443), 60))     // QUIC
+        assertFalse(Dns.isQuery(packet(17, 53), 30))      // too short to hold a DNS header
     }
 }

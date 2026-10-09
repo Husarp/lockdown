@@ -19,4 +19,11 @@ object Sites {
 
     /** A box for a site or a word: with a dot it is a site, so its spaces go; a word or phrase keeps them. */
     fun cleanIfSite(raw: String): String = if ('.' in raw) raw.filterNot(Char::isWhitespace) else raw
+
+    /** The site [host] really is, when it's another site under a different name, else null: YouTube's privacy
+     *  player (youtube-nocookie.com, which DuckDuckGo's Duck Player plays from) is youtube.com. */
+    fun alias(host: String): String? {
+        val h = host.lowercase()
+        return if (h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com")) "youtube.com" else null
+    }
 }

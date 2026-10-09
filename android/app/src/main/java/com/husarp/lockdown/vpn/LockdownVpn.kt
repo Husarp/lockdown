@@ -73,6 +73,7 @@ class LockdownVpn : VpnService() {
         out = FileOutputStream(fd.fileDescriptor)
         running = true
         active = true
+        runCatching { getSystemService(NotificationManager::class.java).cancel(REVOKED_ID) }   // running again
         watchNetwork()
         Store.update { it.copy(settings = it.settings.copy(siteFilterOn = true)) }
         thread(name = "lockdown-vpn") { loop(FileInputStream(fd.fileDescriptor)) }
@@ -90,15 +91,17 @@ class LockdownVpn : VpnService() {
 
     private fun handle(packet: ByteBuffer, len: Int) {
         if ((packet.get(0).toInt() ushr 4) != 4) return          // IPv4 only
+        if (!Dns.isQuery(packet, len)) return                     // not DNS (Android's DNS-over-TLS probe): dropped
         val cfg = Store.config
         val host = Dns.queriedName(packet, len) ?: return
         val nowLdt = Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(this))
         val mode = ModesStore.current(nowLdt)
         // A blocked site is cut off here only when its block method includes "cut the connection" ("dns", the
         // default); "go back" / "close" alone are done by the accessibility service in the browser.
+        // A browser's own "secure DNS" server is cut off too, so it looks names up here, where they're filtered.
         val verdict = Enforce.site(cfg, host, nowLdt, mode)
         val blocked = (verdict != null && "dns" in Enforce.siteFlags(verdict.blockType)) ||
-            (cfg.enabled && com.husarp.lockdown.block.Protection.blocked(host))
+            (cfg.enabled && (com.husarp.lockdown.block.Protection.blocked(host) || Dns.encryptedDns(host)))
         if (cfg.settings.networkLog) NetLog.add(host, blocked)
         if (blocked) {
             write(Dns.nxdomain(packet, len))
@@ -239,7 +242,26 @@ class LockdownVpn : VpnService() {
         super.onDestroy()
     }
 
-    override fun onRevoke() { stop() }
+    // Android runs one VPN at a time: another VPN app took over (DuckDuckGo's App Tracking Protection is one), or it
+    // was disconnected in Android's settings. The filter stops as before, but says so instead of going quietly.
+    override fun onRevoke() { revokedNotice(); stop() }
+
+    private fun revokedNotice() = runCatching {
+        val text = "Another VPN app took over (Android runs one at a time, and DuckDuckGo's App Tracking Protection " +
+            "is one), or it was disconnected in Android. Turn it back on in Lockdown > Settings."
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        getSystemService(NotificationManager::class.java).notify(REVOKED_ID, Notification.Builder(this, CHANNEL)
+            .setContentTitle("Site filter stopped")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build())
+    }
 
     private fun notification(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
@@ -270,6 +292,7 @@ class LockdownVpn : VpnService() {
         private val DOH = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")   // DoH endpoints (valid TLS certs for these IPs)
         private const val CHANNEL = "site_filter"
         private const val NOTIF_ID = 42
+        private const val REVOKED_ID = 44
         const val STOP = "com.husarp.lockdown.vpn.STOP"
 
         @Volatile var active = false

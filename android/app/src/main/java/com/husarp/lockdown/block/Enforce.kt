@@ -100,6 +100,8 @@ object Enforce {
      *  time-limited / scheduled / mode-blocked sites that DNS can't express, while a browser shows them.) */
     fun site(cfg: Config, host: String, now: LocalDateTime, mode: ModeState?): Verdict? {
         if (!cfg.enabled || paused(cfg, now)) return null
+        // a site under another name goes with it: YouTube's privacy player (DuckDuckGo's Duck Player) is youtube.com
+        com.husarp.lockdown.engine.Sites.alias(host)?.let { real -> site(cfg, real, now, mode)?.let { return it } }
         // An emergency unlock frees a site as it does an app (PC): here, in the browser and in the site filter (the VPN
         // asks this too), for the unlock's length. Never a permanent block (Rules.itemBlock keeps those). Every item
         // matching the host counts: an unlocked "reddit.com" doesn't free a blocked "old.reddit.com".

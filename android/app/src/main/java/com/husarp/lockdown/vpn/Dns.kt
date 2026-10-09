@@ -9,6 +9,47 @@ import java.nio.ByteBuffer
  */
 object Dns {
 
+    /** A UDP packet to port 53 - a DNS query. Nothing else is for us: Android's DNS-over-TLS probe of the sentinel
+     *  (TCP 853) or DNS over TCP is dropped (it used to be read as a junk query and forwarded), so Android goes on
+     *  with plain DNS, which is filtered. */
+    fun isQuery(ip: ByteBuffer, len: Int): Boolean = runCatching {
+        val ihl = (ip.get(0).toInt() and 0x0F) * 4
+        val port = ((ip.get(ihl + 2).toInt() and 0xFF) shl 8) or (ip.get(ihl + 3).toInt() and 0xFF)
+        ip.get(9).toInt() == 17 && len >= ihl + 8 + 12 && port == 53
+    }.getOrDefault(false)
+
+    // ---- Encrypted DNS: a browser or app that looks names up itself (DNS-over-HTTPS / -TLS / -QUIC) goes around
+    // the filter. Its server's name doesn't resolve here, so it falls back to the phone's DNS - which is filtered. ----
+
+    private val ENCRYPTED_DNS = setOf(
+        "use-application-dns.net",                                          // Firefox's canary: no automatic DoH here
+        "dns.google", "dns.google.com", "8888.google",                      // Google
+        "cloudflare-dns.com", "one.one.one.one",                            // Cloudflare (chrome., mozilla., family., ...)
+        "dns.quad9.net", "dns9.quad9.net", "dns10.quad9.net", "dns11.quad9.net", "dns12.quad9.net",
+        "doh.opendns.com", "doh.familyshield.opendns.com", "dns.opendns.com",
+        "dns.nextdns.io",                                                   // NextDNS (chromium., firefox., your own id)
+        "dns.adguard.com", "dns-family.adguard.com", "dns-unfiltered.adguard.com", "adguard-dns.com",
+        "doh.cleanbrowsing.org", "security-filter-dns.cleanbrowsing.org", "family-filter-dns.cleanbrowsing.org",
+        "adult-filter-dns.cleanbrowsing.org",
+        "dns.mullvad.net", "doh.mullvad.net", "freedns.controld.com", "dns.controld.com",
+        "doh.xfinity.com", "dot.xfinity.com", "doh.cox.net", "dot.cox.net", "doh-01.spectrum.com", "doh-02.spectrum.com",
+        "dns.sb", "odvr.nic.cz", "public.dns.iij.jp", "dns.switch.ch", "doh.quickline.ch", "dot.quickline.ch",
+        "dns.levonet.sk", "canadianshield.cira.ca", "dns.alidns.com", "doh.pub", "dot.pub",
+        "protective.joindns4.eu", "unfiltered.joindns4.eu", "child.joindns4.eu", "noads.joindns4.eu", "child-noads.joindns4.eu",
+    )
+
+    /** [host] is a public encrypted-DNS server (or Firefox's canary), as the browsers' "Secure DNS" menus and Android's
+     *  Private DNS name them; a name matches its subdomains too. */
+    fun encryptedDns(host: String): Boolean {
+        var h = host.lowercase().trimEnd('.')
+        while (true) {
+            if (h in ENCRYPTED_DNS) return true
+            val dot = h.indexOf('.')
+            if (dot < 0) return false
+            h = h.substring(dot + 1)
+        }
+    }
+
     /** The domain asked about in a DNS query packet (full IPv4/UDP/DNS bytes), or null if unparseable. */
     fun queriedName(ip: ByteBuffer, len: Int): String? = runCatching {
         val ihl = (ip.get(0).toInt() and 0x0F) * 4
@@ -94,7 +135,8 @@ object Dns {
             GOOGLE.matches(h) -> "forcesafesearch.google.com"
             h == "bing.com" || h == "www.bing.com" -> "strict.bing.com"
             h == "duckduckgo.com" || h == "www.duckduckgo.com" -> "safe.duckduckgo.com"
-            h == "youtube.com" || h == "www.youtube.com" || h == "m.youtube.com" -> "restrictmoderate.youtube.com"
+            h == "youtube.com" || h == "www.youtube.com" || h == "m.youtube.com" ||
+                h == "www.youtube-nocookie.com" -> "restrictmoderate.youtube.com"   // (Duck Player plays from youtube-nocookie)
             else -> null
         }
     }
