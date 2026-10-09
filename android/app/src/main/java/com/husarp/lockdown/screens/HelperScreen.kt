@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,8 +33,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
+import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.Pause
 import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.guard.Perms
+import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.link.LinkService
 import com.husarp.lockdown.usage.Usage
@@ -74,6 +78,18 @@ fun HelperScreen() {
                     if (st.cfgError) Text("Couldn't read the latest rules: update Lockdown here. Still blocking with the earlier ones.",
                         style = MaterialTheme.typography.bodySmall, color = cs.error)
                     if (st.mainApp > mine) Text("Update Lockdown here: your main Lockdown is newer.", style = MaterialTheme.typography.bodySmall, color = cs.error)
+                }
+            }
+
+            // "Pause my blocks" from main (it comes with the rules), in trusted time like main's banner
+            val cfg by Store.state.collectAsStateWithLifecycle()
+            val pausedUntil = remember(cfg.pause, now) { Pause.until(cfg.pause, TrustedTime.local(ctx)) }
+            if (pausedUntil != null) Card(colors = CardDefaults.cardColors(containerColor = cs.primaryContainer, contentColor = cs.onPrimaryContainer)) {
+                Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Blocks paused · back on at %02d:%02d".format(pausedUntil.hour, pausedUntil.minute) +
+                        if (cfg.pause?.silent == true) " · alerts silenced" else "",
+                        style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { IslandLink.endPause() }) { Text("Resume now") }
                 }
             }
 

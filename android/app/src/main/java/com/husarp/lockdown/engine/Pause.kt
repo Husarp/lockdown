@@ -55,5 +55,10 @@ object Pause {
     fun start(now: LocalDateTime, minutes: Int?, silent: Boolean, reset: LocalTime): BlockPause =
         BlockPause(now.toString(), endFor(minutes, now, reset).toString(), silent)
 
+    /** Main, on "Resume now" from the linked Island helper: [current] ends only when it is exactly the pause the
+     *  helper [asked] to end; anything else (none asked, another pause started since) stays as it is. Never starts
+     *  or lengthens one. */
+    fun endEarly(current: BlockPause?, asked: BlockPause?): BlockPause? = if (asked != null && current == asked) null else current
+
     fun label(minutes: Int?): String = DURATIONS.entries.first { it.value == minutes }.key
 }

@@ -226,4 +226,20 @@ class PauseAndTimeTest {
         assertEquals("America/New_York", other.pending)
         assertEquals(2_000, other.since)
     }
+
+    @Test fun helperResumeEndsOnlyThatPauseNeverStartsOrLengthensOne() {
+        val p = Pause.start(t0, 60, silent = true, reset = LocalTime.of(4, 0))
+        assertNull(Pause.endEarly(p, p))                                                   // the same pause: ended
+        assertNull(Pause.endEarly(p, p.copy()))                                            // (equal by value, as sent)
+        assertEquals(p, Pause.endEarly(p, null))                                           // nothing asked: as it was
+        assertNull(Pause.endEarly(null, p))                                                // none running: still none
+        val newer = Pause.start(t0.plusMinutes(10), 240, silent = false, reset = LocalTime.of(4, 0))
+        assertEquals(newer, Pause.endEarly(newer, p))                                      // a newer pause isn't ended by an old ask
+        // a forged ask can't lengthen or change one: anything but the exact running pause leaves it untouched
+        assertEquals(p, Pause.endEarly(p, p.copy(until = t0.plusHours(20).toString())))
+        assertEquals(p, Pause.endEarly(p, p.copy(silent = false)))
+        // and it never hands back anything but the running pause or none
+        for (asked in listOf(null, p, newer, p.copy(started = t0.minusHours(1).toString())))
+            assertTrue(Pause.endEarly(p, asked).let { it == null || it == p })
+    }
 }

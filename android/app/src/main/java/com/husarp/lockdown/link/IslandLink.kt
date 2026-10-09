@@ -295,6 +295,12 @@ object IslandLink {
         islandFront = body.front
         islandFrontAt = SystemClock.elapsedRealtime()
         body.apps?.let { saveIslandApps(it) }
+        // "Resume now" in Island: ends only the pause it names (a tightening, no challenge); never starts or lengthens one.
+        body.endPause?.let { asked ->
+            val before = Store.config.pause
+            Store.update { it.copy(pause = com.husarp.lockdown.engine.Pause.endEarly(it.pause, asked)) }
+            if (Store.config.pause != before) runCatching { Grayscale.sync(app) }
+        }
 
         val cfg = Store.config
         val now = Enforce.ldt(TrustedTime.now(app))
@@ -392,6 +398,20 @@ object IslandLink {
     @Volatile private var modesHash = ""
     @Volatile private var cfgFailed: String? = null
     @Volatile private var appsCache: Pair<Long, List<IslandApp>>? = null
+    /** "Resume now" tapped here: the pause to end, sent to main until it answers. */
+    @Volatile private var endPauseAsked: com.husarp.lockdown.engine.BlockPause? = null
+
+    /** Helper: "Resume now". Blocking comes back here at once; main is asked to end the same pause (only that one),
+     *  and its rules are taken whole again on the next sync, so this copy shows what main really has. */
+    fun endPause() = thread(isDaemon = true, name = "lockdown-link-resume") {
+        synchronized(clientLock) {              // not in the middle of a sync, which could put the old rules back
+            val p = Store.config.pause ?: return@thread
+            endPauseAsked = p
+            Store.update { it.copy(pause = null) }
+            cfgHash = ""
+        }
+        kick()
+    }
 
     /** The app in front in this profile (helper), from its usage events. */
     @Volatile var localFront: String? = null
@@ -513,18 +533,21 @@ object IslandLink {
             }) return
         val st = helperState ?: return
         val batch = UsageStore.inflight
+        var asked: com.husarp.lockdown.engine.BlockPause? = null
         val apps = islandApps(ctx)
         val appsHash = LinkCrypto.sha256(apps.joinToString("\n") { it.pkg + "\t" + it.label })
         val body = json.encodeToString(SyncBody(
             seq = batch?.seq ?: 0, deltas = batch?.deltas ?: emptyMap(),
             cfg = cfgFailed ?: cfgHash, modes = modesHash, front = localFront, app = versionCode(ctx),
             cfgError = cfgFailed != null, apps = apps.takeIf { appsHash != st.appsHash }, canBlock = canBlock(ctx),
+            endPause = endPauseAsked.also { asked = it },
         ))
         val (reply, problem) = exchange(st.port,
             { nM, nH -> LinkProtocol.signed("sync", secret, LinkProtocol.H2M, nM, nH, body) },
         ) { r, nM, nH -> r.t == "state" && LinkProtocol.verify(r, secret, LinkProtocol.M2H, nM, nH) }
         if (reply == null) { _status.value = _status.value.copy(problem = problem); return }
         val sb = json.decodeFromString<StateBody>(reply.frame.body!!)
+        if (asked != null && endPauseAsked == asked) endPauseAsked = null      // main has had it (applied, or a newer pause there)
         if (sb.unlink) {
             // Say bye (signed), so main drops the link only once this copy has the unlink. If it doesn't arrive,
             // main keeps "Unlinking" and its Forget Island now.
