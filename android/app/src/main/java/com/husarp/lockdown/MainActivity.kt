@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         com.husarp.lockdown.remind.ReminderRunner.appVisible = true
         com.husarp.lockdown.update.Updates.onResume(this)
+        runCatching { com.husarp.lockdown.remind.Grayscale.sync(this) }   // a grey screen left on outside bedtime clears on open
     }
 
     override fun onNewIntent(intent: Intent) {

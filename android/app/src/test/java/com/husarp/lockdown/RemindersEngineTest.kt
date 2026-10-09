@@ -6,7 +6,9 @@ import com.husarp.lockdown.engine.ReminderTier
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.engine.SleepCfg
 import com.husarp.lockdown.engine.bedtimeGrayscaleWanted
+import com.husarp.lockdown.engine.grayscaleRestore
 import com.husarp.lockdown.engine.grayscaleStep
+import com.husarp.lockdown.engine.grayscaleStuck
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -330,7 +332,49 @@ class RemindersEngineTest {
         assertEquals(true to true, grayscaleStep(wanted = true, switchOn = true, mark = true, isOn = null))     // can't tell: write
         assertEquals(false to false, grayscaleStep(wanted = false, switchOn = true, mark = true, isOn = true))  // wake time
         assertEquals(false to false, grayscaleStep(wanted = false, switchOn = false, mark = true, isOn = true)) // switch off at night
-        assertEquals(null to false, grayscaleStep(wanted = false, switchOn = true, mark = true, isOn = false))  // already off
+        // Lockdown's grey went off some other way (Android's Colour correction tile): still undone once, so the
+        // mode it set to grayscale goes back too - then nothing more is written
+        assertEquals(false to false, grayscaleStep(wanted = false, switchOn = true, mark = true, isOn = false))
+        assertEquals(null to false, grayscaleStep(wanted = false, switchOn = true, mark = false, isOn = false))
+    }
+
+    @Test fun grayscale_off_puts_back_the_colour_correction_from_before() {
+        assertEquals(0 to 12, grayscaleRestore(prevEnabled = 0, prevMode = null))   // never set: off, Android's default mode
+        assertEquals(0 to 12, grayscaleRestore(prevEnabled = null, prevMode = null)) // Android wouldn't say
+        assertEquals(0 to 12, grayscaleRestore(prevEnabled = 0, prevMode = 0))       // the mode is never left on grayscale
+        assertEquals(0 to 11, grayscaleRestore(prevEnabled = 0, prevMode = 11))      // the user's chosen mode kept
+        assertEquals(0 to -1, grayscaleRestore(prevEnabled = 0, prevMode = -1))      // a phone that stores "off" as -1
+        assertEquals(1 to 13, grayscaleRestore(prevEnabled = 1, prevMode = 13))      // the user's own correction comes back on
+        assertEquals(0 to 12, grayscaleRestore(prevEnabled = 1, prevMode = 0))       // grey already on at bedtime: colour back
+    }
+
+    @Test fun a_whole_night_ends_with_the_screen_as_it_was() {
+        // a tiny phone: (correction on, mode); the steps as Grayscale.sync runs them
+        var enabled = 1; var mode: Int? = 13                                       // the user's own correction
+        fun isOn() = enabled == 1 && mode == 0
+        var mark: Boolean? = null; var prev: Pair<Int, Int?>? = null
+        fun tick(wanted: Boolean) {
+            val (write, newMark) = grayscaleStep(wanted, switchOn = true, mark = mark, isOn = isOn())
+            if (newMark == true && mark != true) prev = enabled to mode
+            if (write == true) { mode = 0; enabled = 1 }
+            if (write == false) grayscaleRestore(prev?.first, prev?.second).let { enabled = it.first; mode = it.second; prev = null }
+            if (newMark != null) mark = newMark
+        }
+        tick(wanted = false); assertEquals(1 to 13, enabled to mode)               // evening: untouched
+        tick(wanted = true); assertTrue(isOn())                                     // bedtime: grey
+        enabled = 0; tick(wanted = true); assertTrue(isOn())                        // switched off in Android at night: back
+        tick(wanted = false); assertEquals(1 to 13, enabled to mode)               // wake: exactly as before
+        tick(wanted = false); assertEquals(1 to 13, enabled to mode)               // and left alone after
+        assertEquals(false, mark)
+    }
+
+    @Test fun turn_grayscale_off_now_shows_only_when_grey_outside_bedtime_and_maybe_ours() {
+        assertTrue(grayscaleStuck(wanted = false, switchOn = true, mark = false, isOn = true))   // grey in the day, switch on
+        assertTrue(grayscaleStuck(wanted = false, switchOn = false, mark = true, isOn = true))   // ours, switch already off
+        assertFalse(grayscaleStuck(wanted = true, switchOn = true, mark = true, isOn = true))    // bedtime: no way around it
+        assertFalse(grayscaleStuck(wanted = false, switchOn = false, mark = false, isOn = true)) // the user's own, switch off
+        assertFalse(grayscaleStuck(wanted = false, switchOn = true, mark = true, isOn = false))  // colour is back
+        assertFalse(grayscaleStuck(wanted = false, switchOn = true, mark = true, isOn = null))   // Android won't say
     }
 
     @Test fun bedtime_steps_follow_the_bedtime() {

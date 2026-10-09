@@ -75,6 +75,7 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         com.husarp.lockdown.update.UpdateBanner()
+        GrayscaleStuck()
 
         // Hero
         Card(color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, shape = MaterialTheme.shapes.extraLarge) {

@@ -377,7 +377,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         override fun run() {
             runCatching {
                 val ms = SystemClock.elapsedRealtime()
-                if (screenInUse()) lastInUse = ms
+                val inUse = screenInUse()
+                // Unlocked after a while (the night): bedtime grayscale right away, not up to a minute later
+                if (inUse && ms - lastInUse > 15_000) runCatching { Grayscale.sync(this@BlockService) }
+                if (inUse) lastInUse = ms
                 val dt = ((ms - lastRemindTick) / 1000.0).coerceIn(0.0, 15.0)   // (a long gap was the phone asleep)
                 lastRemindTick = ms
                 ReminderRunner.tick(this@BlockService, (ms - lastInUse) / 1000.0, dt)

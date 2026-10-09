@@ -12,6 +12,7 @@
 - **Island:** a **Copy** button next to the link code, and **Paste** in the code box of Lockdown in Island.
 - **Guardrails shows when Lockdown was installed and when Island was linked**, so a reinstall or reset shows up. Lockdown in Island shows the same.
 - The "Uninstall protection" check's **Fix** now opens Android's device admin screen (it did nothing), and turns the Uninstall protection switch on with it, so the two agree.
+- **Bedtime grayscale turns off more reliably.** It's checked as soon as you unlock and when you open the app, and at wake-up your colour correction goes back to how it was before bedtime (the mode is no longer left on grayscale, so Android's Colour correction tile doesn't turn the screen grey later). If the screen is still grey outside bedtime, Home shows **Turn grayscale off now**.
 
 ## 0.5.14 - 2026-10-03 22:26
 Bedtime, breaks, reminders, rules, protection, notifications and Insights now work like on the PC. If you use the Island link, update both copies: an older copy ignores the new settings.
