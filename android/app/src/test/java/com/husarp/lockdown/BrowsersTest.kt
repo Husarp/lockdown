@@ -28,6 +28,16 @@ class BrowsersTest {
         assertTrue(Browsers.isBrowser("com.opera.browser"))
     }
 
+    @Test fun browser_versions_and_forks_are_watched_with_their_familys_bar() {
+        for (p in listOf("com.chrome.beta", "com.chrome.canary", "com.kiwibrowser.browser", "com.vivaldi.browser",
+                "org.cromite.cromite", "com.brave.browser_nightly", "com.microsoft.emmx.beta"))
+            assertEquals(p, listOf("$p:id/url_bar"), Browsers.barIds(p))
+        for (p in listOf("org.mozilla.fenix", "org.mozilla.firefox_beta", "org.mozilla.focus", "org.torproject.torbrowser"))
+            assertEquals(p, "$p:id/mozac_browser_toolbar_url_view", Browsers.barIds(p).first())
+        assertEquals(listOf("com.opera.mini.native:id/url_field"), Browsers.barIds("com.opera.mini.native"))
+        assertEquals(listOf("com.opera.gx:id/addressbarEdit"), Browsers.barIds("com.opera.gx"))
+    }
+
     @Test fun duckduckgo_bar_ids_cover_top_bottom_and_custom_tabs() {
         val ids = Browsers.barIds(ddg)
         assertEquals("$ddg:id/omnibarTextInput", ids.first())       // the address bar, top or bottom

@@ -37,7 +37,7 @@ import kotlin.concurrent.thread
 /**
  * A local DNS-filter VPN. Android sends every app's DNS query to our sentinel address; we read the
  * name, block it (NXDOMAIN) or forward it upstream. It never leaves the phone and forwards nothing
- * but DNS. Android allows only one VPN at a time, and Private DNS must be off.
+ * but DNS. Android allows only one VPN at a time, and Private DNS must be on Automatic or Off (warned about).
  */
 class LockdownVpn : VpnService() {
 
@@ -49,6 +49,7 @@ class LockdownVpn : VpnService() {
     @Volatile private var upstream: InetAddress = InetAddress.getByName(UPSTREAM)
     @Volatile private var underlying: Network? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var strictWarned = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stop(); return START_NOT_STICKY }
@@ -75,6 +76,7 @@ class LockdownVpn : VpnService() {
         active = true
         runCatching { getSystemService(NotificationManager::class.java).cancel(REVOKED_ID) }   // running again
         watchNetwork()
+        checkPrivateDns()
         Store.update { it.copy(settings = it.settings.copy(siteFilterOn = true)) }
         thread(name = "lockdown-vpn") { loop(FileInputStream(fd.fileDescriptor)) }
     }
@@ -211,7 +213,7 @@ class LockdownVpn : VpnService() {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) = pickUpstream()
             override fun onLost(network: Network) = pickUpstream()
-            override fun onLinkPropertiesChanged(network: Network, lp: android.net.LinkProperties) = pickUpstream()
+            override fun onLinkPropertiesChanged(network: Network, lp: android.net.LinkProperties) { pickUpstream(); checkPrivateDns() }
         }
         runCatching { cm.registerDefaultNetworkCallback(cb); netCallback = cb }
     }
@@ -253,8 +255,37 @@ class LockdownVpn : VpnService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        getSystemService(NotificationManager::class.java).notify(REVOKED_ID, Notification.Builder(this, CHANNEL)
+        val nm = getSystemService(NotificationManager::class.java)
+        // the Reminders channel (the tamper notices'), not the quiet always-on one people mute
+        if (nm.getNotificationChannel(NOTICE_CHANNEL) == null)
+            nm.createNotificationChannel(NotificationChannel(NOTICE_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.notify(REVOKED_ID, Notification.Builder(this, NOTICE_CHANNEL)
             .setContentTitle("Site filter stopped")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build())
+    }
+
+    /** Private DNS set to a provider (strict) while the filter runs: say so once, until it's set back. */
+    private fun checkPrivateDns() = runCatching {
+        val name = strictPrivateDns(this)
+        val nm = getSystemService(NotificationManager::class.java)
+        if (name == null) { if (strictWarned) nm.cancel(PRIVATE_DNS_ID); strictWarned = false; return@runCatching }
+        if (strictWarned) return@runCatching
+        strictWarned = true
+        val text = "Private DNS is set to $name. With the site filter on, sites may not load at all, or blocked ones " +
+            "may load. Set Private DNS to Automatic or Off (Android Settings > Network & internet > Private DNS)."
+        if (nm.getNotificationChannel(NOTICE_CHANNEL) == null)
+            nm.createNotificationChannel(NotificationChannel(NOTICE_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
+        val open = PendingIntent.getActivity(
+            this, 1, Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        nm.notify(PRIVATE_DNS_ID, Notification.Builder(this, NOTICE_CHANNEL)
+            .setContentTitle("Private DNS clashes with the site filter")
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -292,7 +323,9 @@ class LockdownVpn : VpnService() {
         private val DOH = listOf("1.1.1.1", "8.8.8.8", "9.9.9.9")   // DoH endpoints (valid TLS certs for these IPs)
         private const val CHANNEL = "site_filter"
         private const val NOTIF_ID = 42
-        private const val REVOKED_ID = 44
+        private const val NOTICE_CHANNEL = "reminders"      // Reminders.kt's channel
+        private const val REVOKED_ID = 4                    // the watchdog's "Site filter stopped" (Reminders.kt): one notice
+        private const val PRIVATE_DNS_ID = 45
         const val STOP = "com.husarp.lockdown.vpn.STOP"
 
         @Volatile var active = false
@@ -300,6 +333,18 @@ class LockdownVpn : VpnService() {
 
         fun start(ctx: Context) = ctx.startService(Intent(ctx, LockdownVpn::class.java))
         fun stop(ctx: Context) = ctx.startService(Intent(ctx, LockdownVpn::class.java).setAction(STOP))
+
+        /** The provider's name when Android's Private DNS is set to one ("strict"), else null (Automatic or Off).
+         *  Android then sends every app's DNS over TLS to that provider: past the filter, or - as the filter cuts off
+         *  the well-known providers' names - nowhere, so nothing loads. */
+        fun strictPrivateDns(ctx: Context): String? {
+            if (Build.VERSION.SDK_INT < 28) return null
+            val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return null
+            return (listOfNotNull(cm.activeNetwork) + cm.allNetworks.toList()).distinct().firstNotNullOfOrNull { n ->
+                val vpn = cm.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ?: true
+                if (vpn) null else cm.getLinkProperties(n)?.privateDnsServerName
+            }
+        }
 
         /** Returns an intent to ask the user's consent, or null if already granted. */
         fun prepare(ctx: Context): Intent? = VpnService.prepare(ctx)

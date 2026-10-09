@@ -135,6 +135,7 @@ fun SettingsScreen() {
     val notes = remember(fresh) { Perms.notifications(ctx) }
     // Never Android's VpnService.prepare() here: when allowed before, it takes the VPN over from another app.
     val vpn = remember(fresh, s.siteFilterOn) { PermCheck.vpn(s.siteFilterOn, LockdownVpn.active) }
+    val privateDns = remember(fresh, s.siteFilterOn) { if (s.siteFilterOn) runCatching { LockdownVpn.strictPrivateDns(ctx) }.getOrNull() else null }
     fun startVpn() = runCatching { LockdownVpn.prepare(ctx) }.fold(
         { i -> if (i != null) vpnConsent.launch(i) else LockdownVpn.start(ctx) },
         { android.widget.Toast.makeText(ctx, "Couldn't start the site filter: Android keeps the VPN for another app " +
@@ -177,6 +178,13 @@ fun SettingsScreen() {
                     Text("On, but not running.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
                     TextButton(onClick = { startVpn() }) { Text("Start") }
+                }
+                // Private DNS set to a provider: sites don't load at all, or blocked ones do (the filter can't see them)
+                if (privateDns != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Private DNS is set to $privateDns. Set it to Automatic or Off, or sites may not load (or blocked ones may).",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Fix") }
                 }
                 Text("Optional. Blocks sites everywhere via a local VPN, but can interfere with other apps. Leave it off — Lockdown still blocks sites and protection lists in the browser without it.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

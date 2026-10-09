@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Button
 import android.widget.FrameLayout
@@ -263,11 +264,17 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             if (ms - lastBarRead < 400) return@runCatching
             lastBarRead = ms
             val text = browserBarText(pkg)
-            if (text != null) lastUrl[pkg] = text
-            // keyword blocking: watch the address / search bar and block on a match
+            if (text != null) {
+                // a new site in the same tab (a link, back) isn't a window change: judge it now, not on the next tick
+                val newSite = Browsers.hostOf(pkg, text) != Browsers.hostOf(pkg, lastUrl[pkg])
+                lastUrl[pkg] = text
+                if (newSite) handler.post { runCatching { step() } }
+            }
+            // keyword blocking: watch the address / search bar - and the box being typed in (DuckDuckGo's search /
+            // Duck.ai box floats over its address bar) - and block on a match
             val cfg = Store.config
             if (cfg.keywords.enabled) {
-                val hit = Keywords.hit(cfg, text)
+                val hit = Keywords.hit(cfg, text) ?: Keywords.hit(cfg, typedText(pkg))
                 if (hit != null) block(Verdict(hit, "Blocked search", "\"$hit\" is on your blocked words.", null, "back", null, site = true), pkg, "$pkg|kw")
             }
         }
@@ -290,10 +297,18 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun browserBarText(pkg: String): String? {
         val root = rootInActiveWindow ?: return null
         for (id in Browsers.barIds(pkg)) {
-            val nodes = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull() ?: continue
-            nodes.firstOrNull()?.text?.let { return it.toString() }
+            val node = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()?.firstOrNull() ?: continue
+            if (node.isShowingHintText) continue          // an empty box reads as its hint ("Search"): try the next
+            node.text?.let { return it.toString() }
         }
         return null
+    }
+
+    /** The text in [pkg]'s box being typed in, if it's [pkg]'s and not just its hint. */
+    private fun typedText(pkg: String): String? {
+        val node = runCatching { rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return null
+        if (node.packageName?.toString() != pkg || node.isShowingHintText) return null
+        return node.text?.toString()
     }
 
     // ---------- overlay ----------

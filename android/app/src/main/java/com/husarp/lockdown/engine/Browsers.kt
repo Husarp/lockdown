@@ -6,15 +6,27 @@ package com.husarp.lockdown.engine
  * were), so each one needs at least one; a unit test checks it.
  */
 object Browsers {
-    /** Package -> the view ids that hold its address, tried in order (the first with text wins). */
-    val BARS: Map<String, List<String>> = mapOf(
-        "com.android.chrome" to listOf("url_bar"),
-        "com.brave.browser" to listOf("url_bar"),
-        "com.brave.browser.bt1" to listOf("url_bar"),
-        "com.microsoft.emmx" to listOf("url_bar"),
+    // Browser families that share their address bar's id (the ids as in Bitwarden's autofill list). Each version a
+    // browser ships separately (beta, nightly, a fork) is its own package: one left out isn't watched at all.
+    private val CHROMIUM = listOf(
+        "com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary",
+        "com.brave.browser", "com.brave.browser.bt1", "com.brave.browser_beta", "com.brave.browser_nightly",
+        "com.microsoft.emmx", "com.microsoft.emmx.beta",
+        "com.kiwibrowser.browser", "com.vivaldi.browser", "org.cromite.cromite",
+    )
+    private val GECKO = listOf(
+        "org.mozilla.firefox", "org.mozilla.firefox_beta", "org.mozilla.fenix", "org.mozilla.focus", "org.mozilla.klar",
+        "org.torproject.torbrowser", "io.github.forkmaintainers.iceraven",
+    )
+
+    /** Package -> the view ids that hold its address, tried in order (the first with text wins; an
+     *  empty box's hint, "Search", doesn't count). */
+    val BARS: Map<String, List<String>> = CHROMIUM.associateWith { listOf("url_bar") } +
+        GECKO.associateWith { listOf("mozac_browser_toolbar_url_view", "url_bar_title") } + mapOf(
         "com.sec.android.app.sbrowser" to listOf("location_bar_edit_text"),
-        "org.mozilla.firefox" to listOf("mozac_browser_toolbar_url_view", "url_bar_title"),
         "com.opera.browser" to listOf("url_field"),
+        "com.opera.mini.native" to listOf("url_field"),
+        "com.opera.gx" to listOf("addressbarEdit"),
         "com.duckduckgo.mobile.android" to listOf(
             "omnibarTextInput",                         // the address bar, at the top or the bottom
             "omnibarTextInputBottom",                   // the search widget's screen with the bar at the bottom
