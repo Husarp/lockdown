@@ -7,6 +7,7 @@ that), which is also what Tk's own `wm geometry` takes. customtkinter's `geometr
 the display scaling a second time (a 150% screen got a cover 1.5x too big that spilled onto the next monitor and
 put the text off-centre), so covers are placed with `wm_geometry` and the rect as it is.
 """
+import math
 import sys
 from dataclasses import dataclass
 
@@ -58,6 +59,15 @@ def countdown(remaining: float) -> tuple[str, int | None]:
     if remaining <= 0:
         return text, None
     return text, round((remaining - int(remaining)) * 1000) + 15   # (just past the boundary, so it has changed)
+
+
+def dismiss_label(remaining: float) -> tuple[str, bool, int | None]:
+    """The bedtime screen's Dismiss while its wait runs: (its text, whether it works yet, ms until the number next
+    changes - None once it works). 25.0 s left -> ("Dismiss (25)", False, 1015); over -> ("Dismiss", True, None)."""
+    if remaining <= 0:
+        return "Dismiss", True, None
+    left = math.ceil(remaining)
+    return f"Dismiss ({left})", False, round((remaining - (left - 1)) * 1000) + 15
 
 
 def monitors() -> list[Monitor]:

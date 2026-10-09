@@ -35,6 +35,7 @@ data class SleepCfg(
     // earlier in the evening than bedtime counts from bedtime. No steps: back every [repeat] min.
     val tiers: List<ReminderTier> = listOf(ReminderTier("23:00", 15), ReminderTier("00:00", 5), ReminderTier("03:00", 1)),
     val guarded: Boolean = false,               // dismissing needs the anti-bypass challenge
+    val dismissWait: Int = 0,                   // seconds before Dismiss works on the bedtime screen (0 = off)
 )
 
 /** Should bedtime grayscale be on at [mins] (minutes since midnight)? Only with the toggle on, Bedtime on, and inside bedtime→wake. */
@@ -133,6 +134,7 @@ data class RPrompt(
     val buttons: List<RButton>,
     val overlay: Boolean = false,
     val until: LocalDateTime? = null,
+    val wait: Int = 0,                          // seconds before its Dismiss works, from each time it's shown
 )
 
 /** What a tick decided. The platform layer shows [show], dismisses [close], toasts [toasts], and acts on the rest. */
@@ -322,7 +324,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             if (emergencyLeft > 0) buttons.add(RButton("Emergency ($emergencyLeft left)", "emergency"))
             overlay("sleep", "Time for bed",
                 message(s.text, SLEEP_TEXT, "time" to hhmm(now), "bedtime" to hhmm(bed), "wake" to hhmm(wake)),
-                null, buttons, out)
+                null, buttons, out, wait = maxOf(0, s.dismissWait))
         }
     }
 
@@ -492,6 +494,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
                     val nkey = bed.toString()
                     when {
                         action == "off_tonight" -> sleepNext[nkey] = wake
+                        action == "back" -> sleepNext[nkey] = now      // up again on the next tick, its wait from the start
                         action.startsWith("snooze:") -> sleepNext[nkey] = now.plusMinutes(maxOf(1L, action.substringAfter(":").toLong()))
                         else -> sleepNext[nkey] = now.plusMinutes(sleepInterval(sleep, bed, now).toLong())
                     }
@@ -548,10 +551,10 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         if (key == "break" || key.startsWith("custom:")) lastInterruption = now(out)
     }
 
-    private fun overlay(key: String, title: String, text: String, until: LocalDateTime?, buttons: List<RButton>, out: Out) {
+    private fun overlay(key: String, title: String, text: String, until: LocalDateTime?, buttons: List<RButton>, out: Out, wait: Int = 0) {
         if (key in open) return
         open.add(key)
-        out.show.add(RPrompt(key, title, text, buttons, overlay = true, until = until))
+        out.show.add(RPrompt(key, title, text, buttons, overlay = true, until = until, wait = wait))
     }
 
     private fun close(key: String, out: Out) { if (open.remove(key)) out.close.add(key) }
@@ -642,5 +645,21 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         /** A change that weakens a guarded (important) reminder - turning it off, or dropping its guard. */
         fun loosensReminder(oldOn: Boolean, oldGuarded: Boolean, newOn: Boolean, newGuarded: Boolean): Boolean =
             oldGuarded && ((oldOn && !newOn) || !newGuarded)
+
+        /** "Wait before Dismiss" choices in seconds (0 = off), and the range a typed one may take. */
+        val DISMISS_WAITS = listOf(0, 10, 30, 60)
+        const val DISMISS_WAIT_MAX = 600
+
+        /** A typed wait in seconds (1 to [DISMISS_WAIT_MAX]), or null. */
+        fun parseDismissWait(text: String): Int? = text.trim().toIntOrNull()?.takeIf { it in 1..DISMISS_WAIT_MAX }
+
+        /** A shorter wait before Dismiss (or none) loosens bedtime: it needs the challenge. Longer is free. */
+        fun loosensDismissWait(old: Int, new: Int): Boolean = new < old
+
+        /** Whole seconds until Dismiss works ([readyAt] and [nowMs] on the same monotonic clock); 0 = it works now. */
+        fun waitLeft(readyAt: Long, nowMs: Long): Int = if (nowMs >= readyAt) 0 else ((readyAt - nowMs + 999) / 1000).toInt()
+
+        /** The Dismiss button's label: "Dismiss (25)" while it counts down, then "Dismiss". */
+        fun dismissLabel(left: Int): String = if (left > 0) "Dismiss ($left)" else "Dismiss"
     }
 }

@@ -94,7 +94,8 @@ class Overlay(ctk.CTkToplevel):
     _deactivate_windows_window_header_manipulation = True   # no title bar to colour: skip CTk's hide/update/show
     BG = ("#101316", "#0B0D10")
 
-    def __init__(self, root, title: str, text: str, until: datetime | None, buttons, on_answer, now):
+    def __init__(self, root, title: str, text: str, until: datetime | None, buttons, on_answer, now,
+                 wait: int = 0):
         super().__init__(root, fg_color=self.BG)
         self.withdraw()                       # build it off screen, show it once
         self.overrideredirect(True)
@@ -123,12 +124,20 @@ class Overlay(ctk.CTkToplevel):
         self.clock.pack()
         row = ctk.CTkFrame(box, fg_color="transparent")
         row.pack(pady=18)
+        self._dismiss, self._dismiss_end = None, None
         for i, (label, action) in enumerate(buttons):
             style = {} if i == 0 else {**theme.OUTLINE, "text_color": "#E8ECF1"}
-            ctk.CTkButton(row, text=label, width=150, height=36, **style,
-                          command=lambda a=action: _finish(self, a, on_answer)).pack(side="left", padx=6)
+            button = ctk.CTkButton(row, text=label, width=150, height=36, **style,
+                                   command=lambda a=action: self._press(a, on_answer))
+            button.pack(side="left", padx=6)
+            if action == "dismiss" and wait > 0:   # Dismiss waits; Disable alerts / Emergency never do
+                self._dismiss = button
+                button.configure(text=f"Dismiss ({wait})", state="disabled")
         self._count()
         self.update_idletasks()
+        if self._dismiss is not None:         # the wait starts when the screen shows, afresh each time
+            self._dismiss_end = time.monotonic() + wait
+            self._dismiss_tick()
         self.deiconify()
         self.lift()
         self._up = True
@@ -195,6 +204,22 @@ class Overlay(ctk.CTkToplevel):
             except Exception:
                 self.wm_geometry(screens.geometry(self._rect))
 
+    def _press(self, action, on_answer):
+        # still waiting: Dismiss does nothing (a disabled button shouldn't fire, but never let it), and Disable
+        # alerts / Emergency left unfinished bring the screen straight back instead of counting as a Dismiss
+        self.early = self._dismiss_end is not None and time.monotonic() < self._dismiss_end
+        if action == "dismiss" and self.early:
+            return
+        _finish(self, action, on_answer)
+
+    def _dismiss_tick(self):
+        if self._dismiss is None or not self.winfo_exists():
+            return
+        text, ready, wait = screens.dismiss_label(self._dismiss_end - time.monotonic())
+        self._dismiss.configure(text=text, state="normal" if ready else "disabled")
+        if wait is not None:
+            self.after(wait, self._dismiss_tick)
+
     def _count(self):
         if self._end is None or not self.winfo_exists():
             return
@@ -227,8 +252,10 @@ class ReminderUI:
 
     def overlay(self, key, title, text, until, buttons):
         self.close(key)
+        wait = reminders.dismiss_wait(reminders.load(self.app.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)) \
+            if key == "sleep" else 0
         self.windows[key] = Overlay(self.app, title, text, until, buttons, lambda a: self._answer(key, a),
-                                    lambda: now_from_db(self.app.db))
+                                    lambda: now_from_db(self.app.db), wait)
 
     def held(self, key, title, text, buttons):
         """A popup held back while a full-screen app is in front: meanwhile a Windows notification with the same
@@ -280,29 +307,37 @@ class ReminderUI:
                 pass   # another mode is locked on
 
     def _answer(self, key, action):
-        self.windows.pop(key, None)
+        win = self.windows.pop(key, None)
+        # pressed while Dismiss was still waiting: backing out of these is no way round the wait - it comes back
+        back = "back" if getattr(win, "early", False) else "dismiss"
         if key == "sleep" and action == "disable":
-            self._disable_sleep()      # the escape hatch: challenge first, then off-tonight or snooze
+            self._disable_sleep(back)      # the escape hatch: challenge first, then off-tonight or snooze
             return
         if key == "sleep" and action == "emergency":
-            self._emergency_sleep()    # the sanctioned escape: no challenge, but it costs an emergency use
+            self._emergency_sleep(back)    # the sanctioned escape: no challenge, but it costs an emergency use
             return
         self.engine.answer(key, action)
 
-    def _emergency_sleep(self):
+    def _emergency_sleep(self, back="dismiss"):
         """"Emergency (N left)" on the bedtime screen: asks once (a stray click must not spend a use), then pauses
         the bedtime and break alerts for the emergency length - with several kinds of emergency, the one picked
         (a button each, spent ones greyed out). Cancelling just dismisses it, as Dismiss does.
         It counts as dismissed from the click on, so leaving the question open is no free pause: the bedtime screen
-        comes back on its escalation as usual (and "Pause" closes it again)."""
+        comes back on its escalation as usual (and "Pause" closes it again).
+        back="back" (pressed while Dismiss was still waiting): the screen stays away only while the question is up,
+        and Cancel brings it straight back - so it is no way round the wait."""
         db = self.app.db
         now = self.engine.now   # (the engine decides the use as of its last tick: the same time here)
         left = emergency.available(db, now)
         if not left:     # spent elsewhere (or turned off) since the screen came up: the engine says so, dismisses
-            self.engine.answer("sleep", "emergency")
+            if back != "dismiss":
+                self.toast("No emergency unlocks left.")
+            self.engine.answer("sleep", "emergency" if back == "dismiss" else back)
             return
         kinds = emergency.left_by_tier(db, now)
-        self.engine.answer("sleep", "dismiss")
+        if back == "dismiss":
+            self.engine.answer("sleep", "dismiss")
+        cancel = (lambda: None) if back == "dismiss" else (lambda: self.engine.answer("sleep", back))
 
         def spend(tier):
             return lambda: self.engine.answer("sleep", f"emergency:{tier['id']}")
@@ -312,23 +347,24 @@ class ReminderUI:
             ask = ConfirmDialog(self.app, "Emergency", f"Pause the bedtime and break alerts for {minutes} min? "
                                                        f"Uses 1 of your {left} emergency unlock{'s' * (left != 1)} "
                                                        "left. Your bedtime settings stay as they are.",
-                                on_yes=spend(tier), yes_text=f"Pause {minutes} min")
+                                on_yes=spend(tier), yes_text=f"Pause {minutes} min", on_no=cancel)
         else:
             ask = ChoiceDialog(self.app, "Emergency", "Pause the bedtime and break alerts for how long? It uses 1 "
                                                       "of that kind's emergency unlocks. Your bedtime settings stay "
                                                       "as they are.",
                                [(f"Pause {t['minutes']} min · {n} left {emergency.PERIODS[t['per']]}" if n else
                                  f"{t['minutes']} min - none left · resets {short_when(reset)}", n > 0, spend(t))
-                                for t, n, _allowed, reset in kinds])
+                                for t, n, _allowed, reset in kinds], on_no=cancel)
         # (not left up for good: as a modal it would hold the clicks of the bedtime screen when that comes back)
         self.app.after(ASK_LIMIT_MS, lambda: _give_up(ask))
 
-    def _disable_sleep(self):
+    def _disable_sleep(self, back="dismiss"):
         """"Disable alerts" on the bedtime screen needs the anti-bypass challenge; passing it offers "off for
         tonight" or a snooze. Cancelling just dismisses it, so it returns on the escalation - never a free out.
         Neither waits for ever: the bedtime screen stays away while they are open, so after ASK_LIMIT_MS with
         no typing in the challenge (a long phrase may take longer than that to type), or ASK_MAX_MS in all, they
-        close and it counts as Dismiss - the screen comes back on its escalation."""
+        close and it counts as Dismiss - the screen comes back on its escalation. back="back" (pressed while
+        Dismiss was still waiting): backing out brings the screen straight back instead, with a fresh wait."""
         asking = {"open": True, "question": None, "typed": False, "waited": 0}
 
         def answer(action):
@@ -342,10 +378,10 @@ class ReminderUI:
                 asking["question"] = ConfirmDialog(
                     self.app, "Bedtime alerts off", "Off for the rest of tonight, or snooze a while?",
                     on_yes=lambda: answer("off_tonight"), yes_text="Off tonight", alt_text="Snooze 15 min",
-                    on_alt=lambda: answer("snooze:15"), on_no=lambda: answer("dismiss"))
+                    on_alt=lambda: answer("snooze:15"), on_no=lambda: answer(back))
 
         before = getattr(self.app, "challenge", None)
-        self.app.guard(["Turn off tonight's bedtime alerts"], choose, cancel=lambda: answer("dismiss"))
+        self.app.guard(["Turn off tonight's bedtime alerts"], choose, cancel=lambda: answer(back))
         challenge = getattr(self.app, "challenge", None)
         challenge = challenge if challenge is not before else None   # (only the one opened for this)
         asking["typed"] = False   # (no challenge: the question was opened just above - this is its time)
@@ -362,7 +398,7 @@ class ReminderUI:
                 return
             _give_up(challenge)
             _give_up(asking["question"])
-            answer("dismiss")   # (if neither was up any more)
+            answer(back)   # (if neither was up any more)
         self.app.after(ASK_LIMIT_MS, time_up)
 
 
@@ -485,6 +521,20 @@ class RemindersView(ctk.CTkScrollableFrame):
         ctk.CTkLabel(right, text="The later it is, the more often the bedtime screen returns after you dismiss it.",
                      text_color=MUTED, font=theme.body(11), wraplength=330, justify="left").pack(anchor="w",
                                                                                                  pady=(2, 0))
+        line = ctk.CTkFrame(b, fg_color="transparent")
+        line.pack(anchor="w", pady=5)
+        ctk.CTkLabel(line, text="Dismiss wait", width=LABEL_W, anchor="w", text_color=MUTED).pack(side="left",
+                                                                                                padx=(0, 12))
+        self.dismiss_wait = Segmented(line, values=list(reminders.DISMISS_WAITS), command=self._pick_wait)
+        self.dismiss_wait.pack(side="left")
+        self.dismiss_wait_entry = ctk.CTkEntry(line, width=48, justify="center")   # or any seconds: picks fill it in
+        self.dismiss_wait_entry.pack(side="left", padx=(10, 6))
+        self.dismiss_wait_entry.bind("<Return>", lambda e: self._save_sleep())
+        self.dismiss_wait_entry.bind("<FocusOut>", lambda e: self._save_sleep())
+        ctk.CTkLabel(line, text="s", text_color=MUTED).pack(side="left")
+        ctk.CTkLabel(b, text="Dismiss on the bedtime screen works only after this many seconds, each time it shows. "
+                             "Longer is instant; shorter or Off needs the challenge.", text_color=MUTED,
+                     font=theme.body(11), wraplength=330, justify="left").pack(anchor="w", padx=(LABEL_W + 12, 0))
         self.sleep_mode = _option(b, "Turn on", ["No mode"], "at bedtime, until wake-up time", LABEL_W)
         self.sleep_mode.configure(command=lambda v: self._save_sleep())
         self.sleep_warn_text = _message(b, "Heads-up says", reminders.SLEEP_WARN_TEXT, LABEL_W, self._save_sleep)
@@ -553,6 +603,10 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.before.delete(0, "end")
         self.before.insert(0, reminders.minutes_text(s["before"]))
         self._load_tiers(reminders.tiers_of(s))
+        wait = reminders.dismiss_wait(s)
+        self.dismiss_wait.set(next((k for k, v in reminders.DISMISS_WAITS.items() if v == wait), None))
+        self.dismiss_wait_entry.delete(0, "end")
+        self.dismiss_wait_entry.insert(0, str(wait) if wait else "Off")
         for entry, value in ((self.sleep_warn_text, s.get("warn_text")), (self.sleep_text, s.get("text"))):
             if entry.get() != (value or ""):
                 entry.delete(0, "end")
@@ -636,13 +690,23 @@ class RemindersView(ctk.CTkScrollableFrame):
             tiers.append({"from": f"{after:%H:%M}", "every": max(1, every)})
         return sorted(tiers, key=lambda t: parse_hhmm(t["from"]))
 
+    def _pick_wait(self, value: str):
+        self.dismiss_wait_entry.delete(0, "end")
+        wait = reminders.DISMISS_WAITS[value]
+        self.dismiss_wait_entry.insert(0, str(wait) if wait else "Off")
+        self._save_sleep()
+
     def _save_guarded(self, name, old, key, new):
         """Save reminder settings. Turning an important alert off (or removing its \"important\" flag) is
         loosening, so it needs the Anti-Bypass challenge first; on cancel the switches snap back and nothing
         is saved."""
         loosens = reminders.loosens_reminder(old, new)
         if loosens:
-            self.page.guard([f"Turn off / un-flag the important {name} reminder"],
+            what = [f"Turn off / un-flag the important {name} reminder"] \
+                if reminders.loosens_reminder(old, {**new, "dismiss_wait": reminders.dismiss_wait(old)}) else []
+            if reminders.dismiss_wait(new) < reminders.dismiss_wait(old):
+                what.append("Shorten the wait before Dismiss on the bedtime screen")
+            self.page.guard(what,
                             lambda: reminders.save(self.db, key, new), cancel=self.refresh)
         else:
             reminders.save(self.db, key, new)
@@ -659,13 +723,19 @@ class RemindersView(ctk.CTkScrollableFrame):
         except ValueError:
             self._sleep_says("Steps need minutes like 5 and a time like 21:00.")
             return
+        try:
+            wait = reminders.parse_seconds(self.dismiss_wait_entry.get())
+        except ValueError as e:
+            self._sleep_says(str(e))
+            return
+        self.dismiss_wait.set(next((k for k, v in reminders.DISMISS_WAITS.items() if v == wait), None))
         self.sleep_error.pack_forget()
         old = reminders.load(self.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
         self._save_guarded("bedtime", old, reminders.SLEEP_KEY, {
             "on": bool(self.sleep_on.get()), "bedtime": f"{bedtime:%H:%M}", "wake": f"{wake:%H:%M}",
             "before": before, "repeat": 5, "tiers": tiers, "warn_text": self.sleep_warn_text.get().strip(),
             "text": self.sleep_text.get().strip(),
-            "guarded": bool(self.sleep_guarded.get()),
+            "guarded": bool(self.sleep_guarded.get()), "dismiss_wait": wait,
             "mode": self.mode_ids.get(self.sleep_mode.get(), "")})
 
     def _sleep_says(self, text: str):

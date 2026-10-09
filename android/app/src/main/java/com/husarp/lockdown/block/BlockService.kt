@@ -412,21 +412,45 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun show(p: RPrompt) {
         val col = remindColumn(p.title, p.text)
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        // "Wait before Dismiss": Dismiss counts down and can't be tapped until it ends, from the start each time the
+        // screen comes up (also back after a call or the lock screen). Disable alerts and Emergency don't wait.
+        var readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L
+        var dismiss: Button? = null
+        val countdown = object : Runnable {
+            override fun run() {
+                if (p.wait <= 0) return
+                val left = RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime())
+                dismiss?.apply { text = RemindersEngine.dismissLabel(left); isEnabled = left == 0; alpha = if (left == 0) 1f else 0.4f }
+                handler.removeCallbacks(this)
+                if (left > 0) handler.postDelayed(this, 250)
+            }
+        }
+        col.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) { readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L; countdown.run() }
+            override fun onViewDetachedFromWindow(v: View) { handler.removeCallbacks(countdown) }
+        })
         fun fill() {
             buttons.removeAllViews()
             p.buttons.forEachIndexed { i, b ->
                 buttons.addView(remindButton(if (b.action == "dismiss") "Dismiss" else b.label, primary = i == 0) {
                     when (b.action) {
-                        "disable" -> { closeRemind(p.key); ReminderRunner.askDisable(this) }
+                        "disable" -> {
+                            val early = RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime()) > 0
+                            closeRemind(p.key); ReminderRunner.askDisable(this, early)
+                        }
                         "emergency" -> askEmergency(buttons, "Your bedtime settings stay as they are.", back = { fill() }) { tier ->
                             closeRemind(p.key)
                             ReminderRunner.answer(this, p.key, "dismiss")   // back on the escalation if it fails
                             ReminderRunner.spendEmergency(this, tier)
                         }
+                        "dismiss" -> if (RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime()) == 0) {
+                            closeRemind(p.key); ReminderRunner.answer(this, p.key, b.action)
+                        }
                         else -> { closeRemind(p.key); ReminderRunner.answer(this, p.key, b.action) }
                     }
-                })
+                }.also { if (b.action == "dismiss") dismiss = it })
             }
+            countdown.run()
         }
         fill()
         col.addView(buttons)

@@ -180,10 +180,12 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     val modes by ModesStore.modes.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val guard = rememberGuard()
+    var waitCancels by remember { mutableStateOf(0) }    // a cancelled challenge puts the saved wait back in the field
+    val waitGuard = rememberGuard(onCancel = { waitCancels++ })
     val cs = MaterialTheme.colorScheme
     val s = cfg.sleep
     // Steps, heads-up, texts and the mode are ordinary edits, as on the PC; only turning an important alert off
-    // (or un-flagging it) asks for the challenge.
+    // (or un-flagging it), or a shorter wait before Dismiss, asks for the challenge.
     fun set(block: (SleepCfg) -> SleepCfg) = Store.update { it.copy(sleep = block(it.sleep)) }
     Column(Modifier.fillMaxSize()) {
         EditorHeader("Bedtime", onBack = onClose)
@@ -215,6 +217,27 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 TextButton(onClick = { set { c -> c.copy(tiers = c.tiers + newStep(c)) } }) { Text("+ Add step") }
                 Text("The later it is, the more often the bedtime screen returns after you dismiss it. " +
                     "A step earlier in the evening than bedtime counts from bedtime.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            Card(color = cs.surfaceContainerLow) {
+                // shorter (or off) loosens bedtime: the challenge; longer saves at once
+                fun setWait(n: Int) = waitGuard(RemindersEngine.loosensDismissWait(s.dismissWait, n)) { set { it.copy(dismissWait = n) } }
+                Text("Wait before Dismiss", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (n in RemindersEngine.DISMISS_WAITS) Chip(if (n == 0) "Off" else "$n s", s.dismissWait == n) { setWait(n) }
+                }
+                var waitText by remember(s.dismissWait, waitCancels) { mutableStateOf(if (s.dismissWait > 0) s.dismissWait.toString() else "") }
+                val typedWait = RemindersEngine.parseDismissWait(waitText)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(waitText, { waitText = it.filter(Char::isDigit).take(3) },
+                        label = { Text("Or any (seconds)") }, singleLine = true, isError = waitText.isNotEmpty() && typedWait == null,
+                        supportingText = { Text("1 to ${RemindersEngine.DISMISS_WAIT_MAX} seconds.") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                    TextButton(onClick = { typedWait?.let { setWait(it) } }, enabled = typedWait != null && typedWait != s.dismissWait) { Text("Save") }
+                }
+                Text("Dismiss on the bedtime screen counts down and works only when it ends, from the start each time " +
+                    "the screen comes up. Disable alerts and Emergency don't wait. Longer saves at once; shorter or off needs the challenge.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {

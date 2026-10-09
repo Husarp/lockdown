@@ -36,7 +36,8 @@ DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30,
                  # read within the night; the latest tier whose time has passed wins. Fully editable.
                  "tiers": [{"from": "21:00", "every": 15}, {"from": "00:00", "every": 5},
                            {"from": "03:00", "every": 1}],
-                 "guarded": False}   # dismissing the bedtime screen needs the Anti-Bypass challenge
+                 "guarded": False,   # dismissing the bedtime screen needs the Anti-Bypass challenge
+                 "dismiss_wait": 0}  # seconds before the bedtime screen's Dismiss works (0 = at once)
 DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "strict": False, "snooze": 5, "max_snooze": 2,
                  "twenty": False, "text": "", "twenty_text": "", "guarded": False}
 DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
@@ -99,6 +100,34 @@ def minutes_text(minutes: float) -> str:
         h, m = divmod(whole, 60)
         return f"{h}h{m:02d}" if m else f"{h}h"
     return f"{whole} min"
+
+
+DISMISS_WAITS = {"Off": 0, "10 s": 10, "30 s": 30, "60 s": 60}   # quick picks; any number of seconds in between
+MAX_DISMISS_WAIT = 600
+
+
+def parse_seconds(text: str) -> int:
+    """The bedtime screen's wait before Dismiss, as typed: "30" and "30s" -> 30, "2 min" -> 120, "off" -> 0."""
+    t = str(text).strip().lower()
+    if t in ("", "off", "0", "no", "never"):
+        return 0
+    if m := re.fullmatch(r"(\d+)\s*(?:s|sec|secs|seconds?)?", t):
+        value = int(m[1])
+    elif m := re.fullmatch(r"(\d+)\s*(?:m|min|mins|minutes?)", t):
+        value = int(m[1]) * 60
+    else:
+        raise ValueError("Write the wait in seconds, like 30, or Off.")
+    if value > MAX_DISMISS_WAIT:
+        raise ValueError(f"A wait of at most {MAX_DISMISS_WAIT} seconds, please.")
+    return value
+
+
+def dismiss_wait(s: dict) -> int:
+    """Seconds the bedtime screen's Dismiss stays off each time it comes up (0 = none)."""
+    try:
+        return max(0, min(MAX_DISMISS_WAIT, int(s.get("dismiss_wait") or 0)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def message(custom: str, default: str, **values) -> str:
@@ -164,7 +193,10 @@ def counts_many(db, whats, since: datetime) -> dict[str, dict[str, int]]:
 
 def loosens_reminder(old: dict, new: dict) -> bool:
     """A change that weakens an IMPORTANT alert - turning it off, or removing its "important" flag.
-    Those need the Anti-Bypass challenge; ordinary edits (times, message, frequency) do not."""
+    Those need the Anti-Bypass challenge; ordinary edits (times, message, frequency) do not. A shorter wait
+    before the bedtime screen's Dismiss (or none) needs it too, important or not; a longer one is free."""
+    if dismiss_wait(new) < dismiss_wait(old):
+        return True
     if not old.get("guarded"):
         return False
     return bool((old.get("on") and not new.get("on")) or not new.get("guarded"))
@@ -669,6 +701,8 @@ class Engine:
                 if action == "off_tonight":                 # behind the challenge: no more tonight
                     self.sleep_next[nkey] = wake
                     log(self.db, "sleep", "off tonight", now)
+                elif action == "back":                      # backed out of Disable alerts / Emergency while
+                    self.sleep_next[nkey] = now              # Dismiss was still waiting: straight back
                 elif action.startswith("snooze:"):          # behind the challenge: your own amount
                     self.sleep_next[nkey] = now + timedelta(minutes=max(1, int(action.split(":", 1)[1])))
                     log(self.db, "sleep", "snoozed", now)

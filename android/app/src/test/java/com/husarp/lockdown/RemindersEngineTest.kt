@@ -301,6 +301,41 @@ class RemindersEngineTest {
         assertFalse(RemindersEngine.loosensReminder(oldOn = true, oldGuarded = true, newOn = true, newGuarded = true))
     }
 
+    @Test fun shorter_or_no_wait_before_dismiss_needs_the_challenge_longer_is_free() {
+        assertTrue(RemindersEngine.loosensDismissWait(old = 30, new = 10))
+        assertTrue(RemindersEngine.loosensDismissWait(old = 30, new = 0))              // off
+        assertFalse(RemindersEngine.loosensDismissWait(old = 30, new = 60))
+        assertFalse(RemindersEngine.loosensDismissWait(old = 0, new = 10))             // turning it on
+        assertFalse(RemindersEngine.loosensDismissWait(old = 30, new = 30))
+        assertEquals(45, RemindersEngine.parseDismissWait(" 45 "))
+        assertEquals(null, RemindersEngine.parseDismissWait("0"))
+        assertEquals(null, RemindersEngine.parseDismissWait("${RemindersEngine.DISMISS_WAIT_MAX + 1}"))
+        assertEquals(null, RemindersEngine.parseDismissWait(""))
+    }
+
+    @Test fun dismiss_counts_down_in_whole_seconds_then_works() {
+        val readyAt = 100_000L + 25_000L                                                // shown at 100 s with a 25 s wait
+        assertEquals(25, RemindersEngine.waitLeft(readyAt, 100_000L))
+        assertEquals("Dismiss (25)", RemindersEngine.dismissLabel(RemindersEngine.waitLeft(readyAt, 100_000L)))
+        assertEquals(25, RemindersEngine.waitLeft(readyAt, 100_001L))                  // rounds up: never "0" while still waiting
+        assertEquals(1, RemindersEngine.waitLeft(readyAt, 124_999L))
+        assertEquals(0, RemindersEngine.waitLeft(readyAt, 125_000L))
+        assertEquals("Dismiss", RemindersEngine.dismissLabel(0))
+        assertEquals(0, RemindersEngine.waitLeft(100_000L + 0, 100_000L))              // off: works at once
+    }
+
+    @Test fun the_bedtime_screen_carries_its_wait_and_comes_back_when_disable_alerts_is_cancelled() {
+        val e = RemindersEngine()
+        val s = SleepCfg(on = true, bedtime = "22:00", wake = "07:00", dismissWait = 30)
+        val bed = e.tick(at(28, 22, 5), 999.0, s, noBreak, emptyList())
+        assertEquals(30, bed.show.single { it.key == "sleep" }.wait)
+        assertEquals(0, RemindersEngine().tick(at(28, 22, 5), 999.0, s.copy(dismissWait = 0), noBreak, emptyList())
+            .show.single { it.key == "sleep" }.wait)
+        // "Disable alerts", then the challenge cancelled: straight back (with the wait from the start), not dismissed
+        e.answer("sleep", "back", at(28, 22, 6), s, noBreak, emptyList())
+        assertTrue(e.tick(at(28, 22, 6), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" && it.wait == 30 })
+    }
+
     @Test fun bedtime_grayscale_only_when_toggle_and_bedtime_on_inside_the_window() {
         val s = SleepCfg(on = true, bedtime = "23:00", wake = "07:00")
         assertTrue(bedtimeGrayscaleWanted(true, s, 23 * 60 + 30))                 // inside, across midnight
