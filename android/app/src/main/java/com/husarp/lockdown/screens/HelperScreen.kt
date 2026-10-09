@@ -30,9 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
+import com.husarp.lockdown.engine.Perm
+import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.link.LinkService
 import com.husarp.lockdown.usage.Usage
@@ -80,19 +81,20 @@ fun HelperScreen() {
                 Column(Modifier.padding(16.dp)) {
                     Text("Needed here", style = MaterialTheme.typography.titleSmall)
                     // read again each second (the clock above), so a permission granted in Settings shows on return
-                    val a11y = remember(now) { BlockService.connected }     // really running, not just ticked
+                    val a11yState = remember(now) { Perms.a11y(ctx) }
+                    val a11y = a11yState == Perm.ON                          // really running, not just ticked
                     val overlay = remember(now) { Settings.canDrawOverlays(ctx) }
                     HelperRow("Usage access (sees the Island app in front)", remember(now) { Usage.hasAccess(ctx) }) { open(ctx, Usage.accessIntent()) }
                     HelperRow("Display over other apps (the block screen)", overlay || a11y) {
                         open(ctx, Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
                     }
                     HelperRow("Battery not restricted", remember(now) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }) {
-                        open(ctx, Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        Perms.openBattery(ctx)
                     }
-                    HelperRow("Notifications", remember(now) { NotificationManagerCompat.from(ctx).areNotificationsEnabled() }) {
-                        open(ctx, Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
-                    }
-                    HelperRow("App blocking (accessibility): optional, better if your phone allows it", a11y) { open(ctx, BlockService.settingsIntent()) }
+                    HelperRow("Notifications", remember(now) { Perms.notifications(ctx) }) { open(ctx, Perms.notificationsIntent(ctx)) }
+                    HelperRow("App blocking (accessibility): optional, better if your phone allows it", a11y,
+                        if (a11yState == Perm.NOT_RUNNING) "On in Android, but Android doesn't run it here (common in a work profile). Display over other apps does the blocking." else null,
+                    ) { open(ctx, BlockService.settingsIntent()) }
                     if (!overlay && !a11y)
                         Text("Can't block in Island yet: allow Display over other apps.", style = MaterialTheme.typography.bodySmall, color = cs.error)
                 }
@@ -117,11 +119,15 @@ fun HelperScreen() {
 
 private fun open(ctx: Context, i: Intent) { runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
 
+/** [note]: why it's not on although Android shows it allowed ("allowed but not running"). */
 @Composable
-private fun HelperRow(label: String, ok: Boolean, onFix: () -> Unit) {
+private fun HelperRow(label: String, ok: Boolean, note: String? = null, onFix: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (!ok && note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (ok) Text("On", color = com.husarp.lockdown.ui.theme.LockdownTheme.extra.success, style = MaterialTheme.typography.labelLarge)
-        else TextButton(onClick = onFix) { Text("Grant") }
+        else TextButton(onClick = onFix) { Text(if (note != null) "Open" else "Grant") }
     }
 }

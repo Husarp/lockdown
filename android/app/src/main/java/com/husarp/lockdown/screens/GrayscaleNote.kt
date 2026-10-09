@@ -29,6 +29,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun GrayscaleNote(on: Boolean) {
     val ctx = LocalContext.current
+    val fresh = com.husarp.lockdown.guard.rememberFresh()     // the adb grant shows without leaving the app
+    val canWrite = remember(fresh) { Grayscale.canWrite(ctx) }
     if (!on) return
     val cs = MaterialTheme.colorScheme
     if (Grayscale.otherProfile(ctx)) {
@@ -37,7 +39,7 @@ fun GrayscaleNote(on: Boolean) {
             style = MaterialTheme.typography.bodySmall, color = cs.error)
         return
     }
-    if (Grayscale.canWrite(ctx)) return
+    if (canWrite) return
     Column(Modifier.padding(top = 6.dp)) {
         Text("Grayscale can't work yet: it needs a one-time permission. With the phone connected to a computer, run:",
             style = MaterialTheme.typography.bodySmall, color = cs.error)
@@ -58,7 +60,8 @@ fun GrayscaleStuck() {
     val ctx = LocalContext.current
     var tick by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) { while (true) { delay(5000); tick++ } }      // goes once the colour is back
-    val stuck = remember(tick) { Grayscale.stuck(ctx) }
+    val fresh = com.husarp.lockdown.guard.rememberFresh()               // and at once on every return to the app
+    val stuck = remember(tick, fresh) { Grayscale.stuck(ctx) }
     if (!stuck) return
     val cs = MaterialTheme.colorScheme
     com.husarp.lockdown.ui.Card(color = cs.errorContainer, contentColor = cs.onErrorContainer) {

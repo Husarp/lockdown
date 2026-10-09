@@ -9,7 +9,6 @@ import android.graphics.Typeface
 import android.media.AudioManager
 import android.os.SystemClock
 import android.provider.Settings
-import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -617,13 +616,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         @Volatile var connected = false
             private set
 
-        fun isEnabled(ctx: Context): Boolean {
-            val flat = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-            val me = "${ctx.packageName}/${BlockService::class.java.name}"
-            val split = TextUtils.SimpleStringSplitter(':'); split.setString(flat)
-            while (split.hasNext()) if (split.next().equals(me, ignoreCase = true)) return true
-            return false
-        }
+        /** Turned on in Android's accessibility settings (full or short name); [connected] says it really runs. */
+        fun isEnabled(ctx: Context): Boolean = com.husarp.lockdown.engine.PermCheck.a11yListed(
+            Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES),
+            ctx.packageName, BlockService::class.java.name)
 
         fun settingsIntent() = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
 

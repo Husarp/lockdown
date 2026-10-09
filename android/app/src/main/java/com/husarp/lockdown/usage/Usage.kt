@@ -18,7 +18,7 @@ data class DayUse(val apps: List<AppUse>, val totalMs: Long, val hourly: LongArr
 
 object Usage {
 
-    /** Has the user granted "usage access" in Settings? */
+    /** Has the user granted "usage access" in Settings? (Left at its default, the permission itself decides.) */
     fun hasAccess(ctx: Context): Boolean {
         val ops = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = if (Build.VERSION.SDK_INT >= 29) ops.unsafeCheckOpNoThrow(
@@ -26,7 +26,8 @@ object Usage {
         ) else @Suppress("DEPRECATION") ops.checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName,
         )
-        return mode == AppOpsManager.MODE_ALLOWED
+        return com.husarp.lockdown.engine.PermCheck.usageAllowed(mode,
+            ctx.checkCallingOrSelfPermission(android.Manifest.permission.PACKAGE_USAGE_STATS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
     }
 
     fun accessIntent() = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)

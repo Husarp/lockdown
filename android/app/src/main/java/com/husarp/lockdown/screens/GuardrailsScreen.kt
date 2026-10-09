@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
-import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -56,7 +55,10 @@ import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Pause
 import com.husarp.lockdown.engine.Window
 import com.husarp.lockdown.engine.Rules
+import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.guard.AdminReceiver
+import com.husarp.lockdown.guard.Perms
+import com.husarp.lockdown.guard.rememberFresh
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
@@ -81,6 +83,12 @@ fun GuardrailsScreen() {
     LaunchedEffect(Unit) { while (true) { nowMs = System.currentTimeMillis(); delay(1000) } }
     val now = remember(nowMs) { TrustedTime.local(ctx) }     // trusted time: the clock set forward or back changes nothing
     val ab = cfg.antibypass
+    // Read again on every return to the app (and a moment after), so a permission just granted in Android shows.
+    val fresh = rememberFresh()
+    val a11y = remember(fresh) { Perms.a11y(ctx) }
+    val battery = remember(fresh) { batteryUnrestricted(ctx) }
+    val admin = remember(fresh) { isAdmin(ctx) }
+    val grayOk = remember(fresh) { com.husarp.lockdown.remind.Grayscale.canWrite(ctx) }
 
     fun setAb(newAb: AntiBypassCfg) {
         val loosening = AntiBypass.settingsLooser(cfg.antibypass, newAb)
@@ -139,19 +147,19 @@ fun GuardrailsScreen() {
 
         SectionLabel("Reliability")
         Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-            HealthRow("App blocking active", BlockService.isEnabled(ctx)) { ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            HealthRow("Battery not restricted", batteryUnrestricted(ctx)) {
-                ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            HealthRow("App blocking active", a11y == Perm.ON, if (a11y == Perm.NOT_RUNNING) A11Y_NOT_RUNNING else null) {
+                ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            HealthRow("Uninstall protection", isAdmin(ctx)) {     // as the switch's on: the switch below then agrees
+            HealthRow("Battery not restricted", battery) { Perms.openBattery(ctx) }
+            HealthRow("Uninstall protection", admin) {     // as the switch's on: the switch below then agrees
                 Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = true)) }
                 ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             if (cfg.settings.bedtimeGrayscale && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
-                HealthRow("Grayscale permission", com.husarp.lockdown.remind.Grayscale.canWrite(ctx)) { copyGrant(ctx) }
+                HealthRow("Grayscale permission", grayOk) { copyGrant(ctx) }
             val link by com.husarp.lockdown.link.IslandLink.mainState.collectAsStateWithLifecycle()
             if (link.state.isNotEmpty() && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // Fix opens Lockdown in Island
-                HealthRow("Island helper checking in", com.husarp.lockdown.link.IslandLink.healthy(ctx)) { com.husarp.lockdown.link.IslandLink.openOtherProfile(ctx) }
+                HealthRow("Island helper checking in", remember(fresh, link) { com.husarp.lockdown.link.IslandLink.healthy(ctx) }) { com.husarp.lockdown.link.IslandLink.openOtherProfile(ctx) }
         }
         // A reinstall or a reset to get out of the rules shows here as a fresh date.
         val installed = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime }.getOrDefault(0L) }
@@ -282,7 +290,8 @@ fun GuardrailsScreen() {
                 Text("Time zone changed to $new - Lockdown keeps $kept for 24 hours.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            SwitchRowInline("Uninstall protection (device admin)", cfg.guardrails.uninstallProtection) { on ->
+            // on only while Android really has it (turned off in Android's settings, or its screen cancelled, shows off)
+            SwitchRowInline("Uninstall protection (device admin)", cfg.guardrails.uninstallProtection && admin) { on ->
                 if (on) {
                     Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = true)) }
                     ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -448,16 +457,23 @@ private fun EmergencyDialog(onDismiss: () -> Unit) {
     )
 }
 
+/** [note]: why it's not on although Android shows it allowed ("allowed but not running"). */
 @Composable
-private fun HealthRow(label: String, ok: Boolean, onFix: () -> Unit) {
+private fun HealthRow(label: String, ok: Boolean, note: String? = null, onFix: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val ex = com.husarp.lockdown.ui.theme.LockdownTheme.extra
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Icon(if (ok) Icons.Filled.Check else Icons.Filled.Close, null, tint = if (ok) ex.success else cs.error, modifier = Modifier.size(20.dp))
-        Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleSmall)
+            if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = cs.error)
+        }
         if (!ok) TextButton(onClick = onFix) { Text("Fix") }
     }
 }
+
+/** App blocking turned on in Android's accessibility settings, but Android isn't running it (it crashed or was stopped). */
+internal const val A11Y_NOT_RUNNING = "On in Android, but not running. Turn Lockdown off and on again in Accessibility."
 
 private fun batteryUnrestricted(ctx: Context) =
     (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)

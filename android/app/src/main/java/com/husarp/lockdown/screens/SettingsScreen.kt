@@ -39,6 +39,9 @@ import com.husarp.lockdown.engine.ResetCarry
 import java.time.LocalTime
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
+import com.husarp.lockdown.engine.Perm
+import com.husarp.lockdown.engine.PermCheck
+import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.usage.Usage
@@ -125,6 +128,14 @@ fun SettingsScreen() {
         }
     }
 
+    // Read again on every return to the app (and a moment after), so a permission just granted in Android shows.
+    val fresh = com.husarp.lockdown.guard.rememberFresh()
+    val a11y = remember(fresh) { Perms.a11y(ctx) }
+    val usage = remember(fresh) { Usage.hasAccess(ctx) }
+    val notes = remember(fresh) { Perms.notifications(ctx) }
+    val vpn = remember(fresh, s.siteFilterOn) { PermCheck.vpn(s.siteFilterOn, LockdownVpn.prepare(ctx) == null, LockdownVpn.active) }
+    fun startVpn() { val i = LockdownVpn.prepare(ctx); if (i != null) vpnConsent.launch(i) else LockdownVpn.start(ctx) }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card {
             Column(Modifier.padding(16.dp)) {
@@ -144,14 +155,23 @@ fun SettingsScreen() {
         Card {
             Column(Modifier.padding(16.dp)) {
                 Text("Permissions", style = MaterialTheme.typography.titleSmall)
-                PermRow("App blocking (accessibility)", BlockService.isEnabled(ctx)) { ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                PermRow("Usage access (screen time)", Usage.hasAccess(ctx)) { ctx.startActivity(Usage.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                PermRow("App blocking (accessibility)", a11y == Perm.ON, if (a11y == Perm.NOT_RUNNING) A11Y_NOT_RUNNING else null) {
+                    ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                PermRow("Usage access (screen time)", usage) { ctx.startActivity(Usage.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                PermRow("Notifications (reminders, block notices)", notes) { ctx.startActivity(Perms.notificationsIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Site filter (VPN)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     Switch(checked = s.siteFilterOn, onCheckedChange = { on ->
-                        if (on) { val i = LockdownVpn.prepare(ctx); if (i != null) vpnConsent.launch(i) else LockdownVpn.start(ctx) }
+                        if (on) startVpn()
                         else guard(true) { LockdownVpn.stop(ctx) }
                     })
+                }
+                // switched on, but not running (or Android's VPN permission went to another app): say so, one tap starts it
+                if (vpn == Perm.NOT_RUNNING || vpn == Perm.OFF) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (vpn == Perm.NOT_RUNNING) "On, but not running." else "On, but Android's VPN permission went to another app.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { startVpn() }) { Text(if (vpn == Perm.NOT_RUNNING) "Start" else "Allow") }
                 }
                 Text("Optional. Blocks sites everywhere via a local VPN, but can interfere with other apps. Leave it off — Lockdown still blocks sites and protection lists in the browser without it.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -262,12 +282,16 @@ fun SettingsScreen() {
     }
 }
 
+/** [note]: why it's not on although Android shows it allowed ("allowed but not running"); then the button is Fix. */
 @Composable
-private fun PermRow(label: String, ok: Boolean, onFix: () -> Unit) {
+private fun PermRow(label: String, ok: Boolean, note: String? = null, onFix: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (!ok && note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
         if (ok) Text("On", color = com.husarp.lockdown.ui.theme.LockdownTheme.extra.success, style = MaterialTheme.typography.labelLarge)
-        else TextButton(onClick = onFix) { Text("Grant") }
+        else TextButton(onClick = onFix) { Text(if (note != null) "Fix" else "Grant") }
     }
 }
 

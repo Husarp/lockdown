@@ -21,6 +21,8 @@
         tools:ignore="ProtectedPermissions" />
     <!-- In-app updater: hand the downloaded APK to Android's installer (asks "install unknown apps" once). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Battery "Fix": Android's one-tap "let it always run in the background?" question instead of the whole app list. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Island link: the helper copy in the work profile covers a blocked Island app with its block screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
