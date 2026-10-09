@@ -131,4 +131,17 @@ class AntiBypassEngineTest {
         assertNull(Emergency.start(true, listOf(week), used(t0, t0, t0), week.id, listOf("a"), false, t0).use)
         assertEquals(t0.plusMinutes(20).toString(), Emergency.start(true, listOf(week), emptyList(), week.id, listOf("a"), false, t0).use!!.until)
     }
+
+    @Test fun anyPhraseLengthWithinBoundsAndShorterNeedsTheChallenge() {
+        assertEquals(30, AntiBypass.parseLength(" 30 "))
+        assertEquals(777, AntiBypass.parseLength("777"))
+        assertEquals(2000, AntiBypass.parseLength("2000"))
+        for (bad in listOf("29", "2001", "0", "-50", "", "abc", "60.5")) assertNull(bad, AntiBypass.parseLength(bad))
+        val base = AntiBypassCfg(phrase = true, length = 250)
+        assertFalse(AntiBypass.settingsLooser(base, base.copy(length = 251)))      // longer than a preset: free
+        assertFalse(AntiBypass.settingsLooser(base, base.copy(length = 2000)))
+        assertTrue(AntiBypass.settingsLooser(base, base.copy(length = 249)))       // any shorter: the challenge
+        assertTrue(AntiBypass.settingsLooser(base.copy(length = 1500), base))
+        assertEquals(2000, AntiBypass.newPhrase(2000).replace(" ", "").length)
+    }
 }

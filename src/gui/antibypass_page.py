@@ -110,8 +110,11 @@ class ChallengeWindow(ctk.CTkToplevel):
                 ctk.CTkLabel(box, text=f"Type this phrase to continue (no pasting). Passing unlocks changes like "
                                        f"these for {antibypass.UNLOCK_MIN} minutes.", justify="left", wraplength=520,
                              text_color=MUTED, font=theme.body(12)).pack(anchor="w")
-                shown_phrase = ctk.CTkFrame(box, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER,
-                                            corner_radius=3)
+                # a long phrase (up to MAX_LENGTH) scrolls inside a box of fixed height instead of growing the dialog
+                long = len(self.phrase) > 300
+                shown_phrase = (ctk.CTkScrollableFrame if long else ctk.CTkFrame)(
+                    box, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER, corner_radius=3,
+                    **({"height": 180} if long else {}))
                 shown_phrase.pack(anchor="w", fill="x", pady=10)
                 ctk.CTkLabel(shown_phrase, text=self.phrase, font=ctk.CTkFont(theme.DISPLAY, 15), wraplength=490,
                              justify="left", anchor="w").pack(anchor="w", padx=12, pady=8)
@@ -250,10 +253,15 @@ class AntiBypassPage(ctk.CTkFrame):
         line = ctk.CTkFrame(challenges.body, fg_color="transparent")
         line.pack(anchor="w", padx=(46, 0), pady=(4, 12))
         ctk.CTkLabel(line, text="Length").pack(side="left", padx=(0, 8))
-        self.length = Segmented(line, values=list(antibypass.LENGTHS), command=lambda v: self._apply())
+        self.length = Segmented(line, values=list(antibypass.LENGTHS), command=self._pick_length)
         self.length.pack(side="left")
-        self.length_note = ctk.CTkLabel(line, text="", text_color=MUTED)
-        self.length_note.pack(side="left", padx=10)
+        self.length_entry = ctk.CTkEntry(line, width=64, justify="center")   # or any length: the presets fill it in
+        self.length_entry.pack(side="left", padx=(10, 6))
+        self.length_entry.bind("<Return>", lambda e: self._apply())
+        self.length_entry.bind("<FocusOut>", lambda e: self._apply())
+        ctk.CTkLabel(line, text="characters", text_color=MUTED).pack(side="left")
+        help_icon(line, f"Pick one, or type any length from {antibypass.MIN_LENGTH} to {antibypass.MAX_LENGTH}. "
+                        f"Longer is instant; shorter needs the challenge.").pack(side="left", padx=4)
         self.complex_box = ctk.CTkCheckBox(challenges.body, text="Include numbers and CAPITAL letters (harder to type "
                                            "quickly)", command=self._apply)
         self.complex_box.pack(anchor="w", padx=(46, 0), pady=(0, 8))
@@ -425,8 +433,10 @@ class AntiBypassPage(ctk.CTkFrame):
         self.phrase_sw.select() if cfg["phrase"] else self.phrase_sw.deselect()
         self.grid_box.select() if cfg["grid"] else self.grid_box.deselect()
         self.complex_box.select() if cfg.get("complex") else self.complex_box.deselect()
-        self.length.set(next((k for k, v in antibypass.LENGTHS.items() if v == cfg["length"]), "Medium"))
-        self.length_note.configure(text=f"{cfg['length']} characters")
+        self.length.set(next((k for k, v in antibypass.LENGTHS.items() if v == cfg["length"]), None))
+        if self.length_entry.get() != str(cfg["length"]):
+            self.length_entry.delete(0, "end")
+            self.length_entry.insert(0, str(cfg["length"]))
         if self.custom_entry.get() != (cfg.get("custom_phrase") or ""):
             self.custom_entry.delete(0, "end")
             self.custom_entry.insert(0, cfg.get("custom_phrase") or "")
@@ -538,11 +548,16 @@ class AntiBypassPage(ctk.CTkFrame):
         if self.hours_sw.get() and not windows:
             raise ValueError("Turn on at least one day.")
         return {**cfg, "wait_min": reminders.parse_minutes(self.wait_entry.get(), least=1),
-                "phrase": bool(self.phrase_sw.get()), "length": antibypass.LENGTHS[self.length.get()],
+                "phrase": bool(self.phrase_sw.get()), "length": antibypass.parse_length(self.length_entry.get()),
                 "grid": bool(self.grid_box.get()), "complex": bool(self.complex_box.get()),
                 "custom_phrase": " ".join(self.custom_entry.get().split()),
                 "hours": bool(self.hours_sw.get()),
                 "windows": load_schedule(make_schedule("allow", windows))["windows"] if windows else cfg["windows"]}
+
+    def _pick_length(self, value: str):
+        self.length_entry.delete(0, "end")
+        self.length_entry.insert(0, str(antibypass.LENGTHS[value]))
+        self._apply()
 
     def _apply(self):
         old = antibypass.settings(self.db)

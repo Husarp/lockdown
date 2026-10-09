@@ -1,6 +1,7 @@
 # Changelog — Lockdown Mobile
 
 ## Unreleased
+- **Random challenge phrase: any length you choose.** Under the length chips, "Or any length" takes any number from 30 to 2000 characters. Longer saves at once; shorter needs the challenge. A long phrase scrolls in its own box while you type it. The Island helper gets it with the rest of your settings.
 - **Times are picked, not typed.** Tap any time (bedtime, wake-up, the bedtime steps, schedule hours, challenge hours, reminder times and hours, when limits reset) and Android's own clock opens, in 24 h when your phone uses it. Deleting a digit no longer turns a time into something else. A reminder's set times are a row: tap one to change it, × to remove it, **+ Add time** for another.
 - **The bedtime steps follow the bedtime.** Moving bedtime moves every "comes back" step by the same amount, so 23:00 / 00:00 / 03:00 with bedtime 23:00 becomes 22:00 / 23:00 / 02:00 when bedtime moves to 22:00.
 - **Site addresses never keep a space.** The space a keyboard adds after a dot ("youtube. com") is dropped as you type and when it's saved: new sites, sites in a group, allowed exceptions, keyword exceptions that are sites, and imported lists. Importing a hosts-file list ("0.0.0.0 ads.example.com") no longer adds "0.0.0.0" or "127.0.0.1" as sites.

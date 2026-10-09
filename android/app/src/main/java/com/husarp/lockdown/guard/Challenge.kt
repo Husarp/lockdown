@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -115,15 +116,16 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
                                     color = if (gridError) cs.error else cs.onSurfaceVariant)
                             }
                         } else {
-                            Surface(color = cs.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
-                                Text(phrase, Modifier.padding(12.dp), fontFamily = FontFamily.Monospace,
+                            // a long phrase (up to MAX_LENGTH) scrolls in its own box, so the typing field stays in view
+                            Surface(Modifier.heightIn(max = 220.dp), color = cs.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
+                                Text(phrase, Modifier.verticalScroll(rememberScrollState()).padding(12.dp), fontFamily = FontFamily.Monospace,
                                     style = MaterialTheme.typography.bodyLarge, color = cs.primary)
                             }
                             Spacer(Modifier.height(8.dp))
                             // Typed, not pasted (PC block_paste): a chunk dropped in at once - the clipboard, or a known
                             // custom phrase from the keyboard's clipboard history - is ignored. No suggestions either.
                             OutlinedTextField(value = typed, onValueChange = { if (AntiBypass.typedNotPasted(typed, it)) typed = it },
-                                label = { Text("Type the phrase") }, singleLine = false,
+                                label = { Text("Type the phrase") }, singleLine = false, maxLines = 6,
                                 keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = KeyboardType.Password),
                                 isError = typed.isNotBlank() && !onTrack)
                             if (typed.isNotBlank() && !phraseOk) {

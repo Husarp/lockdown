@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
@@ -211,6 +213,16 @@ fun GuardrailsScreen() {
                     Spacer(Modifier.height(6.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         for ((label, n) in PHRASE_LENGTHS) Chip("$label · $n", ab.length == n) { setAb(ab.copy(length = n)) }
+                    }
+                    var lengthText by remember(ab.length) { mutableStateOf(ab.length.toString()) }
+                    val typedLength = AntiBypass.parseLength(lengthText)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(lengthText, { lengthText = it.filter(Char::isDigit).take(4) },
+                            label = { Text("Or any length") }, singleLine = true, isError = typedLength == null,
+                            supportingText = { Text("${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH} characters. Longer saves at once; shorter needs the challenge.") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                        TextButton(onClick = { typedLength?.let { setAb(ab.copy(length = it)) } },
+                            enabled = typedLength != null && typedLength != ab.length) { Text("Save") }
                     }
                     Spacer(Modifier.height(8.dp))
                 }

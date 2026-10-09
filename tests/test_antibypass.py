@@ -156,3 +156,21 @@ def test_turning_the_grid_off_needs_the_challenge():
     base = {**ab.DEFAULTS, "phrase": True, "grid": True}
     assert ab.settings_looser(base, {**base, "grid": False})
     assert not ab.settings_looser({**base, "grid": False}, base)
+
+
+def test_custom_phrase_length_bounds_and_looseness():
+    assert ab.parse_length(" 30 ") == ab.MIN_LENGTH == 30
+    assert ab.parse_length("777") == 777
+    assert ab.parse_length(str(ab.MAX_LENGTH)) == ab.MAX_LENGTH == 2000
+    for bad in ("29", "2001", "0", "-50", "", "abc", "60.5"):
+        try:
+            ab.parse_length(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    base = {**ab.DEFAULTS, "phrase": True, "length": 250}
+    assert not ab.settings_looser(base, {**base, "length": 251})       # longer than a preset: free
+    assert not ab.settings_looser(base, {**base, "length": 2000})
+    assert ab.settings_looser(base, {**base, "length": 249})           # any shorter: the challenge
+    assert ab.settings_looser({**base, "length": 1500}, {**base, "length": 250})
+    assert len(ab.new_phrase(2000).replace(" ", "")) == 2000

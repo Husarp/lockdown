@@ -40,6 +40,11 @@ data class AntiBypassCfg(
 
 object AntiBypass {
     const val UNLOCK_MIN = 5L
+    const val MIN_LENGTH = 30           // a random phrase's length: the presets are quick picks, any length in between works
+    const val MAX_LENGTH = 2000
+
+    /** A random phrase's length as typed in settings, or null when it isn't a whole number in MIN_LENGTH..MAX_LENGTH. */
+    fun parseLength(text: String): Int? = text.trim().toIntOrNull()?.takeIf { it in MIN_LENGTH..MAX_LENGTH }
 
     fun active(cfg: AntiBypassCfg) = cfg.phrase || cfg.hours
 

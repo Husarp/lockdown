@@ -48,7 +48,8 @@ EXITED_KEY = "agent.exited"   # "1" after tray Exit: the watchdog doesn't bring 
 OFF_KEY = "app.off"           # "" or when Lockdown was switched off entirely - nothing is enforced until you
                               # switch it back on. Turning it off needs the challenge; turning it back on never
                               # does (coming back to your rules is never the thing to stand in the way of).
-LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
+LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}   # quick picks; any length in between works
+MIN_LENGTH, MAX_LENGTH = 30, 2000
 DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "wait_min": 0,
             "unlocked_from": None, "unlocked_until": None}
@@ -134,6 +135,17 @@ def new_phrase(length: int, complex: bool = False, rng=random) -> str:
     charset = string.ascii_lowercase + (string.ascii_uppercase + string.digits if complex else "")
     chars = "".join(rng.choice(charset) for _ in range(length))
     return " ".join(chars[i:i + 5] for i in range(0, length, 5))
+
+
+def parse_length(text) -> int:
+    """A random phrase's length as typed in settings: a whole number of characters, MIN_LENGTH..MAX_LENGTH."""
+    try:
+        n = int(str(text).strip())
+    except ValueError:
+        n = 0
+    if not MIN_LENGTH <= n <= MAX_LENGTH:
+        raise ValueError(f"Phrase length: a number from {MIN_LENGTH} to {MAX_LENGTH}.")
+    return n
 
 
 def phrase_for(cfg: dict, rng=random) -> str:
