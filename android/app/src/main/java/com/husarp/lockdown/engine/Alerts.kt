@@ -67,6 +67,10 @@ object Alerts {
     fun whenText(t: LocalDateTime, now: LocalDateTime): String =
         if (t.toLocalDate() == now.toLocalDate()) t.format(HM) else "${DAY_NAMES[t.dayOfWeek.value - 1]} ${t.format(HM)}"
 
+    /** The one line a blocked item shows, whatever blocks it: "Blocked until 18:00", or "Blocked" with no end. */
+    fun blockedLine(until: LocalDateTime?, now: LocalDateTime): String =
+        if (until == null || until == LocalDateTime.MAX) "Blocked" else "Blocked until ${whenText(until, now)}"
+
     /** Your own text for [reason], or null when you haven't written one. */
     fun ownMessage(cfg: AlertsCfg, reason: String): String? =
         cfg.messages[reason]?.trim()?.takeIf { it.isNotEmpty() && it != DEFAULT_MESSAGES[reason] }

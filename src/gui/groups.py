@@ -492,8 +492,10 @@ class GroupsTab(ctk.CTkFrame):
             texts.pack(side="left", fill="x", expand=True, padx=10, pady=8)
             names = sorted(self.draft.items[i]["display_name"] for i in g["members"] if i in self.draft.items)
             pot = {"usage_owner": f"group:{g['id']}"}
-            rules = " · ".join(describe_rule({**r, **pot, "rule_key": f"g{g['id']}{r['rule_type']}"}, now, usage)
-                               .replace(":\n", " ").replace("\n", " · ") for r in g["rules"])
+            own = [{**r, **pot, "rule_key": f"g{g['id']}{r['rule_type']}"} for r in g["rules"]]
+            blocking = bool(item_block(own, now, usage))   # blocked: its limits without the time used
+            rules = " · ".join(describe_rule(r, now, usage, used=not blocking)
+                               .replace(":\n", " ").replace("\n", " · ") for r in own)
             if self.draft.is_group_unsaved(g["id"]):
                 status, color = "Not applied (unsaved)", ORANGE
             elif g.get("disabled"):

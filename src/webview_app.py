@@ -62,14 +62,22 @@ def _windows_for_ui(schedule_json: str) -> list[dict]:
 
 
 def _rules_for_ui(db) -> list[dict]:
-    from rules import (DAY_LIMITS_FIELD, TIME_LIMIT_FIELDS, allowance_left, describe_rule, effective_rules, limits,
-                       load_schedule, time_bucket)
+    from rules import (DAY_LIMITS_FIELD, TIME_LIMIT_FIELDS, allowance_left, block_end, blocked_text, describe_rule,
+                       effective_rules, item_block, limits, load_schedule, time_bucket)
     groups = db.list_groups()
     group_of = {i: g["name"] for g in groups for i in g["members"]}
     now = now_from_db(db)
     usage = db.usage_lookup(now)
     out = []
-    for item in db.list_items():
+    items = db.list_items()
+    blocks = {i["id"]: item_block(effective_rules(i, groups), now, usage) for i in items}
+    live = {i["id"] for i in items if not i.get("disabled")}
+
+    def whole_group(g):   # the group's own rules block every live member now (not one member's own pot or unlock)
+        return all((b := blocks.get(i)) and (b[2].get("group") or {}).get("id") == g["id"]
+                   for i in g["members"] if i in live)
+    by_group = {g["id"]: g["name"] for g in groups if whole_group(g)}
+    for item in items:
         rules = effective_rules(item, groups)
         row = {"id": str(item["id"]), "n": item["display_name"],
                "kind": "app" if item["item_type"] == "app" else "site", "target": item["target"],
@@ -77,6 +85,11 @@ def _rules_for_ui(db) -> list[dict]:
                "windows": [], "limitType": "off", "limit": 0, "used": 0,
                "allowOn": False, "allowMin": 0, "allowTimes": 0, "allowActive": False, "allowLeft": 0,
                "words": " · ".join(describe_rule(r, now, usage).splitlines()[0] for r in rules) if rules else ""}
+        # blocked now: the page shows just this, once - not the time used or left of its limits
+        block = blocks[item["id"]]
+        row["blocked"] = blocked_text(block_end(rules, now, usage), now) if block else ""   # its longest block
+        # by a group: only when the group's block covers all its members, else the row keeps the item's name
+        row["blockedBy"] = by_group.get(block[2]["group"]["id"], "") if block and block[2].get("group") else ""
         mode, allowances = None, []
         for r in rules:
             if r["rule_type"] == "scheduled":

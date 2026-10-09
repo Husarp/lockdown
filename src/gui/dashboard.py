@@ -15,7 +15,7 @@ from gui import app_browser, appinfo, categories, icons, theme
 from gui.charts import DayBars, TimelineBar
 from gui.components import Card, ProgressLine, Rows, StatCard, eyebrow, page_head
 from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left, allowance_owner,
-                   period_words,
+                   block_end, blocked_text, period_words, rule_block,
                    effective_rules, item_block, limits, next_block, opening_bucket, time_bucket)
 from trusted_time import now_from_db
 
@@ -155,6 +155,85 @@ def upcoming(now, items, groups, usage) -> list[dict]:
                                                      "title": f"{item['display_name']} limit will be reached",
                                                      "names": []}
     return sorted(merged.values(), key=lambda e: (e["when"] is not None, e["when"] or now))
+
+
+def limit_entries(now, items, groups, usage) -> list[dict]:
+    """The Limits card's rows, fullest first: one per limit - a group's shared limit once, a member's own limit
+    in a group (on top of the group's) as a row of its own - and one per allowance in use.
+    Something blocked gets one row, blocked = "Blocked (until ...)", without used / left times; and only once:
+    a group whose members are all blocked is that one row, so neither its allowance nor a member's own limit
+    shows the same block again (nor a member's own limit and its allowance)."""
+    clock = usage.clock
+    seen, entries, allowances = set(), [], {}
+    live = {i["id"] for i in items if not i.get("disabled")}
+    members = {g["id"]: {i for i in g["members"] if i in live} for g in groups}
+    blocks = {i["id"]: block_end(effective_rules(i, groups), now, usage) for i in items}   # how long each stays blocked
+
+    def entry(name, item, rule, pot, kind, frac, period, used, limit):
+        group = pot.startswith("group:")
+        return {"name": name, "item": item, "group": rule["group"]["name"] if rule.get("group") else None,
+                "rule": rule, "kind": kind, "frac": frac, "period": period, "used": used, "limit": limit,
+                "members": members[rule["group"]["id"]] if group else {item["id"]}, "blocked": None}
+
+    for item in items:
+        for r in effective_rules(item, groups):
+            spent = allowance_left(r, now, usage)   # "N min allowed during blocked hours", while inside them
+            pot = allowance_owner(r)    # a group's allowance is one pot, so it is one row
+            if spent:
+                used, allowed, until = spent
+                key = (pot, "allowance", r["rule_key"], until)
+                # one pot, two allowances (a group's per-member one and the member's own extra, ending at the
+                # same minute): the row shows the one with least left - the one that really limits it
+                if key not in allowances or allowed - used < allowances[key][1]:
+                    name = f"{r['group']['name']} (group)" if pot.startswith("group:") else item["display_name"]
+                    row = entry(name, item, r, pot, "allowance", used / max(allowed, 1), until, used, allowed)
+                    if key in allowances:
+                        entries[allowances[key][0]] = row
+                        allowances[key] = (allowances[key][0], allowed - used)
+                    else:
+                        allowances[key] = (len(entries), allowed - used)
+                        entries.append(row)
+            # one row per limit: a group's shared limit once, and a member's own limit in a group (on top of
+            # the group's) as a row of its own besides the group's
+            key = (r["usage_owner"], r["rule_key"])
+            if r["rule_type"] not in ("time_limit", "switch_limit") or key in seen:
+                continue
+            seen.add(key)
+            is_time = r["rule_type"] == "time_limit"
+            best = None
+            for period, limit in limits(r, TIME_LIMIT_FIELDS if is_time else OPEN_LIMIT_FIELDS, now, clock).items():
+                bucket = time_bucket(period, now, clock) if is_time else opening_bucket(r, period, now, clock)
+                used = usage(r["usage_owner"], bucket)
+                frac = used / (limit * 60 if is_time else max(limit, 1))
+                if best is None or frac > best[0]:
+                    best = (frac, period, used, limit)
+            if best:
+                group = r["usage_owner"].startswith("group:")
+                name = f"{r['group']['name']} (group)" if group else item["display_name"]
+                if r.get("extra_of"):
+                    name += f" (own, in {r['extra_of']['name']})"
+                entries.append(entry(name, item, r, r["usage_owner"], "time" if is_time else "opens", *best))
+    # blocked: every item the row is about is blocked now. Until: when this row's own rule lets go, if it is
+    # the one blocking; otherwise (blocked by something else) when the item is allowed again. A row for one item
+    # says when that item is allowed again, if that is later than its own rule's end (as its Status column does).
+    covered, dropped = [], set()
+    for n, e in sorted(enumerate(entries), key=lambda ne: -len(ne[1]["members"])):   # a group's row first
+        if not all(blocks.get(i) for i in e["members"]):
+            continue
+        ends = [blocks[i] for i in e["members"]]
+        if any(e["members"] <= c and max(ends) <= c_until for c, c_until in covered):
+            dropped.add(n)   # the same block is already a row (a member blocked longer keeps its own row)
+            continue
+        own = rule_block(e["rule"], now, usage)
+        until = (datetime.max if own[1] is None else own[1]) if own else max(ends)
+        if len(e["members"]) == 1:
+            until = max(until, ends[0])
+        e["blocked"] = blocked_text(until, now)
+        e["frac"] = 1.0
+        covered.append((e["members"], until))
+    shown = [e for n, e in enumerate(entries) if n not in dropped]
+    shown.sort(key=lambda e: -e["frac"])
+    return shown
 
 
 class DashboardPage(ctk.CTkFrame):
@@ -403,65 +482,27 @@ class DashboardPage(ctk.CTkFrame):
                                     f"{len(blocked_today)} blocked visit{'s' * (len(blocked_today) != 1)} turned away")
 
     def _limits(self, now, items, groups, usage):
-        clock = usage.clock
-        seen, entries, allowances = set(), [], {}
-        for item in items:
-            for r in effective_rules(item, groups):
-                spent = allowance_left(r, now, usage)   # "N min allowed during blocked hours", while inside them
-                pot = allowance_owner(r)    # a group's allowance is one pot, so it is one row
-                if spent:
-                    used, allowed, until = spent
-                    key = (pot, "allowance", r["rule_key"], until)
-                    # one pot, two allowances (a group's per-member one and the member's own extra, ending at the
-                    # same minute): the row shows the one with least left - the one that really limits it
-                    if key not in allowances or allowed - used < allowances[key][1]:
-                        name = f"{r['group']['name']} (group)" if pot.startswith("group:") \
-                            else item["display_name"]
-                        icon = icons.get(r["group"]["name"], 16) if r.get("group") else icons.for_item(item, 16)
-                        row = (f"{name} - allowance", icon, "allowance", used / max(allowed, 1), until, used, allowed)
-                        if key in allowances:
-                            entries[allowances[key][0]] = row
-                            allowances[key] = (allowances[key][0], allowed - used)
-                        else:
-                            allowances[key] = (len(entries), allowed - used)
-                            entries.append(row)
-                # one row per limit: a group's shared limit once, and a member's own limit in a group (on top of
-                # the group's) as a row of its own besides the group's
-                key = (r["usage_owner"], r["rule_key"])
-                if r["rule_type"] not in ("time_limit", "switch_limit") or key in seen:
-                    continue
-                seen.add(key)
-                is_time = r["rule_type"] == "time_limit"
-                group = r["usage_owner"].startswith("group:")
-                best = None
-                for period, limit in limits(r, TIME_LIMIT_FIELDS if is_time else OPEN_LIMIT_FIELDS, now, clock).items():
-                    bucket = time_bucket(period, now, clock) if is_time else opening_bucket(r, period, now, clock)
-                    used = usage(r["usage_owner"], bucket)
-                    frac = used / (limit * 60 if is_time else max(limit, 1))
-                    if best is None or frac > best[0]:
-                        best = (frac, period, used, limit)
-                if best:
-                    name = f"{r['group']['name']} (group)" if group else item["display_name"]
-                    if r.get("extra_of"):
-                        name += f" (own, in {r['extra_of']['name']})"
-                    icon = icons.get(r["group"]["name"], 16) if group else icons.for_item(item, 16)
-                    entries.append((name, icon, "time" if is_time else "opens", *best))
+        entries = limit_entries(now, items, groups, usage)
         self.limits.note.configure(text=f"{len(entries)} active")
-        entries.sort(key=lambda e: -e[3])
-        for row, (name, icon, kind, frac, period, used, limit) in zip(self.limit_rows.take(len(entries)),
-                                                                      entries):
+        for row, e in zip(self.limit_rows.take(len(entries)), entries):
+            name, kind, frac, period, used, limit = (e[k] for k in ("name", "kind", "frac", "period", "used",
+                                                                    "limit"))
+            icon = icons.get(e["group"], 16) if e["group"] else icons.for_item(e["item"], 16)
             color = theme.SUCCESS if frac < 0.6 else theme.WARNING if frac < 0.85 else theme.DANGER
-            if kind == "allowance":   # here period is the end of the blocked stretch, and limit is in seconds
+            if e["blocked"]:   # one line, no used / left times: they can't be spent
+                text, left_text, color = "", e["blocked"], theme.DANGER
+            elif kind == "allowance":   # here period is the end of the blocked stretch, and limit is in seconds
                 left = limit - used
                 text = f"{stats.hm(used)} of {stats.hm(limit)} allowed during blocked hours (until {period:%H:%M})"
                 left_text = f"{stats.hm(left)} left" if left > 0 else "used up"
+                name += " - allowance"
             elif kind == "time":
-                words = period_words(period, now, clock)
+                words = period_words(period, now, usage.clock)
                 when = "" if words == PERIOD_WORDS["day"] else f" {words}"   # ("today" goes without saying here)
                 text, left = f"{stats.hm(used)} of {stats.hm(limit * 60)}{when}", limit * 60 - used
                 left_text = f"{stats.hm(left)} left" if left > 0 else "limit reached"
             else:
-                text = f"{used} opens of {limit} {period_words(period, now, clock)}"
+                text = f"{used} opens of {limit} {period_words(period, now, usage.clock)}"
                 left_text = f"{limit - used} left" if used < limit else "limit reached"
                 name += " - opens"
             row.name.configure(text=f"  {name}", image=icon)

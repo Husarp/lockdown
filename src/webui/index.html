@@ -156,6 +156,7 @@ document.addEventListener("click", function(e){
 // ---- rule state (mirrors the engine's colours) ----------------------------
 function ruleState(r){
   if(!r.enabled) return ["off","Disabled"];
+  if(r.blocked) return ["red",r.blocked];    // blocked now (worked out in Python): just "Blocked (until …)"
   if(r.limitType!=="off" && r.limit){
     if(r.used>=r.limit) return ["red","Limit reached"];
     if(r.used>=r.limit*0.85) return ["warn",(r.limit-r.used)+" min left"];
@@ -178,17 +179,26 @@ function pageHome(){
       (!S.on?"Lockdown is off":(!svc()?"Service stopped":"of "+S.rules.length+" rules"))]
   ];
   var last7=h.last7||[], max=Math.max.apply(null,last7.map(function(d){return d.v;}).concat([1]));
-  var lim = S.rules.filter(function(r){return r.limitType!=="off" && r.limit;});
+  // members blocked by their group are one row for the group, not one per member
+  var byGroup = {};
+  var lim = S.rules.filter(function(r){
+    if(!(r.limitType!=="off" && r.limit)) return false;
+    if(!r.blocked || !r.blockedBy) return true;
+    if(byGroup[r.blockedBy]) return false;
+    return (byGroup[r.blockedBy] = true);
+  });
   return banner()+
   '<div class="grid stats">'+tiles.map(function(t){
     return '<div class="card tile"><div class="lab">'+esc(t[0])+'</div><div class="val">'+esc(t[1])+
       '</div><div class="sub">'+esc(t[2])+'</div></div>'; }).join("")+'</div>'+
   '<div class="cols">'+
     '<div class="card"><h3>Limits today</h3>'+ (lim.length? lim.map(function(r){
-        var st=ruleState(r), pct=Math.min(100,Math.round(r.used/r.limit*100));
-        return '<div class="row"><div style="flex:1"><div class="name">'+esc(r.n)+'</div>'+
+        var st=ruleState(r), pct=r.blocked?100:Math.min(100,Math.round(r.used/r.limit*100));
+        return '<div class="row"><div style="flex:1"><div class="name">'+
+          esc(r.blocked && r.blockedBy ? r.blockedBy+" (group)" : r.n)+'</div>'+
           '<div class="bar"><i style="width:'+pct+'%;background:var(--'+(st[0]==="off"?"muted":st[0])+')"></i></div></div>'+
-          '<div class="r"><span class="muted">'+r.used+' / '+r.limit+' min</span><span class="chip '+st[0]+'">'+esc(st[1])+'</span></div></div>';
+          '<div class="r">'+(r.blocked?'':'<span class="muted">'+r.used+' / '+r.limit+' min</span>')+
+          '<span class="chip '+st[0]+'">'+esc(st[1])+'</span></div></div>';
       }).join("") : '<div class="empty">No time limits set.</div>')+'</div>'+
     '<div class="card"><h3>Last 7 days</h3><div class="chart">'+ (last7.length? last7.map(function(d){
         var hi = d.v===max && d.v>0;

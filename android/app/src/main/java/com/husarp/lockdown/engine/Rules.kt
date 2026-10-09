@@ -266,6 +266,12 @@ object Rules {
         return active.filter { it.reason.ordinal == top }.maxBy { it.until ?: LocalDateTime.MAX }
     }
 
+    /** When the item's longest block now ends (LocalDateTime.MAX = no end), or null if nothing blocks it. Unlike
+     *  [itemBlock] (the most important reason), this is how long the item stays blocked. */
+    fun blockEnd(effRules: List<EffRule>, now: LocalDateTime, usage: Usage = noUsage,
+                 clock: LimitClock = LimitClock.DEFAULT): LocalDateTime? =
+        effRules.mapNotNull { ruleBlock(it, now, usage, clock) }.maxOfOrNull { it.second ?: LocalDateTime.MAX }
+
     /** Every rule blocking the item now (all reasons), for how it is blocked (BlockMethod.blockingWay). */
     fun blockingRules(effRules: List<EffRule>, now: LocalDateTime, usage: Usage = noUsage,
                       clock: LimitClock = LimitClock.DEFAULT, unlockedUntil: LocalDateTime? = null): List<EffRule> {

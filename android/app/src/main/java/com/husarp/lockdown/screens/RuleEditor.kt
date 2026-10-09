@@ -94,20 +94,27 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
             }
             ItemType.APP -> {
                 val apps = rememberInstalledApps()
+                // an app already on your list shows ticked in its place, and opens its rules instead of a second copy
+                val cfg by Store.state.collectAsStateWithLifecycle()
+                val listed = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.associateBy { it.target.lowercase() } }
                 var q by remember { mutableStateOf("") }
                 OutlinedTextField(q, { q = it }, placeholder = { Text("Search apps") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
                 val shown = apps.filter { it.label.contains(q, true) || it.pkg.contains(q, true) }
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(shown, key = { it.pkg }) { a ->
+                        val have = listed[a.pkg.lowercase()]
                         com.husarp.lockdown.ui.ListRow(
-                            title = a.label, subtitle = a.pkg,
+                            title = a.label, subtitle = if (have != null) "On your list" else a.pkg,
                             leading = { com.husarp.lockdown.ui.AppIcon(a.pkg, a.label) },
+                            trailing = if (have != null) ({ Checkbox(checked = true, onCheckedChange = null) }) else null,
                             onClick = {
-                                val item = Item(UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP,
-                                    rules = listOf(Rule(RuleType.PERMANENT)))
-                                Store.update { it.copy(items = it.items + item) }
-                                onEdit(item)
+                                if (have != null) onEdit(have) else {
+                                    val item = Item(UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP,
+                                        rules = listOf(Rule(RuleType.PERMANENT)))
+                                    Store.update { it.copy(items = it.items + item) }
+                                    onEdit(item)
+                                }
                             },
                         )
                     }
@@ -118,12 +125,10 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
                 var host by remember { mutableStateOf("") }
                 Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(host, { host = it }, label = { Text("Hostname(s), space-separated") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(host, { host = com.husarp.lockdown.engine.Sites.joinDots(it) }, label = { Text("Hostname(s), space-separated") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     TextButton(onClick = {
                         // each hostname cleaned, not just the first ("www.a.com www.b.com" used to keep the second www.)
-                        val h = host.trim().lowercase().split(Regex("\\s+")).map {
-                            it.removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/")
-                        }.filter { it.isNotEmpty() }.distinct().joinToString(" ")
+                        val h = com.husarp.lockdown.engine.Sites.cleanList(host).joinToString(" ")
                         if (h.isNotEmpty()) {
                             val item = Item(UUID.randomUUID().toString().take(8), name.ifBlank { h.substringBefore(" ") }, h, ItemType.SITE,
                                 rules = listOf(Rule(RuleType.PERMANENT)))

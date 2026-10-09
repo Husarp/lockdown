@@ -91,6 +91,9 @@ fun GuardrailsScreen() {
     // first would make the very next pick a loosening, behind the challenge it just switched on.
     var pickHours by remember { mutableStateOf(false) }
     var pickWait by remember { mutableStateOf(false) }
+    // The same for the phrase: random or your own is chosen first, so turning it on never saves a random one
+    // while your own is still being typed (and setting yours after would need the challenge just switched on).
+    var pickPhrase by remember { mutableStateOf(false) }
 
     // Emergency settings: on, longer, more uses or per day instead of per week needs the challenge (PC Settings).
     fun setEm(new: EmergencyCfg) {
@@ -140,22 +143,47 @@ fun GuardrailsScreen() {
             HealthRow("Battery not restricted", batteryUnrestricted(ctx)) {
                 ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            HealthRow("Uninstall protection", isAdmin(ctx)) { }
+            HealthRow("Uninstall protection", isAdmin(ctx)) {     // as the switch's on: the switch below then agrees
+                Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = true)) }
+                ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
             if (cfg.settings.bedtimeGrayscale && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
                 HealthRow("Grayscale permission", com.husarp.lockdown.remind.Grayscale.canWrite(ctx)) { copyGrant(ctx) }
             val link by com.husarp.lockdown.link.IslandLink.mainState.collectAsStateWithLifecycle()
             if (link.state.isNotEmpty() && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // Fix opens Lockdown in Island
                 HealthRow("Island helper checking in", com.husarp.lockdown.link.IslandLink.healthy(ctx)) { com.husarp.lockdown.link.IslandLink.openOtherProfile(ctx) }
         }
+        // A reinstall or a reset to get out of the rules shows here as a fresh date.
+        val installed = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime }.getOrDefault(0L) }
+        val linkedAt = com.husarp.lockdown.link.IslandLink.linkedAt()
+        Text("Installed ${dateTime(installed)}" + when {
+            linkedAt > 0 -> " · Island linked ${dateTime(linkedAt)}"
+            com.husarp.lockdown.link.IslandLink.mainState.value.state.isNotEmpty() -> " · Island linked (by an older version, time not kept)"
+            else -> ""
+        }, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
 
         SectionLabel("Before loosening anything")
         Card(color = cs.surfaceContainerLow) {
             Text("Tightening a rule never asks. Loosening needs:", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Type a phrase", cfg.antibypass.phrase) { setAb(cfg.antibypass.copy(phrase = !cfg.antibypass.phrase)) }
+                Chip("Type a phrase", ab.phrase) { if (ab.phrase) setAb(ab.copy(phrase = false)) else pickPhrase = !pickPhrase }
                 Chip("Only in hours", ab.hours) { if (ab.hours) setAb(ab.copy(hours = false)) else pickHours = !pickHours }
                 Chip("Cool-off", ab.waitMin > 0) { if (ab.waitMin > 0) setAb(ab.copy(waitMin = 0)) else pickWait = !pickWait }
+            }
+            if (pickPhrase && !ab.phrase) {
+                Spacer(Modifier.height(14.dp))
+                Text("Type a phrase - pick which to turn it on", style = MaterialTheme.typography.titleSmall)
+                var own by remember { mutableStateOf("") }
+                val ownCleaned = own.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+                OutlinedTextField(own, { own = it }, label = { Text("Your own phrase") }, modifier = Modifier.fillMaxWidth())
+                Row {
+                    TextButton(onClick = { pickPhrase = false; setAb(ab.copy(phrase = true, customPhrase = "")) }) { Text("A random phrase") }
+                    TextButton(onClick = { pickPhrase = false; setAb(ab.copy(phrase = true, customPhrase = ownCleaned)) },
+                        enabled = ownCleaned.isNotEmpty()) { Text("Use my phrase") }
+                }
+                Text("Your own phrase is typed exactly each time (no pasting). Changing it later needs the challenge.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             if (ab.phrase) {
                 Spacer(Modifier.height(14.dp))
@@ -435,6 +463,9 @@ private fun batteryUnrestricted(ctx: Context) =
     (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
 
 private fun dpm(ctx: Context) = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+internal fun dateTime(ms: Long): String =
+    if (ms <= 0) "?" else java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
+
 private fun admin(ctx: Context) = ComponentName(ctx, AdminReceiver::class.java)
 private fun isAdmin(ctx: Context) = dpm(ctx).isAdminActive(admin(ctx))
 private fun adminIntent(ctx: Context) = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)

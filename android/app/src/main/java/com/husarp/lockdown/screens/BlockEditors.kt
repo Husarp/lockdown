@@ -127,31 +127,36 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
             }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
                 if (candidates.isEmpty() && apps.isEmpty()) Text("Nothing matches. Add a site below.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                // one list in name order: an app already on your list sits in its place among the others, not apart
+                val rows = (candidates.map { it.name to it } + apps.map { it.label to it }).sortedBy { it.first.lowercase() }.map { it.second }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
-                    items(candidates, key = { it.id }) { it2 ->
-                        ListRow(title = it2.name, subtitle = if (it2.type == ItemType.APP) "App" else it2.target,
-                            trailing = { androidx.compose.material3.Checkbox(checked = it2.id in draft.memberIds, onCheckedChange = { on ->
-                                setMember(it2.id, on)
-                                if (!on && newApps.any { n -> n.id == it2.id }) newApps = newApps.filterNot { n -> n.id == it2.id }
-                            }) })
-                    }
-                    items(apps, key = { "pkg:" + it.pkg }) { a ->
-                        ListRow(title = a.label, subtitle = "App · not on your list yet",
-                            trailing = { androidx.compose.material3.Checkbox(checked = false, onCheckedChange = { on ->
-                                if (on) {
-                                    // no own rule: the group's rules govern it
-                                    val item = Item(java.util.UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP)
-                                    newApps = newApps + item
-                                    setMember(item.id, true)
-                                }
-                            }) })
+                    items(rows, key = { if (it is Item) it.id else "pkg:" + (it as com.husarp.lockdown.block.InstalledApp).pkg }) { row ->
+                        if (row is Item) {
+                            val it2 = row
+                            ListRow(title = it2.name, subtitle = if (it2.type == ItemType.APP) (if (it2.rules.isEmpty()) "App" else "App · has its own rule") else it2.target,
+                                trailing = { androidx.compose.material3.Checkbox(checked = it2.id in draft.memberIds, onCheckedChange = { on ->
+                                    setMember(it2.id, on)
+                                    if (!on && newApps.any { n -> n.id == it2.id }) newApps = newApps.filterNot { n -> n.id == it2.id }
+                                }) })
+                        } else {
+                            val a = row as com.husarp.lockdown.block.InstalledApp
+                            ListRow(title = a.label, subtitle = "App · not on your list yet",
+                                trailing = { androidx.compose.material3.Checkbox(checked = false, onCheckedChange = { on ->
+                                    if (on) {
+                                        // no own rule: the group's rules govern it
+                                        val item = Item(java.util.UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP)
+                                        newApps = newApps + item
+                                        setMember(item.id, true)
+                                    }
+                                }) })
+                        }
                     }
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(newSite, { newSite = it }, placeholder = { Text("Add a site to this group (e.g. reddit.com)") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(newSite, { newSite = it.filterNot(Char::isWhitespace) }, placeholder = { Text("Add a site to this group (e.g. reddit.com)") }, singleLine = true, modifier = Modifier.weight(1f))
                 TextButton(onClick = {
-                    val h = newSite.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/")
+                    val h = com.husarp.lockdown.engine.Sites.clean(newSite)
                     if (h.isNotEmpty()) {
                         val item = Item(java.util.UUID.randomUUID().toString().take(8), h, h, ItemType.SITE)   // no own rule: the group's shared rule governs it
                         Store.update { c -> c.copy(items = c.items + item) }
@@ -231,7 +236,7 @@ fun ProtectionEditor(onClose: () -> Unit) {
                 }
             }
             SectionLabel("Allowed exceptions")
-            ExceptionList(cfg.protection.allowed,
+            ExceptionList(cfg.protection.allowed, clean = { it.filterNot(Char::isWhitespace) },
                 onAdd = { host -> guard(true) { Store.update { c -> c.copy(protection = c.protection.copy(allowed = (c.protection.allowed + host).distinct())) } } },
                 onRemove = { host -> Store.update { c -> c.copy(protection = c.protection.copy(allowed = c.protection.allowed - host)) } })
         }
@@ -289,7 +294,7 @@ fun KeywordsEditor(onClose: () -> Unit) {
                 canRemove = true, onRemove = { w -> guard(true) { setKw { it.copy(words = it.words - w) } } },
             )
             SectionLabel("Exceptions (a site or a word that's never blocked)")
-            ExceptionList(kw.exceptions,
+            ExceptionList(kw.exceptions, clean = com.husarp.lockdown.engine.Sites::cleanIfSite,
                 onAdd = { w -> guard(true) { setKw { it.copy(exceptions = (it.exceptions + w).distinct()) } } },
                 onRemove = { w -> setKw { it.copy(exceptions = it.exceptions - w) } })
         }
@@ -337,7 +342,7 @@ private fun CollapsibleWordList(
 
 /** A simple editable list of strings with an add field and per-row remove. */
 @Composable
-private fun ExceptionList(values: List<String>, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
+private fun ExceptionList(values: List<String>, clean: (String) -> String, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     var field by remember { mutableStateOf("") }
     Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
@@ -345,8 +350,8 @@ private fun ExceptionList(values: List<String>, onAdd: (String) -> Unit, onRemov
             ListRow(title = v, trailing = { IconButton(onClick = { onRemove(v) }) { Icon(Icons.Filled.Close, "remove") } })
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(field, { field = it }, placeholder = { Text("Add…") }, singleLine = true, modifier = Modifier.weight(1f))
-            TextButton(onClick = { val t = field.trim(); if (t.isNotEmpty()) { onAdd(t); field = "" } }) { Text("Add") }
+            OutlinedTextField(field, { field = clean(it) }, placeholder = { Text("Add…") }, singleLine = true, modifier = Modifier.weight(1f))
+            TextButton(onClick = { val t = clean(field).trim(); if (t.isNotEmpty()) { onAdd(t); field = "" } }) { Text("Add") }
         }
     }
 }

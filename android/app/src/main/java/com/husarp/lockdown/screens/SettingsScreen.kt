@@ -75,8 +75,7 @@ fun SettingsScreen() {
         importMsg = "Importing sites…"
         scope.launch {
             val added = withContext(Dispatchers.IO) {
-                val doms = linesOf(uri).map { it.removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/") }
-                    .filter { it.contains(".") }
+                val doms = linesOf(uri).flatMap { com.husarp.lockdown.engine.Sites.importLine(it) }
                 var n = 0
                 Store.update { c ->
                     val have = c.items.filter { it.type == ItemType.SITE }.flatMapTo(HashSet()) { it.target.split(" ") }
@@ -314,8 +313,7 @@ private fun ResetTimeCard() {
             Text("Time limits and opening limits start over at this time every day (weekly ones on Monday, monthly ones on the 1st, at the same time). Screen time keeps normal days.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(text, { text = it; error = null }, label = { Text("Reset at") }, singleLine = true,
-                    isError = error != null, modifier = Modifier.width(120.dp))
+                TimeField("Reset at", text, Modifier.width(120.dp)) { text = it; error = null }
                 TextButton(onClick = {
                     val t = validTime(text)?.let { com.husarp.lockdown.engine.Rules.parseHhmm(it) }
                     when {

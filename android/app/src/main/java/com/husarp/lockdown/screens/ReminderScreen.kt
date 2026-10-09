@@ -1,8 +1,13 @@
 package com.husarp.lockdown.screens
 
+import android.app.TimePickerDialog
+import android.content.Context
+import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,11 +45,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +74,7 @@ import com.husarp.lockdown.ui.Segmented
 import com.husarp.lockdown.ui.StatusChip
 import com.husarp.lockdown.ui.Status
 import com.husarp.lockdown.ui.SwitchRowInline
+import java.time.LocalTime
 import java.util.UUID
 
 private sealed interface RemPage {
@@ -179,19 +185,14 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     // Steps, heads-up, texts and the mode are ordinary edits, as on the PC; only turning an important alert off
     // (or un-flagging it) asks for the challenge.
     fun set(block: (SleepCfg) -> SleepCfg) = Store.update { it.copy(sleep = block(it.sleep)) }
-    // The step that sat at bedtime when the Bedtime box was entered: only it moves with the bedtime, so a time
-    // passing through on the way (deleting the "2" of 23:00 gives 3:00) never drags other steps along.
-    var anchor by remember { mutableStateOf(-1) }
     Column(Modifier.fillMaxSize()) {
         EditorHeader("Bedtime", onBack = onClose)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Card(color = cs.surfaceContainerLow) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // a step at bedtime moves with it
-                    TimeField("Bedtime", s.bedtime, Modifier.weight(1f).onFocusChanged { f ->
-                        if (f.isFocused) anchor = Store.config.sleep.let { c -> c.tiers.indexOfFirst { it.from == c.bedtime } }
-                    }) { t ->
-                        set { c -> c.copy(bedtime = t, tiers = c.tiers.mapIndexed { j, x -> if (j == anchor) x.copy(from = t) else x }) }
+                    // the steps move with the bedtime
+                    TimeField("Bedtime", s.bedtime, Modifier.weight(1f)) { t ->
+                        set { c -> c.copy(bedtime = t, tiers = RemindersEngine.shiftSteps(c.tiers, c.bedtime, t)) }
                     }
                     TimeField("Wake", s.wake, Modifier.weight(1f)) { t -> set { it.copy(wake = t) } }
                 }
@@ -207,10 +208,7 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 s.tiers.forEachIndexed { i, t ->
                     key(i) {
                         TierRow(s, t, onChange = { n -> set { c -> c.copy(tiers = c.tiers.mapIndexed { j, x -> if (j == i) n else x }) } },
-                            onRemove = {
-                                anchor = if (anchor == i) -1 else if (anchor > i) anchor - 1 else anchor
-                                set { c -> c.copy(tiers = c.tiers.filterIndexed { j, _ -> j != i }) }
-                            })
+                            onRemove = { set { c -> c.copy(tiers = c.tiers.filterIndexed { j, _ -> j != i }) } })
                     }
                 }
                 if (s.tiers.isEmpty()) Text("Every ${s.repeat} min, all night.", style = MaterialTheme.typography.bodyMedium)
@@ -256,11 +254,9 @@ private fun BedtimeEditor(onClose: () -> Unit) {
 /** One escalation step: "from HH:MM, every N min", with × to remove it. */
 @Composable
 private fun TierRow(s: SleepCfg, t: ReminderTier, onChange: (ReminderTier) -> Unit, onRemove: () -> Unit) {
-    var time by remember(t.from) { mutableStateOf(t.from) }
     var every by remember(t.every) { mutableStateOf(t.every.toString()) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(time, { v -> time = v; validTime(v)?.let { onChange(t.copy(from = it)) } },
-            label = { Text("From") }, singleLine = true, isError = validTime(time) == null, modifier = Modifier.weight(1f))
+        TimeField("From", t.from, Modifier.weight(1f)) { onChange(t.copy(from = it)) }
         OutlinedTextField(every, { v -> every = v; v.trim().toIntOrNull()?.takeIf { it >= 1 }?.let { onChange(t.copy(every = minOf(it, 12 * 60))) } },
             label = { Text("Every (min)") }, singleLine = true, isError = (every.trim().toIntOrNull() ?: 0) < 1,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
@@ -284,12 +280,24 @@ internal fun validTime(v: String): String? {
     return if (h < 24 && min < 60) "%02d:%02d".format(h, min) else null
 }
 
-/** A time box that saves only a real time (half-typed "2" or "22:" never reaches the settings). */
+/** Android's own clock dialog (24 h when the phone uses it), starting at [value] (or now if it isn't a time). */
+internal fun pickTime(ctx: Context, value: String, onPick: (String) -> Unit) {
+    val t = validTime(value)?.let { Rules.parseHhmm(it) } ?: LocalTime.now()
+    TimePickerDialog(ctx, { _, h, m -> onPick("%02d:%02d".format(h, m)) }, t.hour, t.minute, DateFormat.is24HourFormat(ctx)).show()
+}
+
+/** A time you tap to change with the system clock dialog: no typing, so only a real time ever reaches the settings. */
 @Composable
 internal fun TimeField(label: String, value: String, modifier: Modifier, onValid: (String) -> Unit) {
-    var text by remember(value) { mutableStateOf(value) }
-    OutlinedTextField(text, { v -> text = v; validTime(v)?.let { if (it != value) onValid(it) } }, label = { Text(label) },
-        singleLine = true, isError = validTime(text) == null, modifier = modifier)
+    val ctx = LocalContext.current
+    val src = remember { MutableInteractionSource() }
+    val cur by rememberUpdatedState(value)
+    val pick by rememberUpdatedState(onValid)
+    LaunchedEffect(src) {
+        src.interactions.collect { if (it is PressInteraction.Release) pickTime(ctx, cur) { t -> if (t != cur) pick(t) } }
+    }
+    OutlinedTextField(validTime(value) ?: value, {}, label = { Text(label) }, readOnly = true, singleLine = true,
+        isError = validTime(value) == null, interactionSource = src, modifier = modifier)
 }
 
 /** The bedtime screen's "Disable alerts": the challenge, then off for tonight or a 15-min snooze. Cancelled, or
@@ -353,6 +361,7 @@ private fun BreakEditor(onClose: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
@@ -360,7 +369,6 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     var draft by remember { mutableStateOf(cfg.customs.firstOrNull { it.id == c.id } ?: c) }
-    var timesText by remember { mutableStateOf(draft.times.joinToString(", ")) }
     val kindIdx = when (draft.kind) { "times" -> 1; "random" -> 2; else -> 0 }
     val timesOk = draft.times.isNotEmpty() && draft.times.all { validTime(it) != null }
     val windowOk = draft.window.size == 2 && draft.window.all { validTime(it) != null }
@@ -386,12 +394,20 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
             Segmented(listOf("Every…", "Set times", "Random once"), kindIdx) { draft = draft.copy(kind = when (it) { 1 -> "times"; 2 -> "random"; else -> "interval" }) }
             when (draft.kind) {
                 "interval" -> StepperRow("Every", draft.every, "min of use", 15, min = 1) { draft = draft.copy(every = it) }
-                "times" -> OutlinedTextField(timesText, { v -> timesText = v; draft = draft.copy(times = v.split(",").map { it.trim() }.filter { it.isNotEmpty() }) },
-                    label = { Text("Times (e.g. 09:00, 13:00)") }, isError = !timesOk, modifier = Modifier.fillMaxWidth())
+                "times" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // tap a time to change it, × to remove it, + to add one (all with the system clock dialog)
+                    draft.times.forEachIndexed { i, tm ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Chip(validTime(tm) ?: tm, true) { pickTime(ctx, tm) { v -> draft = draft.copy(times = draft.times.mapIndexed { j, x -> if (j == i) v else x }) } }
+                            IconButton(onClick = { draft = draft.copy(times = draft.times.filterIndexed { j, _ -> j != i }) }) { Icon(Icons.Filled.Close, "Remove time") }
+                        }
+                    }
+                    TextButton(onClick = { pickTime(ctx, "09:00") { v -> draft = draft.copy(times = draft.times + v) } }) { Text("+ Add time") }
+                }
                 else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     val from = draft.window.getOrElse(0) { "10:00" }; val to = draft.window.getOrElse(1) { "18:00" }
-                    OutlinedTextField(from, { draft = draft.copy(window = listOf(it, to)) }, label = { Text("From") }, singleLine = true, isError = validTime(from) == null, modifier = Modifier.weight(1f))
-                    OutlinedTextField(to, { draft = draft.copy(window = listOf(from, it)) }, label = { Text("To") }, singleLine = true, isError = validTime(to) == null, modifier = Modifier.weight(1f))
+                    TimeField("From", from, Modifier.weight(1f)) { draft = draft.copy(window = listOf(it, to)) }
+                    TimeField("To", to, Modifier.weight(1f)) { draft = draft.copy(window = listOf(from, it)) }
                 }
             }
             SectionLabel("Days")

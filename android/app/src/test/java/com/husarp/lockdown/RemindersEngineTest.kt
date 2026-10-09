@@ -332,4 +332,12 @@ class RemindersEngineTest {
         assertEquals(false to false, grayscaleStep(wanted = false, switchOn = false, mark = true, isOn = true)) // switch off at night
         assertEquals(null to false, grayscaleStep(wanted = false, switchOn = true, mark = true, isOn = false))  // already off
     }
+
+    @Test fun bedtime_steps_follow_the_bedtime() {
+        val steps = listOf(ReminderTier("23:00", 15), ReminderTier("00:00", 5), ReminderTier("03:00", 1))
+        assertEquals(listOf("22:00", "23:00", "02:00"), RemindersEngine.shiftSteps(steps, "23:00", "22:00").map { it.from })
+        assertEquals(listOf("00:30", "01:30", "04:30"), RemindersEngine.shiftSteps(steps, "23:00", "00:30").map { it.from })   // past midnight
+        assertEquals(listOf(15, 5, 1), RemindersEngine.shiftSteps(steps, "23:00", "22:00").map { it.every })                 // only the times move
+        assertEquals(steps, RemindersEngine.shiftSteps(steps, "23:00", "nonsense"))
+    }
 }

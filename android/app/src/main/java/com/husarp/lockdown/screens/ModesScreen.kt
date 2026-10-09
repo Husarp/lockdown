@@ -139,21 +139,23 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 ((pick.isNotBlank() && (a.label.contains(pick, true) || a.pkg.contains(pick, true))) || isExtra(a.pkg)) }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
                 if (shown.isEmpty() && apps.isEmpty()) Text("Nothing matches.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                // one list in name order: an app already on your list sits in its place among the others, not apart
+                val rows = (shown.map { it.name to it } + apps.map { it.label to it }).sortedBy { it.first.lowercase() }.map { it.second }
                 androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
-                    items(shown, key = { it.id }) { it2 ->
-                        ListRow(title = it2.name, subtitle = it2.target, trailing = {
-                            Checkbox(checked = it2.id in draft.items, onCheckedChange = { on ->
-                                draft = draft.copy(items = if (on) draft.items + it2.id else draft.items - it2.id)
+                    items(rows, key = { if (it is com.husarp.lockdown.engine.Item) it.id else "pkg:" + (it as com.husarp.lockdown.block.InstalledApp).pkg }) { row ->
+                        if (row is com.husarp.lockdown.engine.Item) ListRow(title = row.name, subtitle = row.target, trailing = {
+                            Checkbox(checked = row.id in draft.items, onCheckedChange = { on ->
+                                draft = draft.copy(items = if (on) draft.items + row.id else draft.items - row.id)
                             })
-                        })
-                    }
-                    items(apps, key = { "pkg:" + it.pkg }) { a ->
-                        ListRow(title = a.label, subtitle = "App · not on your list", trailing = {
-                            Checkbox(checked = isExtra(a.pkg), onCheckedChange = { on ->
-                                draft = draft.copy(extra = if (on) draft.extra + com.husarp.lockdown.engine.ModeExtra(a.label, ItemType.APP, listOf(a.pkg))
-                                    else draft.extra.filterNot { it.kind == ItemType.APP && it.targets == listOf(a.pkg) })
+                        }) else {
+                            val a = row as com.husarp.lockdown.block.InstalledApp
+                            ListRow(title = a.label, subtitle = "App · not on your list", trailing = {
+                                Checkbox(checked = isExtra(a.pkg), onCheckedChange = { on ->
+                                    draft = draft.copy(extra = if (on) draft.extra + com.husarp.lockdown.engine.ModeExtra(a.label, ItemType.APP, listOf(a.pkg))
+                                        else draft.extra.filterNot { it.kind == ItemType.APP && it.targets == listOf(a.pkg) })
+                                })
                             })
-                        })
+                        }
                     }
                 }
             }

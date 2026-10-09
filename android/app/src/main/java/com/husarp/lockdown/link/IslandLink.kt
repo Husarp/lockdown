@@ -81,7 +81,7 @@ object IslandLink {
         if (isMain) {
             val p = prefs()
             _main.value = MainLink(p.getString("state", "") ?: "", p.getLong("lastSeen", 0), p.getLong("helperApp", 0), p.getBoolean("cfgError", false),
-                canBlock = p.getBoolean("canBlock", true))
+                canBlock = p.getBoolean("canBlock", true), linkedAt = p.getLong("linkedAt", 0))
             if (_main.value.state.isNotEmpty()) ensureServer()
         } else {
             val st = readHelper() ?: return
@@ -137,6 +137,7 @@ object IslandLink {
         val codeUntil: Long = 0,
         val codeFails: Int = 0,
         val noPort: Boolean = false,         // no link port could be opened
+        val linkedAt: Long = 0,              // wall ms the link was made (0: made by an older version)
     )
 
     private val _main = MutableStateFlow(MainLink())
@@ -263,9 +264,9 @@ object IslandLink {
             val s = LinkCrypto.secret(kp, nM, nH)
             val now = System.currentTimeMillis()
             prefs().edit().clear().putString("state", "linked").putString("secret", LinkCrypto.b64(s))
-                .putLong("lastSeq", 0).putLong("lastSeen", now).commit()
+                .putLong("lastSeq", 0).putLong("lastSeen", now).putLong("linkedAt", now).commit()
             lastSeenSaved = now
-            publish { MainLink(state = "linked", lastSeen = now) }
+            publish { MainLink(state = "linked", lastSeen = now, linkedAt = now) }
             s
         } ?: return deny(out)
         LinkProtocol.write(out, Frame("paired", LinkProtocol.V, proof = LinkCrypto.b64(LinkProtocol.pairProofM(s, nM, nH))))
@@ -369,7 +370,11 @@ object IslandLink {
         val appsHash: String = "",
         val lastOk: Long = 0,
         val mainApp: Long = 0,
+        val linkedAt: Long = 0,               // wall ms this copy was linked (0: by an older version)
     )
+
+    /** When the link was made (wall ms), on either side; 0 if not linked or linked before this was kept. */
+    fun linkedAt(): Long = if (isMain) _main.value.linkedAt.takeIf { _main.value.state.isNotEmpty() } ?: 0 else helperState?.linkedAt ?: 0
 
     data class HelperStatus(
         val lastOk: Long = 0,                 // wall ms of the last good sync
@@ -481,7 +486,7 @@ object IslandLink {
             LinkUsage.foldBack(UsageStore.counter.counters, UsageStore.inflight)
             UsageStore.inflight = null
             UsageStore.base = emptyMap()
-            helperState = HelperState(LinkCrypto.b64(secret!!), port = reply.port)
+            helperState = HelperState(LinkCrypto.b64(secret!!), port = reply.port, linkedAt = System.currentTimeMillis())
             cfgHash = ""; modesHash = ""; cfgFailed = null
             saveHelper()
             UsageStore.flush()

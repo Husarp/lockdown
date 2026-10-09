@@ -1,5 +1,10 @@
 package com.husarp.lockdown.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -103,7 +109,10 @@ private fun MainLinkCard() {
             val pairingOpen = code != null && now < st.codeUntil && st.codeFails < PairWindow.MAX_FAILS
             if (pairingOpen) {
                 val left = ((st.codeUntil - now) / 1000).coerceAtLeast(0)
-                Text(LinkCrypto.display(code!!), fontFamily = FontFamily.Monospace, fontSize = 34.sp, style = MaterialTheme.typography.headlineMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(LinkCrypto.display(code!!), fontFamily = FontFamily.Monospace, fontSize = 34.sp, style = MaterialTheme.typography.headlineMedium)
+                    OutlinedButton(onClick = { copyCode(ctx, LinkCrypto.display(code)) }) { Text("Copy") }
+                }
                 Text("Open Lockdown in Island > Settings > Link to your main Lockdown, and type this code. %d:%02d left.".format(left / 60, left % 60),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 TextButton(onClick = { IslandLink.cancelPairing() }) { Text("Cancel") }
@@ -140,12 +149,24 @@ fun LinkCodeField(challenge: Boolean) {
     }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = code, onValueChange = { code = it.take(12); msg = null }, singleLine = true,
-            label = { Text("Link code") }, placeholder = { Text("K7QM-2XPA") }, modifier = Modifier.weight(1f))
+            label = { Text("Link code") }, placeholder = { Text("K7QM-2XPA") }, modifier = Modifier.weight(1f),
+            trailingIcon = { TextButton(onClick = { pastedCode(ctx)?.let { code = it; msg = null } }) { Text("Paste") } })
         Button(onClick = { if (challenge) guard(true) { go() } else go() }, enabled = ready && !busy,
             modifier = Modifier.padding(top = 8.dp)) { Text("Link") }
     }
     msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (busy) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error) }
 }
+
+/** The link code onto the clipboard, to paste in Lockdown in Island (the clipboard is shared with Island). */
+private fun copyCode(ctx: Context, text: String) {
+    ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Lockdown link code", text))
+    if (Build.VERSION.SDK_INT < 33) Toast.makeText(ctx, "Code copied", Toast.LENGTH_SHORT).show()   // 13+ shows its own
+}
+
+/** What's on the clipboard, cut to a code's length, or null if there's nothing. */
+private fun pastedCode(ctx: Context): String? =
+    ctx.getSystemService(ClipboardManager::class.java)?.primaryClip?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim()?.take(12)?.ifEmpty { null }
 
 internal fun agoText(sec: Long) = when {
     sec < 60 -> "${sec.coerceAtLeast(0)} s ago"

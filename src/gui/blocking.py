@@ -27,8 +27,8 @@ from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, summary
 from gui.target_picker import TargetPicker
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import (DAY_NAMES, allowance_left, allowance_note, describe_rule, duration_text, effective_rules,
-                   item_block, next_block, rule_state)
+from rules import (DAY_NAMES, allowance_left, allowance_note, block_end, blocked_text, describe_rule, duration_text,
+                   effective_rules, item_block, next_block, rule_state)
 from trusted_time import now_from_db
 
 TABS = ["Overview", "Groups", "Add", "Site protection", "Calendar"]
@@ -80,14 +80,16 @@ def status_of(page, item: dict, now, usage) -> dict:
     unlocked = getattr(usage, "unlocks", {}).get(f"item:{item['id']}")
     if unlocked and now < unlocked:
         return {"text": f"● Unlocked · {duration_text((unlocked - now).total_seconds())} left", "text_color": BLUE}
-    if not saved_block(draft, item, now, usage):
+    block = saved_block(draft, item, now, usage)
+    if not block:
         left = allowance_running(draft, item, now, usage)   # inside its blocked hours, on the allowance
         if left is not None:
             return {"text": f"● On the allowance · {duration_text(left)} left", "text_color": theme.SPECIAL}
         return {"text": "● Allowed now", "text_color": GREEN}
     if not page.app.service_running:
         return {"text": "● Pending · service off", "text_color": ORANGE}
-    return {"text": "● Blocked now", "text_color": RED}
+    saved = effective_rules(draft.saved_items[item["id"]], list(draft.saved_groups.values()))
+    return {"text": f"● {blocked_text(block_end(saved, now, usage), now)}", "text_color": RED}   # its longest block
 
 
 def _merge_rules(old: list[dict], new: list[dict]) -> list[dict]:
@@ -134,10 +136,10 @@ def group_rule(group: dict, rule: dict) -> dict:
             "rule_key": f"g{group['id']}{rule['rule_type']}"}
 
 
-def rule_text(rule, now, usage) -> str:
+def rule_text(rule, now, usage, used: bool = True) -> str:
     """"→ Games · ..." for a group's rule and for a member's extra rule in a group - except inside the group's own
-    box (in_box), which already says whose rules they are."""
-    text = describe_rule(rule, now, usage, allowance=False).replace(":\n", ": ").replace("\n", " · ")
+    box (in_box), which already says whose rules they are. used=False: a limit without its used time."""
+    text = describe_rule(rule, now, usage, allowance=False, used=used).replace(":\n", ": ").replace("\n", " · ")
     group = rule["group"] or rule.get("extra_of")
     return f"→ {group['name']} · {text}" if group and not rule.get("in_box") else text
 
@@ -163,10 +165,12 @@ def chip_kind(rule, now, usage) -> str:
 
 def _paint_chip(chip, rule, now, usage, allowance: bool = False, siblings=None):
     """siblings: the other rules on the same thing. While any of them is blocking, what this one still allows
-    is of no use - so it goes red with the rest, instead of offering time you can't spend."""
+    is of no use - so it goes red with the rest, instead of offering time you can't spend. A red chip shows its
+    limit without the time used or left: the thing is blocked (the Status column says so, once)."""
     inert = bool(siblings) and bool(item_block(siblings, now, usage))
     kind = "allowance" if allowance else "danger" if inert else chip_kind(rule, now, usage)
-    text = allowance_note(rule, now, usage) if allowance else rule_text(rule, now, usage)
+    blocked = inert or kind == "danger"
+    text = allowance_note(rule, now, usage, not blocked) if allowance else rule_text(rule, now, usage, not blocked)
     fg, bg = CHIP_STYLES[kind]
     chip.configure(text=f" {text} ", text_color=fg, fg_color=bg)
 

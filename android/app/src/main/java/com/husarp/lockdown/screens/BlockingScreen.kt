@@ -94,6 +94,7 @@ private fun BlockList(
     val cs = MaterialTheme.colorScheme
     var query by remember { mutableStateOf("") }
     val now = com.husarp.lockdown.guard.TrustedTime.local(androidx.compose.ui.platform.LocalContext.current)
+    val mode = com.husarp.lockdown.data.ModesStore.current(now)
 
     val matches = cfg.items.filter { it.name.contains(query, true) || it.target.contains(query, true) }
     // The blocked list can be thousands long, so it stays collapsed and paginates: 20 rows at a time, loading 20
@@ -155,12 +156,12 @@ private fun BlockList(
                 if (open) {
                     val list = matches.take(shown)
                     items(list, key = { it.id }) { item ->
-                        val st = Live.status(cfg, item, now)   // computed only for this visible row
+                        val st = Live.status(cfg, item, now, mode)   // computed only for this visible row
                         ListRow(
                             title = item.name,
                             subtitle = ruleSummary(item),
                             leading = { com.husarp.lockdown.ui.ItemIcon(item.type, item.target, item.name) },
-                            trailing = { StatusChip(statusText(st, cfg, item, now), st) },
+                            trailing = { StatusChip(statusText(st, cfg, item, now, mode), st) },
                             onClick = { onEdit(item) },
                         )
                     }
@@ -183,8 +184,9 @@ private fun BlockList(
     }
 }
 
-private fun statusText(status: Status, cfg: com.husarp.lockdown.data.Config, item: Item, now: LocalDateTime): String = when (status) {
-    Status.BLOCKED -> "Blocked"
+private fun statusText(status: Status, cfg: com.husarp.lockdown.data.Config, item: Item, now: LocalDateTime,
+                       mode: com.husarp.lockdown.engine.ModeState?): String = when (status) {
+    Status.BLOCKED -> Live.blockedLine(cfg, item, now, mode)
     Status.SOON -> Live.dayLimitFraction(cfg, item, now)?.let { "${it.second} min left" } ?: "Soon"
     Status.ALLOWED -> "Allowed"
     Status.PAUSED -> "Paused"

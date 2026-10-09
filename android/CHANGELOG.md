@@ -1,5 +1,17 @@
 # Changelog — Lockdown Mobile
 
+## Unreleased
+- **Times are picked, not typed.** Tap any time (bedtime, wake-up, the bedtime steps, schedule hours, challenge hours, reminder times and hours, when limits reset) and Android's own clock opens, in 24 h when your phone uses it. Deleting a digit no longer turns a time into something else. A reminder's set times are a row: tap one to change it, × to remove it, **+ Add time** for another.
+- **The bedtime steps follow the bedtime.** Moving bedtime moves every "comes back" step by the same amount, so 23:00 / 00:00 / 03:00 with bedtime 23:00 becomes 22:00 / 23:00 / 02:00 when bedtime moves to 22:00.
+- **Site addresses never keep a space.** The space a keyboard adds after a dot ("youtube. com") is dropped as you type and when it's saved: new sites, sites in a group, allowed exceptions, keyword exceptions that are sites, and imported lists. Importing a hosts-file list ("0.0.0.0 ads.example.com") no longer adds "0.0.0.0" or "127.0.0.1" as sites.
+- **Apps already on your list show in place.** In Block > An app, an app you already block is ticked and opens its rules (no second copy). In the group and mode pickers, apps on your list sit in name order among the others, not in a separate block on top.
+- **Your own challenge phrase can be set.** Turning on "Type a phrase" first asks which: a random phrase, or your own (Use my phrase saves only once you've typed one). Changing it later still needs the challenge.
+- **A blocked item shows one line:** "Blocked until 18:00" in the list, and no "min left" on Home while it's blocked, also when a running mode blocks it. The time is when it's really free again: a temporary block until 15:00 with the daily limit used up says until the limit's reset, not 15:00.
+- The challenge's "Keep my rule" button is now **Cancel**.
+- **Island:** a **Copy** button next to the link code, and **Paste** in the code box of Lockdown in Island.
+- **Guardrails shows when Lockdown was installed and when Island was linked**, so a reinstall or reset shows up. Lockdown in Island shows the same.
+- The "Uninstall protection" check's **Fix** now opens Android's device admin screen (it did nothing), and turns the Uninstall protection switch on with it, so the two agree.
+
 ## 0.5.14 - 2026-10-03 22:26
 Bedtime, breaks, reminders, rules, protection, notifications and Insights now work like on the PC. If you use the Island link, update both copies: an older copy ignores the new settings.
 

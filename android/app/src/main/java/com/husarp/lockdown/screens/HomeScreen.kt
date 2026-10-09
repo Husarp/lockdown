@@ -68,7 +68,7 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
     val groupLimited = cfg.groups.filter { g -> g.rules.any { it.type == RuleType.TIME_LIMIT || it.type == RuleType.SWITCH_LIMIT } }.flatMap { it.memberIds }.toSet()
     val lowItems = cfg.items
         .filter { it.id in groupLimited || it.rules.any { r -> r.type == RuleType.TIME_LIMIT || r.type == RuleType.SWITCH_LIMIT } }
-        .filter { Live.status(cfg, it, now) == Status.SOON }.take(5)
+        .filter { Live.status(cfg, it, now, modeState) == Status.SOON }.take(5)   // a blocked one shows no "min left"
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),

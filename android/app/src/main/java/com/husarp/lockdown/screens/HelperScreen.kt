@@ -98,6 +98,9 @@ fun HelperScreen() {
                 }
             }
 
+            val installed = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime }.getOrDefault(0L) }
+            Text("Installed here ${dateTime(installed)}" + IslandLink.linkedAt().let { if (it > 0) " · linked ${dateTime(it)}" else "" },
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             Text("To unlink, open Lockdown in your main profile: Settings > Island > Unlink.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             if (!newCode) TextButton(onClick = { newCode = true }) { Text("Enter a new link code") }
             else Card {

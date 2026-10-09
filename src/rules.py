@@ -495,6 +495,15 @@ def item_block(rules: list[dict], now: datetime, usage=no_usage) -> tuple[str, d
     return max((b for b in active if b[0] == reason), key=lambda b: datetime.max if b[1] is None else b[1])
 
 
+def block_end(rules: list[dict], now: datetime, usage=no_usage) -> datetime | None:
+    """When the item's longest block now ends (datetime.max = no end), or None if nothing blocks it. Unlike
+    item_block (the most important reason), this is how long the item stays blocked: a temporary block until
+    15:00 with a daily limit used up is blocked until the limit's reset."""
+    if not item_block(rules, now, usage):
+        return None
+    return max(datetime.max if b[1] is None else b[1] for r in rules if (b := rule_block(r, now, usage)))
+
+
 def usage_targets(rules: list[dict], item_id: int, now: datetime,
                   clock: LimitClock = DEFAULT_CLOCK) -> set[tuple[str, str]]:
     """(owner, bucket) pairs to add time to while the item is being used."""
@@ -650,6 +659,19 @@ def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = 
     return min(found, key=lambda f: f[0]) if found else None
 
 
+def blocked_text(until: datetime | None, now: datetime) -> str:
+    """"Blocked (until 03:00)", "Blocked (until Tue 03:00)" when that is another day, "Blocked (until Mon 21 Sep
+    00:00)" from 6 days on (a weekly or monthly limit), "Blocked" for good - the one line a blocked thing gets in
+    place of its used / left times."""
+    if until is None or until == datetime.max:
+        return "Blocked"
+    days = (until.date() - now.date()).days
+    day = DAY_NAMES[until.weekday()][:3]
+    when = f"{until:%H:%M}" if days == 0 else f"{day} {until:%H:%M}" if days < 6 \
+        else f"{day} {until.day} {until:%b %H:%M}"
+    return f"Blocked (until {when})"
+
+
 def days_text(days: list[int]) -> str:
     """[0,1,2,3,4] -> 'Monday–Friday', [0,2,5,6] -> 'Monday, Wednesday, Saturday–Sunday'."""
     if days == list(range(7)):
@@ -684,14 +706,15 @@ def allowance_left(rule: dict, now: datetime, usage=no_usage):
     return usage(allowance_owner(rule), allowance_bucket(rule, until)), rule["allowance_min"] * 60, until
 
 
-def allowance_note(rule: dict, now: datetime, usage=no_usage) -> str | None:
+def allowance_note(rule: dict, now: datetime, usage=no_usage, used: bool = True) -> str | None:
     """"N minutes allowed during blocked hours" and, while you are inside them, what is left of it - or None
     for a rule that has no allowance. The blocked hours and this are two different things (the hours are on,
-    the allowance is the way out), so the Blocking list shows them as two chips of its own colours."""
+    the allowance is the way out), so the Blocking list shows them as two chips of its own colours.
+    used=False leaves out what is left (for something blocked: the time left can't be spent)."""
     if not rule.get("allowance_min"):
         return None
     text = f"+ {rule['allowance_min']} min allowed during blocked hours"
-    spent = allowance_left(rule, now, usage)
+    spent = allowance_left(rule, now, usage) if used else None
     if spent:   # inside those hours: say how much of it is still there
         used, allowed, until = spent
         left = max(0, allowed - used)
@@ -700,8 +723,10 @@ def allowance_note(rule: dict, now: datetime, usage=no_usage) -> str | None:
     return text
 
 
-def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = True) -> str:
+def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = True, used: bool = True) -> str:
     """allowance=False leaves out the "N min allowed..." clause, for a caller that shows it separately.
+    used=False gives a limit's amounts without the time or openings used ("Limit (own): 1h 00m today"), for
+    something blocked - what is used or left of it is of no use then.
     A group's limit says "(group)" - one total for all its members - and a member's extra rule in a group says
     "(own)", so a member shows both: "Limit (own): 40m / 1h 00m today" and "Limit (group): 1h 10m / 2h 00m"."""
     kind = rule["rule_type"]
@@ -712,7 +737,7 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = T
         s = load_schedule(rule["schedule"])
         label = "Allowed only" if s["mode"] == ALLOW else "Blocked"
         text = f"{label}{own}:\n" + "\n".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in s["windows"])
-        note = allowance_note(rule, now, usage) if allowance else None
+        note = allowance_note(rule, now, usage, used) if allowance else None
         return f"{text}\n{note}" if note else text
     if kind == "temporary":
         if rule.get("temp_until"):
@@ -723,14 +748,14 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = T
     tag = " (group)" if _owner(rule).startswith("group:") else own
     if kind == "time_limit":
         lims = limits(rule, TIME_LIMIT_FIELDS, now, clock)
-        parts = [f"{duration_text(usage(_owner(rule), time_bucket(p, now, clock)))} / {duration_text(limit * 60)} "
-                 f"{period_words(p, now, clock)}" for p, limit in lims.items()]
+        parts = [(f"{duration_text(usage(_owner(rule), time_bucket(p, now, clock)))} / " if used else "")
+                 + f"{duration_text(limit * 60)} {period_words(p, now, clock)}" for p, limit in lims.items()]
         if "day" not in lims and day_limits(rule):   # set per weekday, and not on this one
             parts.insert(0, f"no limit {period_words('day', now, clock)}")
         return f"Limit{tag}: " + "\n".join(parts)
     if kind == "switch_limit":
-        parts = [f"{usage(_owner(rule), opening_bucket(rule, p, now, clock))} / {limit} {period_words(p, now, clock)}"
-                 for p, limit in limits(rule, OPEN_LIMIT_FIELDS).items()]
+        parts = [(f"{usage(_owner(rule), opening_bucket(rule, p, now, clock))} / " if used else "")
+                 + f"{limit} {period_words(p, now, clock)}" for p, limit in limits(rule, OPEN_LIMIT_FIELDS).items()]
         what = "Switches" if switch_mode(rule) == SWITCH else "Openings"
         return f"{what}{tag}: " + "\n".join(parts)
     return kind

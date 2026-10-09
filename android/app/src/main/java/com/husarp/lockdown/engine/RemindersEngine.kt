@@ -602,6 +602,15 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             return sinceBed(bed, t) >= wakeOff
         }
 
+        /** Moving the bedtime moves every step by the same amount, so the steps keep their place in the night
+         *  (23:00/00:00/03:00 with bedtime 23:00 -> 22:00 gives 22:00/23:00/02:00). */
+        fun shiftSteps(tiers: List<ReminderTier>, oldBed: String, newBed: String): List<ReminderTier> {
+            val o = hm(oldBed) ?: return tiers
+            val n = hm(newBed) ?: return tiers
+            val d = sinceBed(o, n)
+            return tiers.map { t -> hm(t.from)?.plusMinutes(d.toLong())?.let { t.copy(from = "%02d:%02d".format(it.hour, it.minute)) } ?: t }
+        }
+
         /** A change that weakens a guarded (important) reminder - turning it off, or dropping its guard. */
         fun loosensReminder(oldOn: Boolean, oldGuarded: Boolean, newOn: Boolean, newGuarded: Boolean): Boolean =
             oldGuarded && ((oldOn && !newOn) || !newGuarded)

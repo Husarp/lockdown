@@ -144,7 +144,7 @@ private fun ChallengeDialog(onPass: () -> Unit, onCancel: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = onPass, enabled = canPass) { Text("Confirm change") } },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Keep my rule") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
 }
 

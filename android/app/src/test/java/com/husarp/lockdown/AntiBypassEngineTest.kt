@@ -61,6 +61,13 @@ class AntiBypassEngineTest {
         assertFalse(AntiBypass.settingsLooser(base, base.copy(length = 90, waitMin = 10)))   // stronger
     }
 
+    @Test fun own_phrase_is_free_when_turning_the_phrase_on_but_not_after() {
+        val off = AntiBypassCfg(phrase = false)
+        assertFalse(AntiBypass.settingsLooser(off, off.copy(phrase = true, customPhrase = "my own words")))   // on with yours
+        val random = off.copy(phrase = true)
+        assertTrue(AntiBypass.settingsLooser(random, random.copy(customPhrase = "my own words")))             // random -> yours
+    }
+
     @Test fun rule_looser_cases() {
         val day30 = Rule(RuleType.TIME_LIMIT, dailyLimitMin = 30)
         assertTrue(AntiBypass.ruleLooser(day30, Rule(RuleType.TIME_LIMIT, dailyLimitMin = 60), t0))
