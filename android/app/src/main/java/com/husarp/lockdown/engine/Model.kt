@@ -52,7 +52,7 @@ data class Item(
     val name: String,
     val target: String,                       // sites: space-separated hostnames; apps: package name
     val type: ItemType,
-    val blockType: String = "",               // flags - app: "close,background,minimize,internet"; site: "dns,close,back"
+    val blockType: String = "",               // flags - app: "close" or "grey" (PC: "close,background,minimize,internet"); site: "dns,close,back"
     val disabled: Boolean = false,            // paused: kept, but not enforced
     val rules: List<Rule> = emptyList(),
     val notify: String? = null,               // blocked-visit alert override: null/"on"/"off"
@@ -70,7 +70,9 @@ data class Group(
     // how the group blocks its member sites (PC 0.84.11): "dns,close,back" flags like an item's; null = not chosen,
     // each member is blocked its own way (every group from before)
     val siteBlock: String? = null,
-    // what a member site adds on top of that, in this group: itemId -> flags (only ever more, never less)
+    // how the group blocks its member apps: "close" / "grey" (BlockMethod); null = each app its own way
+    val appBlock: String? = null,
+    // what a member adds on top of that, in this group: itemId -> flags (only ever more, never less)
     val memberBlocks: Map<String, String> = emptyMap(),
 )
 

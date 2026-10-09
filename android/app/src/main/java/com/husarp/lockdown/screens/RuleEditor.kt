@@ -462,13 +462,34 @@ fun SiteWayChips(selected: Set<String>, locked: Set<String> = emptySet(), onTogg
     }
 }
 
+/** How an app is blocked: "Close it" (the notice, then the home screen) or "Grey it" (it stays open, the screen goes
+ *  grey while it's in front). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AppWayChips(grey: Boolean, onChange: (Boolean) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip("Close it", !grey) { if (grey) onChange(false) }
+        Chip("Grey it", grey) { if (!grey) onChange(true) }
+    }
+}
+
+/** What the app way [grey] does, in a line. */
+fun appWayText(grey: Boolean) =
+    if (grey) "It stays open, but the whole screen goes grey while it's in front; the colour comes back when you leave it. " +
+        "A mode that blocks it still closes it."
+    else "A notice covers it and it goes to the home screen. Videos playing in it are paused."
+
 @Composable
 private fun BlockTypeChips(item: Item, onChange: (String) -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
     if (item.type == ItemType.APP) {
-        Text("A notice covers it and it goes to the home screen. Videos playing in it are paused.",
-            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+        val grey = BlockMethod.greyOnly(item.blockType)
+        AppWayChips(grey) { onChange(if (it) BlockMethod.GREY else "") }      // closing back: the default (as new apps have)
+        val chose = cfg.groups.filter { item.id in it.memberIds && !it.disabled && it.appBlock != null }.map { it.name }
+        Text(appWayText(grey) + (if (chose.isNotEmpty()) " When ${chose.joinToString(" or ")} blocks it, that group's way applies." else ""),
+            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        GrayscaleNote(grey)
         return
     }
     SiteWayChips(BlockMethod.flags(item.blockType)) { f -> if (f.isNotEmpty()) onChange(f.joinToString(",")) }
@@ -499,14 +520,16 @@ fun openingLimitText(r: Rule): String =
 fun sentence(item: Item): String {
     val name = item.name
     val r = item.rules.firstOrNull() ?: return "$name isn't limited yet — pick a rule below."
+    val grey = item.type == ItemType.APP && BlockMethod.greyOnly(item.blockType)
+    val block = if (grey) "Grey" else "Block"
     return when (r.type) {
-        RuleType.PERMANENT -> "Block $name completely."
-        RuleType.TEMPORARY -> "Block $name for a while."
-        RuleType.TIME_LIMIT -> "Block $name after ${timeLimitText(r)}."
-        RuleType.SWITCH_LIMIT -> "Block $name after ${openingLimitText(r)}."
+        RuleType.PERMANENT -> if (grey) "Grey $name all the time." else "Block $name completely."
+        RuleType.TEMPORARY -> "$block $name for a while."
+        RuleType.TIME_LIMIT -> "$block $name after ${timeLimitText(r)}."
+        RuleType.SWITCH_LIMIT -> "$block $name after ${openingLimitText(r)}."
         RuleType.SCHEDULED -> {
             val ws = r.schedule?.windows.orEmpty()
-            val verb = if (r.schedule?.mode == SchedMode.BLOCK) "Block" else "Allow"
+            val verb = if (r.schedule?.mode == SchedMode.BLOCK) block else "Allow"
             "$verb $name ${ws.joinToString(", ") { "${it.start}–${it.end}" }}."
         }
     }

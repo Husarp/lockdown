@@ -1,6 +1,7 @@
 package com.husarp.lockdown.data
 
 import com.husarp.lockdown.engine.Alerts
+import com.husarp.lockdown.engine.BlockMethod
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
@@ -26,14 +27,19 @@ object Live {
     }
 
     /** The one line for a blocked item: "Blocked until 18:00" - the block that lasts longest of its own rules, its
-     *  groups' and the running mode's, never a line per rule or member. */
+     *  groups' and the running mode's, never a line per rule or member. "Grey until 18:00" for an app only greyed. */
     fun blockedLine(cfg: Config, item: Item, now: LocalDateTime, mode: ModeState? = null): String {
         val ends = ArrayList<LocalDateTime?>()
-        Rules.blockEnd(Rules.effectiveRules(item, cfg.groups), now, UsageStore.usage, cfg.clock())
+        val eff = Rules.effectiveRules(item, cfg.groups)
+        Rules.blockEnd(eff, now, UsageStore.usage, cfg.clock())
             ?.let { ends.add(it.takeIf { e -> e != LocalDateTime.MAX }) }
-        if (modeBlocks(cfg, item, mode)) ends.add(mode!!.until)
+        val byMode = modeBlocks(cfg, item, mode)
+        if (byMode) ends.add(mode!!.until)
         val until = if (ends.isEmpty() || ends.any { it == null }) null else ends.filterNotNull().max()
-        return Alerts.blockedLine(until, now)
+        val line = Alerts.blockedLine(until, now)
+        val grey = item.type == ItemType.APP && !byMode &&
+            BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, UsageStore.usage, cfg.clock())))
+        return if (grey) line.replaceFirst("Blocked", "Grey") else line
     }
 
     /** The running mode blocks [item] (as Enforce does: by its app, or by any of its hostnames). */

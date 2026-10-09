@@ -149,10 +149,8 @@ object AntiBypass {
     private fun blockFlags(bt: String): Set<String> =
         bt.split(",").map { it.trim() }.filterTo(HashSet()) { it.isNotEmpty() }
 
-    private fun appStrength(bt: String): Set<String> {
-        val f = blockFlags(bt).ifEmpty { setOf("close") }
-        return if ("close" in f) f + "minimize" else f       // closing is stronger than minimizing
-    }
+    // closing is stronger than minimizing or greying
+    private fun appStrength(bt: String): Set<String> = BlockMethod.appStrength(bt)
 
     private fun siteFlags(bt: String): Set<String> = blockFlags(bt).ifEmpty { setOf("dns") }
 

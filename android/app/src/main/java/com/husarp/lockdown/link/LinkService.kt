@@ -156,12 +156,13 @@ class LinkService : Service() {
             hideBlock(); return
         }
         val item = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
-        val actives = if (item != null && !item.disabled && !Enforce.itemBlocked(cfg, item, now))
+        val actives = if (item != null && !item.disabled && Enforce.counts(cfg, item, now))
             listOf(Active(item, Rules.countedRules(item, cfg.groups), launched = pkg != prevPkg)) else emptyList()
         UsageStore.record(actives, now)
         prevPkg = pkg
         val v = Enforce.app(cfg, pkg, now, ModesStore.current(now), item?.name ?: Apps.label(packageManager, pkg))
-        if (v == null) { allowedPkg = pkg; hideBlock(); return }
+        // only greyed: it stays open here (main greys the screen - this copy can't)
+        if (v == null || v.grey) { allowedPkg = pkg; hideBlock(); return }
         if (allowedPkg == pkg) Media.pause(this)      // its block started while it was in use: stop the video
         allowedPkg = null
         showBlock(v, pkg)

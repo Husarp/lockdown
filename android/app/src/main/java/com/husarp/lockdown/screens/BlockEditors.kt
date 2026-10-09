@@ -97,7 +97,7 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             RuleFields(draft.rules, group = true) { draft = draft.copy(rules = it) }
 
-            // How the group blocks its member sites (PC 0.84.11). Apps have one way on Android.
+            // How the group blocks its member sites and apps (PC 0.84.11).
             SectionLabel("How member sites are blocked")
             val way = draft.siteBlock
             if (way == null) {
@@ -109,7 +109,19 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 TextButton(onClick = { draft = draft.copy(siteBlock = null) }) { Text("Each site its own way") }
             }
-            Text("Apps: a notice covers them and they go to the home screen.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            SectionLabel("How member apps are blocked")
+            val appWay = draft.appBlock
+            if (appWay == null) {
+                Text("Each app the way it's set itself.", style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { draft = draft.copy(appBlock = "close") }) { Text("Choose for this group") }
+            } else {
+                val grey = BlockMethod.greyOnly(appWay)
+                AppWayChips(grey) { draft = draft.copy(appBlock = if (it) BlockMethod.GREY else "close") }
+                Text(appWayText(grey) + " When this group blocks an app, this way is used. An app's own rules keep its own way.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                GrayscaleNote(grey)
+                TextButton(onClick = { draft = draft.copy(appBlock = null) }) { Text("Each app its own way") }
+            }
 
             SectionLabel("Members")
             OutlinedTextField(pick, { pick = it }, placeholder = { Text("Search apps & items") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -198,6 +210,13 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                                 SiteWayChips(own, locked = base) { f ->
                                     val add = f - base
                                     draft = draft.copy(memberBlocks = if (add.isEmpty()) draft.memberBlocks - m.id else draft.memberBlocks + (m.id to add.joinToString(",")))
+                                }
+                            } else if (BlockMethod.greyOnly(BlockMethod.inGroup(m, draft, own = false))) {
+                                // the group greys it: this member can be closed instead (only more, never less)
+                                Spacer(Modifier.height(8.dp))
+                                Text("How ${m.name} is blocked in this group", style = MaterialTheme.typography.titleSmall)
+                                AppWayChips(grey = draft.memberBlocks[m.id] == null) { grey ->
+                                    draft = draft.copy(memberBlocks = if (grey) draft.memberBlocks - m.id else draft.memberBlocks + (m.id to "close"))
                                 }
                             }
                         }

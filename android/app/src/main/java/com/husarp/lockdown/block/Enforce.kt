@@ -40,7 +40,10 @@ data class Verdict(
     val itemId: String?,
     val site: Boolean = false,                 // a site in the browser (blockType: "dns,close,back"), not an app
     val reason: String = "",                   // Alerts.REASONS key ("" = blocked words: always explained)
-)
+) {
+    /** "Grey this app": it isn't closed, the screen goes grey while it's in front. */
+    val grey: Boolean get() = !site && BlockMethod.greyOnly(blockType)
+}
 
 /** The live blocking decision: the tested engine (rules + groups + limit clock + usage) plus the active mode. */
 object Enforce {
@@ -73,26 +76,47 @@ object Enforce {
         return Rules.itemBlock(Rules.effectiveRules(item, cfg.groups), now, UsageStore.usage, cfg.clock(), emergencyUntil(cfg, item.id, now)) != null
     }
 
+    /** The way [item] is blocked now by its rules and groups ([BlockMethod.blockingWay]), or null when nothing blocks it. */
+    fun itemWay(cfg: Config, item: Item, now: LocalDateTime): String? {
+        if (!cfg.enabled || item.disabled || paused(cfg, now)) return null
+        val blocking = Rules.blockingRules(Rules.effectiveRules(item, cfg.groups), now, UsageStore.usage, cfg.clock(), emergencyUntil(cfg, item.id, now))
+        return if (blocking.isEmpty()) null else BlockMethod.blockingWay(item, cfg.groups, blocking)
+    }
+
+    /** [item]'s use counts now: nothing blocks it, or its block only greys the screen - an app that stays open is in
+     *  use, and its time keeps filling its other limits (greyed by one rule, it still gets closed by another). */
+    fun counts(cfg: Config, item: Item, now: LocalDateTime): Boolean =
+        itemWay(cfg, item, now)?.let { item.type == ItemType.APP && BlockMethod.greyOnly(it) } ?: true
+
     /** The site flags in force: "dns" (cut the connection), "close", "back"; none set means "dns". */
     fun siteFlags(blockType: String): Set<String> =
         blockType.split(",").map { it.trim() }.filterTo(HashSet()) { it.isNotEmpty() }.ifEmpty { setOf("dns") }
 
-    /** Verdict for a foreground app package, or null if allowed. */
+    /** Verdict for a foreground app package, or null if allowed. A [Verdict.grey] one only greys the screen. */
     fun app(cfg: Config, pkg: String, now: LocalDateTime, mode: ModeState?, label: String = pkg): Verdict? {
         if (!cfg.enabled || paused(cfg, now)) return null
         val item = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
+        var grey: Verdict? = null
         if (item != null && !item.disabled) {
             val eff = Rules.effectiveRules(item, cfg.groups)
-            val block = Rules.itemBlock(eff, now, UsageStore.usage, cfg.clock(), emergencyUntil(cfg, item.id, now))
-            if (block != null) return verdict(item.name, block, item.blockType.ifEmpty { "close" }, item.id, now)
+            val clock = cfg.clock()
+            val unlock = emergencyUntil(cfg, item.id, now)
+            val block = Rules.itemBlock(eff, now, UsageStore.usage, clock, unlock)
+            if (block != null) {
+                // a group's block goes the group's way, plus the member's own in it (as for sites)
+                val way = BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, UsageStore.usage, clock, unlock))
+                val v = verdict(item.name, block, way.ifEmpty { "close" }, item.id, now)
+                if (!v.grey) return v
+                grey = v                    // only greyed: a running mode that blocks it still closes it
+            }
         }
-        if (item != null && emergencyUntil(cfg, item.id, now) != null) return null
+        if (item != null && emergencyUntil(cfg, item.id, now) != null) return grey
         if (Modes.blocking(mode)) {
             val targets = Modes.targets(mode!!.mode, cfg.items, cfg.groups, cfg.categories)
             if (pkg.lowercase() in Modes.blockedApps(targets))
                 return Verdict(label, "$label is off in ${mode.mode.name}", modeSub(mode), mode.until, "close", item?.id, reason = "mode")
         }
-        return null
+        return grey
     }
 
     /** Verdict for a site the browser is showing, or null. (DNS handles most site blocks; this covers

@@ -66,7 +66,7 @@ fun GrayscaleStuck() {
     val cs = MaterialTheme.colorScheme
     com.husarp.lockdown.ui.Card(color = cs.errorContainer, contentColor = cs.onErrorContainer) {
         Text("The screen is grey, but it isn't bedtime", style = MaterialTheme.typography.titleSmall)
-        Text("Bedtime grayscale should be off now.", style = MaterialTheme.typography.bodySmall)
+        Text("Lockdown's grayscale should be off now.", style = MaterialTheme.typography.bodySmall)
         Button(onClick = { Grayscale.turnOffNow(ctx); tick++ }, Modifier.padding(top = 8.dp)) { Text("Turn grayscale off now") }
     }
 }

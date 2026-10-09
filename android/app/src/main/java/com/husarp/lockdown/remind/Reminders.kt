@@ -50,6 +50,8 @@ object Reminders {
  * grayscale (or Bedtime) off by hand gives the colour back whoever turned it on ([switchedOff]). Giving the colour
  * back puts the colour correction as it was before bedtime ([com.husarp.lockdown.engine.grayscaleRestore]). Checked every minute and on
  * unlock (the service), every 15 min (the worker) and whenever the app opens.
+ * "Grey this app" uses the same: grey while an app whose block greys it is in front ([app]), and grey while bedtime
+ * OR that app wants it - the two never fight; the colour comes back (as it was) once neither does.
  */
 object Grayscale {
     const val GRANT = "adb shell pm grant com.husarp.lockdown android.permission.WRITE_SECURE_SETTINGS"
@@ -80,12 +82,25 @@ object Grayscale {
 
     private fun mark(p: android.content.SharedPreferences) = if (p.contains(APPLIED)) p.getBoolean(APPLIED, false) else null
 
-    /** Bedtime grayscale should be on now: in trusted time, and not while an emergency or a silent pause holds the alerts. */
+    /** Grayscale should be on now: bedtime grayscale (in trusted time, and not while an emergency or a silent pause
+     *  holds the alerts), or an app that greys is in front ([app]). */
     private fun wanted(ctx: Context): Boolean {
+        if (appGrey) return true
         val cfg = Store.config
         val now = com.husarp.lockdown.block.Enforce.ldt(com.husarp.lockdown.guard.TrustedTime.now(ctx))   // trusted time
         val paused = com.husarp.lockdown.block.Enforce.alertsPaused(cfg, now) || com.husarp.lockdown.block.Enforce.silenced(cfg, now)
         return !paused && com.husarp.lockdown.engine.bedtimeGrayscaleWanted(cfg.settings.bedtimeGrayscale, cfg.sleep, now.hour * 60 + now.minute)
+    }
+
+    @Volatile private var appGrey = false
+
+    /** "Grey this app" (the service, on every step): [wants] = an app whose block greys it is in front. Grey now, and
+     *  checked again on every step while it stays (colour correction switched off by hand comes back grey); colour
+     *  back, as it was before, once it's gone - unless bedtime grayscale wants it too. */
+    fun app(ctx: Context, wants: Boolean) {
+        if (!wants && !appGrey) return
+        appGrey = wants
+        sync(ctx)
     }
 
     // (synchronized: the 15-minute worker runs it off the main thread)

@@ -47,8 +47,9 @@ import java.time.LocalDateTime
  * Watches the foreground app / browser tab. It feeds the usage engine (so time and opening limits count),
  * asks the rule engine (plus the active mode) whether to block, and when it should: pauses a video that was
  * playing, leaves the app / goes back in the browser (the item's block method) and covers the screen with a
- * notice until OK. It also stops a blocked video carrying on in picture-in-picture, blocks bad keywords in
- * browsers, and runs the reminders (bedtime screen, breaks, your own reminders) and bedtime grayscale.
+ * notice until OK; an app whose way is "grey" stays open and the screen goes grey while it's in front. It also
+ * stops a blocked video carrying on in picture-in-picture, blocks bad keywords in browsers, and runs the reminders
+ * (bedtime screen, breaks, your own reminders) and bedtime grayscale.
  */
 class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
@@ -132,6 +133,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             val island = IslandLink.islandFront?.takeIf { !IslandLink.isHelper && IslandLink.islandInFront() }
             if (island != null) History.record(now, island, "", dt)
             inUseIds = setOfNotNull(island?.let { p -> cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(p, true) }?.id })
+            // the helper can't grey the screen: main greys it while an Island app that greys is in front
+            Grayscale.app(this, island != null && Enforce.app(cfg, island, now, mode)?.grey == true)
             if (quietUp) removeOverlay()
             return
         }
@@ -145,8 +148,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
         // Count what's in use - but not an item that is blocked: its time behind the notice and its retries
         // aren't use (they used to fill its limits and the group's). The opening that goes over a limit counts.
+        // An app that is only greyed is in use: it counts.
         val actives = ArrayList<Active>()
-        if (appItem != null && !appItem.disabled && !Enforce.itemBlocked(cfg, appItem, now))
+        if (appItem != null && !appItem.disabled && Enforce.counts(cfg, appItem, now))
             actives.add(Active(appItem, Rules.countedRules(appItem, cfg.groups), launched = pkg != prevTickPkg))
         if (siteItem != null && !Enforce.itemBlocked(cfg, siteItem, now))
             actives.add(Active(siteItem, Rules.countedRules(siteItem, cfg.groups)))
@@ -154,7 +158,11 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         prevTickPkg = pkg
 
         val label = if (appItem != null) appItem.name else Apps.label(packageManager, pkg)
-        var verdict = Enforce.app(cfg, pkg, now, mode, label)
+        // "Grey this app": it stays open and the screen goes grey while it's in front (a site in it is still judged)
+        val appVerdict = Enforce.app(cfg, pkg, now, mode, label)
+        val grey = appVerdict?.grey == true
+        Grayscale.app(this, grey)
+        var verdict = appVerdict?.takeUnless { grey }
             ?: (if (host != null) Enforce.site(cfg, host, now, mode) else null)
         // Protection lists block in the browser without the VPN. Never gated by the emergency unlock.
         if (verdict == null && host != null && cfg.enabled && Protection.blocked(host))
@@ -226,7 +234,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             if (!w.isInPictureInPictureMode) continue
             val p = runCatching { w.root?.packageName?.toString() }.getOrNull() ?: continue
             val justBlocked = ms - (blockedAt[p] ?: -PIP_CATCH_MS) < PIP_CATCH_MS
-            if (w.id in pipCaught || justBlocked || Enforce.app(cfg, p, now, mode) != null) caught.add(w.id)
+            if (w.id in pipCaught || justBlocked || Enforce.app(cfg, p, now, mode)?.takeUnless { it.grey } != null) caught.add(w.id)
         }
         pipCaught.clear(); pipCaught.addAll(caught)
         if (caught.isNotEmpty() && Media.playing(this)) Media.pause(this)
@@ -651,6 +659,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun onUnbind(intent: Intent?): Boolean { connected = false; return super.onUnbind(intent) }
     override fun onDestroy() {
         connected = false; removeOverlay()
+        runCatching { Grayscale.app(this, false) }     // nothing watches what's in front any more: colour back
         // The bedtime screen goes with the service: count it as dismissed, so it comes back on its escalation.
         if ("sleep" in remindViews) runCatching { ReminderRunner.answer(this, "sleep", "dismiss") }
         for (key in remindViews.keys.toList()) closeRemind(key)

@@ -168,7 +168,8 @@ fun GuardrailsScreen() {
                 Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = true)) }
                 ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            if (cfg.settings.bedtimeGrayscale && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
+            if ((cfg.settings.bedtimeGrayscale || com.husarp.lockdown.engine.BlockMethod.greyUsed(cfg.items, cfg.groups)) &&
+                !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
                 HealthRow("Grayscale permission", grayOk) { copyGrant(ctx) }
             val link by com.husarp.lockdown.link.IslandLink.mainState.collectAsStateWithLifecycle()
             if (link.state.isNotEmpty() && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // Fix opens Lockdown in Island

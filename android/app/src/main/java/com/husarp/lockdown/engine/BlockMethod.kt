@@ -11,10 +11,14 @@ package com.husarp.lockdown.engine
  *   that hasn't chosen blocks each member the way the member is set itself - nothing changes for older groups.
  * - Blocked by several at once: everything any of them asks for (leaving the browser covers going back).
  *
- * Apps have one way on Android (the notice, then the home screen), so this is for sites only.
+ * Apps on Android: "close" (the notice, then the home screen - what an app's empty way means) or "grey" (it stays
+ * open, but the screen goes grey while it's in front). Closing covers greying. A group's "How member apps are
+ * blocked" ([Group.appBlock], PC app_block) and a member's own in it work as the sites' do.
  */
 object BlockMethod {
     private val ORDER = listOf("dns", "back", "close")
+    private val APP_ORDER = listOf("close", GREY)
+    const val GREY = "grey"
 
     /** A site's flags; none set means "dns". */
     fun flags(blockType: String?): Set<String> =
@@ -30,13 +34,36 @@ object BlockMethod {
         return ORDER.filter { it in f }.joinToString(",")
     }
 
-    /** How [group] blocks this member: the group's way (else the member's own setting) plus, with [own], what the
-     *  member adds on top in this group. */
+    /** An app's flags; none set means "close". (The PC's other flags - minimize, background, internet - close it here.) */
+    fun appFlags(blockType: String?): Set<String> =
+        (blockType ?: "").split(",").map { it.trim() }.filterTo(HashSet()) { it.isNotEmpty() }.ifEmpty { setOf("close") }
+
+    /** Everything an app way does, for comparing two ways: closing covers minimizing and greying. */
+    fun appStrength(blockType: String?): Set<String> = appFlags(blockType).let { if ("close" in it) it + "minimize" + GREY else it }
+
+    /** One app way that does everything these ask for (closing it covers greying it). */
+    fun mergeApp(vararg blockTypes: String?): String {
+        val f = blockTypes.flatMapTo(HashSet()) { appFlags(it) }
+        if ("close" in f) f.remove(GREY)
+        return (APP_ORDER.filter { it in f } + (f - APP_ORDER.toSet()).sorted()).joinToString(",")
+    }
+
+    /** The app way only greys the screen: it stays open, nothing in the way closes it. */
+    fun greyOnly(blockType: String?): Boolean = appFlags(blockType) == setOf(GREY)
+
+    /** Some app or group greys apps (so the grayscale permission matters). */
+    fun greyUsed(items: List<Item>, groups: List<Group>): Boolean =
+        items.any { it.type == ItemType.APP && GREY in appFlags(it.blockType) } ||
+            groups.any { g -> GREY in appFlags(g.appBlock ?: "close") }
+
+    private fun mergeFor(type: ItemType, ways: Array<out String?>) = if (type == ItemType.SITE) merge(*ways) else mergeApp(*ways)
+
+    /** How [group] blocks this member: the group's way for its kind (else the member's own setting) plus, with
+     *  [own], what the member adds on top in this group. */
     fun inGroup(item: Item, group: Group, own: Boolean = true): String {
-        if (item.type != ItemType.SITE) return item.blockType
-        val base = group.siteBlock ?: item.blockType
+        val base = (if (item.type == ItemType.SITE) group.siteBlock else group.appBlock) ?: item.blockType
         val extra = if (own) group.memberBlocks[item.id] else null
-        return if (extra != null) merge(base, extra) else base
+        return if (extra != null) mergeFor(item.type, arrayOf(base, extra)) else base
     }
 
     /** The way the item is blocked while this rule blocks it. */
@@ -52,19 +79,19 @@ object BlockMethod {
         return when (ways.size) {
             0 -> item.blockType
             1 -> ways.first()
-            else -> merge(*ways.toTypedArray())
+            else -> mergeFor(item.type, ways.toTypedArray())
         }
     }
 
     /** How the group blocks a member got weaker for any member it keeps: its way, or a member's own in it (e.g.
-     *  "leave the browser" dropped). Compared per member, as each one ends up, so a group's first choice is
-     *  compared with how each member was blocked before it had one. Adding to it is free. */
+     *  "leave the browser" dropped, or apps greyed instead of closed). Compared per member, as each one ends up, so
+     *  a group's first choice is compared with how each member was blocked before it had one. Adding to it is free. */
     fun waysLooser(old: Group, new: Group, oldItems: Map<String, Item>, newItems: Map<String, Item>): Boolean {
         for (member in old.memberIds.toSet() intersect new.memberIds.toSet()) {
             val before = oldItems[member] ?: continue
-            if (before.type != ItemType.SITE) continue
             val after = newItems[member] ?: before
-            if (!strength(inGroup(after, new)).containsAll(strength(inGroup(before, old)))) return true
+            val strengthOf: (String?) -> Set<String> = if (before.type == ItemType.SITE) ::strength else ::appStrength
+            if (!strengthOf(inGroup(after, new)).containsAll(strengthOf(inGroup(before, old)))) return true
         }
         return false
     }
