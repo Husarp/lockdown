@@ -107,12 +107,13 @@ def test_settings_emergency_protection_looser():
     assert ab.settings_looser(base, {**base, "phrase": False})
     assert ab.settings_looser(base, {**base, "windows": [{"days": [5, 6], "start": "18:00", "end": "20:00"}]})
     assert not ab.settings_looser({**base, "hours": False}, base)                          # turning hours on
-    em = {"emergency.enabled": "1", "emergency.minutes": "20", "emergency.uses": "3", "emergency.per": "week"}
-    assert not ab.emergency_looser(em, {**em, "emergency.uses": "2", "emergency.minutes": "10"})
-    assert not ab.emergency_looser(em, {**em, "emergency.enabled": "0"})
-    assert ab.emergency_looser(em, {**em, "emergency.uses": "5"})
-    assert ab.emergency_looser(em, {**em, "emergency.per": "day"})
-    assert ab.emergency_looser({**em, "emergency.enabled": "0"}, em)
+    t1 = {"id": "t1", "minutes": 20, "uses": 3, "per": "week"}
+    em = {"enabled": True, "tiers": [t1]}
+    assert not ab.emergency_looser(em, {**em, "tiers": [{**t1, "uses": 2, "minutes": 10}]})
+    assert not ab.emergency_looser(em, {**em, "enabled": False})
+    assert ab.emergency_looser(em, {**em, "tiers": [{**t1, "uses": 5}]})
+    assert ab.emergency_looser(em, {**em, "tiers": [{**t1, "per": "day"}]})
+    assert ab.emergency_looser({**em, "enabled": False}, em)
     pr = {"enabled": ["scam", "adult"], "allowed": ["a.com"]}
     assert not ab.protection_looser(pr, {"enabled": ["scam", "adult", "gambling"], "allowed": []})
     assert ab.protection_looser(pr, {"enabled": ["scam"], "allowed": ["a.com"]})

@@ -133,6 +133,12 @@ def _reminders_for_ui(db) -> list[dict]:
              "days": list(r.get("days") or [])} for r in reminders.custom_list(db)]
 
 
+def _emergency_tiers(db, now: datetime) -> list[dict]:
+    """Each kind of emergency unlock with its uses left this day / week / month and when that count resets."""
+    return [{**t, "left": left, "reset": reset.strftime("%Y-%m-%d %H:%M")}
+            for t, left, _allowed, reset in emergency.left_by_tier(db, now)]
+
+
 def _home_stats(db, now: datetime) -> dict:
     """The Home tiles/chart that aren't derived from rules: screen time today, blocked tries, last 7 days.
     The per-day totals are summed in SQL (one grouped query -> 7 rows), not by pulling every activity row into
@@ -220,7 +226,8 @@ class Api:
         except (TypeError, ValueError):
             state["service"] = "down"
         for key, fn in (("rules", lambda: _rules_for_ui(db)), ("rem", lambda: _reminders_for_ui(db)),
-                        ("emergencyLeft", lambda: emergency.uses_left(db, now)[0]),
+                        ("emergencyLeft", lambda: emergency.available(db, now)),   # all kinds together
+                        ("emergencyTiers", lambda: _emergency_tiers(db, now)),
                         ("home", lambda: _home_stats(db, now))):
             try:
                 state[key] = fn()
@@ -278,11 +285,12 @@ class Api:
         antibypass.switch_off(self.db, now_from_db(self.db))
         return {"ok": True}
 
-    def emergency_unlock(self):
+    def emergency_unlock(self, tier=None):
+        """tier: the id of the kind to spend (from emergencyTiers); may be left out only while there is one kind."""
         try:
             now = now_from_db(self.db)
             items = [i for part in emergency.choices(self.db, now) for i in part]   # never the permanent ones
-            until = emergency.unlock(self.db, items, now)
+            until = emergency.unlock(self.db, items, now, tier=tier)
             return {"ok": True, "until": until.strftime("%H:%M")}
         except ValueError as e:
             return {"ok": False, "error": str(e)}

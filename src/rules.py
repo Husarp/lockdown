@@ -133,7 +133,10 @@ class LimitClock:
         self.carry_until = _parse_dt(c.get("switch"))      # ... lasts until here
         if self.carry_start and self.carry_until:          # (repairs a day stretched twice by 0.5-0.67)
             self.carry_until = min(self.carry_until, self.carry_start + timedelta(days=2))
-        self.holds = {k: (key, _parse_dt(until)) for k, (key, until) in c.get("hold", {}).items()}
+        # kind -> (key, until, since): the week / month running when the time was changed, held from when it began
+        # (since; None in a hold saved by an older version: every earlier time) until its end
+        self.holds = {k: (h[0], _parse_dt(h[1]), _parse_dt(h[2]) if len(h) > 2 else None)
+                      for k, h in c.get("hold", {}).items()}
 
     def day(self, now: datetime) -> tuple[datetime, datetime]:
         """(start, end) of the limit day containing now."""
@@ -148,10 +151,32 @@ class LimitClock:
         """(key, end) of the day / week / month limit period containing now."""
         key, end = self._natural_period(kind, now)
         if kind in self.holds:   # the week / month running when the time was changed doesn't end early
-            hold_key, until = self.holds[kind]
-            if now < until:
+            hold_key, until, since = self.holds[kind]
+            if now < until and (since is None or now >= since):   # (an earlier time is in an earlier period)
                 return (hold_key, until) if key != hold_key else (key, max(end, until))
         return key, end
+
+    def period_start(self, kind: str, now: datetime) -> datetime | None:
+        """When the week / month containing now began: the start of its first limit day (a day only partly in it
+        counts whole - the strict side). None when it can't be told (a hold saved by an older version)."""
+        key = self.period(kind, now)[0]
+        start = self.day(now)[0]
+        for _ in range(45):   # (a month and a stretched day or two)
+            before = start - timedelta(seconds=1)
+            if self.period(kind, before)[0] != key:
+                return start
+            start = self.day(before)[0]
+        return None
+
+    def hold(self, now: datetime) -> dict:
+        """The "hold" of a changed reset time: the week and month running now, by this clock, so they don't end
+        early - [key, end, start] each (the start keeps earlier weeks and months out of them)."""
+        out = {}
+        for kind in ("week", "month"):
+            key, until = self.period(kind, now)
+            since = self.period_start(kind, now)
+            out[kind] = [key, until.strftime(TIME_FMT)] + ([since.strftime(TIME_FMT)] if since else [])
+        return out
 
     def _natural_period(self, kind: str, now: datetime) -> tuple[str, datetime]:
         start, end = self.day(now)
@@ -191,9 +216,7 @@ def apply_reset_now(config: str | None, new_time: str, now: datetime) -> str:
         new = parse_hhmm(new_time)
     except ValueError:
         raise ValueError("The time must look like 04:00.") from None
-    hold = {kind: [key, until.strftime(TIME_FMT)]
-            for kind in ("week", "month") for key, until in [clock.period(kind, now)]}
-    return json.dumps({"time": f"{new:%H:%M}", "hold": hold})
+    return json.dumps({"time": f"{new:%H:%M}", "hold": clock.hold(now)})
 
 
 def change_reset(config: str | None, new_time: str, now: datetime) -> str:
@@ -212,12 +235,8 @@ def change_reset(config: str | None, new_time: str, now: datetime) -> str:
     switch = datetime.combine(end.date(), new)
     # never before the end it already has, never more than two days from its start (a second change can't stack)
     switch = max(end, min(switch, start + timedelta(days=2)))
-    hold = {}
-    for kind in ("week", "month"):
-        key, until = clock.period(kind, now)
-        hold[kind] = [key, until.strftime(TIME_FMT)]
     return json.dumps({"time": f"{new:%H:%M}", "day_start": start.strftime(TIME_FMT),
-                       "switch": switch.strftime(TIME_FMT), "hold": hold})
+                       "switch": switch.strftime(TIME_FMT), "hold": clock.hold(now)})
 
 
 class Usage:

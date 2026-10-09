@@ -18,6 +18,7 @@ import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.Block
 import com.husarp.lockdown.engine.BlockMethod
+import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
@@ -46,16 +47,14 @@ object Enforce {
     /** [ms] as local time - in the time zone trusted time accepts (a new zone counts only after 24 h). */
     fun ldt(ms: Long): LocalDateTime = Instant.ofEpochMilli(ms).atZone(com.husarp.lockdown.guard.TrustedTime.zone()).toLocalDateTime()
 
-    /** The emergency unlock's end for [itemId], or null. In trusted time, and never longer than the unlock can
-     *  run from now: one started with the clock set forward (then set back) doesn't hold for days. */
+    /** The emergency unlock's end for [itemId] (the latest running use covering it), or null. In trusted time, and
+     *  never longer than an unlock can run: one started with the clock set forward (then set back) doesn't hold for
+     *  days (Emergency.itemUntil). */
     fun emergencyUntil(cfg: Config, itemId: String, now: LocalDateTime): LocalDateTime? =
-        cfg.unlockUntil?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
-            ?.takeIf { now.isBefore(it) && !it.isAfter(now.plusMinutes(cfg.emergency.minutes + 1L)) && itemId in cfg.unlockItems }
+        Emergency.itemUntil(cfg.allUses(), itemId, now)
 
     /** An emergency paused the bedtime and break alerts (PC 0.84.7) - same cap as the unlock. */
-    fun alertsPaused(cfg: Config, now: LocalDateTime): Boolean =
-        cfg.alertsPausedUntil?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
-            ?.let { now.isBefore(it) && !it.isAfter(now.plusMinutes(cfg.emergency.minutes + 1L)) } ?: false
+    fun alertsPaused(cfg: Config, now: LocalDateTime): Boolean = Emergency.alertsPausedUntil(cfg.allUses(), now) != null
 
     /** "Pause my blocks" is running (PC 0.84.8): nothing from your own list blocks. */
     fun paused(cfg: Config, now: LocalDateTime): Boolean = Pause.state(cfg.pause, now) != null

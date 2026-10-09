@@ -18,6 +18,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.husarp.lockdown.data.History
@@ -29,6 +30,7 @@ import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
 import com.husarp.lockdown.engine.Browsers
+import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Rules
@@ -416,10 +418,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 buttons.addView(remindButton(if (b.action == "dismiss") "Dismiss" else b.label, primary = i == 0) {
                     when (b.action) {
                         "disable" -> { closeRemind(p.key); ReminderRunner.askDisable(this) }
-                        "emergency" -> askEmergency(buttons, "Your bedtime settings stay as they are.", back = { fill() }) {
+                        "emergency" -> askEmergency(buttons, "Your bedtime settings stay as they are.", back = { fill() }) { tier ->
                             closeRemind(p.key)
                             ReminderRunner.answer(this, p.key, "dismiss")   // back on the escalation if it fails
-                            ReminderRunner.spendEmergency(this)
+                            ReminderRunner.spendEmergency(this, tier)
                         }
                         else -> { closeRemind(p.key); ReminderRunner.answer(this, p.key, b.action) }
                     }
@@ -431,18 +433,28 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         addRemind(p.key, col)
     }
 
-    /** "Emergency": asks once (a stray tap must not spend a use), then [onPause]. [back] redraws the buttons. */
-    private fun askEmergency(buttons: LinearLayout, note: String, back: () -> Unit, onPause: () -> Unit) {
+    /** "Emergency": asks once (a stray tap must not spend a use), then [onPause] with the kind picked: one button
+     *  per kind when there are several (a spent one greyed out). [back] redraws the buttons. */
+    private fun askEmergency(buttons: LinearLayout, note: String, back: () -> Unit, onPause: (String) -> Unit) {
         val cfg = Store.config
-        val left = ReminderRunner.emergencyLeft(cfg, ReminderRunner.now(this))
+        val now = ReminderRunner.now(this)
+        val left = ReminderRunner.emergencyLeft(cfg, now)
         if (left <= 0) { Toast.makeText(this, "No emergency unlocks left.", Toast.LENGTH_LONG).show(); back(); return }
+        val tiers = cfg.emergency.tierList()
         buttons.removeAllViews()
         buttons.addView(TextView(this).apply {
-            text = "Pause the bedtime and break alerts for ${cfg.emergency.minutes} min? Uses 1 of your " +
+            text = if (tiers.size == 1) "Pause the bedtime and break alerts for ${tiers[0].minutes} min? Uses 1 of your " +
                 "$left emergency unlock${if (left != 1) "s" else ""} left. $note"
+            else "Pause the bedtime and break alerts? Pick how long - it uses 1 of that kind's emergency unlocks. $note"
             textSize = 15f; setTextColor(Color.parseColor("#D8C2BC")); setPadding(0, 32, 0, 0)
         })
-        buttons.addView(remindButton("Pause ${cfg.emergency.minutes} min", primary = true) { onPause() })
+        if (tiers.size == 1) buttons.addView(remindButton("Pause ${tiers[0].minutes} min", primary = true) { onPause(tiers[0].id) })
+        else for (t in tiers) {
+            val u = Emergency.usesLeft(cfg.allUses(), t, now, cfg.clock())
+            buttons.addView(remindButton("Pause ${t.minutes} min · " +
+                (if (u.left > 0) "${u.left} left" else "none left") + " ${Emergency.PERIODS[t.per]}",
+                primary = false, enabled = u.left > 0) { onPause(t.id) })
+        }
         buttons.addView(remindButton("Cancel", primary = false) { back() })
     }
 
@@ -458,8 +470,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             buttons.addView(remindButton("Phone", primary = false) { dial() })
             val left = ReminderRunner.emergencyLeft(Store.config, ReminderRunner.now(this))
             if (left > 0) buttons.addView(remindButton("Emergency ($left left)", primary = false) {
-                askEmergency(buttons, "The break ends now.", back = { fill() }) {
-                    if (ReminderRunner.spendEmergency(this)) closeRemind(STRICT_BREAK) else fill()
+                askEmergency(buttons, "The break ends now.", back = { fill() }) { tier ->
+                    if (ReminderRunner.spendEmergency(this, tier)) closeRemind(STRICT_BREAK) else fill()
                 }
             })
         }
@@ -510,10 +522,12 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         })
     }
 
-    private fun remindButton(label: String, primary: Boolean, onClick: () -> Unit) = Button(this).apply {
+    private fun remindButton(label: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) = Button(this).apply {
         text = label
         setTextColor(Color.parseColor(if (primary) "#5C1900" else "#FFB59C"))
         setBackgroundColor(Color.parseColor(if (primary) "#FFB59C" else "#3A2A26"))
+        isEnabled = enabled
+        if (!enabled) alpha = 0.4f
         setOnClickListener { runCatching(onClick) }
         val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130); lp.topMargin = 32
         layoutParams = lp
@@ -522,7 +536,12 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun addRemind(key: String, col: View) {
         closeRemind(key)
         val root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#1A110F")) }
-        root.addView(col, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        // scrolls when it doesn't fit (several emergency kinds on a small screen or with a large font), centred when it does
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(col, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        }
+        root.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         remindViews[key] = root
         if (!remindHidden) runCatching { wm?.addView(root, remindParams()) }.onFailure { remindViews.remove(key) }
     }

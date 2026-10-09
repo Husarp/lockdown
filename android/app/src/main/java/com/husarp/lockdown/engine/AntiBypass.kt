@@ -10,7 +10,7 @@ import kotlin.random.Random
  *  - phrase: type a random phrase (no pasting). Passing unlocks loosening for [UNLOCK_MIN] minutes.
  *  - hours: loosening only inside chosen time windows.
  *  - wait: passing doesn't open at once - a cooling-off period first.
- * The emergency unlock (Emergency.kt) is separate, with its own weekly limit. Pure and testable.
+ * The emergency unlock (Emergency.kt) is separate, with its own limits. Pure and testable.
  *
  * ══════════════════════════════════════════════════════════════════════════════════════════════════════
  *  ⛔ ANTI-BYPASS RULE FOR AI ASSISTANTS AND DEVELOPERS  (ships to every user; the canonical copy is in the
@@ -190,10 +190,24 @@ object AntiBypass {
         return false
     }
 
-    /** Emergency-unlock settings weakened: turned on, longer, more uses, or per-day instead of per-week. */
-    fun emergencyLooser(oldOn: Boolean, oldMin: Int, oldUses: Int, oldPer: String,
-                        newOn: Boolean, newMin: Int, newUses: Int, newPer: String): Boolean =
-        (newOn && !oldOn) || newMin > oldMin || newUses > oldUses || (newPer == "day" && oldPer != "day")
+    /** The periods an emergency kind may move to for free: only one that takes in the period you're in, so its uses
+     *  so far still count (a week and a month each hold whole limit days). A month doesn't hold the week you're in -
+     *  per week -> per month on the 1st would hand a spent week's uses back early - and a shorter period gives the
+     *  same uses more often (PC PER_FREE). */
+    private val PER_FREE = mapOf("day" to setOf("day", "week", "month"), "week" to setOf("week"), "month" to setOf("month"))
+
+    /** Emergency-unlock settings weakened: turned on, a new kind, or a kind (matched by id, so swapping two kinds'
+     *  values isn't free) with more uses, longer, or another period than [PER_FREE] allows. Off, removing a kind,
+     *  fewer, shorter, or per day -> per week / month is free (PC emergency_looser). */
+    fun emergencyLooser(oldOn: Boolean, oldTiers: List<EmergencyTier>, newOn: Boolean, newTiers: List<EmergencyTier>): Boolean {
+        if (!newOn) return false                       // off, or staying off: nothing can be used
+        if (!oldOn) return true                        // turned on
+        val before = Emergency.clean(oldTiers).associateBy { it.id }
+        return Emergency.clean(newTiers).any { t ->
+            val o = before[t.id] ?: return@any true      // a new kind
+            t.uses > o.uses || t.minutes > o.minutes || t.per !in PER_FREE.getValue(o.per)
+        }
+    }
 
     /** Protection weakened: a list switched off, or a site allowed that wasn't before. */
     fun protectionLooser(oldEnabled: List<String>, oldAllowed: List<String>,

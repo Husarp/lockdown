@@ -3,6 +3,8 @@ package com.husarp.lockdown
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
 import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.EmergencyTier
+import com.husarp.lockdown.engine.EmergencyUse
 import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
@@ -103,11 +105,13 @@ class AntiBypassEngineTest {
         assertTrue(AntiBypass.groupLooser(overridden, loosened, t0))                         // a member's own limit raised
     }
 
+    private fun one(min: Int, uses: Int, per: String) = listOf(EmergencyTier(Emergency.LEGACY_TIER, uses, per, min))
+
     @Test fun emergency_and_protection_looser() {
-        assertTrue(AntiBypass.emergencyLooser(false, 20, 3, "week", true, 20, 3, "week"))    // turned on
-        assertTrue(AntiBypass.emergencyLooser(true, 20, 3, "week", true, 30, 3, "week"))     // longer
-        assertTrue(AntiBypass.emergencyLooser(true, 20, 3, "week", true, 20, 3, "day"))      // per day
-        assertFalse(AntiBypass.emergencyLooser(true, 20, 3, "week", true, 20, 3, "week"))
+        assertTrue(AntiBypass.emergencyLooser(false, one(20, 3, "week"), true, one(20, 3, "week")))    // turned on
+        assertTrue(AntiBypass.emergencyLooser(true, one(20, 3, "week"), true, one(30, 3, "week")))     // longer
+        assertTrue(AntiBypass.emergencyLooser(true, one(20, 3, "week"), true, one(20, 3, "day")))      // per day
+        assertFalse(AntiBypass.emergencyLooser(true, one(20, 3, "week"), true, one(20, 3, "week")))
 
         assertTrue(AntiBypass.protectionLooser(listOf("adult"), emptyList(), emptyList(), emptyList()))  // list off
         assertTrue(AntiBypass.protectionLooser(listOf("adult"), emptyList(), listOf("adult"), listOf("x.com")))  // allowed a site
@@ -115,14 +119,16 @@ class AntiBypassEngineTest {
     }
 
     @Test fun emergency_uses_count_per_period() {
-        val u1 = Emergency.usesLeft(listOf(t0.minusHours(1)), t0, "week", allowed = 3)
+        val week = EmergencyTier(Emergency.LEGACY_TIER, 3, "week", 20)
+        fun used(vararg at: LocalDateTime) = at.map { EmergencyUse(it.toString(), week.id, it.plusMinutes(20).toString()) }
+        val u1 = Emergency.usesLeft(used(t0.minusHours(1)), week, t0)
         assertEquals(2, u1.left)
         // Sunday 09-27 is in the previous Monday-start week, so it doesn't count against this week
-        val prevWeek = Emergency.usesLeft(listOf(t0.minusHours(1), t0.minusHours(2), t0.minusDays(1)), t0, "week", 3)
+        val prevWeek = Emergency.usesLeft(used(t0.minusHours(1), t0.minusHours(2), t0.minusDays(1)), week, t0)
         assertEquals(1, prevWeek.left)
-        val out = Emergency.usesLeft(listOf(t0.minusHours(1), t0.minusHours(2), t0.minusHours(3)), t0, "week", 3)
+        val out = Emergency.usesLeft(used(t0.minusHours(1), t0.minusHours(2), t0.minusHours(3)), week, t0)
         assertEquals(0, out.left)
-        assertNull(Emergency.unlockUntil(listOf(t0, t0, t0), t0, enabled = true, minutes = 20, per = "week", allowed = 3))
-        assertEquals(t0.plusMinutes(20), Emergency.unlockUntil(emptyList(), t0, true, 20, "week", 3))
+        assertNull(Emergency.start(true, listOf(week), used(t0, t0, t0), week.id, listOf("a"), false, t0).use)
+        assertEquals(t0.plusMinutes(20).toString(), Emergency.start(true, listOf(week), emptyList(), week.id, listOf("a"), false, t0).use!!.until)
     }
 }

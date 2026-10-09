@@ -8,6 +8,8 @@ import com.husarp.lockdown.engine.AntiBypassCfg
 import com.husarp.lockdown.engine.BlockPause
 import com.husarp.lockdown.engine.BreakCfg
 import com.husarp.lockdown.engine.CustomCfg
+import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.EmergencyTier
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Pause
@@ -161,10 +163,11 @@ class PauseAndTimeTest {
     }
 
     @Test fun emergency_settings_fewer_or_shorter_are_free() {
-        assertFalse(AntiBypass.emergencyLooser(true, 20, 3, "week", true, 10, 2, "week"))
-        assertFalse(AntiBypass.emergencyLooser(true, 20, 3, "day", true, 20, 3, "week"))
-        assertFalse(AntiBypass.emergencyLooser(true, 20, 3, "week", false, 20, 3, "week"))       // turning it off
-        assertTrue(AntiBypass.emergencyLooser(true, 20, 3, "week", true, 20, 4, "week"))
+        fun one(min: Int, uses: Int, per: String) = listOf(EmergencyTier(Emergency.LEGACY_TIER, uses, per, min))
+        assertFalse(AntiBypass.emergencyLooser(true, one(20, 3, "week"), true, one(10, 2, "week")))
+        assertFalse(AntiBypass.emergencyLooser(true, one(20, 3, "day"), true, one(20, 3, "week")))
+        assertFalse(AntiBypass.emergencyLooser(true, one(20, 3, "week"), false, one(20, 3, "week")))       // turning it off
+        assertTrue(AntiBypass.emergencyLooser(true, one(20, 3, "week"), true, one(20, 4, "week")))
     }
 
     // ---------- trusted time ----------

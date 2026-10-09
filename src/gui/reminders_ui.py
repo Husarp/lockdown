@@ -15,7 +15,8 @@ from gui import screens, theme, toast
 from gui.components import Card, Rows, Segmented, eyebrow, hairline, page_head
 from gui.notifications import no_activate
 from gui.rule_editors import DayToggle
-from gui.widgets import ConfirmButton, ConfirmDialog, Corner
+from gui.settings import short_when
+from gui.widgets import ChoiceDialog, ConfirmButton, ConfirmDialog, Corner
 from rules import DAY_NAMES, parse_hhmm
 from trusted_time import now_from_db
 
@@ -290,20 +291,35 @@ class ReminderUI:
 
     def _emergency_sleep(self):
         """"Emergency (N left)" on the bedtime screen: asks once (a stray click must not spend a use), then pauses
-        the bedtime and break alerts for the emergency length. Cancelling just dismisses it, as Dismiss does.
+        the bedtime and break alerts for the emergency length - with several kinds of emergency, the one picked
+        (a button each, spent ones greyed out). Cancelling just dismisses it, as Dismiss does.
         It counts as dismissed from the click on, so leaving the question open is no free pause: the bedtime screen
         comes back on its escalation as usual (and "Pause" closes it again)."""
         db = self.app.db
         now = self.engine.now   # (the engine decides the use as of its last tick: the same time here)
-        left, minutes = emergency.available(db, now), int(emergency.get(db, "emergency.minutes"))
+        left = emergency.available(db, now)
         if not left:     # spent elsewhere (or turned off) since the screen came up: the engine says so, dismisses
             self.engine.answer("sleep", "emergency")
             return
+        kinds = emergency.left_by_tier(db, now)
         self.engine.answer("sleep", "dismiss")
-        ask = ConfirmDialog(self.app, "Emergency", f"Pause the bedtime and break alerts for {minutes} min? "
-                                                   f"Uses 1 of your {left} emergency unlock{'s' * (left != 1)} "
-                                                   "left. Your bedtime settings stay as they are.",
-                            on_yes=lambda: self.engine.answer("sleep", "emergency"), yes_text=f"Pause {minutes} min")
+
+        def spend(tier):
+            return lambda: self.engine.answer("sleep", f"emergency:{tier['id']}")
+        if len(kinds) == 1:
+            tier = kinds[0][0]
+            minutes = tier["minutes"]
+            ask = ConfirmDialog(self.app, "Emergency", f"Pause the bedtime and break alerts for {minutes} min? "
+                                                       f"Uses 1 of your {left} emergency unlock{'s' * (left != 1)} "
+                                                       "left. Your bedtime settings stay as they are.",
+                                on_yes=spend(tier), yes_text=f"Pause {minutes} min")
+        else:
+            ask = ChoiceDialog(self.app, "Emergency", "Pause the bedtime and break alerts for how long? It uses 1 "
+                                                      "of that kind's emergency unlocks. Your bedtime settings stay "
+                                                      "as they are.",
+                               [(f"Pause {t['minutes']} min · {n} left {emergency.PERIODS[t['per']]}" if n else
+                                 f"{t['minutes']} min - none left · resets {short_when(reset)}", n > 0, spend(t))
+                                for t, n, _allowed, reset in kinds])
         # (not left up for good: as a modal it would hold the clicks of the bedtime screen when that comes back)
         self.app.after(ASK_LIMIT_MS, lambda: _give_up(ask))
 

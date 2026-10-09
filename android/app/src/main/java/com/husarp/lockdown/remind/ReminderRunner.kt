@@ -121,19 +121,18 @@ object ReminderRunner {
         answer(ctx, "sleep", action)
     }
 
+    /** "Emergency (N left)": the uses left of every kind together (0 while off). */
     fun emergencyLeft(cfg: Config, now: LocalDateTime): Int =
-        if (!cfg.emergency.enabled) 0
-        else Emergency.usesLeft(cfg.unlocks.mapNotNull { runCatching { LocalDateTime.parse(it) }.getOrNull() },
-            now, cfg.emergency.per, cfg.emergency.uses, cfg.clock()).left
+        Emergency.available(cfg.emergency.enabled, cfg.emergency.tierList(), cfg.allUses(), now, cfg.clock())
 
-    /** "Emergency (N left)": one use pauses the bedtime and break alerts (and bedtime grayscale) for its length.
-     *  The bedtime settings stay as they are. False if no use is left. */
-    fun spendEmergency(ctx: Context): Boolean {
+    /** One use of kind [tierId] pauses the bedtime and break alerts (and bedtime grayscale) for its length. Checked
+     *  against the config as it is when saved, so a use spent meanwhile isn't spent twice. The bedtime settings stay
+     *  as they are. False if that kind has no use left. */
+    fun spendEmergency(ctx: Context, tierId: String): Boolean {
         val now = TrustedTime.local(ctx)
-        val cfg = Store.config
-        if (emergencyLeft(cfg, now) <= 0) { toast(ctx, "No emergency unlocks left."); return false }
-        val until = now.plusMinutes(cfg.emergency.minutes.toLong())
-        Store.update { it.copy(unlocks = it.unlocks + now.toString(), alertsPausedUntil = until.toString()) }
+        var r = Emergency.Started(error = "No emergency unlocks left.")
+        Store.update { c -> c.withEmergency(tierId, emptyList(), alerts = true, now).also { r = it.second }.first }
+        val until = r.use?.let { LocalDateTime.parse(it.until) } ?: run { toast(ctx, r.error); return false }
         runCatching { Grayscale.sync(ctx) }
         toast(ctx, "Emergency: bedtime and break alerts paused until %02d:%02d.".format(until.hour, until.minute))
         return true

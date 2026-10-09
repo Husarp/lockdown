@@ -87,7 +87,8 @@ private fun load(ctx: Context, cfg: Config, back: Int, len: Int): HistData {
     val streakDays = if (first == null) emptyList() else
         generateSequence(today) { it.minusDays(1) }.takeWhile { !it.isBefore(first) && !it.isBefore(today.minusDays(366)) }.toList()
     val goal = cfg.settings.dailyGoalMin.takeIf { it > 0 }
-    val unlockDays = cfg.unlocks.mapNotNull { runCatching { LocalDateTime.parse(it).toLocalDate() }.getOrNull() }.toSet()
+    val unlockDays = cfg.allUses().filter { it.tier.isNotEmpty() }   // (a running one from before kinds is in unlocks too)
+        .mapNotNull { runCatching { LocalDateTime.parse(it.at).toLocalDate() }.getOrNull() }.toSet()
     val days = (0 until len).map { from.plusDays(it.toLong()) }
     val names = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
     return HistData(

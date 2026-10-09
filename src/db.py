@@ -136,7 +136,8 @@ CREATE TABLE IF NOT EXISTS emergency_unlocks (
     until DATETIME,
     item_ids TEXT NOT NULL,       -- JSON list
     names TEXT NOT NULL,          -- JSON list of display names (kept for history / graphs)
-    alerts INTEGER                -- 1: bedtime and break alerts are paused until `until` as well (0.84.7)
+    alerts INTEGER,               -- 1: bedtime and break alerts are paused until `until` as well (0.84.7)
+    tier TEXT                     -- the kind of emergency it was a use of (emergency.tiers); NULL: from before kinds
 );
 
 -- Network log: new connections per minute, app and address (kept for 1 hour; written by the service)
@@ -246,7 +247,8 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("emergency_unlocks", "alerts", "INTEGER"),
               ("block_groups", "app_block", "TEXT"), ("block_groups", "site_block", "TEXT"),
               ("block_groups", "member_blocks", "TEXT"),
-              ("block_rules", "daily_limit_days", "TEXT"), ("group_rules", "daily_limit_days", "TEXT")]
+              ("block_rules", "daily_limit_days", "TEXT"), ("group_rules", "daily_limit_days", "TEXT"),
+              ("emergency_unlocks", "tier", "TEXT")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
                for c in ("weekly_limit_min", "monthly_limit_min", "weekly_switch_limit", "monthly_switch_limit")]
 RULE_COLUMNS = ("rule_type", "schedule", "temp_until", "daily_limit_min", "allowance_min", "allowance_shared",
@@ -273,9 +275,9 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 6   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 7   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
-#                      6: a daily time limit per weekday (0.84.12)
+#                      6: a daily time limit per weekday (0.84.12); 7: emergency_unlocks.tier (emergency kinds)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -686,18 +688,19 @@ class Database:
 
     @_write
     def add_unlock(self, item_ids: list[int], names: list[str], start: datetime, until: datetime,
-                   alerts: bool = False):
+                   alerts: bool = False, tier: str | None = None):
         with self.conn:
-            self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names, alerts) "
-                              "VALUES (?, ?, ?, ?, ?)",
+            self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names, alerts, tier) "
+                              "VALUES (?, ?, ?, ?, ?, ?)",
                               (start.strftime(TIME_FMT), until.strftime(TIME_FMT), json.dumps(item_ids),
-                               json.dumps(names), int(bool(alerts))))
+                               json.dumps(names), int(bool(alerts)), tier))
 
     def unlocks_since(self, since: datetime) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM emergency_unlocks WHERE until > ? ORDER BY started",
                                  (since.strftime(TIME_FMT),))
         return [{"started": datetime.strptime(r["started"], TIME_FMT), "until": datetime.strptime(r["until"], TIME_FMT),
-                 "item_ids": json.loads(r["item_ids"]), "names": json.loads(r["names"]), "alerts": bool(r["alerts"])}
+                 "item_ids": json.loads(r["item_ids"]), "names": json.loads(r["names"]), "alerts": bool(r["alerts"]),
+                 "tier": r["tier"]}
                 for r in rows]
 
     def active_unlocks(self, now: datetime) -> dict[int, datetime]:

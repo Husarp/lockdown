@@ -33,7 +33,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   time** (Settings; a change never ends the current limit day, week or month early), and **Emergency unlock**
   (Blocking > Overview: unblock chosen items for 20 min - blocked yet or not, e.g. before your allowance runs out; the
   time still counts toward your limits - and/or pause the bedtime and break alerts; also "Emergency (N left)" on the
-  bedtime screen; 3 uses per week by default, configurable in Settings; never for permanently-blocked items).
+  bedtime screen; 3 uses per week by default, configurable in Settings - also several kinds at once, each with its
+  own uses per day / week / month and length, e.g. 3 a week for 5 min and 1 a month for 60 min, picked when you
+  use one; never for permanently-blocked items).
 
 - **Dashboard** (home page) and **Screen Time** (Overview / Apps / Websites / Switches, Today to 30 days) with
   categories (productive / neutral / distracting + your own, with your colours - click a category to change it). Your Steam games and purely-for-fun sites / apps (game

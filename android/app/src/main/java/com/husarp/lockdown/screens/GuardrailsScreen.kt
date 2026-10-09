@@ -5,7 +5,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
@@ -18,6 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -31,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,14 +49,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
-import com.husarp.lockdown.data.EmergencyCfg
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
 import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.EmergencyTier
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Pause
 import com.husarp.lockdown.engine.Window
@@ -103,13 +110,17 @@ fun GuardrailsScreen() {
     // while your own is still being typed (and setting yours after would need the challenge just switched on).
     var pickPhrase by remember { mutableStateOf(false) }
 
-    // Emergency settings: on, longer, more uses or per day instead of per week needs the challenge (PC Settings).
-    fun setEm(new: EmergencyCfg) {
+    // Emergency settings: turning on, a new kind, or more, longer or another period (but per day -> week / month) for
+    // a kind needs the challenge (PC Settings). [then] runs once saved.
+    fun setEm(enabled: Boolean = cfg.emergency.enabled, tiers: List<EmergencyTier> = cfg.emergency.tierList(), then: () -> Unit = {}) {
         val old = cfg.emergency
-        guard(AntiBypass.emergencyLooser(old.enabled, old.minutes, old.uses, old.per, new.enabled, new.minutes, new.uses, new.per)) {
-            Store.update { it.copy(emergency = new) }
+        guard(AntiBypass.emergencyLooser(old.enabled, old.tierList(), enabled, tiers)) {
+            Store.update { it.copy(emergency = it.emergency.copy(enabled = enabled, tiers = tiers)) }
+            then()
         }
     }
+    var draftTier by remember { mutableStateOf<EmergencyTier?>(null) }      // "+ Add another kind", until Add
+    var removeTier by remember { mutableStateOf<EmergencyTier?>(null) }     // × asks first
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Unlock box (like the PC): while the challenge is on, pass it once to open a short window where loosening
@@ -242,36 +253,50 @@ fun GuardrailsScreen() {
 
         SectionLabel("Emergency unlock")
         Card(color = cs.surfaceContainer) {
-            val uses = Emergency.usesLeft(cfg.unlocks.mapNotNull { runCatching { LocalDateTime.parse(it) }.getOrNull() }, now, cfg.emergency.per, cfg.emergency.uses, cfg.clock())
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                Text("Unblock chosen items for ${cfg.emergency.minutes} min", style = MaterialTheme.typography.titleSmall)
-                Text("${uses.left} of ${uses.allowed} left", style = MaterialTheme.typography.titleMedium)
+            val em = cfg.emergency
+            val tiers = em.tierList()
+            val uses = cfg.allUses()
+            val left = tiers.associate { it.id to Emergency.usesLeft(uses, it, now, cfg.clock()) }
+            if (tiers.size == 1) {                              // one kind: as before kinds
+                val u = left.getValue(tiers[0].id)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                    Text("Unblock chosen items for ${tiers[0].minutes} min", style = MaterialTheme.typography.titleSmall)
+                    Text("${u.left} of ${u.allowed} left", style = MaterialTheme.typography.titleMedium)
+                }
+            } else {
+                Text(if (tiers.isEmpty()) "No emergency kinds set" else "Unblock chosen items for a while", style = MaterialTheme.typography.titleSmall)
+                for (t in tiers) {
+                    val u = left.getValue(t.id)
+                    Text("${t.minutes} min · ${u.left} of ${u.allowed} left ${Emergency.PERIODS[t.per]}", style = MaterialTheme.typography.bodyMedium)
+                }
             }
             Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = { pickUnlock = true }, enabled = cfg.emergency.enabled && uses.left > 0) { Text("Use unlock") }
+            OutlinedButton(onClick = { pickUnlock = true }, enabled = em.enabled && left.values.any { it.left > 0 }) { Text("Use unlock") }
             Spacer(Modifier.height(14.dp))
             HairlineSpacer()
             Spacer(Modifier.height(8.dp))
-            val em = cfg.emergency
-            SwitchRowInline("Allow emergency unlocks", em.enabled) { setEm(em.copy(enabled = it)) }
+            SwitchRowInline("Allow emergency unlocks", em.enabled) { setEm(enabled = it) }
             if (em.enabled) {
-                Text("Length", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (m in (Emergency.MINUTE_OPTIONS + em.minutes).distinct().sorted()) Chip("$m min", em.minutes == m) { setEm(em.copy(minutes = m)) }
+                tiers.forEachIndexed { i, t ->
+                    TierEditor(t, left[t.id], onChange = { new -> setEm(tiers = tiers.toMutableList().also { it[i] = new }) },
+                        onRemove = { removeTier = t })
                 }
-                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Uses", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { setEm(em.copy(uses = (em.uses - 1).coerceAtLeast(1))) }, enabled = em.uses > 1) {
-                        Icon(Icons.Filled.Remove, "fewer") }
-                    Text("${em.uses}", style = MaterialTheme.typography.titleMedium)
-                    IconButton(onClick = { setEm(em.copy(uses = em.uses + 1)) }, enabled = em.uses < 10) {
-                        Icon(Icons.Filled.Add, "more") }
+                if (tiers.isEmpty() && draftTier == null)
+                    Text("No kinds - add one", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                val draft = draftTier
+                if (draft != null) {
+                    TierEditor(draft, null, onChange = { draftTier = it }, onRemove = null)
+                    Row {
+                        TextButton(onClick = { setEm(tiers = tiers + draft) { draftTier = null } }) { Text("Add") }
+                        TextButton(onClick = { draftTier = null }) { Text("Cancel") }
+                    }
+                } else if (tiers.size < Emergency.MAX_TIERS) {
+                    TextButton(onClick = {
+                        draftTier = EmergencyTier(Emergency.newId(tiers.map { it.id } + uses.map { it.tier }), 1, "week", 20)
+                    }) { Text(if (tiers.isEmpty()) "+ Add a kind" else "+ Add another kind") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("per day", em.per == "day") { setEm(em.copy(per = "day")) }
-                    Chip("per week", em.per == "week") { setEm(em.copy(per = "week")) }
-                }
-                Text("Shorter, fewer or per week saves at once. Longer, more, per day or turning it on needs the challenge.",
+                Text("Fewer, shorter, per day to per week or month, or removing a kind saves at once. More, longer, " +
+                    "any other period, a new kind or turning it on needs the challenge.",
                     Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
         }
@@ -304,6 +329,55 @@ fun GuardrailsScreen() {
     }
 
     if (pickUnlock) EmergencyDialog(onDismiss = { pickUnlock = false })
+    removeTier?.let { t ->
+        AlertDialog(
+            onDismissRequest = { removeTier = null },
+            title = { Text("Remove this kind?") },
+            text = { Text("${t.minutes} min, ${t.uses} per ${t.per}. Removing it saves at once, but getting it back later needs the challenge.") },
+            confirmButton = { TextButton(onClick = {
+                removeTier = null
+                setEm(tiers = cfg.emergency.tierList().filter { it.id != t.id })
+            }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removeTier = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+private val RESET_FMT = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm")
+
+/** One emergency kind: uses, period and length, and [left] (null for a kind not added yet) as a small meter. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TierEditor(t: EmergencyTier, left: Emergency.Uses?, onChange: (EmergencyTier) -> Unit, onRemove: (() -> Unit)?) {
+    val cs = MaterialTheme.colorScheme
+    Spacer(Modifier.height(10.dp))
+    HairlineSpacer()
+    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (left == null) "New kind" else "${t.minutes} min · ${t.uses} per ${t.per}", style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f))
+        if (onRemove != null) IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, "remove this kind") }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Uses", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        IconButton(onClick = { onChange(t.copy(uses = t.uses - 1)) }, enabled = t.uses > 1) { Icon(Icons.Filled.Remove, "fewer") }
+        Text("${t.uses}", style = MaterialTheme.typography.titleMedium)
+        IconButton(onClick = { onChange(t.copy(uses = t.uses + 1)) }, enabled = t.uses < Emergency.MAX_USES) { Icon(Icons.Filled.Add, "more") }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (p in Emergency.PERIODS.keys) Chip("per $p", t.per == p) { onChange(t.copy(per = p)) }
+    }
+    Spacer(Modifier.height(8.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (m in (Emergency.MINUTE_OPTIONS + t.minutes).distinct().sorted()) Chip("$m min", t.minutes == m) { onChange(t.copy(minutes = m)) }
+    }
+    if (left != null) Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        repeat(left.allowed) { i ->                         // one bar per use; the used ones grey
+            Box(Modifier.padding(end = 3.dp).size(width = 10.dp, height = 6.dp)
+                .background(if (i < left.left) cs.primary else cs.outlineVariant, RoundedCornerShape(3.dp)))
+        }
+        Text("${left.left} of ${left.allowed} left ${Emergency.PERIODS[t.per]} · resets ${left.reset.format(RESET_FMT)}",
+            Modifier.padding(start = 6.dp).weight(1f), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+    }
 }
 
 private val PHRASE_LENGTHS = listOf("Short" to 30, "Medium" to 60, "Long" to 120, "Very long" to 250)   // as the PC
@@ -407,12 +481,20 @@ private fun HoursEditor(saved: List<Window>, turnOn: Boolean = false, onSave: (L
     }
 }
 
+/** "Use unlock": tick what to free (and/or pause the alerts); with several kinds, pick how long - the shortest with
+ *  a use left is picked first. One use of that kind, checked again as it's saved. */
 @Composable
 private fun EmergencyDialog(onDismiss: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val picked = remember { mutableStateOf(setOf<String>()) }
     var alerts by remember { mutableStateOf(false) }
+    val now = remember(cfg) { TrustedTime.local(ctx) }
+    val tiers = cfg.emergency.tierList()
+    val left = tiers.associate { it.id to Emergency.usesLeft(cfg.allUses(), it, now, cfg.clock()) }
+    var tierId by remember { mutableStateOf(Emergency.shortest(tiers, cfg.allUses(), now, cfg.clock())?.id) }
+    val tier = tiers.firstOrNull { it.id == tierId }
+    val none = cfg.emergency.enabled && left.values.none { it.left > 0 }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Emergency unlock") },
@@ -423,8 +505,28 @@ private fun EmergencyDialog(onDismiss: () -> Unit) {
                     .sortedWith(compareBy({ it.type != ItemType.APP }, { it.name.lowercase() }))
             }
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Unblock apps or sites for ${cfg.emergency.minutes} minutes (one use, however many you tick). " +
+                if (tiers.size == 1) Text("Unblock apps or sites for ${tiers[0].minutes} minutes (one use, however many you tick). " +
                     "Permanent blocks and protection lists stay on. Time you use still counts toward your limits.")
+                else {
+                    Text("Unblock apps or sites (one use of the kind you pick, however many you tick). " +
+                        "Permanent blocks and protection lists stay on. Time you use still counts toward your limits.")
+                    Text("How long", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.titleSmall)
+                    for (t in tiers) {
+                        val u = left.getValue(t.id)
+                        Row(Modifier.fillMaxWidth().selectable(tierId == t.id, enabled = u.left > 0, role = Role.RadioButton) { tierId = t.id },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = tierId == t.id, onClick = null, enabled = u.left > 0)
+                            Text(if (u.left > 0) "${t.minutes} min — ${u.left} of ${u.allowed} left ${Emergency.PERIODS[t.per]}"
+                                else "${t.minutes} min — none left · resets ${u.reset.format(RESET_FMT)}",
+                                Modifier.padding(start = 8.dp),
+                                color = if (u.left > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                if (none) left.values.minOfOrNull { it.reset }?.let {
+                    Text("No emergency unlocks left - next one ${it.format(RESET_FMT)}", Modifier.padding(top = 8.dp),
+                        color = MaterialTheme.colorScheme.error)
+                }
                 if (items.isEmpty()) Text("Nothing the emergency can unlock.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 items.forEach { item ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -439,19 +541,15 @@ private fun EmergencyDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(enabled = picked.value.isNotEmpty() || alerts, onClick = {
-                val now = TrustedTime.local(ctx)                  // trusted time: a clock set forward gives no longer unlock
-                if (com.husarp.lockdown.remind.ReminderRunner.emergencyLeft(Store.config, now) <= 0) { onDismiss(); return@TextButton }   // spent meanwhile
-                val until = now.plusMinutes(cfg.emergency.minutes.toLong())
-                Store.update {
-                    var c = it.copy(unlocks = it.unlocks + now.toString())   // items and alerts together: one use
-                    if (picked.value.isNotEmpty()) c = c.copy(unlockUntil = until.toString(), unlockItems = picked.value.toList())
-                    if (alerts) c = c.copy(alertsPausedUntil = until.toString())
-                    c
-                }
-                if (alerts) com.husarp.lockdown.remind.Grayscale.sync(ctx)
+            if (!none) TextButton(enabled = tier != null && (picked.value.isNotEmpty() || alerts), onClick = {
+                val at = TrustedTime.local(ctx)                   // trusted time: a clock set forward gives no longer unlock
+                // checked against the config as it's saved: a kind spent or removed meanwhile isn't used
+                var r = Emergency.Started(error = "No emergency unlocks left.")
+                Store.update { c -> c.withEmergency(tier!!.id, picked.value.toList(), alerts, at).also { r = it.second }.first }
+                if (r.use == null) Toast.makeText(ctx, r.error, Toast.LENGTH_LONG).show()
+                else if (alerts) com.husarp.lockdown.remind.Grayscale.sync(ctx)
                 onDismiss()
-            }) { Text("Unlock") }
+            }) { Text(if (tiers.size > 1 && tier != null) "Unlock for ${tier.minutes} min" else "Unlock") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

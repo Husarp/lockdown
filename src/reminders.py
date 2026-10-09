@@ -646,11 +646,13 @@ class Engine:
                     log(self.db, rid, "dismissed", now)
                     if rid in by_id:
                         self._dismissed(rid, by_id[rid]["text"], now)
-        elif key == "sleep" and action == "emergency":
-            # "Emergency (N left)" on the bedtime screen: one emergency use pauses the bedtime and break alerts
-            # for its length. The bedtime settings themselves are not touched.
+        elif key == "sleep" and (action == "emergency" or action.startswith("emergency:")):
+            # "Emergency (N left)" on the bedtime screen: one use of the kind picked ("emergency:<id>"; a plain
+            # "emergency": the shortest kind with a use left) pauses the bedtime and break alerts for its length.
+            # The bedtime settings themselves are not touched.
             try:
-                self.paused = emergency.unlock(self.db, [], now, alerts=True)
+                tier = action.partition(":")[2] or emergency.shortest_left(self.db, now)
+                self.paused = emergency.unlock(self.db, [], now, alerts=True, tier=tier)
             except ValueError as e:
                 self.ui.toast(str(e))
                 self.answer("sleep", "dismiss")   # (as if dismissed: back on the escalation)

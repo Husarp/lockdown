@@ -15,8 +15,12 @@ class LimitClock(
     val resetTime: LocalTime = LocalTime.MIDNIGHT,
     private val carryStart: LocalDateTime? = null,
     private val carryUntil: LocalDateTime? = null,
-    private val holds: Map<String, Pair<String, LocalDateTime>> = emptyMap(),
+    private val holds: Map<String, Hold> = emptyMap(),
 ) {
+    /** The week / month ([key]) running when the reset time was changed, held from when it began ([from]; null in a
+     *  hold saved by an older version: every earlier time too) until [until], so it doesn't end early. */
+    data class Hold(val key: String, val until: LocalDateTime, val from: LocalDateTime? = null)
+
     /** (start, end) of the limit day containing [now]. */
     fun day(now: LocalDateTime): Pair<LocalDateTime, LocalDateTime> {
         if (carryUntil != null && carryStart != null && !now.isBefore(carryStart) && now.isBefore(carryUntil)) {
@@ -35,12 +39,25 @@ class LimitClock(
     /** (key, end) of the day/week/month period containing [now], honouring any hold on a changed reset. */
     fun period(kind: String, now: LocalDateTime): Pair<String, LocalDateTime> {
         val (key, end) = naturalPeriod(kind, now)
-        holds[kind]?.let { (holdKey, until) ->
-            if (now.isBefore(until)) {
-                return if (key != holdKey) holdKey to until else key to maxOf(end, until)
+        holds[kind]?.let { h ->
+            if (now.isBefore(h.until) && (h.from == null || !now.isBefore(h.from))) {   // (earlier: an earlier period)
+                return if (key != h.key) h.key to h.until else key to maxOf(end, h.until)
             }
         }
         return key to end
+    }
+
+    /** When the week / month containing [now] began: the start of its first limit day (a day only partly in it counts
+     *  whole - the strict side); null when it can't be told (a hold saved by an older version). PC period_start. */
+    fun periodStart(kind: String, now: LocalDateTime): LocalDateTime? {
+        val key = period(kind, now).first
+        var start = day(now).first
+        repeat(45) {   // (a month and a stretched day or two)
+            val before = start.minusSeconds(1)
+            if (period(kind, before).first != key) return start
+            start = day(before).first
+        }
+        return null
     }
 
     private fun naturalPeriod(kind: String, now: LocalDateTime): Pair<String, LocalDateTime> {
@@ -78,7 +95,7 @@ class LimitClock(
         fun of(time: LocalTime, carry: ResetCarry?): LimitClock {
             val start = at(carry?.dayStart)
             val until = at(carry?.switch)?.let { u -> start?.let { minOf(u, it.plusDays(2)) } ?: u }
-            val holds = carry?.holds.orEmpty().mapNotNull { (k, h) -> at(h.until)?.let { k to (h.key to it) } }.toMap()
+            val holds = carry?.holds.orEmpty().mapNotNull { (k, h) -> at(h.until)?.let { k to Hold(h.key, it, at(h.from)) } }.toMap()
             return LimitClock(time, start, until, holds)
         }
 
@@ -104,15 +121,16 @@ class LimitClock(
          *  limits start over - only behind the challenge (PC apply_reset_now). The week and month are still held. */
         fun startNow(clock: LimitClock, now: LocalDateTime) = ResetCarry(holds = holds(clock, now))
 
-        private fun holds(clock: LimitClock, now: LocalDateTime) =
-            listOf("week", "month").associateWith { clock.period(it, now).let { (k, u) -> PeriodHold(k, u.toString()) } }
+        private fun holds(clock: LimitClock, now: LocalDateTime) = listOf("week", "month").associateWith { kind ->
+            clock.period(kind, now).let { (k, u) -> PeriodHold(k, u.toString(), clock.periodStart(kind, now)?.toString()) }
+        }
     }
 }
 
 /** A changed reset time: the day running then lasts from [dayStart] to [switch]; [holds] keep the running week and
- *  month ("week"/"month" -> its key and end) from ending early. Kept in the config, so the Island copy has it too. */
+ *  month ("week"/"month" -> its key, end and start) from ending early. Kept in the config, so the Island copy has it too. */
 @Serializable
 data class ResetCarry(val dayStart: String? = null, val switch: String? = null, val holds: Map<String, PeriodHold> = emptyMap())
 
 @Serializable
-data class PeriodHold(val key: String, val until: String)
+data class PeriodHold(val key: String, val until: String, val from: String? = null)

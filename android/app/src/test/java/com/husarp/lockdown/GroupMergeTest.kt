@@ -3,6 +3,8 @@ package com.husarp.lockdown
 import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.EmergencyTier
+import com.husarp.lockdown.engine.EmergencyUse
 import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
@@ -179,7 +181,9 @@ class GroupMergeTest {
 
     @Test fun an_emergency_dated_in_the_future_still_counts_as_used() {
         // used with the clock set a week forward, then set back: it doesn't hand the use back
-        val uses = Emergency.usesLeft(listOf(monNoon.plusDays(7)), monNoon, "week", allowed = 3)
+        val week = EmergencyTier(Emergency.LEGACY_TIER, 3, "week", 20)
+        val ahead = monNoon.plusDays(7)
+        val uses = Emergency.usesLeft(listOf(EmergencyUse(ahead.toString(), week.id, ahead.plusMinutes(20).toString())), week, monNoon)
         assertEquals(2, uses.left)
     }
 

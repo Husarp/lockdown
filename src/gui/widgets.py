@@ -177,6 +177,45 @@ class ConfirmDialog(ctk.CTkToplevel):
         self.on_no()
 
 
+class ChoiceDialog(ctk.CTkToplevel):
+    """A small modal with one button per choice, stacked: choices = [(text, enabled, on_pick)]. A disabled one is
+    shown greyed out. on_no runs on Cancel / closing the window."""
+
+    def __init__(self, app, title: str, message: str, choices: list[tuple], on_no=lambda: None):
+        super().__init__(app)
+        self.on_no, self._answered = on_no, False
+        self.title(title)
+        self.resizable(False, False)
+        self.configure(fg_color=theme.BG)
+        self.protocol("WM_DELETE_WINDOW", self._no)
+        ctk.CTkFrame(self, height=3, corner_radius=0, fg_color=theme.ACCENT).pack(fill="x", side="top")
+        box = ctk.CTkFrame(self, fg_color="transparent")
+        box.pack(fill="both", expand=True, padx=24, pady=20)
+        ctk.CTkLabel(box, text=title, font=theme.card_title()).pack(anchor="w")
+        ctk.CTkLabel(box, text=message, text_color=theme.MUTED, justify="left", wraplength=460, anchor="w").pack(
+            anchor="w", pady=(6, 10))
+        for text, enabled, on_pick in choices:
+            ctk.CTkButton(box, text=text, width=360, anchor="w", state="normal" if enabled else "disabled",
+                          command=lambda f=on_pick: self._pick(f),
+                          **({} if enabled else theme.OUTLINE)).pack(anchor="w", pady=3)
+        buttons = ctk.CTkFrame(box, fg_color="transparent")
+        buttons.pack(fill="x", pady=(12, 0))
+        ctk.CTkButton(buttons, text="Cancel", width=90, **theme.OUTLINE, command=self._no).pack(side="right")
+        modal(self, app)
+
+    def _pick(self, on_pick):
+        self._answered = True
+        self.destroy()
+        on_pick()
+
+    def _no(self):
+        if self._answered:
+            return
+        self._answered = True
+        self.destroy()
+        self.on_no()
+
+
 def clear_entry(entry: ctk.CTkEntry):
     """Empty an entry and keep its placeholder visible. CTkEntry.delete() alone hides the placeholder until
     the entry is clicked (it treats every new entry as focused until its first focus-out)."""

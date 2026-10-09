@@ -25,9 +25,10 @@ from gui.groups import GroupsTab
 from gui.protection_tab import ProtectionTab
 from gui.rule_editors import EDITORS, RULE_NAMES, RULE_SUBTITLES, summary
 from gui.target_picker import TargetPicker
+from gui.settings import short_when
 from gui.widgets import ConfirmButton
 from importer.popular import POPULAR_SITES
-from rules import (DAY_NAMES, allowance_left, allowance_note, block_end, blocked_text, describe_rule, duration_text,
+from rules import (allowance_left, allowance_note, block_end, blocked_text, describe_rule, duration_text,
                    effective_rules, item_block, next_block, rule_state)
 from trusted_time import now_from_db
 
@@ -236,16 +237,33 @@ class OverviewTab(ctk.CTkScrollableFrame):
         for w in panel.winfo_children():
             w.destroy()
         now = now_from_db(db)
-        left, allowed, reset = emergency.uses_left(db, now)
-        minutes = int(emergency.get(db, "emergency.minutes"))
-        per = emergency.PERIODS[emergency.get(db, "emergency.per")]
+        kinds = emergency.left_by_tier(db, now)
+        works = ("It works whether something is blocked yet or not: running out of allowance or limit meanwhile "
+                 "doesn't block it until the unlock ends. The time you use still counts toward your limits and "
+                 "allowances.")
         ctk.CTkLabel(panel, text="Emergency unlock", font=theme.card_title()).pack(anchor="w", padx=14, pady=(10, 0))
-        ctk.CTkLabel(panel, text=f"{left} of {allowed} left {per} (resets {DAY_NAMES[reset.weekday()]} {reset:%H:%M}). "
-                                 f"Pick what to unblock for {minutes} min - several at once still count as one use. "
-                                 "It works whether something is blocked yet or not: running out of allowance or "
-                                 "limit meanwhile doesn't block it until the unlock ends. The time you use still "
-                                 "counts toward your limits and allowances.",
-                     text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
+        choice = tk.StringVar(value="")
+        if len(kinds) == 1:   # one kind: as it always was
+            kind, left, allowed, reset = kinds[0]
+            choice.set(kind["id"])
+            ctk.CTkLabel(panel, text=f"{left} of {allowed} left {emergency.PERIODS[kind['per']]} (resets "
+                                     f"{short_when(reset)}). Pick what to unblock for "
+                                     f"{kind['minutes']} min - several at once still count as one use. {works}",
+                         text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
+        else:   # several: pick how long first (the shortest with a use left is ticked - the smallest way out)
+            ctk.CTkLabel(panel, text="Pick how long and what to unblock - several at once still count as one use of "
+                                     f"that kind. {works}",
+                         text_color=MUTED, wraplength=760, justify="left").pack(anchor="w", padx=14)
+            eyebrow(panel, "How long").pack(anchor="w", padx=14, pady=(8, 2))
+            spare = [k for k in kinds if k[1] > 0]
+            if spare:
+                choice.set(min(spare, key=lambda k: k[0]["minutes"])[0]["id"])
+            for kind, left, allowed, reset in kinds:
+                text = (f"{kind['minutes']} min - {left} of {allowed} left {emergency.PERIODS[kind['per']]}" if left
+                        else f"{kind['minutes']} min - none left · resets {short_when(reset)}")
+                ctk.CTkRadioButton(panel, text=text, variable=choice, value=kind["id"],
+                                   state="normal" if left else "disabled",
+                                   command=lambda: unlock_button()).pack(anchor="w", padx=14, pady=2)
         # Things on your list, except permanently-blocked ones - the emergency unlock is for limits/hours, not for
         # things you chose to block for good (so it can't be turned against you, e.g. adult sites). A mode can also
         # block made-up items (no id) that can't be unlocked.
@@ -282,20 +300,38 @@ class OverviewTab(ctk.CTkScrollableFrame):
                          font=theme.body(11)).pack(anchor="w", padx=14, pady=(2, 0))
         error = ctk.CTkLabel(panel, text="", text_color=ERROR)
         error.pack(anchor="w", padx=14)
+        if len(kinds) != 1 and not any(k[1] for k in kinds):
+            when = min((k[3] for k in kinds), default=None)
+            ctk.CTkLabel(panel, text="No emergency unlocks left" + (
+                f" - next one {short_when(when)}" if when else "."),
+                         text_color=MUTED).pack(anchor="w", padx=14, pady=(0, 6))
         buttons = ctk.CTkFrame(panel, fg_color="transparent")
         buttons.pack(anchor="w", padx=14, pady=(0, 10))
-        if left:
-            ConfirmButton(buttons, lambda: self._unlock([i for b, i in boxes if b.get()], bool(alerts_box.get()),
-                                                        error),
-                          text=f"Unlock for {minutes} min", confirm_text=f"Confirm - uses 1 of {left}",
-                          width=170).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(buttons, text="Close", width=80, **theme.OUTLINE,
-                      command=self._toggle_unlock).pack(side="left")
+        close = ctk.CTkButton(buttons, text="Close", width=80, **theme.OUTLINE, command=self._toggle_unlock)
+        close.pack(side="left")
+        shown = []
 
-    def _unlock(self, items: list[dict], alerts: bool, error):
+        def unlock_button():
+            """"Unlock for 5 min" for the kind picked ("Confirm - uses 1 of 2 this week" on the first click)."""
+            for b in shown:
+                b.destroy()
+            shown.clear()
+            picked = next((k for k in kinds if k[0]["id"] == choice.get()), None)
+            if not picked or not picked[1]:
+                return
+            kind, left = picked[:2]
+            confirm = f"Confirm - uses 1 of {left}" + (f" {emergency.PERIODS[kind['per']]}" if len(kinds) > 1 else "")
+            shown.append(ConfirmButton(buttons, lambda: self._unlock([i for b, i in boxes if b.get()],
+                                                                     bool(alerts_box.get()), kind["id"], error),
+                                       text=f"Unlock for {kind['minutes']} min", confirm_text=confirm,
+                                       width=170 if len(kinds) == 1 else 230))
+            shown[0].pack(side="left", padx=(0, 8), before=close)
+        unlock_button()
+
+    def _unlock(self, items: list[dict], alerts: bool, tier: str, error):
         db = self.page.app.db
         try:
-            until = emergency.unlock(db, items, now_from_db(db), alerts=alerts)
+            until = emergency.unlock(db, items, now_from_db(db), alerts=alerts, tier=tier)
         except ValueError as e:
             error.configure(text=str(e))
             return
@@ -514,7 +550,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             chip.pack_forget()
 
     def refresh(self, now, usage):
-        if emergency.get(self.page.app.db, "emergency.enabled") == "1":
+        if emergency.usable(self.page.app.db):
             self.unlock_btn.pack(side="left", padx=16)
         else:
             self.unlock_btn.pack_forget()

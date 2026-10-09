@@ -1,6 +1,7 @@
 """Settings page: when limits reset, and the emergency unlock. Changes here apply at once (not via Save).
 Design 3j: two columns - left: Appearance (theme, accents, daily goal) + "When limits reset" in one card, then
-Categories; right (400px): Emergency unlock (yellow bar, a "2 of 3 left" meter) and Backup & export."""
+Categories; right (400px): Emergency unlock (yellow bar; its kinds, each with a "2 of 3 left" meter) and
+Backup & export."""
 import customtkinter as ctk
 
 from gui import theme
@@ -16,7 +17,8 @@ from trusted_time import now_from_db
 
 MUTED = theme.MUTED
 ERROR = theme.DANGER
-PER_LABELS = {"per day": "day", "per week": "week"}
+PER_LABELS = {"per day": "day", "per week": "week", "per month": "month"}
+NEW_KIND = {"uses": 1, "per": "week", "minutes": 20}   # "+ Add another kind" starts here
 SIZES = {"Auto": "auto", "100%": "100", "90%": "90", "80%": "80", "70%": "70"}
 GOAL_OPTIONS = ["Off"] + [f"{h} h" for h in range(1, 13)]
 RIGHT_W = 400
@@ -242,41 +244,127 @@ class SettingsPage(ctk.CTkFrame):
         head = card.title.master
         ctk.CTkLabel(head, text="", image=theme.icon("shield-check", MUTED, 13), width=13).pack(side="left", padx=(8, 0))
         help_icon(head, "The \"Emergency unlock\" button (Blocking > Overview) unblocks the sites / apps you pick "
-                        "for a while. Unlocking several at once counts as one use.").pack(side="left", padx=8)
+                        "for a while. Unlocking several at once counts as one use. With more than one kind (e.g. 3 a "
+                        "week for 5 min and 1 a month for 60 min) you pick which kind to use; each counts its own "
+                        "uses.").pack(side="left", padx=8)
         box = card.body
-        self.em_enabled = ctk.CTkSwitch(box, text="Allow emergency unlocks", command=self._save_emergency)
+        self.em_enabled = ctk.CTkSwitch(box, text="Allow emergency unlocks",
+                                        command=lambda: self._save_emergency(enabled=bool(self.em_enabled.get())))
         self.em_enabled.pack(anchor="w", pady=(6, 10))
-        line = ctk.CTkFrame(box, fg_color="transparent")
-        line.pack(anchor="w", pady=(0, 10))
-        ctk.CTkLabel(line, text="Each lasts", text_color=MUTED).pack(side="left", padx=(0, 8))
-        self.em_minutes = ctk.CTkOptionMenu(line, width=84, values=[f"{m} min" for m in emergency.MINUTE_OPTIONS],
-                                            command=lambda v: self._save_emergency())
-        self.em_minutes.pack(side="left")
-        ctk.CTkLabel(line, text="·", text_color=MUTED).pack(side="left", padx=10)
-        self.em_uses = ctk.CTkOptionMenu(line, width=58, values=[str(n) for n in range(1, 11)],
-                                         command=lambda v: self._save_emergency())
-        self.em_uses.pack(side="left", padx=(0, 6))
-        self.em_per = Segmented(line, values=list(PER_LABELS), command=lambda v: self._save_emergency())
-        self.em_per.pack(side="left")
-        # the usage meter: one yellow bar per unlock left, grey for used ones, and "2 of 3 left this week"
-        meter = ctk.CTkFrame(box, fg_color=theme.BG, border_width=1, border_color=theme.BORDER, corner_radius=3)
-        meter.pack(fill="x", pady=(0, 2))
-        self.em_bars = ctk.CTkFrame(meter, fg_color="transparent")
-        self.em_bars.pack(side="left", padx=(12, 10), pady=10)
-        self.em_left = ctk.CTkLabel(meter, text="", font=theme.semi(12), height=16)
-        self.em_left.pack(side="left")
-        self.em_info = ctk.CTkLabel(meter, text="", text_color=MUTED, font=theme.body(12), height=16)
-        self.em_info.pack(side="left", padx=(4, 12))
+        self.em_rows = ctk.CTkFrame(box, fg_color="transparent")   # one box per kind, filled by load()
+        self.em_rows.pack(fill="x")
+        self.em_draft = ctk.CTkFrame(box, fg_color="transparent")  # "+ Add another kind": packed while it is open
+        self.em_add = ctk.CTkButton(box, text="+ Add another kind", width=160, **theme.OUTLINE,
+                                    command=self._open_draft)
+        self.em_note = ctk.CTkLabel(box, text="Fewer, shorter, per day to per week or month, or removing a kind "
+                                              "saves at once. More, longer, any other period, a new kind or "
+                                              "turning it on needs the challenge.",
+                                    text_color=MUTED, font=theme.body(11), anchor="w", justify="left",
+                                    wraplength=RIGHT_W - 40)
+        self.em_note.pack(anchor="w", pady=(4, 0))
+        self._draft: dict | None = None
 
-    def _save_emergency(self):
-        new = {"emergency.enabled": "1" if self.em_enabled.get() else "0",
-               "emergency.minutes": self.em_minutes.get().split()[0], "emergency.uses": self.em_uses.get(),
-               "emergency.per": PER_LABELS[self.em_per.get()]}
-        old = {k: emergency.get(self.db, k) for k in new}
+    def _kind_line(self, parent, kind: dict, on_change) -> ctk.CTkFrame:
+        """[N ▾] [per week ▾] · [M min ▾] for one kind; on_change(field, value) after each pick."""
+        line = ctk.CTkFrame(parent, fg_color="transparent")
+        line.pack(fill="x")
+        uses = ctk.CTkOptionMenu(line, width=58, values=[str(n) for n in range(1, emergency.MAX_USES + 1)],
+                                 command=lambda v: on_change("uses", int(v)))
+        uses.set(str(kind["uses"]))
+        uses.pack(side="left")
+        per = ctk.CTkOptionMenu(line, width=108, values=list(PER_LABELS),
+                                command=lambda v: on_change("per", PER_LABELS[v]))
+        per.set(next(k for k, v in PER_LABELS.items() if v == kind["per"]))
+        per.pack(side="left", padx=6)
+        ctk.CTkLabel(line, text="·", text_color=MUTED).pack(side="left", padx=(0, 6))
+        minutes = ctk.CTkOptionMenu(line, width=84, values=[f"{m} min" for m in sorted(
+            {*emergency.MINUTE_OPTIONS, kind["minutes"]})], command=lambda v: on_change("minutes", int(v.split()[0])))
+        minutes.set(f"{kind['minutes']} min")
+        minutes.pack(side="left")
+        return line
+
+    def _load_emergency(self, now):
+        self.em_enabled.select() if emergency.get(self.db, "emergency.enabled") == "1" else self.em_enabled.deselect()
+        for w in self.em_rows.winfo_children():
+            w.destroy()
+        kinds = emergency.left_by_tier(self.db, now)
+        if not kinds:
+            ctk.CTkLabel(self.em_rows, text="No kinds - add one.", text_color=MUTED).pack(anchor="w", pady=(0, 8))
+        for kind, left, allowed, reset in kinds:
+            # one box per kind: its choices (they save at once), x to remove it, and the meter - one yellow bar per
+            # unlock left, grey for used ones, "2 of 3 left this week"
+            row = ctk.CTkFrame(self.em_rows, fg_color=theme.BG, border_width=1, border_color=theme.BORDER,
+                               corner_radius=3)
+            row.pack(fill="x", pady=(0, 8))
+            inner = ctk.CTkFrame(row, fg_color="transparent")
+            inner.pack(fill="x", padx=10, pady=8)
+            line = self._kind_line(inner, kind, lambda field, value, k=kind["id"]: self._edit_kind(k, field, value))
+            ConfirmButton(line, lambda k=kind["id"]: self._remove_kind(k), text="×", confirm_text="Remove?",
+                          width=30, height=28).pack(side="right")
+            meter = ctk.CTkFrame(inner, fg_color="transparent")
+            meter.pack(fill="x", pady=(6, 0))
+            bars = ctk.CTkFrame(meter, fg_color="transparent")
+            bars.pack(side="left", padx=(2, 8))
+            for i in range(allowed):
+                ctk.CTkFrame(bars, width=8, height=6, corner_radius=1,
+                             fg_color=theme.WARNING if i < left else theme.BORDER).pack(side="left", padx=(0, 3))
+            ctk.CTkLabel(meter, text=f"{left} of {allowed} left {emergency.PERIODS[kind['per']]} · resets "
+                                     f"{short_when(reset)}", text_color=MUTED, font=theme.body(11), height=14,
+                         anchor="w", justify="left", wraplength=RIGHT_W - 80 - allowed * 11).pack(side="left")
+        if self._draft is None and len(kinds) < emergency.MAX_TIERS:
+            self.em_add.pack(anchor="w", pady=(0, 4), before=self.em_note)
+        else:
+            self.em_add.pack_forget()
+
+    def _open_draft(self):
+        """A new kind is chosen first and saved once with Add - one challenge, not one for adding it and more for
+        raising it afterwards."""
+        self._draft = dict(NEW_KIND)
+        for w in self.em_draft.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self.em_draft, text="New kind", font=theme.semi(12)).pack(anchor="w", pady=(0, 4))
+        self._kind_line(self.em_draft, self._draft, lambda field, value: self._draft.__setitem__(field, value))
+        buttons = ctk.CTkFrame(self.em_draft, fg_color="transparent")
+        buttons.pack(anchor="w", pady=(8, 0))
+        ctk.CTkButton(buttons, text="Add", width=80, command=self._add_kind).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(buttons, text="Cancel", width=80, **theme.OUTLINE, command=self._close_draft).pack(side="left")
+        self.em_add.pack_forget()
+        self.em_draft.pack(fill="x", pady=(0, 8), before=self.em_note)
+
+    def _hide_draft(self):
+        self._draft = None
+        self.em_draft.pack_forget()
+
+    def _close_draft(self):
+        self._hide_draft()
+        self.load()
+
+    def _add_kind(self):
+        kinds = emergency.tiers(self.db)
+        if self._draft is None or len(kinds) >= emergency.MAX_TIERS:
+            self._close_draft()
+            return
+        self._save_emergency(tiers=kinds + [{"id": emergency.new_id(), **self._draft}], done=self._hide_draft)
+
+    def _edit_kind(self, kind_id: str, field: str, value):
+        self._save_emergency(tiers=[{**t, field: value} if t["id"] == kind_id else t for t in emergency.tiers(self.db)])
+
+    def _remove_kind(self, kind_id: str):
+        self._save_emergency(tiers=[t for t in emergency.tiers(self.db) if t["id"] != kind_id])
+
+    def _save_emergency(self, enabled: bool | None = None, tiers: list[dict] | None = None, done=None):
+        """The switch and / or the kinds: through Anti-Bypass first when that gives more or longer emergency
+        unlocks (antibypass.emergency_looser), at once otherwise. Cancelling the challenge puts the card back."""
+        old = emergency.config(self.db)
+        new = {"enabled": old["enabled"] if enabled is None else enabled,
+               "tiers": old["tiers"] if tiers is None else emergency.clean(tiers)}
 
         def save():
-            for key, value in new.items():
-                self.db.set_setting(key, value)
+            self.db.set_setting("emergency.enabled", "1" if new["enabled"] else "0")
+            if tiers is not None:
+                emergency.save_tiers(self.db, new["tiers"])
+            if done:
+                done()
             self.load()
             if "Blocking" in self.app.pages:
                 self.app.pages["Blocking"].refresh()   # shows / hides the button
@@ -378,16 +466,4 @@ class SettingsPage(ctk.CTkFrame):
             self.reset_note.pack_forget()
         self.reset_error.pack_forget()
 
-        g = lambda k: emergency.get(self.db, k)
-        self.em_enabled.select() if g("emergency.enabled") == "1" else self.em_enabled.deselect()
-        self.em_minutes.set(f"{g('emergency.minutes')} min")
-        self.em_uses.set(g("emergency.uses"))
-        self.em_per.set(next(k for k, v in PER_LABELS.items() if v == g("emergency.per")))
-        left, allowed, reset = emergency.uses_left(self.db, now)
-        for w in self.em_bars.winfo_children():
-            w.destroy()
-        for i in range(allowed):
-            ctk.CTkFrame(self.em_bars, width=16, height=6, corner_radius=1,
-                         fg_color=theme.WARNING if i < left else theme.BORDER).pack(side="left", padx=(0, 4))
-        self.em_left.configure(text=f"{left} of {allowed}")
-        self.em_info.configure(text=f"left {emergency.PERIODS[g('emergency.per')]} · resets {short_when(reset)}")
+        self._load_emergency(now)

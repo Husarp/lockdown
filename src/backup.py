@@ -6,6 +6,8 @@ import csv
 import json
 from datetime import date, timedelta
 
+import emergency
+
 FORMAT = 1
 RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "clock_zone", "dns_filter.saved",
                 "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last",
@@ -66,7 +68,7 @@ def load(path: str) -> dict:
 
 def _norm(key: str, value):
     """Normalise a setting for comparison: drop the volatile bits so a diff doesn't flag them."""
-    if value is None:
+    if value is None or (key == "emergency.tiers" and value == ""):   # ("": the single setting, as when missing)
         return None
     if key in ("antibypass", "protection"):
         try:
@@ -101,7 +103,8 @@ def diff(db, data: dict) -> list[str]:
     new_s = data.get("settings", {})
     labels = {"antibypass": "Anti-Bypass challenge", "protection": "Protection lists / your blocklists",
               "keywords": "Safe search & blocked words", "limits.reset": "When limits reset",
-              "stats.categories": "Categories", "ui.theme": "Theme", "ui.accent": "Accent colour"}
+              "stats.categories": "Categories", "ui.theme": "Theme", "ui.accent": "Accent colour",
+              "emergency.tiers": "Emergency unlock kinds"}
     changed = {k for k in set(cur_s) | set(new_s) if _norm(k, cur_s.get(k)) != _norm(k, new_s.get(k))}
     for key, label in labels.items():
         if key in changed:
@@ -130,9 +133,15 @@ def restore(db, data: dict):
         db.add_group(g["name"], g.get("rules", []), members, ways)
     for c in data.get("categories", []):
         db.set_category(c["kind"], c["name"], c["category"])
-    for key, value in data.get("settings", {}).items():
+    settings = data.get("settings", {})
+    for key, value in settings.items():
         if key not in RUNTIME_KEYS:
             db.set_setting(key, value)
+    if "emergency.tiers" not in settings:   # a backup from before emergency kinds: its single setting applies
+        db.set_setting("emergency.tiers", "")
+        for key in ("emergency.uses", "emergency.per", "emergency.minutes"):   # (not in it: it had the default)
+            if key not in settings:
+                db.set_setting(key, emergency.DEFAULTS[key])
 
 
 def screen_time_csv(db, path: str, days: int = 365) -> int:
