@@ -107,9 +107,11 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
     fun persist() = ModesStore.saveModes(ModesStore.modes.value.filter { it.id != draft.id } + draft)
+    val modes by ModesStore.modes.collectAsStateWithLifecycle()
+    com.husarp.lockdown.ui.UnsavedChanges(draft != (modes.firstOrNull { it.id == mode.id } ?: mode), onClose, { then -> persist(); then() })
 
     Column(Modifier.fillMaxSize()) {
-        EditorHeader(draft.name, onBack = onClose, action = "Save") { persist(); onClose() }
+        EditorHeader(draft.name, onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) }, action = "Save") { persist(); onClose() }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Card(color = cs.surfaceContainer, shape = MaterialTheme.shapes.extraLarge) {
                 Text(Modes.describe(draft) + (if (draft.pomodoro != null) " · Pomodoro" else ""), style = MaterialTheme.typography.bodyLarge)

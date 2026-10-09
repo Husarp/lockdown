@@ -216,4 +216,13 @@ object AntiBypass {
     fun protectionLooser(oldEnabled: List<String>, oldAllowed: List<String>,
                          newEnabled: List<String>, newAllowed: List<String>): Boolean =
         !newEnabled.toSet().containsAll(oldEnabled) || !oldAllowed.toSet().containsAll(newAllowed)
+
+    /** Blocked words weakened: a switch or a list turned off, a built-in word turned off, one of your words removed,
+     *  or an exception added (or exceptions turned on). Adding words, turning things on, removing exceptions is free. */
+    fun keywordsLooser(old: KeywordsCfg, new: KeywordsCfg): Boolean =
+        (old.enabled && !new.enabled) || (old.safeSearch && !new.safeSearch) || (old.youtube && !new.youtube) ||
+            (old.wordsOn && !new.wordsOn) || (!old.exceptionsOn && new.exceptionsOn) ||
+            old.lists.any { (k, on) -> on && new.lists[k] != true } ||
+            !old.off.toSet().containsAll(new.off) || !new.words.toSet().containsAll(old.words) ||
+            !old.exceptions.toSet().containsAll(new.exceptions)
 }

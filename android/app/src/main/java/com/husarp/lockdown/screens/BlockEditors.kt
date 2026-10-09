@@ -37,7 +37,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.Protection
+import com.husarp.lockdown.data.ProtectionCfg
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.data.inSavedOrder
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.BlockMethod
 import com.husarp.lockdown.engine.Group
@@ -51,8 +53,12 @@ import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.EditorHeader
 import com.husarp.lockdown.ui.ListRow
+import com.husarp.lockdown.ui.SaveBar
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
+import com.husarp.lockdown.ui.Unsaved
+import com.husarp.lockdown.ui.UnsavedChanges
+import com.husarp.lockdown.ui.rememberDraft
 
 @Composable
 fun GroupEditor(group: Group, onClose: () -> Unit) {
@@ -75,20 +81,24 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                 else draft.copy(memberIds = draft.memberIds - id, overrides = draft.overrides - id, memberBlocks = draft.memberBlocks - id)
     }
 
-    Column(Modifier.fillMaxSize()) {
-        EditorHeader(draft.name.ifBlank { "New group" }, onBack = onClose, action = "Save") {
-            val original = cfg.groups.firstOrNull { it.id == draft.id }
-            val loosening = original != null && AntiBypass.groupLooser(original, draft, TrustedTime.local(ctx), byId, byId + newApps.associateBy { it.id })
-            guard(loosening) {
-                val added = newApps.filter { it.id in draft.memberIds }
-                Store.update { c ->
-                    val items = c.items + added
-                    if (c.groups.any { it.id == draft.id }) c.copy(items = items, groups = c.groups.map { if (it.id == draft.id) draft else it })
-                    else c.copy(items = items, groups = c.groups + draft)
-                }
-                onClose()
+    fun save(then: () -> Unit) {
+        val original = cfg.groups.firstOrNull { it.id == draft.id }
+        val loosening = original != null && AntiBypass.groupLooser(original, draft, TrustedTime.local(ctx), byId, byId + newApps.associateBy { it.id })
+        guard(loosening) {
+            val added = newApps.filter { it.id in draft.memberIds }
+            Store.update { c ->
+                val items = c.items + added
+                if (c.groups.any { it.id == draft.id }) c.copy(items = items, groups = c.groups.map { if (it.id == draft.id) draft else it })
+                else c.copy(items = items, groups = c.groups + draft)
             }
+            newApps = emptyList()
+            then()
         }
+    }
+    UnsavedChanges(draft != (cfg.groups.firstOrNull { it.id == group.id } ?: group) || newApps.any { it.id in draft.memberIds }, onClose, ::save)
+
+    Column(Modifier.fillMaxSize()) {
+        EditorHeader(draft.name.ifBlank { "New group" }, onBack = { Unsaved.leave(onClose) }, action = "Save") { save(onClose) }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             OutlinedTextField(draft.name, { draft = draft.copy(name = it) }, label = { Text("Group name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
@@ -236,32 +246,44 @@ fun ProtectionEditor(onClose: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
 
+    // A draft, saved with Save: one challenge when a list goes off or an exception is added.
+    val d = rememberDraft(cfg.protection)
+    val p = d.value
+    fun set(f: (ProtectionCfg) -> ProtectionCfg) = d.update { old ->
+        f(old).let { it.copy(enabled = inSavedOrder(d.saved.enabled, it.enabled), allowed = inSavedOrder(d.saved.allowed, it.allowed)) }
+    }
+    fun save(then: () -> Unit) {
+        val new = d.value
+        val old = Store.config.protection
+        guard(AntiBypass.protectionLooser(old.enabled, old.allowed, new.enabled, new.allowed)) {
+            Store.update { c -> c.copy(protection = new) }
+            if (new.enabled != old.enabled) Protection.load(ctx)
+            d.clear()
+            then()
+        }
+    }
+    UnsavedChanges(d.dirty, onClose, ::save, d::clear)
+
     Column(Modifier.fillMaxSize()) {
-        EditorHeader("Protection lists", onBack = onClose)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        EditorHeader("Protection lists", onBack = { Unsaved.leave(onClose) })
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Bundled blocklists — flip one on to block its whole category of sites.", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             Protection.LISTS.forEach { def ->
-                val on = def.key in cfg.protection.enabled
-                val info = remember(def.key, on) { runCatching { Protection.info(ctx, def.key) }.getOrDefault(0 to false) }
+                val loaded = def.key in cfg.protection.enabled
+                val info = remember(def.key, loaded) { runCatching { Protection.info(ctx, def.key) }.getOrDefault(0 to false) }
                 Card(color = cs.surfaceContainerLow) {
-                    SwitchRowInline(def.name, on) { want ->
-                        val apply = {
-                            Store.update { c ->
-                                val e = if (want) (c.protection.enabled + def.key).distinct() else c.protection.enabled - def.key
-                                c.copy(protection = c.protection.copy(enabled = e))
-                            }
-                            Protection.load(ctx)
-                        }
-                        if (want) apply() else guard(true) { apply() }
+                    SwitchRowInline(def.name, def.key in p.enabled) { want ->
+                        set { it.copy(enabled = if (want) (it.enabled + def.key).distinct() else it.enabled - def.key) }
                     }
                     Text("${def.desc} · ${info.first} domains", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
             }
             SectionLabel("Allowed exceptions")
-            ExceptionList(cfg.protection.allowed, clean = { it.filterNot(Char::isWhitespace) },
-                onAdd = { host -> guard(true) { Store.update { c -> c.copy(protection = c.protection.copy(allowed = (c.protection.allowed + host).distinct())) } } },
-                onRemove = { host -> Store.update { c -> c.copy(protection = c.protection.copy(allowed = c.protection.allowed - host)) } })
+            ExceptionList(p.allowed, clean = { it.filterNot(Char::isWhitespace) },
+                onAdd = { host -> set { it.copy(allowed = (it.allowed + host).distinct()) } },
+                onRemove = { host -> set { it.copy(allowed = it.allowed - host) } })
         }
+        SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
 }
 
@@ -270,18 +292,32 @@ fun KeywordsEditor(onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
-    val kw = cfg.keywords
-    fun setKw(block: (com.husarp.lockdown.engine.KeywordsCfg) -> com.husarp.lockdown.engine.KeywordsCfg) = Store.update { it.copy(keywords = block(it.keywords)) }
+    // A draft, saved with Save: one challenge when anything goes off, a word is removed or an exception added.
+    val d = rememberDraft(cfg.keywords)
+    val kw = d.value
+    fun setKw(block: (com.husarp.lockdown.engine.KeywordsCfg) -> com.husarp.lockdown.engine.KeywordsCfg) = d.update { old ->
+        block(old).let { it.copy(off = inSavedOrder(d.saved.off, it.off), words = inSavedOrder(d.saved.words, it.words),
+            exceptions = inSavedOrder(d.saved.exceptions, it.exceptions)) }
+    }
+    fun save(then: () -> Unit) {
+        val new = d.value
+        guard(AntiBypass.keywordsLooser(Store.config.keywords, new)) {
+            Store.update { it.copy(keywords = new) }
+            d.clear()
+            then()
+        }
+    }
+    UnsavedChanges(d.dirty, onClose, ::save, d::clear)
 
     var addWord by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize()) {
-        EditorHeader("Blocked words", onBack = onClose)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        EditorHeader("Blocked words", onBack = { Unsaved.leave(onClose) })
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Card(color = cs.surfaceContainerLow) {
-                SwitchRowInline("Block words in browsers", kw.enabled) { on -> if (on) setKw { it.copy(enabled = true) } else guard(true) { setKw { it.copy(enabled = false) } } }
-                SwitchRowInline("Force SafeSearch", kw.safeSearch) { on -> if (on) setKw { it.copy(safeSearch = true) } else guard(true) { setKw { it.copy(safeSearch = false) } } }
-                SwitchRowInline("YouTube Restricted Mode", kw.youtube) { on -> if (on) setKw { it.copy(youtube = true) } else guard(true) { setKw { it.copy(youtube = false) } } }
+                SwitchRowInline("Block words in browsers", kw.enabled) { on -> setKw { it.copy(enabled = on) } }
+                SwitchRowInline("Force SafeSearch", kw.safeSearch) { on -> setKw { it.copy(safeSearch = on) } }
+                SwitchRowInline("YouTube Restricted Mode", kw.youtube) { on -> setKw { it.copy(youtube = on) } }
             }
             // Add a word — at the TOP, so you don't scroll past hundreds of words to reach it.
             Card(color = cs.surfaceContainerLow) {
@@ -301,9 +337,9 @@ fun KeywordsEditor(onClose: () -> Unit) {
                 CollapsibleWordList(
                     title = pair.first, count = pair.second.size,
                     on = kw.lists[key] == true,
-                    onToggle = { want -> if (want) setKw { it.copy(lists = it.lists + (key to true)) } else guard(true) { setKw { it.copy(lists = it.lists + (key to false)) } } },
+                    onToggle = { want -> setKw { it.copy(lists = it.lists + (key to want)) } },
                     words = pair.second, isActive = { w -> w !in kw.off },
-                    onWord = { w, active -> if (active) guard(true) { setKw { it.copy(off = (it.off + w).distinct()) } } else setKw { it.copy(off = it.off - w) } },
+                    onWord = { w, active -> setKw { if (active) it.copy(off = (it.off + w).distinct()) else it.copy(off = it.off - w) } },
                     canRemove = false, onRemove = {},
                 )
             }
@@ -311,15 +347,16 @@ fun KeywordsEditor(onClose: () -> Unit) {
             CollapsibleWordList(
                 title = "Your words", count = kw.words.size,
                 on = kw.wordsOn,
-                onToggle = { want -> if (want) setKw { it.copy(wordsOn = true) } else guard(true) { setKw { it.copy(wordsOn = false) } } },
+                onToggle = { want -> setKw { it.copy(wordsOn = want) } },
                 words = kw.words, isActive = { true }, onWord = { _, _ -> },
-                canRemove = true, onRemove = { w -> guard(true) { setKw { it.copy(words = it.words - w) } } },
+                canRemove = true, onRemove = { w -> setKw { it.copy(words = it.words - w) } },
             )
             SectionLabel("Exceptions (a site or a word that's never blocked)")
             ExceptionList(kw.exceptions, clean = com.husarp.lockdown.engine.Sites::cleanIfSite,
-                onAdd = { w -> guard(true) { setKw { it.copy(exceptions = (it.exceptions + w).distinct()) } } },
+                onAdd = { w -> setKw { it.copy(exceptions = (it.exceptions + w).distinct()) } },
                 onRemove = { w -> setKw { it.copy(exceptions = it.exceptions - w) } })
         }
+        SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
 }
 

@@ -128,6 +128,7 @@ fun App(askOff: MutableState<Boolean>) {
         }
     }
     com.husarp.lockdown.screens.BedtimeAsk()
+    com.husarp.lockdown.ui.UnsavedDialog()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val here = Dest.entries.firstOrNull { it.route == route } ?: Dest.HOME
@@ -171,19 +172,21 @@ fun App(askOff: MutableState<Boolean>) {
             composable(Dest.MODES.route) { ModesScreen() }
             composable(Dest.INSIGHTS.route) { InsightsScreen() }
             composable(Dest.REMINDERS.route) { ReminderScreen() }
-            composable(Dest.GUARDRAILS.route) { GuardrailsScreen() }
-            composable(Dest.SETTINGS.route) { SettingsScreen() }
+            composable(Dest.GUARDRAILS.route) { GuardrailsScreen(onBack = { nav.popBackStack() }) }
+            composable(Dest.SETTINGS.route) { SettingsScreen(onBack = { nav.popBackStack() }) }
         }
         }
     }
 }
 
-/** Navigate to a top-level section without stacking duplicates. */
+/** Navigate to a top-level section without stacking duplicates; from a page with unsaved edits, Save / Discard first. */
 private fun androidx.navigation.NavController.go(dest: Dest) {
     if (currentDestination?.route == dest.route) return
-    navigate(dest.route) {
-        popUpTo(Dest.HOME.route) { saveState = true }
-        launchSingleTop = true
-        restoreState = true
+    com.husarp.lockdown.ui.Unsaved.leave {
+        navigate(dest.route) {
+            popUpTo(Dest.HOME.route) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 }

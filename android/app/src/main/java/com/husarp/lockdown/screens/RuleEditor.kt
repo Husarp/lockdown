@@ -150,16 +150,18 @@ fun RuleEditor(item: Item, onClose: () -> Unit) {
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
     var draft by remember { mutableStateOf(cfg.items.firstOrNull { it.id == item.id } ?: item) }
+    fun save(then: () -> Unit) {
+        val original = Store.config.items.firstOrNull { it.id == draft.id }
+        val loosening = original != null && AntiBypass.itemLooser(original, draft, com.husarp.lockdown.guard.TrustedTime.local(ctx))
+        guard(loosening) {
+            Store.update { c -> c.copy(items = c.items.map { if (it.id == draft.id) draft else it }) }
+            then()
+        }
+    }
+    com.husarp.lockdown.ui.UnsavedChanges(draft != (cfg.items.firstOrNull { it.id == item.id } ?: item), onClose, ::save)
 
     Column(Modifier.fillMaxSize()) {
-        EditorHeader(title = draft.name, onBack = onClose, action = "Save") {
-            val original = cfg.items.firstOrNull { it.id == draft.id }
-            val loosening = original != null && AntiBypass.itemLooser(original, draft, com.husarp.lockdown.guard.TrustedTime.local(ctx))
-            guard(loosening) {
-                Store.update { c -> c.copy(items = c.items.map { if (it.id == draft.id) draft else it }) }
-                onClose()
-            }
-        }
+        EditorHeader(title = draft.name, onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) }, action = "Save") { save(onClose) }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // live sentence summary
             Card(color = cs.surfaceContainer, shape = MaterialTheme.shapes.extraLarge) {

@@ -21,6 +21,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
 import com.husarp.lockdown.data.Settings
+import com.husarp.lockdown.data.SettingsEdit
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.LimitClock
 import com.husarp.lockdown.engine.ResetCarry
@@ -44,6 +46,9 @@ import com.husarp.lockdown.engine.PermCheck
 import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
+import com.husarp.lockdown.ui.SaveBar
+import com.husarp.lockdown.ui.UnsavedChanges
+import com.husarp.lockdown.ui.rememberDraft
 import com.husarp.lockdown.usage.Usage
 import com.husarp.lockdown.vpn.LockdownVpn
 import java.util.UUID
@@ -52,7 +57,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onBack: () -> Unit = {}) {
     val ctx = LocalContext.current
     val cfg by Store.state.collectAsStateWithLifecycle()
     val s = cfg.settings
@@ -142,7 +147,30 @@ fun SettingsScreen() {
             "(Always-on VPN or \"Block connections without VPN\").", android.widget.Toast.LENGTH_LONG).show() },
     )
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // The site filter, protection lists and extras are a draft (like the PC): nothing is in effect until Save, which
+    // asks for the challenge once if anything in it loosens. Appearance, notifications and the actions act at once.
+    val d = rememberDraft(SettingsEdit.of(cfg))
+    val e = d.value
+    fun save(then: () -> Unit) {
+        val new = d.value
+        val old = SettingsEdit.of(Store.config)
+        guard(new.looser(old)) {
+            Store.update { new.applyTo(it) }
+            if (new.protection != old.protection) com.husarp.lockdown.block.Protection.load(ctx)
+            if (new.bedtimeGrayscale != old.bedtimeGrayscale) {
+                if (new.bedtimeGrayscale) com.husarp.lockdown.remind.Grayscale.sync(ctx) else com.husarp.lockdown.remind.Grayscale.switchedOff(ctx)
+            }
+            if (new.siteFilter != old.siteFilter) { if (new.siteFilter) startVpn() else LockdownVpn.stop(ctx) }
+            d.clear()
+            then()
+        }
+    }
+    UnsavedChanges(d.dirty, onBack, ::save, d::clear)
+    // the filter also starts and stops outside the draft (Start, another VPN taking over): a draft being edited follows it
+    LaunchedEffect(s.siteFilterOn) { d.update { it.copy(siteFilter = s.siteFilterOn) } }
+
+    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card {
             Column(Modifier.padding(16.dp)) {
                 Text("Appearance", style = MaterialTheme.typography.titleSmall)
@@ -168,10 +196,7 @@ fun SettingsScreen() {
                 PermRow("Notifications (reminders, block notices)", notes) { ctx.startActivity(Perms.notificationsIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Site filter (VPN)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    Switch(checked = s.siteFilterOn, onCheckedChange = { on ->
-                        if (on) startVpn()
-                        else guard(true) { LockdownVpn.stop(ctx) }
-                    })
+                    Switch(checked = e.siteFilter, onCheckedChange = { on -> d.update { it.copy(siteFilter = on) } })
                 }
                 // switched on, but not running: say so, one tap starts it (asks Android's VPN permission again if needed)
                 if (vpn == Perm.NOT_RUNNING) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,7 +251,7 @@ fun SettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         com.husarp.lockdown.block.Protection.LISTS.forEach { def ->
-            val onList = def.key in cfg.protection.enabled
+            val onList = def.key in cfg.protection.enabled        // saved (and loaded); the switch shows the draft
             val info = remember(def.key, onList, importMsg) { com.husarp.lockdown.block.Protection.info(ctx, def.key) }
             Card {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -239,15 +264,8 @@ fun SettingsScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(checked = onList, onCheckedChange = { want ->
-                            val apply = {
-                                Store.update {
-                                    it.copy(protection = it.protection.copy(
-                                        enabled = if (want) (it.protection.enabled + def.key).distinct() else it.protection.enabled - def.key))
-                                }
-                                com.husarp.lockdown.block.Protection.load(ctx)
-                            }
-                            if (want) apply() else guard(true) { apply() }
+                        Switch(checked = def.key in e.protection, onCheckedChange = { want ->
+                            d.update { it.copy(protection = if (want) it.protection + def.key else it.protection - def.key) }
                         })
                     }
                 }
@@ -256,24 +274,22 @@ fun SettingsScreen() {
 
         Text("Extras", style = MaterialTheme.typography.titleMedium)
         // A wait you set yourself: turning it off or shortening it needs the challenge, longer is free.
-        Toggle("Pause before opening", "A ${s.pauseSec}-second countdown before a limited app opens.", s.pauseBeforeOpen) { on ->
-            if (on) set { c -> c.copy(pauseBeforeOpen = true) } else guard(true) { set { c -> c.copy(pauseBeforeOpen = false) } }
+        Toggle("Pause before opening", "A ${e.pauseSec}-second countdown before a limited app opens.", e.pauseBeforeOpen) { on ->
+            d.update { it.copy(pauseBeforeOpen = on) }
         }
-        if (s.pauseBeforeOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (e.pauseBeforeOpen) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Countdown", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            val shorter = (s.pauseSec - 5).coerceAtLeast(5)
-            TextButton(onClick = { guard(true) { set { c -> c.copy(pauseSec = shorter) } } }, enabled = s.pauseSec > 5) { Text("−5") }
-            Text("${s.pauseSec} s", style = MaterialTheme.typography.titleMedium)
-            TextButton(onClick = { set { c -> c.copy(pauseSec = (c.pauseSec + 5).coerceAtMost(60)) } }, enabled = s.pauseSec < 60) { Text("+5") }
+            TextButton(onClick = { d.update { it.copy(pauseSec = (it.pauseSec - 5).coerceAtLeast(5)) } }, enabled = e.pauseSec > 5) { Text("−5") }
+            Text("${e.pauseSec} s", style = MaterialTheme.typography.titleMedium)
+            TextButton(onClick = { d.update { it.copy(pauseSec = (it.pauseSec + 5).coerceAtMost(60)) } }, enabled = e.pauseSec < 60) { Text("+5") }
         }
-        Toggle("Bedtime grayscale", "Drain the screen's colour at bedtime. Needs a one-time adb permission.", s.bedtimeGrayscale) {
-            set { c -> c.copy(bedtimeGrayscale = it) }
-            if (it) com.husarp.lockdown.remind.Grayscale.sync(ctx) else com.husarp.lockdown.remind.Grayscale.switchedOff(ctx)
+        Toggle("Bedtime grayscale", "Drain the screen's colour at bedtime. Needs a one-time adb permission.", e.bedtimeGrayscale) { on ->
+            d.update { it.copy(bedtimeGrayscale = on) }
         }
-        GrayscaleNote(s.bedtimeGrayscale)
-        Toggle("Force SafeSearch", "Keep SafeSearch and YouTube Restricted Mode on through the filter.", s.forceSafeSearch) { on -> if (on) set { c -> c.copy(forceSafeSearch = true) } else guard(true) { set { c -> c.copy(forceSafeSearch = false) } } }
-        Toggle("Weekly digest", "A weekly notification with your screen time.", s.weeklyDigest) { set { c -> c.copy(weeklyDigest = it) } }
-        Toggle("Network log", "Record DNS lookups the filter sees.", s.networkLog) { set { c -> c.copy(networkLog = it) } }
+        GrayscaleNote(e.bedtimeGrayscale)
+        Toggle("Force SafeSearch", "Keep SafeSearch and YouTube Restricted Mode on through the filter.", e.forceSafeSearch) { on -> d.update { it.copy(forceSafeSearch = on) } }
+        Toggle("Weekly digest", "A weekly notification with your screen time.", e.weeklyDigest) { on -> d.update { it.copy(weeklyDigest = on) } }
+        Toggle("Network log", "Record DNS lookups the filter sees.", e.networkLog) { on -> d.update { it.copy(networkLog = on) } }
         Card {
             Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -282,8 +298,8 @@ fun SettingsScreen() {
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 OutlinedTextField(
-                    value = if (s.dailyGoalMin == 0) "" else s.dailyGoalMin.toString(),
-                    onValueChange = { v -> set { c -> c.copy(dailyGoalMin = v.filter(Char::isDigit).take(4).toIntOrNull() ?: 0) } },
+                    value = if (e.dailyGoalMin == 0) "" else e.dailyGoalMin.toString(),
+                    onValueChange = { v -> d.update { it.copy(dailyGoalMin = v.filter(Char::isDigit).take(4).toIntOrNull() ?: 0) } },
                     singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
                     modifier = Modifier.width(90.dp),
@@ -292,6 +308,8 @@ fun SettingsScreen() {
         }
 
         com.husarp.lockdown.update.UpdateSection()
+    }
+    SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
 }
 

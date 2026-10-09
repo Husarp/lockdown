@@ -69,11 +69,14 @@ import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.EditorHeader
 import com.husarp.lockdown.ui.Numeral
+import com.husarp.lockdown.ui.SaveBar
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.Segmented
 import com.husarp.lockdown.ui.StatusChip
 import com.husarp.lockdown.ui.Status
 import com.husarp.lockdown.ui.SwitchRowInline
+import com.husarp.lockdown.ui.UnsavedChanges
+import com.husarp.lockdown.ui.rememberDraft
 import java.time.LocalTime
 import java.util.UUID
 
@@ -173,6 +176,9 @@ private fun RemList(open: (RemPage) -> Unit) {
     }
 }
 
+/** What the bedtime editor edits, as a draft: bedtime (its on/off stays on the list) and bedtime grayscale. */
+private data class BedtimeDraft(val sleep: SleepCfg, val grayscale: Boolean)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BedtimeEditor(onClose: () -> Unit) {
@@ -180,16 +186,26 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     val modes by ModesStore.modes.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val guard = rememberGuard()
-    var waitCancels by remember { mutableStateOf(0) }    // a cancelled challenge puts the saved wait back in the field
-    val waitGuard = rememberGuard(onCancel = { waitCancels++ })
     val cs = MaterialTheme.colorScheme
-    val s = cfg.sleep
-    // Steps, heads-up, texts and the mode are ordinary edits, as on the PC; only turning an important alert off
-    // (or un-flagging it), or a shorter wait before Dismiss, asks for the challenge.
-    fun set(block: (SleepCfg) -> SleepCfg) = Store.update { it.copy(sleep = block(it.sleep)) }
+    // A draft, saved with Save (one challenge for the whole edit). Steps, heads-up, texts and the mode are ordinary
+    // edits, as on the PC; only un-flagging Important, or a shorter wait before Dismiss, asks for the challenge.
+    val d = rememberDraft(BedtimeDraft(cfg.sleep, cfg.settings.bedtimeGrayscale))
+    val s = d.value.sleep
+    fun set(block: (SleepCfg) -> SleepCfg) = d.update { it.copy(sleep = block(it.sleep)) }
+    fun save(then: () -> Unit) {
+        val new = d.value
+        val old = Store.config.let { BedtimeDraft(it.sleep, it.settings.bedtimeGrayscale) }
+        guard(RemindersEngine.bedtimeLooser(old.sleep, new.sleep)) {
+            Store.update { c -> c.copy(sleep = new.sleep.copy(on = c.sleep.on), settings = c.settings.copy(bedtimeGrayscale = new.grayscale)) }
+            if (new.grayscale != old.grayscale) { if (new.grayscale) Grayscale.sync(ctx) else Grayscale.switchedOff(ctx) }
+            d.clear()
+            then()
+        }
+    }
+    UnsavedChanges(d.dirty, onClose, ::save, d::clear)
     Column(Modifier.fillMaxSize()) {
-        EditorHeader("Bedtime", onBack = onClose)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        EditorHeader("Bedtime", onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) })
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Card(color = cs.surfaceContainerLow) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // the steps move with the bedtime
@@ -208,7 +224,7 @@ private fun BedtimeEditor(onClose: () -> Unit) {
             Card(color = cs.surfaceContainerLow) {
                 Text("Comes back after you dismiss it", style = MaterialTheme.typography.titleSmall)
                 s.tiers.forEachIndexed { i, t ->
-                    key(i) {
+                    key(i, d.resets) {
                         TierRow(s, t, onChange = { n -> set { c -> c.copy(tiers = c.tiers.mapIndexed { j, x -> if (j == i) n else x }) } },
                             onRemove = { set { c -> c.copy(tiers = c.tiers.filterIndexed { j, _ -> j != i }) } })
                     }
@@ -220,24 +236,23 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {
-                // shorter (or off) loosens bedtime: the challenge; longer saves at once
-                fun setWait(n: Int) = waitGuard(RemindersEngine.loosensDismissWait(s.dismissWait, n)) { set { it.copy(dismissWait = n) } }
+                // shorter (or off) loosens bedtime: the challenge on Save; longer is free
                 Text("Wait before Dismiss", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (n in RemindersEngine.DISMISS_WAITS) Chip(if (n == 0) "Off" else "$n s", s.dismissWait == n) { setWait(n) }
+                    for (n in RemindersEngine.DISMISS_WAITS) Chip(if (n == 0) "Off" else "$n s", s.dismissWait == n) { set { it.copy(dismissWait = n) } }
                 }
-                var waitText by remember(s.dismissWait, waitCancels) { mutableStateOf(if (s.dismissWait > 0) s.dismissWait.toString() else "") }
-                val typedWait = RemindersEngine.parseDismissWait(waitText)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(waitText, { waitText = it.filter(Char::isDigit).take(3) },
-                        label = { Text("Or any (seconds)") }, singleLine = true, isError = waitText.isNotEmpty() && typedWait == null,
-                        supportingText = { Text("1 to ${RemindersEngine.DISMISS_WAIT_MAX} seconds.") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                    TextButton(onClick = { typedWait?.let { setWait(it) } }, enabled = typedWait != null && typedWait != s.dismissWait) { Text("Save") }
-                }
+                var waitText by remember(s.dismissWait, d.resets) { mutableStateOf(if (s.dismissWait > 0) s.dismissWait.toString() else "") }
+                OutlinedTextField(waitText, { v ->
+                        waitText = v.filter(Char::isDigit).take(3)
+                        RemindersEngine.parseDismissWait(waitText)?.let { n -> set { it.copy(dismissWait = n) } }
+                    },
+                    label = { Text("Or any (seconds)") }, singleLine = true,
+                    isError = waitText.isNotEmpty() && RemindersEngine.parseDismissWait(waitText) == null,
+                    supportingText = { Text("1 to ${RemindersEngine.DISMISS_WAIT_MAX} seconds.") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                 Text("Dismiss on the bedtime screen counts down and works only when it ends, from the start each time " +
-                    "the screen comes up. Disable alerts and Emergency don't wait. Longer saves at once; shorter or off needs the challenge.",
+                    "the screen comes up. Disable alerts and Emergency don't wait. Longer is free; shorter or off needs the challenge.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {
@@ -259,18 +274,14 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Column {
-                SwitchRowInline("Grayscale the screen at bedtime", cfg.settings.bedtimeGrayscale) { on ->
-                    Store.update { it.copy(settings = it.settings.copy(bedtimeGrayscale = on)) }
-                    if (on) Grayscale.sync(ctx) else Grayscale.switchedOff(ctx)
-                }
-                GrayscaleNote(cfg.settings.bedtimeGrayscale)
+                SwitchRowInline("Grayscale the screen at bedtime", d.value.grayscale) { on -> d.update { it.copy(grayscale = on) } }
+                GrayscaleNote(d.value.grayscale)
             }
-            SwitchRowInline("Important (need the challenge to turn off)", s.guarded) { on ->
-                guard(RemindersEngine.loosensReminder(s.on, s.guarded, s.on, on)) { set { it.copy(guarded = on) } }
-            }
+            SwitchRowInline("Important (need the challenge to turn off)", s.guarded) { on -> set { it.copy(guarded = on) } }
             Text("At bedtime the screen goes dark with \"Time for bed\": Dismiss, Disable alerts (asks for the challenge), " +
                 "or an emergency unlock while you have one.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
+        SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
 }
 
@@ -352,20 +363,29 @@ private fun BreakEditor(onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
-    val b = cfg.breaks
-    fun set(block: (com.husarp.lockdown.engine.BreakCfg) -> com.husarp.lockdown.engine.BreakCfg) = Store.update { it.copy(breaks = block(it.breaks)) }
+    // A draft, saved with Save; only un-flagging Important asks for the challenge (on/off stays on the list).
+    val d = rememberDraft(cfg.breaks)
+    val b = d.value
+    fun set(block: (com.husarp.lockdown.engine.BreakCfg) -> com.husarp.lockdown.engine.BreakCfg) = d.update(block)
+    fun save(then: () -> Unit) {
+        val new = d.value
+        guard(RemindersEngine.breaksLooser(Store.config.breaks, new)) {
+            Store.update { c -> c.copy(breaks = new.copy(on = c.breaks.on)) }
+            d.clear()
+            then()
+        }
+    }
+    UnsavedChanges(d.dirty, onClose, ::save, d::clear)
     Column(Modifier.fillMaxSize()) {
-        EditorHeader("Breaks", onBack = onClose)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        EditorHeader("Breaks", onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) })
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             StepperRow("Remind every", b.every, "min of use", 5, min = 5) { set { c -> c.copy(every = it) } }
             StepperRow("Break length", b.length, "min", 1, min = 1, max = 60) { set { c -> c.copy(length = it) } }
             StepperRow("Snooze", b.snooze, "min each time", 5, min = 5) { set { c -> c.copy(snooze = it) } }
             Card(color = cs.surfaceContainerLow) {
                 SwitchRowInline("Strict break (covers the screen until it's over)", b.strict) { set { c -> c.copy(strict = it) } }
                 SwitchRowInline("20-20-20 eye breaks", b.twenty) { set { c -> c.copy(twenty = it) } }
-                SwitchRowInline("Important (need the challenge to turn off)", b.guarded) { on ->
-                    guard(RemindersEngine.loosensReminder(b.on, b.guarded, b.on, on)) { set { it.copy(guarded = on) } }
-                }
+                SwitchRowInline("Important (need the challenge to turn off)", b.guarded) { on -> set { it.copy(guarded = on) } }
             }
             if (b.strict) StepperRow("Snoozes first", b.maxSnooze, "then it starts on its own", 1, min = 1) { set { c -> c.copy(maxSnooze = it) } }
             Card(color = cs.surfaceContainerLow) {
@@ -381,6 +401,7 @@ private fun BreakEditor(onClose: () -> Unit) {
                 }
             }
         }
+        SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
 }
 
@@ -396,21 +417,24 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
     val timesOk = draft.times.isNotEmpty() && draft.times.all { validTime(it) != null }
     val windowOk = draft.window.size == 2 && draft.window.all { validTime(it) != null }
 
-    Column(Modifier.fillMaxSize()) {
-        EditorHeader(draft.text.ifBlank { "New reminder" }, onBack = onClose, action = "Save") {
-            // only real times are saved (a half-typed "9" used to be, and the reminder never came)
-            if ((draft.kind == "times" && !timesOk) || ((draft.kind == "random" || draft.hours) && !windowOk)) {
-                Toast.makeText(ctx, "Write the times as HH:MM, e.g. 09:30.", Toast.LENGTH_LONG).show()
-                return@EditorHeader
-            }
-            draft = draft.copy(times = draft.times.map { validTime(it) ?: it }, window = draft.window.map { validTime(it) ?: it })
-            val old = cfg.customs.firstOrNull { it.id == draft.id }
-            val loosen = old != null && RemindersEngine.loosensReminder(old.on, old.guarded, draft.on, draft.guarded)
-            guard(loosen) {
-                Store.update { s -> if (s.customs.any { it.id == draft.id }) s.copy(customs = s.customs.map { if (it.id == draft.id) draft else it }) else s.copy(customs = s.customs + draft) }
-                onClose()
-            }
+    fun save(then: () -> Unit) {
+        // only real times are saved (a half-typed "9" used to be, and the reminder never came)
+        if ((draft.kind == "times" && !timesOk) || ((draft.kind == "random" || draft.hours) && !windowOk)) {
+            Toast.makeText(ctx, "Write the times as HH:MM, e.g. 09:30.", Toast.LENGTH_LONG).show()
+            return
         }
+        draft = draft.copy(times = draft.times.map { validTime(it) ?: it }, window = draft.window.map { validTime(it) ?: it })
+        val old = Store.config.customs.firstOrNull { it.id == draft.id }
+        val loosen = old != null && RemindersEngine.loosensReminder(old.on, old.guarded, draft.on, draft.guarded)
+        guard(loosen) {
+            Store.update { s -> if (s.customs.any { it.id == draft.id }) s.copy(customs = s.customs.map { if (it.id == draft.id) draft else it }) else s.copy(customs = s.customs + draft) }
+            then()
+        }
+    }
+    UnsavedChanges(draft != (cfg.customs.firstOrNull { it.id == c.id } ?: c), onClose, ::save)
+
+    Column(Modifier.fillMaxSize()) {
+        EditorHeader(draft.text.ifBlank { "New reminder" }, onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) }, action = "Save") { save(onClose) }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(draft.text, { draft = draft.copy(text = it) }, label = { Text("What should it say?") }, modifier = Modifier.fillMaxWidth())
             SectionLabel("When")

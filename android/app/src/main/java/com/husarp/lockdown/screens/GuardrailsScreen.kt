@@ -44,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.block.BlockService
+import com.husarp.lockdown.data.GuardrailsEdit
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
@@ -76,12 +78,15 @@ import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
 import kotlinx.coroutines.delay
 import com.husarp.lockdown.ui.HairlineSpacer
+import com.husarp.lockdown.ui.SaveBar
+import com.husarp.lockdown.ui.UnsavedChanges
+import com.husarp.lockdown.ui.rememberDraft
 import java.time.Duration
 import java.time.LocalDateTime
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun GuardrailsScreen() {
+fun GuardrailsScreen(onBack: () -> Unit = {}) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val guard = rememberGuard()
     val ctx = LocalContext.current
@@ -99,32 +104,43 @@ fun GuardrailsScreen() {
     val admin = remember(fresh) { isAdmin(ctx) }
     val grayOk = remember(fresh) { com.husarp.lockdown.remind.Grayscale.canWrite(ctx) }
 
-    fun setAb(newAb: AntiBypassCfg) {
-        val loosening = AntiBypass.settingsLooser(cfg.antibypass, newAb)
-        // keep the unlock window the challenge just opened (newAb was copied from before it)
-        guard(loosening) { Store.update { it.copy(antibypass = newAb.copy(unlockedFrom = it.antibypass.unlockedFrom, unlockedUntil = it.antibypass.unlockedUntil)) } }
-    }
-    // Turning hours / cool-off on picks their settings first and saves both together (free): committing a default
-    // first would make the very next pick a loosening, behind the challenge it just switched on.
-    var pickHours by remember { mutableStateOf(false) }
-    var pickWait by remember { mutableStateOf(false) }
-    // The same for the phrase: random or your own is chosen first, so turning it on never saves a random one
-    // while your own is still being typed (and setting yours after would need the challenge just switched on).
-    var pickPhrase by remember { mutableStateOf(false) }
+    // The challenge, emergency and switch settings are a draft (like the PC): nothing is in effect until Save, which
+    // asks for the challenge once if anything in the whole draft loosens - so turning a challenge on and setting it
+    // up (your own phrase, the hours, a cool-off length) is one free change. Pause, Unlock and Use unlock act at once.
+    val d = rememberDraft(GuardrailsEdit.of(cfg))
+    val e = d.value
+    val dab = e.ab
+    fun setAb(f: (AntiBypassCfg) -> AntiBypassCfg) = d.update { it.copy(ab = f(it.ab)) }
+    var ownPhrase by remember(d.resets) { mutableStateOf(dab.customPhrase.isNotEmpty()) }   // "My own phrase" picked
+    var ownText by remember(d.resets) { mutableStateOf(dab.customPhrase) }
+    var lengthText by remember(d.resets, dab.length) { mutableStateOf(dab.length.toString()) }
 
-    // Emergency settings: turning on, a new kind, or more, longer or another period (but per day -> week / month) for
-    // a kind needs the challenge (PC Settings). [then] runs once saved.
-    fun setEm(enabled: Boolean = cfg.emergency.enabled, tiers: List<EmergencyTier> = cfg.emergency.tierList(), then: () -> Unit = {}) {
-        val old = cfg.emergency
-        guard(AntiBypass.emergencyLooser(old.enabled, old.tierList(), enabled, tiers)) {
-            Store.update { it.copy(emergency = it.emergency.copy(enabled = enabled, tiers = tiers)) }
+    fun save(then: () -> Unit) {
+        val new = d.value
+        val problem = new.problem() ?: when {
+            !new.ab.phrase -> null
+            ownPhrase && new.ab.customPhrase.isEmpty() -> "Type your own phrase, or pick a random one."
+            !ownPhrase && AntiBypass.parseLength(lengthText) == null -> "The phrase length must be ${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH}."
+            else -> null
+        }
+        if (problem != null) { Toast.makeText(ctx, problem, Toast.LENGTH_LONG).show(); return }
+        val old = GuardrailsEdit.of(Store.config)
+        guard(new.looser(old)) {
+            Store.update { new.applyTo(it) }
+            val upOn = new.guardrails.uninstallProtection
+            if (upOn && !old.guardrails.uninstallProtection && !isAdmin(ctx))
+                ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (!upOn && old.guardrails.uninstallProtection) runCatching { dpm(ctx).removeActiveAdmin(admin(ctx)) }
+            d.clear()
             then()
         }
     }
-    var draftTier by remember { mutableStateOf<EmergencyTier?>(null) }      // "+ Add another kind", until Add
-    var removeTier by remember { mutableStateOf<EmergencyTier?>(null) }     // × asks first
+    UnsavedChanges(d.dirty, onBack, ::save, d::clear)
+    // Fix (Reliability) turns uninstall protection on at once: a draft being edited follows it
+    LaunchedEffect(cfg.guardrails.uninstallProtection) { d.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = cfg.guardrails.uninstallProtection)) } }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Unlock box (like the PC): while the challenge is on, pass it once to open a short window where loosening
         // edits save without re-asking each time.
         if (AntiBypass.active(ab)) {
@@ -189,84 +205,71 @@ fun GuardrailsScreen() {
             Text("Tightening a rule never asks. Loosening needs:", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Type a phrase", ab.phrase) { if (ab.phrase) setAb(ab.copy(phrase = false)) else pickPhrase = !pickPhrase }
-                Chip("Only in hours", ab.hours) { if (ab.hours) setAb(ab.copy(hours = false)) else pickHours = !pickHours }
-                Chip("Cool-off", ab.waitMin > 0) { if (ab.waitMin > 0) setAb(ab.copy(waitMin = 0)) else pickWait = !pickWait }
-            }
-            if (pickPhrase && !ab.phrase) {
-                Spacer(Modifier.height(14.dp))
-                Text("Type a phrase - pick which to turn it on", style = MaterialTheme.typography.titleSmall)
-                var own by remember { mutableStateOf("") }
-                val ownCleaned = own.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
-                OutlinedTextField(own, { own = it }, label = { Text("Your own phrase") }, modifier = Modifier.fillMaxWidth())
-                Row {
-                    TextButton(onClick = { pickPhrase = false; setAb(ab.copy(phrase = true, customPhrase = "")) }) { Text("A random phrase") }
-                    TextButton(onClick = { pickPhrase = false; setAb(ab.copy(phrase = true, customPhrase = ownCleaned)) },
-                        enabled = ownCleaned.isNotEmpty()) { Text("Use my phrase") }
+                Chip("Type a phrase", dab.phrase) { setAb { it.copy(phrase = !it.phrase) } }
+                Chip("Only in hours", dab.hours) { setAb { it.copy(hours = !it.hours, windows = it.windows.ifEmpty { listOf(DEFAULT_HOURS) }) } }
+                Chip("Cool-off", dab.waitMin > 0) {
+                    setAb { it.copy(waitMin = if (it.waitMin > 0) 0 else d.saved.ab.waitMin.takeIf { m -> m > 0 } ?: DEFAULT_WAIT) }
                 }
-                Text("Your own phrase is typed exactly each time (no pasting). Changing it later needs the challenge.",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            if (ab.phrase) {
+            if (dab.phrase) {
                 Spacer(Modifier.height(14.dp))
-                if (ab.customPhrase.isEmpty()) {          // a random phrase's settings; your own phrase has none
+                // random or your own, chosen before Save: nothing is locked in half-set
+                com.husarp.lockdown.ui.Segmented(listOf("A random phrase", "My own phrase"), if (ownPhrase) 1 else 0) { i ->
+                    ownPhrase = i == 1
+                    setAb { it.copy(customPhrase = if (ownPhrase) cleanPhrase(ownText) else "") }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (!ownPhrase) {          // a random phrase's settings; your own phrase has none
                     Text("Phrase length", style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(6.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((label, n) in PHRASE_LENGTHS) Chip("$label · $n", ab.length == n) { setAb(ab.copy(length = n)) }
+                        for ((label, n) in PHRASE_LENGTHS) Chip("$label · $n", dab.length == n) { setAb { it.copy(length = n) } }
                     }
-                    var lengthText by remember(ab.length) { mutableStateOf(ab.length.toString()) }
-                    val typedLength = AntiBypass.parseLength(lengthText)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(lengthText, { lengthText = it.filter(Char::isDigit).take(4) },
-                            label = { Text("Or any length") }, singleLine = true, isError = typedLength == null,
-                            supportingText = { Text("${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH} characters. Longer saves at once; shorter needs the challenge.") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                        TextButton(onClick = { typedLength?.let { setAb(ab.copy(length = it)) } },
-                            enabled = typedLength != null && typedLength != ab.length) { Text("Save") }
-                    }
+                    OutlinedTextField(lengthText, { v ->
+                            lengthText = v.filter(Char::isDigit).take(4)
+                            AntiBypass.parseLength(lengthText)?.let { n -> setAb { it.copy(length = n) } }
+                        },
+                        label = { Text("Or any length") }, singleLine = true, isError = AntiBypass.parseLength(lengthText) == null,
+                        supportingText = { Text("${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH} characters. Longer is free; shorter needs the challenge.") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
+                } else {
+                    OutlinedTextField(ownText, { v -> ownText = v; setAb { it.copy(customPhrase = cleanPhrase(v)) } },
+                        label = { Text("Your own phrase") }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(10.dp))
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (ab.customPhrase.isEmpty()) Chip("Numbers and capitals", ab.complex) { setAb(ab.copy(complex = !ab.complex)) }
-                    Chip("Table writing", ab.grid) { setAb(ab.copy(grid = !ab.grid)) }
-                }
-                Spacer(Modifier.height(10.dp))
-                var custom by remember(ab.customPhrase) { mutableStateOf(ab.customPhrase) }
-                val cleaned = custom.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(custom, { custom = it }, label = { Text("Your own phrase") },
-                        placeholder = { Text("empty = a random one") }, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { setAb(ab.copy(customPhrase = cleaned)) }, enabled = cleaned != ab.customPhrase) { Text("Save") }
+                    if (!ownPhrase) Chip("Numbers and capitals", dab.complex) { setAb { it.copy(complex = !it.complex) } }
+                    Chip("Table writing", dab.grid) { setAb { it.copy(grid = !it.grid) } }
                 }
                 Text(
-                    (if (ab.customPhrase.isNotEmpty()) "Your own phrase, typed exactly each time (no pasting). Setting or changing it needs the challenge."
-                        else "A random phrase of ${ab.length} characters" + (if (ab.complex) ", with numbers and capitals" else "") + ".") +
-                        if (ab.grid) " Typed word by word into a 3×3 grid (no paste/macros)." else "",
+                    (if (ownPhrase) "Your own phrase, typed exactly each time (no pasting). Once saved, changing it needs the challenge."
+                        else "A random phrase of ${dab.length} characters" + (if (dab.complex) ", with numbers and capitals" else "") + ".") +
+                        if (dab.grid) " Typed word by word into a 3×3 grid (no paste/macros)." else "",
                     Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
             }
-            if (ab.waitMin > 0 || pickWait) {
+            if (dab.waitMin > 0) {
                 Spacer(Modifier.height(14.dp))
-                Text(if (ab.waitMin > 0) "Cool-off" else "Cool-off - pick a length to turn it on", style = MaterialTheme.typography.titleSmall)
+                Text("Cool-off", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(6.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (m in (WAIT_OPTIONS + ab.waitMin).filter { it > 0 }.distinct().sorted())
-                        Chip("$m min", ab.waitMin == m) { pickWait = false; setAb(ab.copy(waitMin = m)) }
+                    for (m in (WAIT_OPTIONS + dab.waitMin).distinct().sorted())
+                        Chip("$m min", dab.waitMin == m) { setAb { it.copy(waitMin = m) } }
                 }
                 Text("The change goes through this long after the phrase is right, with the app left open.",
                     Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            if (ab.hours || pickHours) {
+            if (dab.hours) {
                 Spacer(Modifier.height(14.dp))
                 Text("Loosening allowed only", style = MaterialTheme.typography.titleSmall)
-                HoursEditor(ab.windows, turnOn = !ab.hours) { pickHours = false; setAb(ab.copy(hours = true, windows = it)) }
+                HoursEditor(dab.windows) { w -> setAb { it.copy(windows = w) } }
             }
         }
 
         SectionLabel("Emergency unlock")
         Card(color = cs.surfaceContainer) {
-            val em = cfg.emergency
+            val em = cfg.emergency                              // what's in effect: the meter and Use unlock
             val tiers = em.tierList()
             val uses = cfg.allUses()
             val left = tiers.associate { it.id to Emergency.usesLeft(uses, it, now, cfg.clock()) }
@@ -288,27 +291,21 @@ fun GuardrailsScreen() {
             Spacer(Modifier.height(14.dp))
             HairlineSpacer()
             Spacer(Modifier.height(8.dp))
-            SwitchRowInline("Allow emergency unlocks", em.enabled) { setEm(enabled = it) }
-            if (em.enabled) {
-                tiers.forEachIndexed { i, t ->
-                    TierEditor(t, left[t.id], onChange = { new -> setEm(tiers = tiers.toMutableList().also { it[i] = new }) },
-                        onRemove = { removeTier = t })
+            SwitchRowInline("Allow emergency unlocks", e.emergencyOn) { on -> d.update { it.copy(emergencyOn = on) } }
+            if (e.emergencyOn) {
+                val savedIds = tiers.mapTo(HashSet()) { it.id }
+                for (t in e.tiers) key(t.id) {
+                    // a kind not saved yet has no meter ("New kind"); a saved one shows its uses as edited
+                    TierEditor(t, if (t.id in savedIds) Emergency.usesLeft(uses, t, now, cfg.clock()) else null,
+                        onChange = { new -> d.update { it.copy(tiers = it.tiers.map { x -> if (x.id == t.id) new else x }) } },
+                        onRemove = { d.update { it.copy(tiers = it.tiers.filter { x -> x.id != t.id }) } })
                 }
-                if (tiers.isEmpty() && draftTier == null)
+                if (e.tiers.isEmpty())
                     Text("No kinds - add one", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                val draft = draftTier
-                if (draft != null) {
-                    TierEditor(draft, null, onChange = { draftTier = it }, onRemove = null)
-                    Row {
-                        TextButton(onClick = { setEm(tiers = tiers + draft) { draftTier = null } }) { Text("Add") }
-                        TextButton(onClick = { draftTier = null }) { Text("Cancel") }
-                    }
-                } else if (tiers.size < Emergency.MAX_TIERS) {
-                    TextButton(onClick = {
-                        draftTier = EmergencyTier(Emergency.newId(tiers.map { it.id } + uses.map { it.tier }), 1, "week", 20)
-                    }) { Text(if (tiers.isEmpty()) "+ Add a kind" else "+ Add another kind") }
-                }
-                Text("Fewer, shorter, per day to per week or month, or removing a kind saves at once. More, longer, " +
+                if (e.tiers.size < Emergency.MAX_TIERS) TextButton(onClick = {
+                    d.update { it.copy(tiers = it.tiers + EmergencyTier(Emergency.newId(it.tiers.map { x -> x.id } + savedIds + uses.map { u -> u.tier }), 1, "week", 20)) }
+                }) { Text(if (e.tiers.isEmpty()) "+ Add a kind" else "+ Add another kind") }
+                Text("Fewer, shorter, per day to per week or month, or removing a kind is free. More, longer, " +
                     "any other period, a new kind or turning it on needs the challenge.",
                     Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
@@ -316,44 +313,29 @@ fun GuardrailsScreen() {
 
         SectionLabel("Switches")
         Card(color = cs.surfaceContainerLow) {
-            SwitchRowInline("Keep running (restart on kill/boot)", cfg.guardrails.persist) { on ->
-                if (on) Store.update { it.copy(guardrails = it.guardrails.copy(persist = true)) }
-                else guard(true) { Store.update { it.copy(guardrails = it.guardrails.copy(persist = false)) } }
+            SwitchRowInline("Keep running (restart on kill/boot)", e.guardrails.persist) { on ->
+                d.update { it.copy(guardrails = it.guardrails.copy(persist = on)) }
             }
-            SwitchRowInline("Trusted time (ignore clock changes)", cfg.guardrails.trustedTime) { on ->
-                if (on) Store.update { it.copy(guardrails = it.guardrails.copy(trustedTime = true)) }
-                else guard(true) { Store.update { it.copy(guardrails = it.guardrails.copy(trustedTime = false)) } }
+            SwitchRowInline("Trusted time (ignore clock changes)", e.guardrails.trustedTime) { on ->
+                d.update { it.copy(guardrails = it.guardrails.copy(trustedTime = on)) }
             }
             TrustedTime.zonePending()?.let { (new, kept) ->
                 Text("Time zone changed to $new - Lockdown keeps $kept for 24 hours.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            // on only while Android really has it (turned off in Android's settings, or its screen cancelled, shows off)
-            SwitchRowInline("Uninstall protection (device admin)", cfg.guardrails.uninstallProtection && admin) { on ->
-                if (on) {
-                    Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = true)) }
-                    ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } else guard(true) {
-                    runCatching { dpm(ctx).removeActiveAdmin(admin(ctx)) }
-                    Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = false)) }
-                }
+            // Saved: on only while Android really has it (turned off in Android's settings, or its screen cancelled,
+            // shows off). Kept on but off in Android, turning it on asks Android again at once (like Fix above).
+            val up = e.guardrails.uninstallProtection
+            SwitchRowInline("Uninstall protection (device admin)", up && (admin || up != d.saved.guardrails.uninstallProtection)) { on ->
+                if (on && up) ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                else d.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = on)) }
             }
         }
     }
+    SaveBar(d.dirty, onDiscard = d::clear) { save {} }
+    }
 
     if (pickUnlock) EmergencyDialog(onDismiss = { pickUnlock = false })
-    removeTier?.let { t ->
-        AlertDialog(
-            onDismissRequest = { removeTier = null },
-            title = { Text("Remove this kind?") },
-            text = { Text("${t.minutes} min, ${t.uses} per ${t.per}. Removing it saves at once, but getting it back later needs the challenge.") },
-            confirmButton = { TextButton(onClick = {
-                removeTier = null
-                setEm(tiers = cfg.emergency.tierList().filter { it.id != t.id })
-            }) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { removeTier = null }) { Text("Cancel") } },
-        )
-    }
 }
 
 private val RESET_FMT = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm")
@@ -467,15 +449,15 @@ fun resumeBlocks(ctx: Context) {
 
 private fun hhmm(t: LocalDateTime) = "%02d:%02d".format(t.hour, t.minute)
 
-/** The challenge's "only in hours" windows: edited here, saved with Save hours (any change of the hours, or no
- *  longer needing them, is loosening - one challenge for the whole edit rather than one per field). */
+/** The challenge's "only in hours" windows, edited in the page's draft (any change of them, or no longer needing
+ *  them, is loosening - one challenge on Save for the whole edit). Each window needs a day: one with none could
+ *  never let a change through. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HoursEditor(saved: List<Window>, turnOn: Boolean = false, onSave: (List<Window>) -> Unit) {
-    var draft by remember(saved) { mutableStateOf(saved.ifEmpty { listOf(Window(listOf(6), "18:00", "20:00")) }) }
-    fun set(i: Int, w: Window?) { draft = draft.toMutableList().also { if (w == null) it.removeAt(i) else it[i] = w } }
+private fun HoursEditor(windows: List<Window>, onChange: (List<Window>) -> Unit) {
+    fun set(i: Int, w: Window?) = onChange(windows.toMutableList().also { if (w == null) it.removeAt(i) else it[i] = w })
     val days = listOf("M", "T", "W", "T", "F", "S", "S")
-    draft.forEachIndexed { i, w ->
+    windows.forEachIndexed { i, w ->
         Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             days.forEachIndexed { d, l -> Chip(l, d in w.days) { set(i, w.copy(days = if (d in w.days) w.days - d else (w.days + d).sorted())) } }
@@ -484,15 +466,18 @@ private fun HoursEditor(saved: List<Window>, turnOn: Boolean = false, onSave: (L
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TimeField("From", w.start, Modifier.weight(1f)) { set(i, w.copy(start = it)) }
             TimeField("To", w.end, Modifier.weight(1f)) { set(i, w.copy(end = it)) }
-            if (draft.size > 1) IconButton(onClick = { set(i, null) }) { Icon(Icons.Filled.Close, "remove these hours") }
+            if (windows.size > 1) IconButton(onClick = { set(i, null) }) { Icon(Icons.Filled.Close, "remove these hours") }
         }
+        if (w.days.isEmpty()) Text("Pick at least one day.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { draft = draft + Window(listOf(6), "18:00", "20:00") }) { Text("+ Add time window") }
-        TextButton(onClick = { onSave(draft) }, enabled = (turnOn || draft != saved) && draft.all { it.days.isNotEmpty() }) {
-            Text(if (turnOn) "Turn on with these hours" else "Save hours") }
-    }
+    TextButton(onClick = { onChange(windows + DEFAULT_HOURS) }) { Text("+ Add time window") }
 }
+
+private val DEFAULT_HOURS = Window(listOf(6), "18:00", "20:00")     // Sunday 18:00-20:00, as AntiBypassCfg
+private const val DEFAULT_WAIT = 5
+
+/** Your own phrase as saved and typed: words with single spaces. */
+private fun cleanPhrase(s: String) = s.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
 
 /** "Use unlock": tick what to free (and/or pause the alerts); with several kinds, pick how long - the shortest with
  *  a use left is picked first. One use of that kind, checked again as it's saved. */

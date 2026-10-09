@@ -646,6 +646,14 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         fun loosensReminder(oldOn: Boolean, oldGuarded: Boolean, newOn: Boolean, newGuarded: Boolean): Boolean =
             oldGuarded && ((oldOn && !newOn) || !newGuarded)
 
+        /** A bedtime editor draft that weakens bedtime: its guard dropped, or a shorter wait before Dismiss. Times,
+         *  steps, heads-up, texts and the mode are ordinary edits (as on the PC). */
+        fun bedtimeLooser(old: SleepCfg, new: SleepCfg): Boolean =
+            loosensReminder(old.on, old.guarded, old.on, new.guarded) || loosensDismissWait(old.dismissWait, new.dismissWait)
+
+        /** A breaks editor draft that weakens breaks: only dropping its guard. */
+        fun breaksLooser(old: BreakCfg, new: BreakCfg): Boolean = loosensReminder(old.on, old.guarded, old.on, new.guarded)
+
         /** "Wait before Dismiss" choices in seconds (0 = off), and the range a typed one may take. */
         val DISMISS_WAITS = listOf(0, 10, 30, 60)
         const val DISMISS_WAIT_MAX = 600
