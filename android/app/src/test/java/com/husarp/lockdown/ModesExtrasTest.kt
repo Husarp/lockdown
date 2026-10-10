@@ -117,4 +117,40 @@ class ModesExtrasTest {
         assertFalse(Modes.startLooser(free, "other", null, false))
         assertFalse(Modes.startLooser(null, "m", null, false))
     }
+
+    private val week = sched(Window((0..4).toList(), "09:00", "17:00"))
+    private fun needs(modes: List<Mode>, st: ModeActive?, saved: Mode?, draft: Mode, until: LocalDateTime? = null, locked: Boolean = false, at: LocalDateTime = mon9) =
+        Modes.startNeedsChallenge(at, modes, st, saved, draft, until, locked)
+
+    @Test fun start_now_with_a_looser_draft_needs_the_challenge() {
+        val saved = mode(week)
+        assertTrue(needs(listOf(saved), null, saved, saved.copy(schedule = null), at = mon9.minusHours(3)))   // scheduled -> by hand
+        assertFalse(needs(listOf(saved), null, saved, saved, at = mon9.minusHours(3)))
+        // running locked by hand until T, then blocking less and starting with the same lock
+        val m = mode()
+        val end = mon9.plusHours(3)
+        val st = ModeActive("m", mon9.toString(), end.toString(), locked = true)
+        assertTrue(needs(listOf(m), st, m, m.copy(categories = emptyList()), end, true))
+        assertFalse(needs(listOf(m), st, m, m, end, true))
+    }
+
+    @Test fun starting_a_different_mode_in_a_scheduled_window_needs_the_challenge() {
+        val s = Mode("s", "S", schedule = week)
+        val other = Mode("o", "O")
+        val modes = listOf(s, other)
+        assertTrue(needs(modes, null, other, other))                                   // in window
+        assertFalse(needs(modes, null, s, s.copy(schedule = null).let { s }))          // same mode: free
+        assertFalse(needs(modes, null, other, other, at = mon9.minusHours(2)))        // outside window
+        // a hand-started mode hides the scheduled one but a third start is still guarded
+        val st = ModeActive("o", mon9.toString())
+        assertTrue(needs(modes, st, other, Mode("x", "X")))
+    }
+
+    @Test fun bad_pomodoro_values_are_clamped_when_read() {
+        val bad = mode(p = Pomodoro(-5, 0, 0, -1))
+        val st = Modes.active(mon9, listOf(bad), ModeActive("m", mon9.toString()))!!
+        assertTrue(Modes.pomodoroLength(Modes.clamp(bad.pomodoro!!)) > 0)
+        assertNotNull(st.until)
+        assertTrue(st.until!!.isAfter(mon9))
+    }
 }

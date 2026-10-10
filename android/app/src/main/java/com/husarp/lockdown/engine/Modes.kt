@@ -103,12 +103,13 @@ object Modes {
         if (state != null && chosen != null) {
             val started = LocalDateTime.parse(state.started)
             var until = state.until?.let { LocalDateTime.parse(it) }
-            chosen.pomodoro?.let { p ->
+            val pom = chosen.pomodoro?.let { clamp(it) }     // odd values from old configs / sync can't make a negative length
+            pom?.let { p ->
                 val pEnd = started.plusMinutes(pomodoroLength(p))
                 until = until?.let { minOf(it, pEnd) } ?: pEnd
             }
             if (!started.isAfter(now) && (until == null || now.isBefore(until))) {
-                val phase = chosen.pomodoro?.let { pomodoroPhase(it, started, now) }
+                val phase = pom?.let { pomodoroPhase(it, started, now) }
                 return ModeState(chosen, started, until, state.locked, scheduled = false, phase = phase)
             }
         }
@@ -195,6 +196,19 @@ object Modes {
         val end = current.until ?: return false
         if (current.mode.id != newId || !newLocked) return true
         return newUntil == null || newUntil.isBefore(end)
+    }
+
+    /** Does "Start now" for [draft] ([saved] = what is stored, null for a new mode) need the challenge? One check
+     *  covers: the draft loosening the saved mode, replacing a locked running mode, and starting a different mode
+     *  while a scheduled one is in its window (a standing commitment that Stop can't end). */
+    fun startNeedsChallenge(now: LocalDateTime, modes: List<Mode>, state: ModeActive?, saved: Mode?, draft: Mode,
+                            newUntil: LocalDateTime?, newLocked: Boolean): Boolean {
+        val cur = active(now, modes, state)
+        val lockedNow = cur != null && cur.mode.id == draft.id && cur.locked && !cur.scheduled
+        if (saved != null && modeLooser(saved, draft, lockedNow)) return true
+        if (startLooser(cur, draft.id, newUntil, newLocked)) return true
+        val sched = active(now, modes, null)       // the scheduled mode in its window, even when a hand-started one hides it
+        return sched != null && sched.mode.id != draft.id
     }
 
     // ---------- what it blocks ----------

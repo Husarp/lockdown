@@ -245,7 +245,7 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
 
             SectionLabel("How it starts")
             com.husarp.lockdown.ui.Segmented(listOf("By hand", "On a schedule"), if (draft.schedule == null) 0 else 1) {
-                draft = draft.copy(schedule = if (it == 0) null else (draft.schedule ?: Schedule(windows = listOf(Window((0..4).toList(), "09:00", "17:00")))))
+                draft = draft.copy(schedule = if (it == 0) null else (draft.schedule ?: ModesStore.modes.value.firstOrNull { m -> m.id == draft.id }?.schedule ?: Schedule(windows = listOf(Window((0..4).toList(), "09:00", "17:00")))))
             }
             draft.schedule?.let { sched ->
                 Card(color = cs.surfaceContainerLow) {
@@ -270,8 +270,9 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 Button(onClick = {
                     val now = com.husarp.lockdown.guard.TrustedTime.local(ctx)   // trusted time: a changed clock doesn't shorten it
                     val until = if (untilMode) Modes.untilTime(now, untilAt) else if (durationMin > 0) now.plusMinutes(durationMin.toLong()) else null
-                    // Replacing a locked running mode (another one, unlocked, or ending sooner) is a loosening.
-                    val replacing = Modes.startLooser(ModesStore.current(now), draft.id, until, locked && until != null)
+                    // A loosened draft, replacing a locked mode, or overriding a scheduled one: one challenge, before anything is saved.
+                    val replacing = Modes.startNeedsChallenge(now, ModesStore.modes.value, ModesStore.active.value,
+                        ModesStore.modes.value.firstOrNull { it.id == draft.id }, draft, until, locked && until != null)
                     guard(replacing) {
                         write()
                         ModesStore.start(draft.id, until, locked, now)
