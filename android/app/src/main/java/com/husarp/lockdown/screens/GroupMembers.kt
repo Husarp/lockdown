@@ -214,7 +214,7 @@ internal fun AddMembersPage(draft: Group, cfg: Config, newApps: List<Item>, onMe
                         } else {
                             val a = row as InstalledApp
                             fun add() = onNewApp(Item(java.util.UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP))  // no own rule: the group's govern it
-                            ListRow(title = a.label, subtitle = "App · not on your list yet",
+                            ListRow(title = a.label, subtitle = "App · not on your list yet", subtitlePill = true,
                                 leading = { AppIcon(a.pkg, a.label) },
                                 trailing = { Checkbox(checked = false, onCheckedChange = { if (it) add() }) },
                                 onClick = { add() })

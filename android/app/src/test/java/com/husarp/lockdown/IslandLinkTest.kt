@@ -319,6 +319,15 @@ class IslandLinkTest {
         assertTrue(out.settings.siteFilterOn)
     }
 
+    @Test fun a_groups_picked_icon_and_colour_reach_island_with_the_config() {
+        val remote = Config(items = listOf(yt), groups = listOf(fun2.copy(icon = "moon", color = "INDIGO")))
+        val sent = LinkProtocol.json.encodeToString(Config.serializer(), remote)        // as main sends it
+        val out = applyConfig(LinkProtocol.json.decodeFromString(Config.serializer(), sent), Config())
+        assertEquals("moon", out.groups.single().icon)
+        assertEquals("INDIGO", out.groups.single().color)
+        assertEquals(fun2.rules, out.groups.single().rules)
+    }
+
     // ---------- foreground ----------
 
     @Test fun the_app_in_front_follows_the_events() {

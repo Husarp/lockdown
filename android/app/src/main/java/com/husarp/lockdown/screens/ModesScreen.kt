@@ -166,7 +166,7 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                             })
                         }) else {
                             val a = row as com.husarp.lockdown.block.InstalledApp
-                            ListRow(title = a.label, subtitle = "App · not on your list",
+                            ListRow(title = a.label, subtitle = "App · not on your list", subtitlePill = true,
                                 leading = { com.husarp.lockdown.ui.AppIcon(a.pkg, a.label) }, trailing = {
                                 Checkbox(checked = isExtra(a.pkg), onCheckedChange = { on ->
                                     draft = draft.copy(extra = if (on) draft.extra + com.husarp.lockdown.engine.ModeExtra(a.label, ItemType.APP, listOf(a.pkg))

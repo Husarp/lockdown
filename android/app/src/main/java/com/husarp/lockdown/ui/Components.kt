@@ -145,11 +145,11 @@ fun IconTile(icon: ImageVector, hue: Hue, size: Dp = 40.dp, on: Boolean = true, 
 
 /** A small label: filled (the hue's container) or outlined (a hairline, no colour). One line, at most 140 dp. */
 @Composable
-fun Pill(text: String, hue: Hue?, icon: ImageVector? = null, outlined: Boolean = false) {
+fun Pill(text: String, hue: Hue?, icon: ImageVector? = null, outlined: Boolean = false, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val t = hue?.takeIf { !outlined }?.let { tone(it) }
     Row(
-        Modifier.height(22.dp).widthIn(max = 140.dp)
+        modifier.height(22.dp).widthIn(max = 140.dp)
             .then(if (t != null) Modifier.background(t.container, RoundedCornerShape(6.dp))
                   else Modifier.border(1.dp, cs.outlineVariant, RoundedCornerShape(6.dp)))
             .padding(horizontal = 7.dp),
@@ -257,13 +257,15 @@ fun MemberStack(items: List<com.husarp.lockdown.engine.Item>, max: Int = 3) {
     }
 }
 
-/** A list row with an avatar, title + subtitle, and a trailing slot (status chip, switch, chevron). */
+/** A list row with an avatar, title + subtitle, and a trailing slot (status chip, switch, chevron). [subtitlePill]: the
+ *  subtitle as a small outlined label ("App · not on your list"). */
 @Composable
 fun ListRow(
     title: String,
     subtitle: String? = null,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    subtitlePill: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     val base = Modifier.fillMaxWidth().let { if (onClick != null) it.clickable { onClick() } else it }
@@ -271,7 +273,8 @@ fun ListRow(
         if (leading != null) leading()
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null && subtitlePill) Pill(subtitle, null, outlined = true, modifier = Modifier.padding(top = 3.dp))
+            else if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (trailing != null) trailing()
     }
