@@ -288,7 +288,7 @@ private fun BlockedCard(cfg: Config, now: LocalDateTime, tick: Int, modeState: M
                 leading = { IconTile(Kinds.PAUSE.icon, Kinds.PAUSE.hue, 32.dp) })
             else -> {
                 val byMode = Modes.blocking(modeState)
-                if (b.alwaysApps == 0 && b.alwaysSites == 0 && b.rows.isEmpty() && !byMode) {
+                if (b.alwaysApps == 0 && b.alwaysSites == 0 && b.alwaysGrey == 0 && b.rows.isEmpty() && !byMode) {
                     CardRow("Nothing blocked right now", leading = { IconTile(Icons.Filled.CheckCircle, Hue.GREEN, 32.dp) })
                 }
                 if (b.alwaysApps > 0 || b.alwaysSites > 0) {
@@ -297,6 +297,8 @@ private fun BlockedCard(cfg: Config, now: LocalDateTime, tick: Int, modeState: M
                         b.alwaysSites.takeIf { it > 0 }?.let { "%,d site%s".format(it, if (it == 1) "" else "s") })
                     CardRow("Always blocked: " + parts.joinToString(", "), leading = { IconTile(Icons.Filled.Block, Hue.RED, 32.dp) })
                 }
+                if (b.alwaysGrey > 0) CardRow("Always grey: %,d app%s".format(b.alwaysGrey, if (b.alwaysGrey == 1) "" else "s"),
+                    leading = { IconTile(Kinds.GREY.icon, Kinds.GREY.hue, 32.dp) })
                 if (byMode && modeState != null) {
                     val what = if ("distracting" in modeState.mode.categories) "your distracting apps and sites" else "what it's set to block"
                     CardRow("${modeState.mode.name} blocks $what" + (modeState.until?.let { " until ${hhmm(it)}" } ?: ""),
@@ -532,10 +534,15 @@ fun HomeLayoutEditor() {
                 IconTile(info.icon, info.hue, 32.dp, on = card.on)
                 Column(Modifier.weight(1f).padding(start = 8.dp)) {
                     Text(info.name, style = MaterialTheme.typography.titleSmall)
-                    Text(info.about, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(info.about, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = { save { HomeLayout.move(it, card.id, -1) } }, enabled = i > 0) { Icon(Icons.Filled.ArrowUpward, "Move up") }
-                IconButton(onClick = { save { HomeLayout.move(it, card.id, 1) } }, enabled = i < list.size - 1) { Icon(Icons.Filled.ArrowDownward, "Move down") }
+                // (small arrows: the name and its line keep room at phone width)
+                IconButton(onClick = { save { HomeLayout.move(it, card.id, -1) } }, Modifier.size(36.dp), enabled = i > 0) {
+                    Icon(Icons.Filled.ArrowUpward, "Move up", Modifier.size(20.dp))
+                }
+                IconButton(onClick = { save { HomeLayout.move(it, card.id, 1) } }, Modifier.size(36.dp), enabled = i < list.size - 1) {
+                    Icon(Icons.Filled.ArrowDownward, "Move down", Modifier.size(20.dp))
+                }
                 Switch(checked = card.on, onCheckedChange = { save { l -> HomeLayout.toggle(l, card.id) } })
             }
         }

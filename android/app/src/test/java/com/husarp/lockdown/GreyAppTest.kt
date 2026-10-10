@@ -64,6 +64,18 @@ class GreyAppTest {
         assertNull(Enforce.app(cfg.copy(items = listOf(insta.copy(disabled = true))), "com.insta", t0, null))
     }
 
+    @Test fun a_grey_app_anywhere_on_screen_keeps_it_grey() {
+        val cfg = Config(items = listOf(insta, insta.copy(id = "c", target = "com.game", blockType = "")))
+        // its video in picture-in-picture over the launcher, or next to another app in split screen
+        assertTrue(Enforce.greyOnScreen(cfg, listOf("com.launcher", "com.insta"), t0, null))
+        assertFalse(Enforce.greyOnScreen(cfg, listOf("com.launcher", "com.other"), t0, null))
+        assertFalse(Enforce.greyOnScreen(cfg, listOf("com.game"), t0, null))           // closed, not greyed
+        assertFalse(Enforce.greyOnScreen(cfg, emptyList(), t0, null))
+        assertFalse(Enforce.greyOnScreen(cfg.copy(enabled = false), listOf("com.insta"), t0, null))
+        val work = ModeState(Mode("w", "Work", items = listOf("i")), t0, null, locked = false, scheduled = false, phase = null)
+        assertFalse(Enforce.greyOnScreen(cfg, listOf("com.insta"), t0, work))         // a mode closes it instead
+    }
+
     @Test fun a_mode_that_blocks_a_grey_app_still_closes_it() {
         val work = Mode("w", "Work", items = listOf("i"))
         val state = ModeState(work, t0, null, locked = false, scheduled = false, phase = null)

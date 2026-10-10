@@ -13,7 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import com.husarp.lockdown.ui.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -66,33 +66,31 @@ fun UpdateSection() {
     val cur = Updates.current(ctx)
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Card {
-        Column(Modifier.padding(16.dp)) {
-            Text("Updates", style = MaterialTheme.typography.titleSmall)
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Check for updates", style = MaterialTheme.typography.bodyMedium)
-                    Text("When the app opens or you come back to it.", style = MaterialTheme.typography.bodySmall, color = muted)
-                }
-                Switch(checked = cfg.settings.checkUpdates, onCheckedChange = { on ->
-                    Store.update { it.copy(settings = it.settings.copy(checkUpdates = on)) }
-                    if (on) Updates.autoCheck(ctx)
-                })
+        Text("Updates", style = MaterialTheme.typography.titleSmall)
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Check for updates", style = MaterialTheme.typography.bodyMedium)
+                Text("When the app opens or you come back to it.", style = MaterialTheme.typography.bodySmall, color = muted)
             }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Version $cur", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { Updates.checkNow(ctx) }, enabled = !s.checking) { Text("CHECK NOW") }
-            }
-            s.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { open(ctx, Updates.RELEASES_PAGE) }) { Text("GITHUB") }
-                if (Updates.available(s, cur)) {
-                    Button(onClick = { Updates.update(ctx) }, enabled = s.phase !is Updates.Phase.Downloading) { Text("GET UPDATE") }
-                }
-            }
-            UpdateProgress(s)
-            Text("Android asks you to confirm every update, and only an update signed with Lockdown's own key installs.",
-                style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.padding(top = 8.dp))
+            Switch(checked = cfg.settings.checkUpdates, onCheckedChange = { on ->
+                Store.update { it.copy(settings = it.settings.copy(checkUpdates = on)) }
+                if (on) Updates.autoCheck(ctx)
+            })
         }
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Version $cur", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { Updates.checkNow(ctx) }, enabled = !s.checking) { Text("CHECK NOW") }
+        }
+        s.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { open(ctx, Updates.RELEASES_PAGE) }) { Text("GITHUB") }
+            if (Updates.available(s, cur)) {
+                Button(onClick = { Updates.update(ctx) }, enabled = s.phase !is Updates.Phase.Downloading) { Text("GET UPDATE") }
+            }
+        }
+        UpdateProgress(s)
+        Text("Android asks you to confirm every update, and only an update signed with Lockdown's own key installs.",
+            style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.padding(top = 8.dp))
     }
 }
 

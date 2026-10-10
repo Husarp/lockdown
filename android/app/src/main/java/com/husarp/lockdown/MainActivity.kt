@@ -102,6 +102,13 @@ class MainActivity : ComponentActivity() {
         runCatching { com.husarp.lockdown.remind.Grayscale.sync(this) }   // a grey screen left on outside bedtime clears on open
     }
 
+    // Rotation, dark mode, split screen resizing don't recreate the activity (the manifest's configChanges), so a
+    // page's unsaved edits stay; the bars follow a dark-mode switch here.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enableEdgeToEdge()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         takeTurnOff(intent)
@@ -200,7 +207,7 @@ private fun androidx.navigation.NavController.go(dest: Dest) {
         navigate(dest.route) {
             popUpTo(Dest.HOME.route) { saveState = true }
             launchSingleTop = true
-            restoreState = true
+            restoreState = dest != Dest.SETTINGS    // (a restored Settings would reopen the section a link last opened)
         }
     }
 }

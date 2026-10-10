@@ -65,9 +65,10 @@ object GroupLook {
         else -> Icons.Filled.Folder
     }
 
-    /** Name words (English and Polish stems) -> icon, first row that matches wins. */
+    /** Name words (English and Polish stems) -> icon, first row that matches wins. A stem under 4 letters (and
+     *  [WHOLE]) only matches the whole word: "bet" isn't "Better", "sen" isn't "Senior", "gra" isn't "Grafika". */
     private val WORDS = listOf(
-        "moon" to listOf("night", "bed", "sleep", "evening", "noc", "sen"),
+        "moon" to listOf("night", "bed", "bedtime", "sleep", "evening", "noc", "nocn", "sen"),
         "game" to listOf("game", "gaming", "play", "gry", "gra"),
         "social" to listOf("social", "insta", "tiktok", "facebook", "snap", "społ"),
         "video" to listOf("video", "youtube", "netflix", "tv", "film", "movie", "stream", "wideo"),
@@ -75,17 +76,21 @@ object GroupLook {
         "music" to listOf("music", "spotify", "muzyk"),
         "news" to listOf("news", "wiadomo"),
         "shopping" to listOf("shop", "amazon", "allegro", "zakup"),
-        "casino" to listOf("bet", "casino", "gambl", "hazard"),
+        "casino" to listOf("bet", "betting", "casino", "gambl", "hazard"),
         "work" to listOf("work", "praca"),
         "school" to listOf("study", "school", "learn", "nauka", "szkoł"),
         "book" to listOf("read", "book"),
     )
 
+    /** Stems of 4 letters or more that still only match the whole word ("read" isn't "Ready"). */
+    private val WHOLE = setOf("read")
+
     /** The icon a name suggests: a word of it (lower case) that starts with one of [WORDS] - by word start, not
-     *  anywhere, so "Instagram" isn't a game ("gra"). Anything else: folder. */
+     *  anywhere, so "Instagram" isn't a game ("gra"); a short stem only as the whole word. Anything else: folder. */
     fun autoIcon(name: String): String {
         val words = name.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
-        return WORDS.firstOrNull { (_, stems) -> words.any { w -> stems.any { w.startsWith(it) } } }?.first ?: "folder"
+        fun hit(w: String, stem: String) = if (stem.length < 4 || stem in WHOLE) w == stem else w.startsWith(stem)
+        return WORDS.firstOrNull { (_, stems) -> words.any { w -> stems.any { hit(w, it) } } }?.first ?: "folder"
     }
 
     /** The automatic colours: never RED or SLATE, so a group doesn't look blocked or paused unless picked so. */

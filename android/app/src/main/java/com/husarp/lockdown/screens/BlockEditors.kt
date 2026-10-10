@@ -22,7 +22,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -194,9 +193,9 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                             Text(m.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                             PillRow(pills)
                         }
-                        StatusChip(info?.text ?: when (st) { Status.BLOCKED -> "Blocked"; Status.SOON -> "Soon"; Status.PAUSED -> "Paused"; Status.ALLOWED -> "Allowed" },
+                        // (no chevron: the whole row opens the member, and the name keeps its room)
+                        StatusChip(info?.let { Kinds.chipText(it, now) } ?: when (st) { Status.BLOCKED -> "Blocked"; Status.SOON -> "Soon"; Status.PAUSED -> "Paused"; Status.ALLOWED -> "Allowed" },
                             st, grey = info?.grey == true)
-                        Icon(Icons.Filled.ChevronRight, null, tint = cs.onSurfaceVariant)
                     }
                 }
             }

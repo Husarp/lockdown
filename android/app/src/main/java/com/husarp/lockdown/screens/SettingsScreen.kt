@@ -40,7 +40,7 @@ import androidx.compose.material.icons.filled.VpnLock
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
+import com.husarp.lockdown.ui.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -264,13 +264,11 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
         }
         "look" -> {
             Card {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Theme", style = MaterialTheme.typography.titleSmall)
-                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        THEMES.forEach { (v, label, icon) ->
-                            FilterChip(selected = s.theme == v, onClick = { set { it.copy(theme = v) } }, label = { Text(label) },
-                                leadingIcon = { Icon(icon, null, Modifier.size(18.dp)) })
-                        }
+                Text("Theme", style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    THEMES.forEach { (v, label, icon) ->
+                        FilterChip(selected = s.theme == v, onClick = { set { it.copy(theme = v) } }, label = { Text(label) },
+                            leadingIcon = { Icon(icon, null, Modifier.size(18.dp)) })
                     }
                 }
             }
@@ -278,40 +276,36 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
         }
         "alerts" -> NotificationsCard()
         "perms" -> Card {
-            Column(Modifier.padding(16.dp)) {
-                PermRow(Icons.Filled.Accessibility, "App blocking (accessibility)", a11y == Perm.ON, if (a11y == Perm.NOT_RUNNING) A11Y_NOT_RUNNING else null) {
-                    ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
-                PermRow(Icons.Filled.QueryStats, "Usage access (screen time)", usage) { ctx.startActivity(Usage.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                PermRow(Icons.Filled.Notifications, "Notifications (reminders, block notices)", notes) { ctx.startActivity(Perms.notificationsIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                Text("The site filter is in Site filter & lists.", Modifier.padding(top = 6.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PermRow(Icons.Filled.Accessibility, "App blocking (accessibility)", a11y == Perm.ON, if (a11y == Perm.NOT_RUNNING) A11Y_NOT_RUNNING else null) {
+                ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
+            PermRow(Icons.Filled.QueryStats, "Usage access (screen time)", usage) { ctx.startActivity(Usage.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            PermRow(Icons.Filled.Notifications, "Notifications (reminders, block notices)", notes) { ctx.startActivity(Perms.notificationsIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            Text("The site filter is in Site filter & lists.", Modifier.padding(top = 6.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         "filter" -> {
             Card {
-                Column(Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        RowIcon(Kinds.FILTER.icon)
-                        Text("Site filter (VPN)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        Switch(checked = e.siteFilter, onCheckedChange = { on -> d.update { it.copy(siteFilter = on) } })
-                    }
-                    // switched on, but not running: say so, one tap starts it (asks Android's VPN permission again if needed)
-                    if (vpn == Perm.NOT_RUNNING) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("On, but not running.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { startVpn() }) { Text("Start") }
-                    }
-                    // Private DNS set to a provider: sites don't load at all, or blocked ones do (the filter can't see them)
-                    if (privateDns != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Private DNS is set to $privateDns. Set it to Automatic or Off, or sites may not load (or blocked ones may).",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Fix") }
-                    }
-                    Text("Optional. Blocks sites everywhere via a local VPN, but can interfere with other apps. Leave it off — Lockdown still blocks sites and protection lists in the browser without it.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    RowIcon(Kinds.FILTER.icon)
+                    Text("Site filter (VPN)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Switch(checked = e.siteFilter, onCheckedChange = { on -> d.update { it.copy(siteFilter = on) } })
                 }
+                // switched on, but not running: say so, one tap starts it (asks Android's VPN permission again if needed)
+                if (vpn == Perm.NOT_RUNNING) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("On, but not running.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { startVpn() }) { Text("Start") }
+                }
+                // Private DNS set to a provider: sites don't load at all, or blocked ones do (the filter can't see them)
+                if (privateDns != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Private DNS is set to $privateDns. Set it to Automatic or Off, or sites may not load (or blocked ones may).",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Fix") }
+                }
+                Text("Optional. Blocks sites everywhere via a local VPN, but can interfere with other apps. Leave it off — Lockdown still blocks sites and protection lists in the browser without it.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Toggle(Icons.Filled.Shield, "Force SafeSearch", "Keep SafeSearch and YouTube Restricted Mode on through the filter.", e.forceSafeSearch) { on -> d.update { it.copy(forceSafeSearch = on) } }
             Toggle(Icons.AutoMirrored.Filled.ReceiptLong, "Network log", "Record DNS lookups the filter sees.", e.networkLog) { on -> d.update { it.copy(networkLog = on) } }
@@ -326,20 +320,18 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
                 val onList = def.key in cfg.protection.enabled        // saved (and loaded); the switch shows the draft
                 val info = remember(def.key, onList, importMsg) { com.husarp.lockdown.block.Protection.info(ctx, def.key) }
                 Card {
-                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(def.name, style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    def.desc + " · ${info.first} domains",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(checked = def.key in e.protection, onCheckedChange = { want ->
-                                d.update { it.copy(protection = if (want) it.protection + def.key else it.protection - def.key) }
-                            })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(def.name, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                def.desc + " · ${info.first} domains",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
+                        Switch(checked = def.key in e.protection, onCheckedChange = { want ->
+                            d.update { it.copy(protection = if (want) it.protection + def.key else it.protection - def.key) }
+                        })
                     }
                 }
             }
@@ -347,7 +339,7 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
         "limits" -> {
             ResetTimeCard()
             Card {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     RowIcon(Icons.Filled.Flag)
                     Column(Modifier.weight(1f)) {
                         Text("Daily screen-time goal", style = MaterialTheme.typography.titleSmall)
@@ -383,29 +375,27 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
         }
         "island" -> IslandLinkCard()
         "backup" -> Card {
-            Column(Modifier.padding(16.dp)) {
-                Text("Import from Lockdown", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "Load a .txt list (one domain or keyword per line) - e.g. the lists exported from Lockdown on the PC.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row {
-                    TextButton(onClick = { importSites.launch("text/*") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import sites") }
-                    TextButton(onClick = { importWords.launch("text/*") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import keywords") }
-                }
-                Text(
-                    "Sync everything to your work profile: Export here, then Import in the other profile's app.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                Row {
-                    TextButton(onClick = { exportCfg.launch("lockdown-config.json") }) { ButtonIcon(Icons.Filled.FileUpload); Text("Export all settings") }
-                    TextButton(onClick = { importCfg.launch("application/json") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import all settings") }
-                }
-                importMsg?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
+            Text("Import from Lockdown", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Load a .txt list (one domain or keyword per line) - e.g. the lists exported from Lockdown on the PC.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row {
+                TextButton(onClick = { importSites.launch("text/*") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import sites") }
+                TextButton(onClick = { importWords.launch("text/*") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import keywords") }
             }
+            Text(
+                "Sync everything to your work profile: Export here, then Import in the other profile's app.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row {
+                TextButton(onClick = { exportCfg.launch("lockdown-config.json") }) { ButtonIcon(Icons.Filled.FileUpload); Text("Export all settings") }
+                TextButton(onClick = { importCfg.launch("application/json") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import all settings") }
+            }
+            importMsg?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
         }
         "updates" -> com.husarp.lockdown.update.UpdateSection()
         }
@@ -451,7 +441,7 @@ private fun PermRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label
 @Composable
 private fun Toggle(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, blurb: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Card {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             RowIcon(icon)
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall)
@@ -486,29 +476,27 @@ private fun ResetTimeCard() {
     }
 
     Card {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                RowIcon(Icons.Filled.RestartAlt)
-                Text("When limits reset", style = MaterialTheme.typography.titleSmall)
-            }
-            Text("Time limits and opening limits start over at this time every day (weekly ones on Monday, monthly ones on the 1st, at the same time). Screen time keeps normal days.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TimeField("Reset at", text, Modifier.width(120.dp)) { text = it; error = null }
-                TextButton(onClick = {
-                    val t = validTime(text)?.let { com.husarp.lockdown.engine.Rules.parseHhmm(it) }
-                    when {
-                        t == null -> error = "The time must look like 04:00."
-                        t == cfg.resetTime() -> error = "That's already the reset time."
-                        LimitClock.resetLooser(cfg.resetTime(), t) -> ask = t
-                        else -> guard(LimitClock.crossesNoon(cfg.resetTime(), t)) { save(t) { clock, at -> LimitClock.change(clock, t, at) } }
-                    }
-                }) { Text("Change") }
-            }
-            error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-            Text("The limit day you are in ends ${whenText(end, now)}.", Modifier.padding(top = 4.dp),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            RowIcon(Icons.Filled.RestartAlt)
+            Text("When limits reset", style = MaterialTheme.typography.titleSmall)
         }
+        Text("Time limits and opening limits start over at this time every day (weekly ones on Monday, monthly ones on the 1st, at the same time). Screen time keeps normal days.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TimeField("Reset at", text, Modifier.width(120.dp)) { text = it; error = null }
+            TextButton(onClick = {
+                val t = validTime(text)?.let { com.husarp.lockdown.engine.Rules.parseHhmm(it) }
+                when {
+                    t == null -> error = "The time must look like 04:00."
+                    t == cfg.resetTime() -> error = "That's already the reset time."
+                    LimitClock.resetLooser(cfg.resetTime(), t) -> ask = t
+                    else -> guard(LimitClock.crossesNoon(cfg.resetTime(), t)) { save(t) { clock, at -> LimitClock.change(clock, t, at) } }
+                }
+            }) { Text("Change") }
+        }
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        Text("The limit day you are in ends ${whenText(end, now)}.", Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 
     ask?.let { t ->

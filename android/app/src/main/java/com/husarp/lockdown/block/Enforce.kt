@@ -119,6 +119,11 @@ object Enforce {
         return grey
     }
 
+    /** Any of [pkgs] (the apps with a window on screen: split screen, a floating window, picture-in-picture) is an
+     *  app whose block only greys it: the screen stays grey while it's visible, not only while it's in front. */
+    fun greyOnScreen(cfg: Config, pkgs: Collection<String>, now: LocalDateTime, mode: ModeState?): Boolean =
+        pkgs.any { app(cfg, it, now, mode)?.grey == true }
+
     /** Verdict for a site the browser is showing, or null. (DNS handles most site blocks; this covers
      *  time-limited / scheduled / mode-blocked sites that DNS can't express, while a browser shows them.) */
     fun site(cfg: Config, host: String, now: LocalDateTime, mode: ModeState?): Verdict? {

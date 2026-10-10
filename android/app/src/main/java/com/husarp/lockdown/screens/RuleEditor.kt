@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -94,10 +96,11 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         EditorHeader(title = "Block something", onBack = onDone)
         when (kind) {
-            null -> Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AddTile("An app", "From your phone", Icons.Filled.Apps, Hue.RED, Modifier.weight(1f)) { kind = ItemType.APP }
-                AddTile("A website", "By its address", Icons.Filled.Language, Hue.TEAL, Modifier.weight(1f)) { kind = ItemType.SITE }
-                AddTile("A group", "Shared rules", Icons.Filled.Folder, Hue.VIOLET, Modifier.weight(1f)) {
+            // (one height for the three: a hint that wraps doesn't make one tile taller)
+            null -> Row(Modifier.padding(top = 12.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AddTile("An app", "From your phone", Icons.Filled.Apps, Hue.RED, Modifier.weight(1f).fillMaxHeight()) { kind = ItemType.APP }
+                AddTile("A website", "By its address", Icons.Filled.Language, Hue.TEAL, Modifier.weight(1f).fillMaxHeight()) { kind = ItemType.SITE }
+                AddTile("A group", "Shared rules", Icons.Filled.Folder, Hue.VIOLET, Modifier.weight(1f).fillMaxHeight()) {
                     val g = Group(UUID.randomUUID().toString().take(8), "New group")
                     Store.update { it.copy(groups = it.groups + g) }
                     onEditGroup(g)

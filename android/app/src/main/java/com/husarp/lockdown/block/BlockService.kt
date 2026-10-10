@@ -133,8 +133,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             val island = IslandLink.islandFront?.takeIf { !IslandLink.isHelper && IslandLink.islandInFront() }
             if (island != null) History.record(now, island, "", dt)
             inUseIds = setOfNotNull(island?.let { p -> cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(p, true) }?.id })
-            // the helper can't grey the screen: main greys it while an Island app that greys is in front
-            Grayscale.app(this, island != null && Enforce.app(cfg, island, now, mode)?.grey == true)
+            // the helper can't grey the screen: main greys it while an Island app that greys is in front (not
+            // Lockdown itself over it), or while one of main's that greys is still on screen (picture-in-picture)
+            Grayscale.app(this, (island != null && Enforce.app(cfg, island, now, mode)?.grey == true && !ReminderRunner.appVisible) ||
+                Enforce.greyOnScreen(cfg, appsOnScreen(), now, mode))
             if (quietUp) removeOverlay()
             return
         }
@@ -158,10 +160,12 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         prevTickPkg = pkg
 
         val label = if (appItem != null) appItem.name else Apps.label(packageManager, pkg)
-        // "Grey this app": it stays open and the screen goes grey while it's in front (a site in it is still judged)
+        // "Grey this app": it stays open and the screen goes grey while it's in front (a site in it is still judged),
+        // and while any window of it is on screen: split screen, a floating window, its video in picture-in-picture.
+        // Lockdown itself in front isn't the greyed app (its windows don't move currentPkg).
         val appVerdict = Enforce.app(cfg, pkg, now, mode, label)
         val grey = appVerdict?.grey == true
-        Grayscale.app(this, grey)
+        Grayscale.app(this, (grey && !ReminderRunner.appVisible) || Enforce.greyOnScreen(cfg, appsOnScreen(), now, mode))
         var verdict = appVerdict?.takeUnless { grey }
             ?: (if (host != null) Enforce.site(cfg, host, now, mode) else null)
         // Protection lists block in the browser without the VPN. Never gated by the emergency unlock.
@@ -238,6 +242,14 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         }
         pipCaught.clear(); pipCaught.addAll(caught)
         if (caught.isNotEmpty() && Media.playing(this)) Media.pause(this)
+    }
+
+    /** The apps with a window on screen, picture-in-picture included (this profile's windows only; not Lockdown). */
+    private fun appsOnScreen(): List<String> {
+        val ws = runCatching { windows }.getOrNull() ?: return emptyList()
+        return ws.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION || it.isInPictureInPictureMode }
+            .mapNotNull { w -> runCatching { w.root?.packageName?.toString() }.getOrNull() }
+            .filter { it != packageName }
     }
 
     /** [pkg] has an app window on screen (this profile's windows only). */

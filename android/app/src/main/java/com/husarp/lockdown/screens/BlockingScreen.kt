@@ -220,7 +220,8 @@ private fun MoreNote(shown: Int, total: Int) {
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** A group: its icon and colour, "6 members" and its shared rules, the members' icons. */
+/** A group: its icon and colour, its shared rules (on their own line, so they keep the room), the members' icons
+ *  and "6 members". */
 @Composable
 private fun GroupRow(g: Group, byId: Map<String, Item>, now: LocalDateTime, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -234,12 +235,12 @@ private fun GroupRow(g: Group, byId: Map<String, Item>, now: LocalDateTime, onCl
             GroupTile(g)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(g.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("${members.size} member${if (members.size == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    PillRow(pills)
-                }
+                PillRow(pills)
             }
-            MemberStack(members)
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                MemberStack(members)
+                Text("${members.size} member${if (members.size == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
             Icon(Icons.Filled.ChevronRight, null, tint = cs.onSurfaceVariant)
         }
     }
@@ -260,7 +261,7 @@ private fun ItemRow(item: Item, cfg: com.husarp.lockdown.data.Config, memberOf: 
             Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             PillRow(pills)
         }
-        StatusChip(info?.text ?: statusText(st, cfg, item, now), st, grey = info?.grey == true)
+        StatusChip(info?.let { Kinds.chipText(it, now) } ?: statusText(st, cfg, item, now), st, grey = info?.grey == true)
     }
 }
 

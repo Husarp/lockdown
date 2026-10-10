@@ -103,6 +103,20 @@ class HomeLayoutTest {
         assertTrue(Live.blockedNow(Config(items = items, groups = listOf(g.copy(disabled = true))), t0, usage = used).rows.none { it.item.id == "lim" })
     }
 
+    @Test fun an_always_grey_app_counts_as_grey_not_blocked() {
+        val grey = Item("i", "Insta", "com.insta", ItemType.APP, blockType = "grey", rules = always)
+        val b = Live.blockedNow(Config(items = listOf(grey, Item("a", "Game", "com.game", ItemType.APP, rules = always))), t0, usage = noUse)
+        assertEquals(1, b.alwaysGrey)
+        assertEquals(1, b.alwaysApps)
+        // in a group (evaluated): the group's way greys it
+        val inG = grey.copy(blockType = "", rules = emptyList())
+        val g = Group("g", "Social", rules = always, memberIds = listOf("i"), appBlock = "grey")
+        val gb = Live.blockedNow(Config(items = listOf(inG), groups = listOf(g)), t0, usage = noUse)
+        assertEquals(1, gb.alwaysGrey)
+        assertEquals(0, gb.alwaysApps)
+        assertEquals(0, Live.blockedNow(Config(items = listOf(inG), groups = listOf(g.copy(appBlock = null))), t0, usage = noUse).alwaysGrey)
+    }
+
     @Test fun a_grey_only_app_is_marked_grey() {
         val cfg = Config(items = listOf(Item("i", "Insta", "com.insta", ItemType.APP, blockType = "grey", rules = temp(t0.plusHours(2)))))
         assertTrue(Live.blockedNow(cfg, t0, usage = noUse).rows.single().grey)

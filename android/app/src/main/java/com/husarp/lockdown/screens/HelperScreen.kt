@@ -11,11 +11,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import com.husarp.lockdown.ui.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,6 +41,8 @@ import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.link.LinkService
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.usage.Usage
 import kotlinx.coroutines.delay
 
@@ -65,7 +68,7 @@ fun HelperScreen() {
                 style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
 
             Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val (text, bad) = when {
                         st.problem == "version" -> "The two copies can't talk: update Lockdown in both profiles. Still blocking with the last rules." to true
                         st.problem == "denied" -> "Your main Lockdown doesn't know this link any more (reinstalled or reset there?). Still blocking with the last rules. Enter a new link code from it." to true
@@ -84,8 +87,11 @@ fun HelperScreen() {
             // "Pause my blocks" from main (it comes with the rules), in trusted time like main's banner
             val cfg by Store.state.collectAsStateWithLifecycle()
             val pausedUntil = remember(cfg.pause, now) { Pause.until(cfg.pause, TrustedTime.local(ctx)) }
-            if (pausedUntil != null) Card(colors = CardDefaults.cardColors(containerColor = cs.primaryContainer, contentColor = cs.onPrimaryContainer)) {
-                Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val slate = tone(Kinds.PAUSE.hue)          // paused is slate, as main's banner
+            if (pausedUntil != null) Card(color = slate.container, contentColor = slate.onContainer,
+                padding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Kinds.PAUSE.icon, null, tint = slate.accent, modifier = Modifier.size(20.dp))
                     Text("Blocks paused · back on at %02d:%02d".format(pausedUntil.hour, pausedUntil.minute) +
                         if (cfg.pause?.silent == true) " · alerts silenced" else "",
                         style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
@@ -94,26 +100,24 @@ fun HelperScreen() {
             }
 
             Card {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Needed here", style = MaterialTheme.typography.titleSmall)
-                    // read again each second (the clock above), so a permission granted in Settings shows on return
-                    val a11yState = remember(now) { Perms.a11y(ctx) }
-                    val a11y = a11yState == Perm.ON                          // really running, not just ticked
-                    val overlay = remember(now) { Settings.canDrawOverlays(ctx) }
-                    HelperRow("Usage access (sees the Island app in front)", remember(now) { Usage.hasAccess(ctx) }) { open(ctx, Usage.accessIntent()) }
-                    HelperRow("Display over other apps (the block screen)", overlay || a11y) {
-                        open(ctx, Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-                    }
-                    HelperRow("Battery not restricted", remember(now) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }) {
-                        Perms.openBattery(ctx)
-                    }
-                    HelperRow("Notifications", remember(now) { Perms.notifications(ctx) }) { open(ctx, Perms.notificationsIntent(ctx)) }
-                    HelperRow("App blocking (accessibility): optional, better if your phone allows it", a11y,
-                        if (a11yState == Perm.NOT_RUNNING) "On in Android, but Android doesn't run it here (common in a work profile). Display over other apps does the blocking." else null,
-                    ) { open(ctx, BlockService.settingsIntent()) }
-                    if (!overlay && !a11y)
-                        Text("Can't block in Island yet: allow Display over other apps.", style = MaterialTheme.typography.bodySmall, color = cs.error)
+                Text("Needed here", style = MaterialTheme.typography.titleSmall)
+                // read again each second (the clock above), so a permission granted in Settings shows on return
+                val a11yState = remember(now) { Perms.a11y(ctx) }
+                val a11y = a11yState == Perm.ON                          // really running, not just ticked
+                val overlay = remember(now) { Settings.canDrawOverlays(ctx) }
+                HelperRow("Usage access (sees the Island app in front)", remember(now) { Usage.hasAccess(ctx) }) { open(ctx, Usage.accessIntent()) }
+                HelperRow("Display over other apps (the block screen)", overlay || a11y) {
+                    open(ctx, Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
                 }
+                HelperRow("Battery not restricted", remember(now) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }) {
+                    Perms.openBattery(ctx)
+                }
+                HelperRow("Notifications", remember(now) { Perms.notifications(ctx) }) { open(ctx, Perms.notificationsIntent(ctx)) }
+                HelperRow("App blocking (accessibility): optional, better if your phone allows it", a11y,
+                    if (a11yState == Perm.NOT_RUNNING) "On in Android, but Android doesn't run it here (common in a work profile). Display over other apps does the blocking." else null,
+                ) { open(ctx, BlockService.settingsIntent()) }
+                if (!overlay && !a11y)
+                    Text("Can't block in Island yet: allow Display over other apps.", style = MaterialTheme.typography.bodySmall, color = cs.error)
             }
 
             val installed = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime }.getOrDefault(0L) }
@@ -122,11 +126,9 @@ fun HelperScreen() {
             Text("To unlink, open Lockdown in your main profile: Settings > Island > Unlink.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             if (!newCode) TextButton(onClick = { newCode = true }) { Text("Enter a new link code") }
             else Card {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Only needed when your main Lockdown was reinstalled or reset. Get a code there: Settings > Island > Link.",
-                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    LinkCodeField(challenge = true)
-                }
+                Text("Only needed when your main Lockdown was reinstalled or reset. Get a code there: Settings > Island > Link.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                LinkCodeField(challenge = true)
             }
             com.husarp.lockdown.update.UpdateSection()
         }

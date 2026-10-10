@@ -150,6 +150,11 @@ object Kinds {
         RuleType.TEMPORARY -> r.tempUntil?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }?.let { untilText(it, now) } ?: "Temporary"
     }
 
+    /** A blocked item's status chip in a list row, short so its name keeps the room: "until Wed 07:00" (the chip's
+     *  colour and icon say blocked or grey), or "Blocked" / "Grey" with no end. */
+    fun chipText(b: com.husarp.lockdown.data.BlockedLine, now: LocalDateTime): String =
+        b.until?.let { untilText(it, now) } ?: if (b.grey) "Grey" else "Blocked"
+
     /** "until 18:00" today, "until Tue 18:00" within the week, else "until 12 Oct". */
     fun untilText(t: LocalDateTime, now: LocalDateTime?): String {
         val hm = "%02d:%02d".format(t.hour, t.minute)

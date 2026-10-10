@@ -14,15 +14,16 @@ import com.husarp.lockdown.ui.Status
 import java.time.LocalDateTime
 
 /** A blocked item's one line ("Blocked until 18:00" / "Grey until 18:00"), whether it's only greyed, and why (the
- *  most important reason; null when only the running mode blocks it). */
-data class BlockedLine(val text: String, val grey: Boolean, val reason: Reason?)
+ *  most important reason; null when only the running mode blocks it), and until when (null: no end). */
+data class BlockedLine(val text: String, val grey: Boolean, val reason: Reason?, val until: LocalDateTime? = null)
 
 /** One row of Home's "Blocked now": an item a rule blocks now, why, until when (null = no end) and if only greyed. */
 data class BlockedRow(val item: Item, val reason: Reason, val until: LocalDateTime?, val grey: Boolean)
 
 /** Home's "Blocked now": the always-blocked apps and sites counted (never evaluated one by one - there can be
- *  thousands of imported sites), and the first [rows] blocked by any other rule, soonest end first, of [total]. */
-data class BlockedNow(val alwaysApps: Int, val alwaysSites: Int, val rows: List<BlockedRow>, val total: Int)
+ *  thousands of imported sites), the always-greyed apps apart, and the first [rows] blocked by any other rule,
+ *  soonest end first, of [total]. */
+data class BlockedNow(val alwaysApps: Int, val alwaysSites: Int, val rows: List<BlockedRow>, val total: Int, val alwaysGrey: Int = 0)
 
 /** Live status of items, computed from the tested engine + the recorded usage counters. For the UI. */
 object Live {
@@ -58,37 +59,40 @@ object Live {
         val grey = item.type == ItemType.APP && !byMode &&
             BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, usage, cfg.clock())))
         val reason = Rules.itemBlock(eff, now, usage, cfg.clock())?.reason
-        return BlockedLine(if (grey) line.replaceFirst("Blocked", "Grey") else line, grey, reason)
+        return BlockedLine(if (grey) line.replaceFirst("Blocked", "Grey") else line, grey, reason, until)
     }
 
     /**
      * Home's "Blocked now", cheap with thousands of items: an item that is only always-blocked (its own rules all
      * permanent, in no group, not paused) is counted, not evaluated. The few others (in a group, or with another
-     * rule) are evaluated; one a permanent rule blocks counts as always blocked too, the rest are the rows. A running
+     * rule) are evaluated; one a permanent rule blocks counts as always blocked too, the rest are the rows. An app
+     * that is only greyed all the time counts as always grey, not blocked. A running
      * mode is left out here (Home sums it up in one line). Main thread only, like the blocking ([usage]).
      */
     fun blockedNow(cfg: Config, now: LocalDateTime, limit: Int = 5, usage: Usage = UsageStore.usage): BlockedNow {
         val grouped = HashSet<String>()
         for (g in cfg.groups) if (!g.disabled) grouped.addAll(g.memberIds)
-        var apps = 0; var sites = 0
-        fun always(item: Item) { if (item.type == ItemType.APP) apps++ else sites++ }
+        var apps = 0; var sites = 0; var greys = 0
+        fun always(item: Item, grey: Boolean) { if (grey) greys++ else if (item.type == ItemType.APP) apps++ else sites++ }
         val rows = ArrayList<BlockedRow>()
         val clock = cfg.clock()
         for (item in cfg.items) {
             if (item.disabled) continue
             val inGroup = item.id in grouped
             if (!inGroup && item.rules.isEmpty()) continue
-            if (!inGroup && item.rules.all { it.type == RuleType.PERMANENT }) { always(item); continue }
+            if (!inGroup && item.rules.all { it.type == RuleType.PERMANENT }) {
+                always(item, item.type == ItemType.APP && BlockMethod.greyOnly(item.blockType)); continue
+            }
             val eff = Rules.effectiveRules(item, cfg.groups)
             val block = Rules.itemBlock(eff, now, usage, clock) ?: continue
-            if (block.reason == Reason.PERMANENT) { always(item); continue }
-            val end = Rules.blockEnd(eff, now, usage, clock)?.takeIf { it != LocalDateTime.MAX }
             val grey = item.type == ItemType.APP &&
                 BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, usage, clock)))
+            if (block.reason == Reason.PERMANENT) { always(item, grey); continue }
+            val end = Rules.blockEnd(eff, now, usage, clock)?.takeIf { it != LocalDateTime.MAX }
             rows.add(BlockedRow(item, block.reason, end, grey))
         }
         rows.sortWith(compareBy<BlockedRow> { it.until ?: LocalDateTime.MAX }.thenBy { it.item.name.lowercase() })
-        return BlockedNow(apps, sites, rows.take(limit), rows.size)
+        return BlockedNow(apps, sites, rows.take(limit), rows.size, greys)
     }
 
     /** The running mode blocks [item] (as Enforce does: by its app, or by any of its hostnames). */

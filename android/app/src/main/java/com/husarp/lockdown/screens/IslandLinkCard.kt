@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import com.husarp.lockdown.ui.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -52,14 +52,12 @@ fun IslandLinkCard() {
     when (IslandLink.role(ctx)) {
         Role.MAIN -> MainLinkCard()
         Role.STANDALONE -> Card {
-            Column(Modifier.padding(16.dp)) {
-                Text("Link to your main Lockdown", style = MaterialTheme.typography.titleSmall)
-                Text("This is Lockdown's copy in Island. Linked, it follows the rules of Lockdown in your main profile: " +
-                    "Island apps share the same limits, and rules are changed only there. Linking replaces this copy's own rules, " +
-                    "so it asks for the challenge.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LinkCodeField(challenge = true)
-            }
+            Text("Link to your main Lockdown", style = MaterialTheme.typography.titleSmall)
+            Text("This is Lockdown's copy in Island. Linked, it follows the rules of Lockdown in your main profile: " +
+                "Island apps share the same limits, and rules are changed only there. Linking replaces this copy's own rules, " +
+                "so it asks for the challenge.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LinkCodeField(challenge = true)
         }
         Role.HELPER -> {}
     }
@@ -76,7 +74,7 @@ private fun MainLinkCard() {
     val mine = remember { IslandLink.versionCode(ctx) }
 
     Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Island (work profile)", style = MaterialTheme.typography.titleSmall)
             when (st.state) {
                 "" -> Text("Use Lockdown in Island too: install it there, then link it here. Island apps then follow these " +

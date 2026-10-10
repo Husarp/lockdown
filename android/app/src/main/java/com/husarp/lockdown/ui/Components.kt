@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,7 +89,7 @@ fun StatusChip(text: String, status: Status, grey: Boolean = false) {
     val t = tone(look.hue)
     val filled = status == Status.BLOCKED || status == Status.SOON
     Row(
-        Modifier.then(if (filled) Modifier.background(t.container, RoundedCornerShape(6.dp)) else Modifier)
+        Modifier.widthIn(max = 120.dp).then(if (filled) Modifier.background(t.container, RoundedCornerShape(6.dp)) else Modifier)
             .padding(horizontal = if (filled) 8.dp else 2.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -163,13 +164,38 @@ fun Pill(text: String, hue: Hue?, icon: ImageVector? = null, outlined: Boolean =
 @Composable
 fun Pill(spec: PillSpec) = Pill(spec.text, spec.hue, spec.icon, spec.outlined)
 
-/** Pills on one line: the first [max], then "+N" for the rest. */
+/** Pills on one line: of the first [max], those that fit whole, then "+N" for the rest - never a pill squeezed to
+ *  a sliver, never the "+N" lost. When not even the first fits whole, it takes the room left, cut short. */
 @Composable
 fun PillRow(pills: List<PillSpec>, max: Int = 2, modifier: Modifier = Modifier) {
     if (pills.isEmpty()) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        pills.take(max).forEach { Pill(it) }
-        if (pills.size > max) Pill("+${pills.size - max}", null, outlined = true)
+    val shown = pills.take(max)
+    val folds = (pills.size - shown.size..pills.size).filter { it > 0 }     // every "+N" it may come to
+    Layout(content = {
+        shown.forEach { Pill(it) }
+        folds.forEach { Pill("+$it", null, outlined = true) }
+        Pill(pills[0])                                                       // the first one, cut to the room left
+    }, modifier = modifier) { ms, c ->
+        val gap = 4.dp.roundToPx()
+        val loose = c.copy(minWidth = 0)
+        val p = ms.take(shown.size).map { it.measure(loose) }
+        val plus = folds.indices.associate { folds[it] to ms[shown.size + it].measure(loose) }
+        fun width(k: Int) = p.take(k).sumOf { it.width } + gap * (k - 1).coerceAtLeast(0) +
+            (plus[pills.size - k]?.let { it.width + if (k > 0) gap else 0 } ?: 0)
+        val k = (shown.size downTo 0).first { it == 0 || width(it) <= c.maxWidth }
+        val placed = ArrayList<androidx.compose.ui.layout.Placeable>(p.take(k))
+        if (k == 0) {
+            val rest = plus[pills.size - 1]
+            val room = c.maxWidth - (rest?.let { it.width + gap } ?: 0)
+            if (room >= 48.dp.roundToPx()) { placed.add(ms.last().measure(loose.copy(maxWidth = room))); rest?.let { placed.add(it) } }
+            else plus[pills.size]?.takeIf { it.width <= c.maxWidth }?.let { placed.add(it) }
+        } else plus[pills.size - k]?.let { placed.add(it) }
+        val w = placed.sumOf { it.width } + gap * (placed.size - 1).coerceAtLeast(0)
+        val h = placed.maxOfOrNull { it.height } ?: 0
+        layout(w.coerceIn(c.minWidth, c.maxWidth), h.coerceIn(c.minHeight, c.maxHeight)) {
+            var x = 0
+            placed.forEach { it.place(x, (h - it.height) / 2); x += it.width + gap }
+        }
     }
 }
 
