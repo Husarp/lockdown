@@ -20,10 +20,12 @@ import antibypass as ab
 import backup
 import block_method
 import rules
+import service
 from db import SCHEMA_VERSION, Database
 from gui.draft import Draft
 from monitor import usage as usage_mod
 from monitor import word_guard
+from test_any_program import add_jar, java, jworld  # noqa: F401
 from test_app_limit_enforcement import BOOT, FRIDAY, World, add_game, at, block_during, world  # noqa: F401
 
 NIGHT = rules.make_schedule("block", [(list(range(7)), "21:00", "05:00")])
@@ -75,16 +77,16 @@ def test_the_item_s_own_rules_keep_its_own_way_and_both_together_do_both(tmp_pat
     assert _way(db, game) == "minimize"
 
 
-def test_a_member_can_only_add_to_the_group_s_way(tmp_path):
+def test_a_site_member_can_only_add_to_the_group_s_way(tmp_path):
     db = Database(tmp_path / "t.db")
     yt, game, _gid = _setup(db, app_block="internet", site_block="dns",
                             member_blocks={"game": "close", "yt": "close"})
-    assert _way(db, game) == "close,internet"      # the member's own on top of the group's
-    assert _way(db, yt) == "dns,close"
+    assert _way(db, game) == "close"               # an app's own way is instead of the group's (schema 8)
+    assert _way(db, yt) == "dns,close"             # a site's is still on top of the group's
     # weaker than the group's: changes nothing
     group = {"app_block": "close", "site_block": "dns,close", "member_blocks": {1: "back", 2: "minimize"}}
     assert block_method.in_group({"id": 1, "item_type": "site", "block_type": None}, group) == "dns,close"
-    assert block_method.in_group({"id": 2, "item_type": "app", "block_type": None}, group) == "close"
+    assert block_method.in_group({"id": 2, "item_type": "app", "block_type": None}, group) == "minimize"   # (own)
 
 
 def test_an_app_cut_off_by_its_group_is_not_closed_but_firewalled(world):
@@ -375,5 +377,160 @@ def test_the_item_editor_says_when_a_group_s_way_applies_instead(tmp_path):
         tab.edit(yt)
         assert tab.info.cget("text") == ("Also in groups: Evening, Other (edit those in the Groups tab) - when "
                                          "Evening blocks it, that group's way of blocking applies")
+    finally:
+        root.destroy()
+
+
+# ---------------------------------------------------------------- a member app's own way (T3)
+
+def test_an_app_member_s_own_way_is_instead_of_the_group_s_and_defaults_to_it(tmp_path):
+    db = Database(tmp_path / "t.db")
+    _yt, game, _gid = _setup(db, app_block="close", member_blocks={"game": "minimize"})
+    assert _way(db, game) == "minimize"                       # a game only minimised, the rest of the group closed
+    assert db.list_groups()[0]["member_blocks"] == {game: "minimize"}
+    item = {"id": 1, "item_type": "app", "block_type": "close"}
+    group = {"app_block": "internet", "member_blocks": {1: "minimize,internet"}}
+    assert block_method.in_group(item, group) == "minimize,internet"
+    assert block_method.in_group(item, group, own=False) == "internet"      # no own way: the group's
+    assert block_method.in_group(item, {"app_block": "internet"}) == "internet"
+    assert block_method.in_group(item, {"app_block": None, "member_blocks": {1: "internet"}}) == "internet"
+    assert block_method.in_group(item, {}) == "close"         # an old group without the field
+
+
+def test_an_old_group_without_the_field_loads_and_blocks_as_before(tmp_path):
+    db = Database(tmp_path / "t.db")
+    _yt, game, gid = _setup(db, app_block="internet")
+    db.conn.execute("UPDATE block_groups SET member_blocks = NULL")
+    db.conn.commit()
+    assert db.list_groups()[0]["member_blocks"] == {} and _way(db, game) == "internet"
+
+
+def test_saved_app_extras_keep_blocking_the_same_after_the_upgrade(tmp_path):
+    """Schema 8: what an app added on top of its group's way is stored as the merged way."""
+    path = tmp_path / "t.db"
+    db = Database(path)
+    yt, game, gid = _setup(db, app_block="close", member_blocks={"game": "internet", "yt": "close"})
+    db.conn.execute("UPDATE block_groups SET member_blocks = ?",
+                    (json.dumps({str(game): "internet", str(yt): "close"}),))   # (old meaning: on top)
+    db.conn.execute("PRAGMA user_version=7")
+    db.conn.commit()
+    db.close()
+    db = Database(path)
+    assert db.list_groups()[0]["member_blocks"] == {game: "close,internet", yt: "close"}
+    assert _way(db, game) == "close,internet" and _way(db, yt) == "dns,close"
+    db.close()
+    assert Database(path).list_groups()[0]["member_blocks"][game] == "close,internet"     # only once
+
+
+def test_a_game_with_its_own_way_is_minimised_while_the_group_closes_the_rest(world):
+    """End to end: the group closes its apps, the game's own way (minimise) keeps it running; the other app closes."""
+    w = world(at(FRIDAY, "22:00"))
+    game_item = add_game(w, [], block_type="close")
+    w.gui.add_group("Games", [block_during("21:00", "05:00")], {game_item: {}},
+                    {"app_block": "close", "member_blocks": {game_item: "minimize"}})
+    w.step()
+    game = w.launch("hollowgame.exe", BOOT)
+    w.run(1)
+    assert w.alive(game) and "hollowgame.exe" not in w.enforcer.firewalled   # not closed, not cut
+    assert w.enforcer.app_blocks["hollowgame.exe"]["item"]["block_type"] == "minimize"   # the tray minimises it
+
+
+def test_a_member_s_own_way_cuts_the_internet_while_the_group_closes(world):
+    w = world(at(FRIDAY, "22:00"))
+    game_item = add_game(w, [], block_type="close")
+    w.gui.add_group("Games", [block_during("21:00", "05:00")], {game_item: {}},
+                    {"app_block": "close", "member_blocks": {game_item: "internet"}})
+    w.step()
+    game = w.launch("hollowgame.exe", BOOT)
+    w.run(1)
+    assert w.alive(game) and "hollowgame.exe" in w.enforcer.firewalled
+
+
+def test_a_program_file_with_an_own_way_is_closed_or_minimised_only(jworld, monkeypatch):
+    added = []
+    w = jworld(at(FRIDAY, "22:30"))
+    monkeypatch.setattr(service.firewall, "add", lambda exe, path: added.append(exe) or True)
+    jar = add_jar(w, [])
+    w.gui.add_group("Games", [block_during("22:00", "23:00")], {jar: {}},
+                    {"app_block": "internet", "member_blocks": {jar: "close,internet"}})
+    game = java(w, r"C:\Games\Block Game\game.jar")
+    w.run(0.5)
+    assert added == [] and not w.alive(game)                  # "close,internet" -> closed only
+
+
+def _g(app=None, members=None):
+    return {"id": 7, "name": "Evening", "rules": [{"rule_type": "permanent"}], "members": {2: {}},
+            "app_block": app, "site_block": None, "member_blocks": members or {}}
+
+
+@pytest.mark.parametrize("old, new, looser", [
+    (_g(app="close"), _g(app="close", members={2: "minimize"}), True),                # lighter own way
+    (_g(app="minimize"), _g(app="minimize", members={2: "close"}), False),           # tighter own way
+    (_g(app="close", members={2: "minimize"}), _g(app="close", members={2: "close"}), False),
+    (_g(app="close", members={2: "minimize"}), _g(app="close", members={2: "minimize"}), False),   # equal
+    (_g(app="close", members={2: "minimize"}), _g(app="close"), False),              # own removed, group's closes
+    (_g(app="minimize", members={2: "close"}), _g(app="minimize"), True),            # own removed, group's lighter
+    (_g(app="close", members={2: "close,internet"}), _g(app="close", members={2: "close"}), True),
+    (_g(app="close", members={2: "close"}), _g(app="close", members={2: "close,internet"}), False),
+])
+def test_an_own_app_way_looser_than_it_had_needs_the_challenge(old, new, looser):
+    items = _items()
+    assert ab.group_looser(old, new, datetime(2026, 10, 2, 12), items, items) is looser
+
+
+def test_an_own_way_moved_to_the_challenge_in_the_draft(tmp_path):
+    db = Database(tmp_path / "t.db")
+    yt, game, gid = _setup(db, app_block="close")
+    d = Draft(db)
+    d.db.set_setting("ui.autosave", "0")
+    g = d.groups[gid]
+    d.set_group(gid, g["name"], g["rules"], g["members"],
+                {"app_block": "close", "site_block": g["site_block"], "member_blocks": {game: "minimize"}})
+    assert d.loosening() == ["Loosen group Evening"]
+
+
+def test_the_member_window_offers_a_program_file_only_close_and_minimise():
+    from test_overlay_screens import _tk_root
+    ctk, root = _tk_root()
+    try:
+        from gui.groups import WayBoxes
+        boxes = WayBoxes(root, "app", hosted=True)
+        boxes.set("close,internet,background")
+        assert boxes.value() == "close"
+        assert boxes.boxes["internet"].cget("state") == "disabled"
+        assert boxes.boxes["background"].cget("state") == "disabled"
+        boxes.set("minimize,internet")
+        assert boxes.value() == "minimize"
+        plain = WayBoxes(root, "app")
+        plain.set("minimize,internet")
+        assert plain.value() == "minimize,internet"
+    finally:
+        root.destroy()
+
+
+def test_the_member_window_gives_an_app_its_own_way_and_a_site_only_more(monkeypatch):
+    from test_overlay_screens import _tk_root
+    ctk, root = _tk_root()
+    try:
+        import gui.groups
+        from gui.groups import CustomizeMember
+        monkeypatch.setattr(gui.groups, "CUSTOMIZABLE", ())      # (the rule editors need the real theme)
+        got = []
+        game = {"item_id": 2, "name": "Game", "item": _items()[2], "overrides": {}, "way": None}
+        win = CustomizeMember(root, game, [], lambda o, w: got.append(w), "close")
+        win._ok()
+        assert got == [None]                                  # switch off: the group's way
+        win = CustomizeMember(root, game, [], lambda o, w: got.append(w), "close")
+        win.own.select()
+        win.way.set("minimize")
+        win._ok()
+        assert got[-1] == "minimize"
+        jar = {"item_id": 3, "name": "g", "item": {**_items()[2], "target": "game.jar"}, "overrides": {},
+               "way": "close,internet"}
+        win = CustomizeMember(root, jar, [], lambda o, w: got.append(w), "internet")
+        assert win.way.hosted and win.way.value() == "close"
+        site = {"item_id": 1, "name": "YT", "item": _items()[1], "overrides": {}, "way": None}
+        win = CustomizeMember(root, site, [], lambda o, w: got.append(w), "dns")
+        assert win.own is None
     finally:
         root.destroy()

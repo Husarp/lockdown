@@ -10,7 +10,7 @@ from datetime import datetime
 import customtkinter as ctk
 
 import block_method
-from blocker.apps import make_block_type
+from blocker.apps import exe_name, is_hosted, make_block_type
 from blocker.site_block import make_site_block_type
 from blocker.site_block import text as site_block_text
 from gui import icons, theme
@@ -46,9 +46,9 @@ class WayBoxes(ctk.CTkFrame):
     that already apply (the group's, in a member's window) - shown ticked and greyed, since a member can only add
     to the group's way, never take from it (0.84.11)."""
 
-    def __init__(self, master, kind: str, locked: set[str] = frozenset(), on_change=None):
+    def __init__(self, master, kind: str, locked: set[str] = frozenset(), on_change=None, hosted: bool = False):
         super().__init__(master, fg_color="transparent")
-        self.kind, self.locked, self.on_change = kind, set(locked), on_change
+        self.kind, self.locked, self.on_change, self.hosted = kind, set(locked), on_change, hosted
         self.boxes = TargetPicker._boxes(self, SITE_ACTIONS if kind == "site" else ACTIONS, self._ticked)
         for flag in self.locked & set(self.boxes):
             self.boxes[flag].select()
@@ -58,6 +58,8 @@ class WayBoxes(ctk.CTkFrame):
     def set(self, block_type: str | None):
         """Tick what `block_type` says (None: nothing of its own ticked)."""
         flags = block_method.flags(self.kind, block_type) if block_type else set()
+        if self.hosted:
+            flags = flags - {"internet", "background"}
         for flag, box in self.boxes.items():
             if flag not in self.locked:
                 box.select() if flag in flags else box.deselect()
@@ -83,9 +85,12 @@ class WayBoxes(ctk.CTkFrame):
                 self.boxes[weaker].deselect()
             self.boxes[weaker].configure(state="disabled" if closing else "normal")
         if self.kind == "app" and "background" not in self.locked:
-            if not closing:
+            if not closing or self.hosted:
                 self.boxes["background"].deselect()
-            self.boxes["background"].configure(state="normal" if closing else "disabled")
+            self.boxes["background"].configure(state="normal" if closing and not self.hosted else "disabled")
+        if self.hosted:   # a program file (game.jar, a script) is closed or minimised only (apps.hosted_way)
+            self.boxes["internet"].deselect()
+            self.boxes["internet"].configure(state="disabled")
 
     def value(self) -> str | None:
         """The ticked flags that aren't locked (None: none). Apps need close, minimize or cut internet - unless
@@ -152,21 +157,43 @@ class CustomizeMember(ctk.CTkToplevel):
                 custom.select()
                 editor.pack(anchor="w", padx=12, pady=(0, 10))
             self.parts[t] = (custom, editor)
-        # how it is blocked: the group's way always applies (greyed), this member can only add to it
         kind = block_method.kind(member["item"])
         base = group_way if group_way is not None else member["item"].get("block_type")
         box = ctk.CTkFrame(body)
         box.pack(fill="x", pady=6)
         ctk.CTkLabel(box, text="How this member is blocked", font=theme.semi(13)).pack(anchor="w", padx=12,
                                                                                        pady=(10, 0))
-        ctk.CTkLabel(box, text="Greyed: the group's way, which always applies. Tick more to make it stricter for "
-                               "this member only." if group_way is not None else
-                               "The group hasn't chosen, so it is blocked the way it was set when it was added "
-                               "(greyed). Tick more to make it stricter in this group.",
-                     text_color=MUTED, wraplength=820, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
-        self.way = WayBoxes(box, kind, block_method.flags(kind, base))
-        self.way.set(member.get("way"))
-        self.way.pack(anchor="w", padx=12, pady=(0, 10))
+        self.own = None
+        if kind == "app":
+            # an app can have its own way instead of the group's - even a lighter one (e.g. a game only minimised
+            # to save and quit); a lighter way than it has now needs the Anti-Bypass challenge when saving
+            hosted = is_hosted(exe_name(member["item"].get("target") or ""))
+            ctk.CTkLabel(box, text="Off: it is blocked the way the group does it" + ("" if group_way is not None else
+                                   " (the group hasn't chosen: the way it was set when it was added)") +
+                                   ". On: this way instead of the group's."
+                                   + (" A program file is closed or minimised only." if hosted else ""),
+                         text_color=MUTED, wraplength=820, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
+            self.own = ctk.CTkSwitch(box, text="Its own way")
+            self.own.pack(anchor="w", padx=12)
+            self.way = WayBoxes(box, kind, hosted=hosted)
+            self.way.set(member.get("way") or base)
+            self.own.configure(command=lambda: self.way.pack(anchor="w", padx=12, pady=(4, 10)) if self.own.get()
+                               else self.way.pack_forget())
+            if member.get("way"):
+                self.own.select()
+                self.way.pack(anchor="w", padx=12, pady=(4, 10))
+            else:
+                ctk.CTkFrame(box, height=8, fg_color="transparent").pack()
+        else:
+            # a site: the group's way always applies (greyed), this member can only add to it
+            ctk.CTkLabel(box, text="Greyed: the group's way, which always applies. Tick more to make it stricter "
+                                   "for this member only." if group_way is not None else
+                                   "The group hasn't chosen, so it is blocked the way it was set when it was added "
+                                   "(greyed). Tick more to make it stricter in this group.",
+                         text_color=MUTED, wraplength=820, justify="left").pack(anchor="w", padx=12, pady=(0, 4))
+            self.way = WayBoxes(box, kind, block_method.flags(kind, base))
+            self.way.set(member.get("way"))
+            self.way.pack(anchor="w", padx=12, pady=(0, 10))
         self.error = ctk.CTkLabel(body, text="", text_color=ERROR)
         self.error.pack(anchor="w")
         buttons = ctk.CTkFrame(self, fg_color="transparent")
@@ -181,8 +208,14 @@ class CustomizeMember(ctk.CTkToplevel):
         except ValueError as e:
             self.error.configure(text=str(e))
             return
+        way = self.way.value()
+        if self.own is not None:
+            way = way if self.own.get() else None
+            if self.own.get() and not way:
+                self.error.configure(text="Tick Close app, Minimize or Block internet for its own way.")
+                return
         self._close()
-        self.on_done(overrides, self.way.value())
+        self.on_done(overrides, way)
 
     def _close(self):
         self.grab_release()
@@ -325,12 +358,12 @@ class GroupEditor(ctk.CTkFrame):
                                  text_color=theme.TEXT, font=theme.semi(12), command=lambda m=m: self._customize(m))
             name.pack(side="left", padx=(4, 0))
             custom = bool(m["overrides"]) or bool(m.get("way"))
-            ctk.CTkLabel(chip, text="+ extra limits" if custom else "group rules", font=theme.body(10),
+            ctk.CTkLabel(chip, text=("own way" if not m["overrides"] else "+ extra limits") if custom else "group rules", font=theme.body(10),
                          text_color=theme.ACCENT if custom else MUTED).pack(side="left", padx=(2, 4))
             ctk.CTkButton(chip, text="×", width=22, height=22, fg_color="transparent", hover_color=theme.BORDER,
                           text_color=MUTED, command=lambda m=m: self._remove_member(m)).pack(side="left", padx=(0, 4))
-        ctk.CTkLabel(self.members_box, text="Click a member to give it extra limits - or a stricter way of being "
-                                            "blocked - on top of the group's.",
+        ctk.CTkLabel(self.members_box, text="Click a member to give it extra limits on top of the group's - or "
+                                            "its own way of being blocked.",
                      text_color=MUTED, font=theme.body(11)).pack(anchor="w", pady=(2, 0))
 
     def _customize(self, member):

@@ -81,7 +81,7 @@ def test_an_older_database_gets_the_tier_column(tmp_path):
     con.commit()
     con.close()
     db = Database(path)
-    assert SCHEMA_VERSION == 7 and db.conn.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     [old] = db.unlocks_since(at(0, 0))
     assert old["tier"] is None and old["item_ids"] == [1] and emergency.tier_of(old) == "t1"
     assert emergency.uses_left(db, at(0, 12)) == (2, 3, at(7, 0))

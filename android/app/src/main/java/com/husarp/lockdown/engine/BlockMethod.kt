@@ -13,7 +13,9 @@ package com.husarp.lockdown.engine
  *
  * Apps on Android: "close" (the notice, then the home screen - what an app's empty way means) or "grey" (it stays
  * open, but the screen goes grey while it's in front). Closing covers greying. A group's "How member apps are
- * blocked" ([Group.appBlock], PC app_block) and a member's own in it work as the sites' do.
+ * blocked" ([Group.appBlock], PC app_block) works as the sites' does, but a member app's own way in it REPLACES the
+ * group's (PC schema 8): e.g. one app only greyed while the group closes. Its way here is its own if it has one, else
+ * the group's; a lighter one than it had is the Anti-Bypass challenge ([waysLooser] compares the effective ways).
  */
 object BlockMethod {
     private val ORDER = listOf("dns", "back", "close")
@@ -54,15 +56,16 @@ object BlockMethod {
     /** Some app or group greys apps (so the grayscale permission matters). */
     fun greyUsed(items: List<Item>, groups: List<Group>): Boolean =
         items.any { it.type == ItemType.APP && GREY in appFlags(it.blockType) } ||
-            groups.any { g -> GREY in appFlags(g.appBlock ?: "close") }
+            groups.any { g -> GREY in appFlags(g.appBlock ?: "close") || g.memberBlocks.any { (id, w) -> GREY in appFlags(w) && items.any { it.id == id && it.type == ItemType.APP } } }
 
     private fun mergeFor(type: ItemType, ways: Array<out String?>) = if (type == ItemType.SITE) merge(*ways) else mergeApp(*ways)
 
-    /** How [group] blocks this member: the group's way for its kind (else the member's own setting) plus, with
-     *  [own], what the member adds on top in this group. */
+    /** How [group] blocks this member: the group's way for its kind (else the member's own setting). With [own], a
+     *  member app's own way in this group instead of it, and a site's own on top. */
     fun inGroup(item: Item, group: Group, own: Boolean = true): String {
         val base = (if (item.type == ItemType.SITE) group.siteBlock else group.appBlock) ?: item.blockType
         val extra = if (own) group.memberBlocks[item.id] else null
+        if (extra != null && item.type == ItemType.APP) return extra
         return if (extra != null) mergeFor(item.type, arrayOf(base, extra)) else base
     }
 

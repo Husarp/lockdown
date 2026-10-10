@@ -5,6 +5,10 @@ load / close the tab / go back - the same flags as an item's own ("block_type", 
 A member may add to that in its extra-limits window, and only add: its own choice is merged ON TOP of the group's,
 like its extra rules (0.84.3), so it can make the member stricter, never weaker.
 
+An APP member is different (schema 8): the way it is given in the group REPLACES the group's - e.g. a game only
+minimised to save and quit while the rest of the group is closed. Its effective way is its own if it has one, else
+the group's; looser than before is the Anti-Bypass challenge (antibypass.ways_looser compares effective ways).
+
 - A block by the item's own rules: the item's own way, as always.
 - A block by a group (its rules or a member's extra rule in it): the group's way for that kind + the member's own.
   A group that hasn't chosen (every group before 0.84.11) blocks each member the way the member is set itself -
@@ -57,7 +61,7 @@ def group_way(group: dict, k: str) -> str | None:
 
 
 def member_own(group: dict, item_id) -> str | None:
-    """What the member adds in this group (None: nothing)."""
+    """What the member adds in this group - for an app, the way it has instead of the group's (None: nothing)."""
     return (group.get("member_blocks") or {}).get(item_id)
 
 
@@ -68,6 +72,8 @@ def in_group(item: dict, group: dict, own: bool = True) -> str | None:
     base = group_way(group, k)
     base = base if base is not None else item.get("block_type")
     extra = member_own(group, item["id"]) if own else None
+    if extra and k == "app":
+        return extra          # an app's own way replaces the group's
     return merge(k, base, extra) if extra else base
 
 

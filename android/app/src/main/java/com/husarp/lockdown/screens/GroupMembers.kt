@@ -88,6 +88,7 @@ internal fun groupSentence(g: Group, members: Int): String {
 
 /** One member in its group: what applies to it, its extra limits on top of the group's, how it's blocked here, and
  *  Remove (removing loosens: the group's Save asks for the challenge). Edits go into the group's draft. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun GroupMemberPage(draft: Group, m: Item, onChange: (Group) -> Unit, onRemove: () -> Unit, onBack: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -137,12 +138,30 @@ internal fun GroupMemberPage(draft: Group, m: Item, onChange: (Group) -> Unit, o
                     val add = f - base
                     onChange(draft.copy(memberBlocks = if (add.isEmpty()) draft.memberBlocks - m.id else draft.memberBlocks + (m.id to add.joinToString(","))))
                 }
-            } else if (BlockMethod.greyOnly(BlockMethod.inGroup(m, draft, own = false))) {
-                // the group greys it: this member can be closed instead (only more, never less)
+            } else {
+                // an app: the group's way, or its own instead (even a lighter one - e.g. only greyed while the group
+                // closes; the group's Save asks for the challenge for that)
+                val own = draft.memberBlocks[m.id]
+                val groupGrey = BlockMethod.greyOnly(BlockMethod.inGroup(m, draft, own = false))
+                val ownGrey = own != null && BlockMethod.greyOnly(own)
                 SectionLabel("How ${m.name} is blocked in this group")
-                AppWayChips(grey = draft.memberBlocks[m.id] == null) { grey ->
-                    onChange(draft.copy(memberBlocks = if (grey) draft.memberBlocks - m.id else draft.memberBlocks + (m.id to "close")))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val look = Kinds.way(if (groupGrey) "grey" else "close", site = false)
+                    Chip("Group's way (${if (groupGrey) "grey" else "close"})", own == null, icon = look.icon, hue = look.hue) {
+                        onChange(draft.copy(memberBlocks = draft.memberBlocks - m.id))
+                    }
+                    val close = Kinds.way("close", site = false)
+                    Chip("Close it", own != null && !ownGrey, icon = close.icon, hue = close.hue) {
+                        onChange(draft.copy(memberBlocks = draft.memberBlocks + (m.id to "close")))
+                    }
+                    Chip("Grey it", ownGrey, icon = Kinds.GREY.icon, hue = Kinds.GREY.hue) {
+                        onChange(draft.copy(memberBlocks = draft.memberBlocks + (m.id to BlockMethod.GREY)))
+                    }
                 }
+                Text(if (own == null) "${m.name} is blocked the way the group does it." else appWayText(ownGrey) + " Only in this group.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                if (own != null) Text("A lighter way than it has now asks for the challenge when you save the group.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
 
             TextButton(onClick = onRemove, colors = ButtonDefaults.textButtonColors(contentColor = cs.error)) {

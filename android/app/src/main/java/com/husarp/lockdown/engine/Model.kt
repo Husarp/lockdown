@@ -72,7 +72,8 @@ data class Group(
     val siteBlock: String? = null,
     // how the group blocks its member apps: "close" / "grey" (BlockMethod); null = each app its own way
     val appBlock: String? = null,
-    // what a member adds on top of that, in this group: itemId -> flags (only ever more, never less)
+    // a member app's own way in this group, INSTEAD of the group's ("close" / "grey"; may be lighter: the challenge); a member
+    // site's extra flags on top of the group's (only ever more). itemId -> way; absent = the group's way
     val memberBlocks: Map<String, String> = emptyMap(),
     // looks only (ui/GroupLook.kt): a picked icon key and colour (a Hue name); null = chosen from the name / id
     val icon: String? = null,

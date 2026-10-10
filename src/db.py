@@ -275,9 +275,10 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 7   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 8   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
 #                      6: a daily time limit per weekday (0.84.12); 7: emergency_unlocks.tier (emergency kinds)
+#                      8: a member app's own way replaces the group's (was: added on top) - same schema
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -365,7 +366,8 @@ class Database:
     def _migrate(self):
         """Create / upgrade the schema - only when PRAGMA user_version says this database hasn't had it yet, so a
         normal open is two PRAGMAs instead of ~20 queries (it is opened four or more times per session)."""
-        if self.conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        was = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if was >= SCHEMA_VERSION:
             return
         self.conn.executescript(SCHEMA)
         self.conn.execute("BEGIN IMMEDIATE")   # the service may be opening it at the same moment
@@ -380,6 +382,8 @@ class Database:
                 self.conn.execute("DROP TABLE site_usage")
             for statement in INDEXES:
                 self.conn.execute(statement)
+            if was < 8:
+                self._own_app_ways()
             self.conn.commit()
         except BaseException:
             self.conn.rollback()
@@ -393,6 +397,23 @@ class Database:
         self.conn.execute("ANALYZE")
         self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.conn.commit()
+
+    def _own_app_ways(self):
+        """One-off (schema 8): a member app's own way used to be added on top of the group's (or of its own); it is
+        now the way it is blocked with, so each saved one becomes the merged way - blocked exactly as before."""
+        import block_method
+        items = {r["id"]: r["block_type"] for r in self.conn.execute(
+            "SELECT id, block_type FROM blocked_items WHERE item_type != 'site'")}
+        for g in self.conn.execute("SELECT id, app_block, member_blocks FROM block_groups "
+                                   "WHERE member_blocks IS NOT NULL").fetchall():
+            try:
+                ways = json.loads(g["member_blocks"] or "{}")
+            except ValueError:
+                continue
+            new = {i: block_method.merge("app", g["app_block"] or items[int(i)], w) if int(i) in items and w else w
+                   for i, w in ways.items()}
+            if new != ways:
+                self.conn.execute("UPDATE block_groups SET member_blocks = ? WHERE id = ?", (json.dumps(new), g["id"]))
 
     def close(self):
         self.flush()

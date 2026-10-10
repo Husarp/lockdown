@@ -1,6 +1,7 @@
 # Changelog — Lockdown Mobile
 
 ## Unreleased
+- **A member app can have its own way inside a group.** Open a member in the group editor: "How it is blocked in this group" is the group's way, Close it or Grey it for that app only (e.g. a game only greyed while the group closes). The own way replaces the group's; a lighter one than it had, or removing one that falls back to a lighter group way, asks for the challenge when you save the group; tighter or equal is free. Sites are unchanged. Tests: new `MemberWayTest`.
 - **Island time in Insights.** Top apps now include what you use in Island: the Island copy sends its per-app time over the link, merged by app (an app only in Island shows as "Name (Island)"). Needs Lockdown in Island updated too; an older one just adds nothing.
 - **Extending hours is free.** Moving a block's hours later (22:00-00:00 to 22:00-01:00), earlier or onto more days, or a block-until to a later time, no longer asks for the challenge - only hours that block less do (it treated any change to the hours as a loosening).
 - **The block notice shows once.** After OK on a blocked app, the app closing and the home screen coming up no longer bring the same notice back two more times; opening the app again later still blocks it.
