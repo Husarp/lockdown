@@ -597,7 +597,7 @@ class Enforcer:
             cached = self.cmd_cache.get(pid)
             if not cached:
                 cmd = apps.command_line(pid)
-                if cmd is None:
+                if not cmd:   # (None: gone or protected; "": not filled in yet - tried again)
                     continue
                 cached = self.cmd_cache[pid] = (name, apps.hosted_file(name, cmd) or "")
             file = apps.exe_name(cached[1])

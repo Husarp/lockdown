@@ -42,6 +42,8 @@ def test_split_command_line(cmd, args):
     ("javaw.exe", "javaw -JAR C:/Games/game.jar", r"C:\Games\game.jar"),
     ("javaw.exe", r"javaw -cp lib\a.jar;game.jar com.game.Main", None),
     ("javaw.exe", "javaw -jar", None),
+    ("javaw.exe", "javaw -cp lib Main -jar game.jar", None),       # after the main class: the program's own argument
+    ("javaw.exe", r"javaw -cp lib\a.jar -Xmx1G -jar game.jar", "game.jar"),
     # Python: the first argument that isn't an option; none for -c / -m
     ("python.exe", rf'"{PYTHON}" "C:\Tools\my tool.py" --fast', r"C:\Tools\my tool.py"),
     ("pythonw.exe", r"pythonw.exe -u -X utf8 -W ignore C:\x\game.pyw", r"C:\x\game.pyw"),
@@ -49,10 +51,13 @@ def test_split_command_line(cmd, args):
     ("python3.12.exe", r"python3.12.exe -B tool.py", "tool.py"),
     ("python.exe", r'python -c "import game"', None),
     ("python.exe", r"python -m http.server", None),
+    ("python.exe", r'python -uc "game.py"', None),                 # -u and -c together: a command, not a file
+    ("python.exe", r"python -X frozen_modules=off tool.py", "tool.py"),
     # cmd: the first word after /c or /k - Explorer's doubled quotes too
     ("cmd.exe", rf'{CMD} /c ""C:\Users\me\Desktop\start game.bat" "', r"C:\Users\me\Desktop\start game.bat"),
     ("cmd.exe", r'cmd.exe /d /s /c "C:\x\run.cmd" arg', r"C:\x\run.cmd"),
     ("cmd.exe", r"cmd /K start.bat", "start.bat"),
+    ("cmd.exe", r'cmd /c call "C:\x y\start.bat"', r"C:\x y\start.bat"),
     ("cmd.exe", r"cmd.exe", None),
     # PowerShell: the first .ps1 - -File, -Command "& '...'" (Run with PowerShell), a bare path (pwsh)
     ("powershell.exe", r'powershell.exe -ExecutionPolicy Bypass -File "C:\My Scripts\x.ps1" -n 1', r"C:\My Scripts\x.ps1"),
@@ -206,6 +211,16 @@ def test_an_unreadable_command_line_is_tried_again(monkeypatch):
     e.enforce_apps()
     assert e.killed == []
     cmds[10] = r"javaw -jar game.jar"          # (readable now)
+    e.enforce_apps()
+    assert e.killed == [10]
+
+
+def test_an_empty_command_line_is_not_remembered(monkeypatch):
+    procs = [(10, "javaw.exe")]
+    cmds = {10: ""}                             # (not filled in yet)
+    e = make_enforcer(monkeypatch, procs, cmds)
+    e.enforce_apps()
+    cmds[10] = r"javaw -jar game.jar"
     e.enforce_apps()
     assert e.killed == [10]
 

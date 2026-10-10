@@ -135,6 +135,10 @@ INTERPRETERS = {"java.exe": "java", "javaw.exe": "java", "py.exe": "python", "py
                 "wscript.exe": "wsh", "cscript.exe": "wsh"}
 _PYTHON = re.compile(r"pythonw?(\d+(\.\d+)*)?\.exe")   # python.exe, pythonw.exe, python3.12.exe (Store) ...
 _PS1 = re.compile(r"""'([^']+?\.ps1)'|"([^"]+?\.ps1)"|([^\s'"&;|]+?\.ps1)(?=$|[\s'";&|)])""", re.IGNORECASE)
+_PY_CLUSTER = re.compile(r"-[BdEiIOPqRsSuvVx]*[cm]")
+_CALL = re.compile(r"call\s+", re.IGNORECASE)
+JAVA_VALUE_OPTIONS = {"-cp", "-classpath", "--class-path", "-p", "--module-path", "--upgrade-module-path",
+                      "--add-modules", "--add-opens", "--add-exports", "--add-reads", "--limit-modules"}
 _CMD_SWITCH = re.compile(r'(?:^|\s)/[ckCK](?=\s|"|$)')
 PROGRAM_TYPES = (".exe", *HOSTED)
 
@@ -229,15 +233,24 @@ def hosted_file(name: str | None, cmd: str | None) -> str | None:
     found = None
     if kind == "java":
         args = split_command_line(cmd)[1:]
-        at = next((k for k, a in enumerate(args) if a.lower() == "-jar"), None)
-        found = args[at + 1] if at is not None and at + 1 < len(args) else None
+        k = 0
+        while k < len(args):   # (only the options: after the main class, "-jar" is the program's own argument)
+            a = args[k]
+            if a.lower() == "-jar":
+                found = args[k + 1] if k + 1 < len(args) else None
+                break
+            if a in JAVA_VALUE_OPTIONS:
+                k += 1
+            elif not a.startswith(("-", "@")):
+                break
+            k += 1
     elif kind == "wsh":
         found = next((a for a in split_command_line(cmd)[1:] if not a.startswith("//")), None)
     elif kind == "python":
         args, k = split_command_line(cmd)[1:], 0
         while k < len(args):
             a = args[k]
-            if a in ("-c", "-m", "-"):   # a command, a module, the standard input: no file
+            if a in ("-c", "-m", "-") or _PY_CLUSTER.fullmatch(a):   # a command, a module, stdin (-uc, -um: no file)
                 break
             if a in ("-W", "-X", "--check-hash-based-pycs"):   # (an option with its value after it)
                 k += 2
@@ -250,7 +263,7 @@ def hosted_file(name: str | None, cmd: str | None) -> str | None:
         rest = _first_arg(cmd)[1]
         switch = _CMD_SWITCH.search(rest)
         if switch:
-            rest = rest[switch.end():].strip()
+            rest = _CALL.sub("", rest[switch.end():].strip(), count=1)   # (/c call x.bat)
             if rest.startswith('""'):   # /c ""C:\x y\start.bat" args": the outer quotes go
                 rest = rest[1:]
             if rest.startswith('"'):
