@@ -22,7 +22,8 @@ import modes
 import pause
 import json
 
-from blocker.apps import PROTECTED, app_folder, exe_name, in_folder, kills, list_processes, names_of
+from blocker.apps import (PROTECTED, app_folder, exe_name, in_folder, interpreter, is_hosted, kills, list_processes,
+                          names_of)
 from blocker.hosts import normalize_host
 from blocker.site_block import title_site
 from db import Database
@@ -223,6 +224,29 @@ def owners_of(db: Database, pid: int | None, published: dict | None = None) -> f
         return frozenset()
 
 
+def pids_of(db: Database, exe: str, published: dict | None = None) -> set[int]:
+    """The processes the service says are the listed program file `exe` (game.jar runs in javaw.exe; MEMBERS_KEY) -
+    to close or minimise its windows. None for an .exe: its windows go by its name."""
+    if not is_hosted(exe):
+        return set()
+    out = set()
+    for pid, exes in (members(db) if published is None else published).items():
+        try:
+            if exe in exes:
+                out.add(int(pid))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def hosted_running(published: dict) -> set[str]:
+    """The listed program files (game.jar, tool.py ...) running now, by what the service published."""
+    try:
+        return {o for exes in published.values() for o in exes if is_hosted(o)}
+    except (TypeError, AttributeError):
+        return set()
+
+
 def site_of(url: str | None) -> str:
     try:
         return normalize_host(url) if url else ""
@@ -374,8 +398,12 @@ class UsageTracker(threading.Thread):
         others = more[2] if len(more) > 2 else ()
         for shown in (url, *(o[1] for o in others)):   # (before any database read: a lock can't lose a sighting)
             note_shown(shown)
-        published = members(db) if exe or others else {}
+        published = members(db)   # (read every tick: the program files running are launches, see below)
         owners = owners_of(db, pid, published) if exe else frozenset()
+        # a Java game / a script in front is that file, not javaw.exe / python.exe (the service reads which file
+        # an interpreter runs and publishes it with the members): its screen time, its category, its switches
+        if interpreter(exe):
+            exe = next((o for o in sorted(owners) if is_hosted(o)), exe)
         now = now_from_db(db)
         now_ts = now.timestamp()
         # Everything read from the database first, before anything is counted: a read that fails (a lock) then
@@ -386,6 +414,7 @@ class UsageTracker(threading.Thread):
         groups = db.list_groups()
         clock = db.limit_clock()
         running = running_exes() if running_exes else self.running_now({p for p in (pid, *(o[3] for o in others)) if p})
+        running = running | hosted_running(published)   # (launches of a Java game, a script)
         seconds, app_seconds = self.elapsed(db, now_ts)
         launched = running - self.running if self.running is not None else set()
         self.running = running

@@ -33,7 +33,7 @@ import keywords
 from blocker.listener import BlockListener
 from db import Database
 from monitor.usage import COUNTED_KEY, MAX_GAP_SEC, MEMBERS_KEY
-from paths import DATA_DIR, LOG_PATH
+from paths import APP_DIR, DATA_DIR, LOG_PATH
 import modes
 import pause
 from rules import counted_rules, usage_targets, visit_targets
@@ -95,6 +95,8 @@ class Enforcer:
     members: dict = {}     # pid -> sorted exes of the listed apps it is part of, other than by name (publish_members)
     published: dict | None = None
     app_items: dict = {}   # exe -> item, for every app on the list (track_families)
+    hosted: dict = {}      # pid -> the listed program file (game.jar, tool.py ...) that interpreter runs (hosted_processes)
+    cmd_cache: dict = {}   # pid -> (exe, the program file in its command line or "") - read once per process
     count_running: set | None = None       # exes running at the service's last counting pass (launches)
     paths_learned_at = float("-inf")       # (learn_paths)
     def __init__(self, db: Database):
@@ -172,10 +174,14 @@ class Enforcer:
                         dns_blocks.setdefault(h, b)
         # (by the bare exe name: a target typed as a full path is still that exe - apps.exe_name; two blocks on
         # one exe become one that does what both ask, closing winning - apps.merge_blocks)
+        # (a program file - game.jar, a script - is closed or minimised only: apps.hosted_way)
         app_blocks: dict[str, dict] = {}
         for b in all_blocks:
             exe = apps.exe_name(b["item"]["target"]) if b["item"]["item_type"] == "app" else ""
-            if exe and exe not in apps.PROTECTED:
+            if exe and apps.is_hosted(exe):
+                way = apps.hosted_way(b["item"].get("block_type"))
+                b = {**b, "item": {**b["item"], "block_type": way}} if way else None
+            if b and exe and exe not in apps.PROTECTED:
                 app_blocks[exe] = apps.merge_blocks(app_blocks.get(exe), b)
         self.app_blocks = app_blocks
         # every app on the list, blocked now or not: what it starts is followed all the time (track_families)
@@ -380,6 +386,7 @@ class Enforcer:
         alive = {pid for pid, _ppid, _name in procs}
         self.count_paths = {pid: v for pid, v in self.count_paths.items() if pid in alive}
         running = {name for _pid, _ppid, name in procs}
+        running |= {file for pid, file in self.hosted.items() if pid in alive}   # (a Java game, a script)
         launched = running - self.count_running if self.count_running is not None else set()
         self.count_running = running
         members = {exe for pid, exes in self.members.items() if pid in alive for exe in exes}
@@ -442,6 +449,7 @@ class Enforcer:
         names = {pid: name for pid, _ppid, name in procs}
         self.path_cache = {pid: v for pid, v in self.path_cache.items() if names.get(pid) == v[0]}
         self.kill_failed = frozenset(self.kill_failed & set(names))
+        self.hosted = self.hosted_processes(names)
         self.track_families(procs, names)
         owned = self.app_processes(targets, procs)
         self.enforce_background(targets, procs)
@@ -489,18 +497,23 @@ class Enforcer:
         by_name: dict[str, set[int]] = {}
         for pid, name in names.items():
             by_name.setdefault(name, set()).add(pid)
+        hosted: dict[str, set[int]] = {}
+        for pid, file in self.hosted.items():
+            hosted.setdefault(file, set()).add(pid)
         family: dict[str, dict[int, tuple[str, float | None]]] = {}
-        members: dict[int, set[str]] = {}
+        members: dict[int, set[str]] = {pid: {file} for pid, file in self.hosted.items()}   # (the tray counts by it)
         folders: dict[str, set[str]] = {}
         me = os.getpid()
         for exe, item in self.app_items.items():
             kept = {pid: v for pid, v in self.family.get(exe, {}).items() if names.get(pid) == v[0]}
-            main = set().union(*(by_name.get(n, ()) for n in apps.names_of(exe)))
+            main = set().union(*(by_name.get(n, ()) for n in apps.names_of(exe)), hosted.get(exe, ()))
             folder = apps.app_folder(item)
             if main:
                 homes = {f for pid in main if (f := apps.helper_folder(self._path(pid, names[pid])))}
                 if folder:
                     homes.add(folder)
+                if exe in hosted and (own := apps.helper_folder(item.get("app_path"))):
+                    homes.add(own)   # (what a start.bat starts from its own folder: the game it starts)
                 for pid in apps.descendants(main, procs) if homes else ():
                     name = names[pid]
                     if pid in kept or name in apps.PROTECTED or pid == me:
@@ -545,6 +558,7 @@ class Enforcer:
         folders: dict[str, str] = {}
         for exe, block in targets.items():
             mine = {pid for n in apps.names_of(exe) for pid in by_name.get(n, ())}
+            mine |= {pid for pid, file in self.hosted.items() if file == exe}
             for pid, (_name, started) in self.family.get(exe, {}).items():
                 now_started = apps.start_time(pid) if started is not None else None
                 if started is None or now_started is None or abs(now_started - started) < 1:
@@ -559,7 +573,37 @@ class Enforcer:
                     exe = next((folders[f] for f in apps.parents_of(self._path(pid, name)) if f in folders), None)
                     if exe:
                         owned[pid] = exe
-        return {pid: exe for pid, exe in owned.items() if pid != me and names[pid] not in apps.PROTECTED}
+        # (python.exe is never closed - Lockdown may run on it - unless it runs a script you listed)
+        return {pid: exe for pid, exe in owned.items()
+                if pid != me and (names[pid] not in apps.PROTECTED or self.hosted.get(pid) == exe)}
+
+    def hosted_processes(self, names: dict[int, str]) -> dict[int, str]:
+        """pid -> the listed program file it runs, for every interpreter process running one: javaw.exe -jar
+        game.jar is game.jar, python tool.py is tool.py, cmd.exe /c start.bat is start.bat (apps.hosted_file) -
+        by the file's name, wherever it is; other Java / Python programs are not. Each process's command line is
+        read once (only interpreters', only while a program file is on the list); one that can't be read is tried
+        again on the next pass. Never Lockdown's own (run from source it is python too): not this process, nor a
+        script or an interpreter in Lockdown's folder."""
+        self.cmd_cache = {pid: v for pid, v in self.cmd_cache.items() if names.get(pid) == v[0]}
+        files = {exe for exe in self.app_items if apps.is_hosted(exe)}
+        if not files:
+            return {}
+        kinds = {apps.hosted_kind(f) for f in files}
+        me, own = os.getpid(), str(APP_DIR).lower()
+        out = {}
+        for pid, name in names.items():
+            if pid == me or apps.interpreter(name) not in kinds:
+                continue
+            cached = self.cmd_cache.get(pid)
+            if not cached:
+                cmd = apps.command_line(pid)
+                if cmd is None:
+                    continue
+                cached = self.cmd_cache[pid] = (name, apps.hosted_file(name, cmd) or "")
+            file = apps.exe_name(cached[1])
+            if file in files and not apps.in_folder(cached[1], own) and not apps.in_folder(self._path(pid, name), own):
+                out[pid] = file
+        return out
 
     def _path(self, pid: int, name: str) -> str:
         """Lowercase exe path of a process ('' if unknown), looked up once per process."""

@@ -259,6 +259,9 @@ class Api:
             targets = (rule.get("target") or "").split()
             engine_rules = _rules_from_draft(rule)
             block_type = _block_type_from_draft(rule)
+            if item_type == "app" and block_type == "internet" and any(apps.is_hosted(t) for t in targets):
+                return {"ok": False, "error": "A Java game or a script can be closed or minimised, not cut off the "
+                                              "internet: that would cut every Java / Python program."}
             if is_edit:
                 db.update_item(rid, rule.get("n") or "", targets, None, engine_rules,
                                block_type=block_type, disabled=not rule.get("enabled", True))

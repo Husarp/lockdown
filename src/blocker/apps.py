@@ -2,6 +2,7 @@
 import ctypes
 import functools
 import os
+import re
 from ctypes import wintypes
 from pathlib import PureWindowsPath
 
@@ -123,6 +124,163 @@ def typed_path(target: str | None) -> str | None:
     return text if "\\" in text or "/" in text else None
 
 
+# ---------- program files run by an interpreter (a Java game, a script) ----------
+# A .jar runs as javaw.exe -jar game.jar, a script as python / cmd / powershell / wscript with the file in its
+# command line: the process is the interpreter, which other programs use too. Such an item (target "game.jar") is
+# the interpreter process whose command line names that file (hosted_file) - by its file name, wherever it is.
+HOSTED = {".jar": "java", ".py": "python", ".pyw": "python", ".bat": "cmd", ".cmd": "cmd", ".ps1": "powershell",
+          ".vbs": "wsh", ".vbe": "wsh", ".js": "wsh", ".jse": "wsh", ".wsf": "wsh"}
+INTERPRETERS = {"java.exe": "java", "javaw.exe": "java", "py.exe": "python", "pyw.exe": "python",
+                "cmd.exe": "cmd", "powershell.exe": "powershell", "pwsh.exe": "powershell",
+                "wscript.exe": "wsh", "cscript.exe": "wsh"}
+_PYTHON = re.compile(r"pythonw?(\d+(\.\d+)*)?\.exe")   # python.exe, pythonw.exe, python3.12.exe (Store) ...
+_PS1 = re.compile(r"""'([^']+?\.ps1)'|"([^"]+?\.ps1)"|([^\s'"&;|]+?\.ps1)(?=$|[\s'";&|)])""", re.IGNORECASE)
+_CMD_SWITCH = re.compile(r'(?:^|\s)/[ckCK](?=\s|"|$)')
+PROGRAM_TYPES = (".exe", *HOSTED)
+
+
+def hosted_kind(target: str | None) -> str | None:
+    """The interpreter family ("java", "python", "cmd", "powershell", "wsh") that runs this program file; None
+    for an .exe (or anything else)."""
+    return HOSTED.get(PureWindowsPath(exe_name(target)).suffix)
+
+
+def is_hosted(target: str | None) -> bool:
+    return hosted_kind(target) is not None
+
+
+def interpreter(name: str | None) -> str | None:
+    """The family of an interpreter's exe name ("javaw.exe" -> "java"), or None."""
+    name = (name or "").lower()
+    return INTERPRETERS.get(name) or ("python" if _PYTHON.fullmatch(name) else None)
+
+
+def hosted_way(block_type: str | None) -> str | None:
+    """How a program file is blocked: closed or minimised only. Cutting the internet would cut it for javaw.exe /
+    python.exe - every Java / Python program - and "its background processes" would be whatever runs from its
+    folder. None when nothing is left (a group that only cuts its members' internet)."""
+    flags = block_flags(block_type) - {"internet", "background"}
+    return make_block_type(flags) if flags else None
+
+
+def _first_arg(cmd: str) -> tuple[str, str]:
+    """(the program in a command line, the rest of it). The program is read as Windows does: up to the closing
+    quote, or to the first space - no escapes."""
+    cmd = cmd.lstrip(" \t")
+    if cmd.startswith('"'):
+        end = cmd.find('"', 1)
+        return (cmd[1:end], cmd[end + 1:]) if end > 0 else (cmd[1:], "")
+    parts = re.split(r"[ \t]", cmd, maxsplit=1)
+    return parts[0], parts[1] if len(parts) > 1 else ""
+
+
+def split_command_line(cmd: str | None) -> list[str]:
+    """A Windows command line split into its arguments, as programs see them (CommandLineToArgvW's rules: quotes
+    group, \\" is a quote, 2n backslashes before a quote are n, "" inside quotes is a quote)."""
+    first, rest = _first_arg(cmd or "")
+    if not first and not rest.strip():
+        return []
+    args, i, n = [first], 0, len(rest)
+    while True:
+        while i < n and rest[i] in " \t":
+            i += 1
+        if i >= n:
+            return args
+        arg, quoted = [], False
+        while i < n and (quoted or rest[i] not in " \t"):
+            c = rest[i]
+            if c == "\\":
+                j = i
+                while j < n and rest[j] == "\\":
+                    j += 1
+                if j < n and rest[j] == '"':
+                    arg.append("\\" * ((j - i) // 2))
+                    if (j - i) % 2:   # an odd one escapes the quote
+                        arg.append('"')
+                        j += 1
+                else:
+                    arg.append("\\" * (j - i))
+                i = j
+            elif c == '"':
+                if quoted and i + 1 < n and rest[i + 1] == '"':
+                    arg.append('"')
+                    i += 2
+                else:
+                    quoted = not quoted
+                    i += 1
+            else:
+                arg.append(c)
+                i += 1
+        args.append("".join(arg))
+
+
+def hosted_file(name: str | None, cmd: str | None) -> str | None:
+    """The program file an interpreter process (exe `name`) runs, from its command line - as written there (a
+    full path or just a file name; quotes removed, / turned into \\) - or None:
+    - java / javaw: the file after -jar (java -Xmx2G -jar "C:\\Games\\game.jar" nogui);
+    - python / pythonw / py: the first argument that isn't an option (none for -c / -m);
+    - cmd: the first word after /c or /k (cmd.exe /c ""C:\\x\\start.bat" " is how Explorer starts a .bat);
+    - powershell / pwsh: the first .ps1 in it (-File x.ps1, -Command "& 'x.ps1'", Run with PowerShell);
+    - wscript / cscript: the first argument not starting with //.
+    Not seen: java -cp with a main class, python -m, a script started without its extension, an encoded command."""
+    kind = interpreter(name)
+    if not kind or not cmd:
+        return None
+    found = None
+    if kind == "java":
+        args = split_command_line(cmd)[1:]
+        at = next((k for k, a in enumerate(args) if a.lower() == "-jar"), None)
+        found = args[at + 1] if at is not None and at + 1 < len(args) else None
+    elif kind == "wsh":
+        found = next((a for a in split_command_line(cmd)[1:] if not a.startswith("//")), None)
+    elif kind == "python":
+        args, k = split_command_line(cmd)[1:], 0
+        while k < len(args):
+            a = args[k]
+            if a in ("-c", "-m", "-"):   # a command, a module, the standard input: no file
+                break
+            if a in ("-W", "-X", "--check-hash-based-pycs"):   # (an option with its value after it)
+                k += 2
+                continue
+            if not a.startswith("-"):
+                found = a
+                break
+            k += 1
+    elif kind == "cmd":
+        rest = _first_arg(cmd)[1]
+        switch = _CMD_SWITCH.search(rest)
+        if switch:
+            rest = rest[switch.end():].strip()
+            if rest.startswith('""'):   # /c ""C:\x y\start.bat" args": the outer quotes go
+                rest = rest[1:]
+            if rest.startswith('"'):
+                end = rest.find('"', 1)
+                found = rest[1:end] if end > 0 else rest[1:]
+            elif rest:
+                found = rest.split()[0]
+    else:   # powershell
+        match = _PS1.search(_first_arg(cmd)[1])
+        found = next((g for g in match.groups() if g), None) if match else None
+    found = (found or "").strip().strip('"').strip().replace("/", "\\")
+    return found or None
+
+
+def shortcut_program(target: str | None, arguments: str | None = "", workdir: str | None = "") -> str | None:
+    """What a shortcut (.lnk) starts, for blocking: the program file its interpreter runs (javaw.exe with
+    -jar game.jar -> <its working folder>\\game.jar), else its target - an .exe or a program file. None when it
+    starts something else (a document, a folder, a web address)."""
+    target = (target or "").strip().strip('"')
+    name = exe_name(target)
+    if interpreter(name):
+        file = hosted_file(name, f'"{target}" {arguments or ""}')
+        if file and is_hosted(file):
+            if workdir and not PureWindowsPath(file).is_absolute():
+                file = str(PureWindowsPath(workdir) / file)
+            return file
+        return target
+    return target if name.endswith(PROGRAM_TYPES) else None
+
+
 # Unreal Engine games run as <Project>-Win64-Shipping.exe (-WinGDK- in the Xbox / Game Pass build); the
 # <Project>.exe you pick only starts it and exits. The game is that exe wherever it is installed.
 SHIPPING_SUFFIXES = ("-win64-shipping.exe", "-wingdk-shipping.exe", "-win32-shipping.exe")
@@ -205,7 +363,8 @@ def _app_folder(path: str | None, block_type: str | None) -> str | None:
         return None
     if game := game_folder(path):
         return game
-    return helper_folder(path) if kills_background(block_type) else None
+    # (a program file has no "background processes": hosted_way)
+    return helper_folder(path) if kills_background(block_type) and not is_hosted(path) else None
 
 
 def in_folder(path: str | None, folder: str) -> bool:
@@ -278,6 +437,41 @@ def process_path(pid: int) -> str | None:
         buf = ctypes.create_unicode_buffer(1024)
         size = wintypes.DWORD(len(buf))
         return buf.value if _k32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)) else None
+    finally:
+        _k32.CloseHandle(handle)
+
+
+class UNICODE_STRING(ctypes.Structure):
+    _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
+
+
+PROCESS_COMMAND_LINE_INFORMATION = 60   # NtQueryInformationProcess, Windows 8.1+
+TOO_SMALL = {0xC0000004, 0x80000005, 0xC0000023}   # STATUS_INFO_LENGTH_MISMATCH, _BUFFER_OVERFLOW, _BUFFER_TOO_SMALL
+_ntdll = ctypes.WinDLL("ntdll")
+_ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+_ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.ULONG,
+                                             ctypes.POINTER(wintypes.ULONG)]
+
+
+def command_line(pid: int) -> str | None:
+    """A process's command line (None if it can't be read - gone, or protected). Needs only the limited query
+    right, like process_path, so the service reads any user's programs."""
+    handle = _k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        size = wintypes.ULONG(0)
+        buf = ctypes.create_string_buffer(2048)
+        for _ in range(2):
+            status = _ntdll.NtQueryInformationProcess(handle, PROCESS_COMMAND_LINE_INFORMATION, buf, len(buf),
+                                                      ctypes.byref(size)) & 0xFFFFFFFF
+            if status not in TOO_SMALL or size.value <= len(buf):   # (a long one - Java's -cp: asked again)
+                break
+            buf = ctypes.create_string_buffer(size.value)
+        if status:
+            return None
+        text = UNICODE_STRING.from_buffer(buf)
+        return ctypes.wstring_at(text.Buffer, text.Length // 2) if text.Buffer and text.Length else ""
     finally:
         _k32.CloseHandle(handle)
 

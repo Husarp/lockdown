@@ -23,7 +23,7 @@ import reminders
 import retention
 import updates
 from blocker import protection
-from blocker.apps import exe_name, minimizes
+from blocker.apps import exe_name, is_hosted, minimizes
 from db import Database
 from gui import mainthread, shortcuts, theme, toast
 from gui.about_page import AboutPage
@@ -590,8 +590,14 @@ class LockdownApp(ctk.CTk):
                 seen, now = time.monotonic(), now_from_db(self.db)
                 for event in events:
                     item = items.get(event["item_id"]) or {}
-                    if event["hostname"].endswith(".exe"):
-                        win.close_app(event["hostname"])   # ask nicely; the service force-closes after 10 s
+                    if alerts.is_app_event(event, item):
+                        # ask nicely; the service force-closes after 10 s (a Java game / a script: the windows
+                        # of the processes the service says run it - they are javaw.exe / python.exe)
+                        pids = usage_mod.pids_of(self.db, event["hostname"])
+                        if pids:
+                            win.close_windows(pids)
+                        else:
+                            win.close_app(event["hostname"])
                         self._alert(event, item.get("notify"))
                     else:   # a site: only if you were opening it (0.84.10)
                         # (looked for in front from the visit's own time: this window may have been busy a while)
@@ -925,9 +931,16 @@ class LockdownApp(ctk.CTk):
             if usage_mod.limit_writes != self.minimize_writes and not antibypass.is_off(self.db):
                 self._read_minimize_blocks(now_from_db(self.db))
             if self.minimize_blocks:
-                _hwnd, exe = win.foreground()
-                block = self.minimize_blocks.get(exe)
-                if block and win.minimize_app(exe):
+                hwnd, exe = win.foreground()
+                block, pids = self.minimize_blocks.get(exe), frozenset()
+                files = [f for f in self.minimize_blocks if is_hosted(f)] if hwnd and not block else ()
+                if files:   # a Java game / a script in front: javaw.exe / python.exe running a listed file
+                    published = usage_mod.members(self.db)
+                    front = published.get(str(win.content_pid(hwnd))) or ()
+                    exe = next((f for f in files if f in front), exe)
+                    block = self.minimize_blocks.get(exe)
+                    pids = usage_mod.pids_of(self.db, exe, published) if block else pids
+                if block and (win.minimize_windows(pids) if pids else win.minimize_app(exe)):
                     item = block["item"]
                     until = block["until"].strftime(TIME_FMT) if block["until"] else None
                     self._alert({"item_id": item["id"], "display_name": item["display_name"], "reason": block["reason"],

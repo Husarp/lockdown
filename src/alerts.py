@@ -2,6 +2,7 @@
 import math
 from datetime import datetime
 
+from blocker.apps import is_hosted
 from blocker.protection import LISTS
 from rules import (DAY_NAMES, TIME_FMT, allowance_left, allowance_owner, effective_rules, item_block,
                    next_block)
@@ -81,6 +82,17 @@ def should_notify(event: dict, item_notify: str | None, enabled: bool, last_show
     if item_notify == "off" or (item_notify != "on" and not enabled):
         return False
     return last_shown is None or now_ts - last_shown >= cooldown_min * 60
+
+
+def is_app_event(event: dict, item: dict | None = None) -> bool:
+    """Was this block event an app being closed rather than a site being opened? Its key is the app's exe - or a
+    program file (game.jar, tool.py). A program file's name can look like a web address (.py is Paraguay's), so
+    it is one unless a protection list or a site `item` recorded it."""
+    key = event["hostname"]
+    if key.endswith(".exe"):
+        return True
+    return is_hosted(key) and not str(event.get("reason") or "").startswith("protection") \
+        and (item or {}).get("item_type") != "site"
 
 
 def opened_in_front(event: dict, shown: set[str], targets=()) -> bool:
