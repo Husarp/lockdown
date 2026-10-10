@@ -53,11 +53,18 @@ def test_split_command_line(cmd, args):
     ("python.exe", r"python -m http.server", None),
     ("python.exe", r'python -uc "game.py"', None),                 # -u and -c together: a command, not a file
     ("python.exe", r"python -X frozen_modules=off tool.py", "tool.py"),
+    ("python.exe", "python -u x.py", "x.py"),
+    ("python.exe", "python -X dev x.py", "x.py"),
+    ("python.exe", "python -mhttp.server 8000", None),            # -m / -c take the rest of the cluster as the value
+    ("python.exe", "python -cprint(1) a.py", None),
     # cmd: the first word after /c or /k - Explorer's doubled quotes too
     ("cmd.exe", rf'{CMD} /c ""C:\Users\me\Desktop\start game.bat" "', r"C:\Users\me\Desktop\start game.bat"),
     ("cmd.exe", r'cmd.exe /d /s /c "C:\x\run.cmd" arg', r"C:\x\run.cmd"),
     ("cmd.exe", r"cmd /K start.bat", "start.bat"),
     ("cmd.exe", r'cmd /c call "C:\x y\start.bat"', r"C:\x y\start.bat"),
+    ("cmd.exe", r'cmd /c "C:\My Games\call of duty.bat"', r"C:\My Games\call of duty.bat"),   # only a leading call goes
+    ("cmd.exe", r"cmd /c C:\recall x.bat", r"C:\recall"),
+    ("cmd.exe", r"cmd /c CALL  start.bat", "start.bat"),
     ("cmd.exe", r"cmd.exe", None),
     # PowerShell: the first .ps1 - -File, -Command "& '...'" (Run with PowerShell), a bare path (pwsh)
     ("powershell.exe", r'powershell.exe -ExecutionPolicy Bypass -File "C:\My Scripts\x.ps1" -n 1', r"C:\My Scripts\x.ps1"),

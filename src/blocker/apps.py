@@ -136,7 +136,7 @@ INTERPRETERS = {"java.exe": "java", "javaw.exe": "java", "py.exe": "python", "py
 _PYTHON = re.compile(r"pythonw?(\d+(\.\d+)*)?\.exe")   # python.exe, pythonw.exe, python3.12.exe (Store) ...
 _PS1 = re.compile(r"""'([^']+?\.ps1)'|"([^"]+?\.ps1)"|([^\s'"&;|]+?\.ps1)(?=$|[\s'";&|)])""", re.IGNORECASE)
 _PY_CLUSTER = re.compile(r"-[BdEiIOPqRsSuvVx]*[cm]")
-_CALL = re.compile(r"call\s+", re.IGNORECASE)
+_CALL = re.compile(r"^call\s+", re.IGNORECASE)
 JAVA_VALUE_OPTIONS = {"-cp", "-classpath", "--class-path", "-p", "--module-path", "--upgrade-module-path",
                       "--add-modules", "--add-opens", "--add-exports", "--add-reads", "--limit-modules"}
 _CMD_SWITCH = re.compile(r'(?:^|\s)/[ckCK](?=\s|"|$)')
@@ -250,7 +250,7 @@ def hosted_file(name: str | None, cmd: str | None) -> str | None:
         args, k = split_command_line(cmd)[1:], 0
         while k < len(args):
             a = args[k]
-            if a in ("-c", "-m", "-") or _PY_CLUSTER.fullmatch(a):   # a command, a module, stdin (-uc, -um: no file)
+            if a in ("-c", "-m", "-") or _PY_CLUSTER.match(a):   # a command, a module, stdin (-uc, -mmod: the rest of a cluster is its value)
                 break
             if a in ("-W", "-X", "--check-hash-based-pycs"):   # (an option with its value after it)
                 k += 2
