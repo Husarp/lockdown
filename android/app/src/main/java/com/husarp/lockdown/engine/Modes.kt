@@ -132,6 +132,71 @@ object Modes {
     fun canStop(state: ModeState?, force: Boolean): Boolean =
         force || state == null || !state.locked || state.scheduled
 
+    // ---------- Pomodoro lengths, "until a time", schedule text, looseness ----------
+
+    /** Bounds of the editable Pomodoro lengths (minutes / rounds). */
+    val WORK_RANGE = 1..180
+    val BREAK_RANGE = 1..60
+    val ROUNDS_RANGE = 1..12
+    val LONG_RANGE = 1..120
+
+    fun clamp(p: Pomodoro) = Pomodoro(p.work.coerceIn(WORK_RANGE), p.brk.coerceIn(BREAK_RANGE),
+        p.rounds.coerceIn(ROUNDS_RANGE), p.long.coerceIn(LONG_RANGE))
+
+    /** "Until [hhmm]": today at that time, or tomorrow when it isn't after [now] (a time already gone means the next one). */
+    fun untilTime(now: LocalDateTime, hhmm: String): LocalDateTime {
+        val t = Rules.parseHhmm(hhmm)
+        val today = now.toLocalDate().atTime(t)
+        return if (today.isAfter(now)) today else today.plusDays(1)
+    }
+
+    private val DAY_NAMES = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    private fun daysText(days: List<Int>): String {
+        val d = days.distinct().sorted()
+        return when {
+            d.size == 7 -> "every day"
+            d.isEmpty() -> "no days"
+            d == listOf(0, 1, 2, 3, 4) -> "Mon\u2013Fri"
+            d == listOf(5, 6) -> "Sat\u2013Sun"
+            d.size > 2 && d.last() - d.first() == d.size - 1 -> DAY_NAMES[d.first()] + "\u2013" + DAY_NAMES[d.last()]
+            else -> d.joinToString(", ") { DAY_NAMES[it] }
+        }
+    }
+
+    /** "Runs 09:00–17:00 Mon–Fri" (one part per window), or null with no schedule. */
+    fun scheduleText(s: Schedule?): String? =
+        s?.windows?.takeIf { it.isNotEmpty() }?.joinToString("; ", prefix = "Runs ") { "${it.start}\u2013${it.end} ${daysText(it.days)}" }
+
+    /** When the schedule next switches the mode on (null if it is on now, or never). */
+    fun nextStart(mode: Mode, now: LocalDateTime): LocalDateTime? {
+        val s = mode.schedule ?: return null
+        if (Rules.scheduleUntil(s, now) != null) return null
+        return Rules.nextWindowStart(s.windows, now)
+    }
+
+    /** Would saving [new] over [old] loosen it? A schedule that runs fewer minutes always does (it is a standing
+     *  commitment); while the mode runs [lockedNow] a shorter Pomodoro work / fewer rounds / longer breaks, or
+     *  blocking less, does too. Longer, more, or added is free. */
+    fun modeLooser(old: Mode, new: Mode, lockedNow: Boolean): Boolean {
+        if (old.schedule != null && AntiBypass.scheduleLooser(old.schedule, new.schedule)) return true
+        if (!lockedNow) return false
+        val op = old.pomodoro
+        val np = new.pomodoro
+        if (op != null && (np == null || np.work < op.work || np.rounds < op.rounds || np.brk > op.brk || np.long > op.long)) return true
+        return !new.categories.containsAll(old.categories) || !new.items.containsAll(old.items) ||
+            !new.groups.containsAll(old.groups) || !new.extra.containsAll(old.extra)
+    }
+
+    /** Would starting [newId] until [newUntil] ([newLocked]) over the running [current] loosen? Only a hand-started
+     *  locked mode holds: another mode, an unlocked start or an earlier end replaces it and needs the challenge. */
+    fun startLooser(current: ModeState?, newId: String, newUntil: LocalDateTime?, newLocked: Boolean): Boolean {
+        if (current == null || !current.locked || current.scheduled) return false
+        val end = current.until ?: return false
+        if (current.mode.id != newId || !newLocked) return true
+        return newUntil == null || newUntil.isBefore(end)
+    }
+
     // ---------- what it blocks ----------
 
     /** An item's category: chosen for its app / one of its own hostnames, else Distracting. Keys: "app:<pkg>" /

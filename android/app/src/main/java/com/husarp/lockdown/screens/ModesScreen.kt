@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -42,6 +43,8 @@ import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Mode
 import com.husarp.lockdown.engine.Modes
 import com.husarp.lockdown.engine.Pomodoro
+import com.husarp.lockdown.engine.Schedule
+import com.husarp.lockdown.engine.Window
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
@@ -81,6 +84,7 @@ private fun ModeList(onEdit: (Mode) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(mode.name, style = MaterialTheme.typography.titleMedium)
                         Text(Modes.describe(mode), style = MaterialTheme.typography.bodySmall, color = if (isOn) blue.onContainer else cs.onSurfaceVariant)
+                        scheduleLine(mode, now)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (isOn) blue.onContainer else cs.onSurfaceVariant) }
                     }
                     if (isOn) {
                         Button(onClick = {
@@ -106,23 +110,73 @@ private fun ModeList(onEdit: (Mode) -> Unit) {
     }
 }
 
+/** "Runs 09:00–17:00 Mon–Fri · next Mon 09:00" for a scheduled mode, else null. */
+private fun scheduleLine(mode: Mode, now: java.time.LocalDateTime): String? {
+    val base = Modes.scheduleText(mode.schedule) ?: return null
+    val next = Modes.nextStart(mode, now) ?: return base
+    return base + " · next " + next.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH) +
+        " " + "%02d:%02d".format(next.hour, next.minute)
+}
+
+@Composable
+private fun PomStepper(label: String, value: Int, range: IntRange, step: Int, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        androidx.compose.material3.TextButton(onClick = { onChange((value - step).coerceIn(range)) }) { Text("−$step") }
+        Text("$value", Modifier.width(36.dp), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        androidx.compose.material3.TextButton(onClick = { onChange((value + step).coerceIn(range)) }) { Text("+$step") }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ScheduleEditor(schedule: Schedule, onChange: (Schedule) -> Unit) {
+    val windows = schedule.windows
+    fun setWin(i: Int, w: Window?) = onChange(schedule.copy(windows = windows.toMutableList().also { if (w == null) it.removeAt(i) else it[i] = w }))
+    val labels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    windows.forEachIndexed { i, win ->
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            labels.forEachIndexed { d, l ->
+                Chip(l, d in win.days) { setWin(i, win.copy(days = if (d in win.days) win.days - d else (win.days + d).sorted())) }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TimeField("From", win.start, Modifier.weight(1f)) { setWin(i, win.copy(start = it)) }
+            TimeField("To", win.end, Modifier.weight(1f)) { setWin(i, win.copy(end = it)) }
+            if (windows.size > 1) androidx.compose.material3.IconButton(onClick = { setWin(i, null) }) {
+                Icon(Icons.Filled.Close, "remove these hours")
+            }
+        }
+    }
+    androidx.compose.material3.TextButton(onClick = { onChange(schedule.copy(windows = windows + Window((0..4).toList(), "09:00", "17:00"))) }) { Text("+ Add hours") }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
     var draft by remember { mutableStateOf(mode) }
-    var byHand by remember { mutableStateOf(mode.schedule == null) }
+    val guard = rememberGuard()
+    var untilMode by remember { mutableStateOf(false) }     // start "until a time" instead of "for N minutes"
+    var untilAt by remember { mutableStateOf("17:00") }
     var durationMin by remember { mutableStateOf(90) }
     var locked by remember { mutableStateOf(false) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
 
-    fun persist() = ModesStore.saveModes(ModesStore.modes.value.filter { it.id != draft.id } + draft)
     val modes by ModesStore.modes.collectAsStateWithLifecycle()
-    com.husarp.lockdown.ui.UnsavedChanges(draft != (modes.firstOrNull { it.id == mode.id } ?: mode), onClose, { then -> persist(); then() })
+    fun write() = ModesStore.saveModes(ModesStore.modes.value.map { if (it.id == draft.id) draft else it }.let { if (it.any { m -> m.id == draft.id }) it else it + draft })
+    // A schedule that runs less, or (while this mode runs locked) a lighter Pomodoro / fewer things blocked, is a loosening: the challenge.
+    fun persist(then: () -> Unit) {
+        val old = ModesStore.modes.value.firstOrNull { it.id == draft.id }
+        val cur = ModesStore.current(com.husarp.lockdown.guard.TrustedTime.local(ctx))
+        val lockedNow = cur != null && cur.mode.id == draft.id && cur.locked && !cur.scheduled
+        guard(old != null && Modes.modeLooser(old, draft, lockedNow)) { write(); then() }
+    }
+    com.husarp.lockdown.ui.UnsavedChanges(draft != (modes.firstOrNull { it.id == mode.id } ?: mode), onClose, { then -> persist(then) })
 
     Column(Modifier.fillMaxSize()) {
-        EditorHeader(draft.name, onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) }, action = "Save") { persist(); onClose() }
+        EditorHeader(draft.name, onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) }, action = "Save") { persist(onClose) }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Card(color = cs.surfaceContainer, shape = MaterialTheme.shapes.extraLarge) {
                 Text(Modes.describe(draft) + (if (draft.pomodoro != null) " · Pomodoro" else ""), style = MaterialTheme.typography.bodyLarge)
@@ -182,29 +236,47 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 SwitchRowInline("Mute notifications", draft.mute) { draft = draft.copy(mute = it) }
                 SwitchRowInline("Focus (Pomodoro)", draft.pomodoro != null) { on -> draft = draft.copy(pomodoro = if (on) Pomodoro() else null) }
                 draft.pomodoro?.let { p ->
-                    Text("${p.work} min work · ${p.brk} min break · ${p.rounds} rounds · ${p.long} min long break",
-                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    PomStepper("Work (min)", p.work, Modes.WORK_RANGE, 5) { draft = draft.copy(pomodoro = p.copy(work = it)) }
+                    PomStepper("Break (min)", p.brk, Modes.BREAK_RANGE, 1) { draft = draft.copy(pomodoro = p.copy(brk = it)) }
+                    PomStepper("Rounds", p.rounds, Modes.ROUNDS_RANGE, 1) { draft = draft.copy(pomodoro = p.copy(rounds = it)) }
+                    PomStepper("Long break (min)", p.long, Modes.LONG_RANGE, 5) { draft = draft.copy(pomodoro = p.copy(long = it)) }
                 }
             }
 
             SectionLabel("How it starts")
-            com.husarp.lockdown.ui.Segmented(listOf("By hand", "On a schedule"), if (byHand) 0 else 1) { byHand = it == 0 }
-            if (byHand) {
+            com.husarp.lockdown.ui.Segmented(listOf("By hand", "On a schedule"), if (draft.schedule == null) 0 else 1) {
+                draft = draft.copy(schedule = if (it == 0) null else (draft.schedule ?: Schedule(windows = listOf(Window((0..4).toList(), "09:00", "17:00")))))
+            }
+            draft.schedule?.let { sched ->
                 Card(color = cs.surfaceContainerLow) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ScheduleEditor(sched) { draft = draft.copy(schedule = it) }
+                        Text(Modes.scheduleText(sched) ?: "Add hours for it to run.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                }
+            }
+            if (draft.schedule == null) {
+                Card(color = cs.surfaceContainerLow) {
+                    com.husarp.lockdown.ui.Segmented(listOf("For a while", "Until a time"), if (untilMode) 1 else 0) { untilMode = it == 1 }
+                    if (untilMode) TimeField("Until", untilAt, Modifier.fillMaxWidth()) { untilAt = it } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         androidx.compose.material3.TextButton(onClick = { durationMin = (durationMin - 15).coerceAtLeast(0) }) { Text("−15") }
                         com.husarp.lockdown.ui.Numeral(if (durationMin == 0) "∞" else "$durationMin", sizeSp = 30)
                         Text(if (durationMin == 0) "until stopped" else "min", style = MaterialTheme.typography.bodyMedium)
                         androidx.compose.material3.TextButton(onClick = { durationMin += 15 }) { Text("+15") }
                     }
-                    if (durationMin > 0) SwitchRowInline("Lock until it ends", locked) { locked = it }
+                    if (untilMode || durationMin > 0) SwitchRowInline("Lock until it ends", locked) { locked = it }
+                    if (untilMode) Text("A time that's already gone today means tomorrow.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
                 Button(onClick = {
-                    persist()
                     val now = com.husarp.lockdown.guard.TrustedTime.local(ctx)   // trusted time: a changed clock doesn't shorten it
-                    val until = if (durationMin > 0) now.plusMinutes(durationMin.toLong()) else null
-                    ModesStore.start(draft.id, until, locked, now)
-                    onClose()
+                    val until = if (untilMode) Modes.untilTime(now, untilAt) else if (durationMin > 0) now.plusMinutes(durationMin.toLong()) else null
+                    // Replacing a locked running mode (another one, unlocked, or ending sooner) is a loosening.
+                    val replacing = Modes.startLooser(ModesStore.current(now), draft.id, until, locked && until != null)
+                    guard(replacing) {
+                        write()
+                        ModesStore.start(draft.id, until, locked, now)
+                        onClose()
+                    }
                 }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Start now")
                 }
