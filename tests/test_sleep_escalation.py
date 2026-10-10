@@ -29,11 +29,11 @@ def _interval(e, hour, minute=0):
 
 def test_it_escalates_through_the_night(tmp_path):
     _db, _ui, e = _engine(tmp_path)
-    assert _interval(e, 23) == 15      # 23:00 - the 21:00 tier
-    assert _interval(e, 0) == 5        # after midnight - the 00:00 tier
-    assert _interval(e, 1) == 5
-    assert _interval(e, 3) == 1        # after 3am - one a minute, relentless
-    assert _interval(e, 5) == 1
+    assert _interval(e, 23) == 15 * 60     # 23:00 - the 21:00 tier (seconds; saved as minutes, read through)
+    assert _interval(e, 0) == 5 * 60       # after midnight - the 00:00 tier
+    assert _interval(e, 1) == 5 * 60
+    assert _interval(e, 3) == 60           # after 3am - one a minute, relentless
+    assert _interval(e, 5) == 60
 
 
 def test_before_the_first_tier_it_falls_back_to_repeat(tmp_path):
@@ -42,7 +42,7 @@ def test_before_the_first_tier_it_falls_back_to_repeat(tmp_path):
                                              "wake": "07:00", "repeat": 10, "tiers": TIERS})
     s = reminders.load(db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
     bed = datetime(2026, 9, 15, 20, 0)
-    assert e._sleep_interval(s, bed, datetime(2026, 9, 15, 20, 30)) == 10   # 20:30, before the 21:00 tier
+    assert e._sleep_interval(s, bed, datetime(2026, 9, 15, 20, 30)) == 600   # 20:30, before the 21:00 tier
 
 
 def _show_bed(e, hour):

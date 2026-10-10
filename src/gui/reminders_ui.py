@@ -555,12 +555,12 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.break_on = ctk.CTkSwitch(b, text="Remind me to take breaks", font=theme.semi(13),
                                       command=self._save_break)
         self.break_on.pack(anchor="w", pady=(4, 8))
-        self.every = _option(b, "After", ["20 min", "30 min", "45 min", "60 min", "90 min"], "of use without a break",
-                             LABEL_W)
+        self.every = _duration(b, "After", "of use without a break (\"45 min\", \"30s\")", LABEL_W,
+                               self._save_break)
         self.length = _option(b, "Break length", ["2 min", "5 min", "10 min", "15 min"], label_w=LABEL_W)
-        self.snooze = _option(b, "Snooze", ["5 min", "10 min", "15 min", "20 min"], "each time", LABEL_W)
-        for menu in (self.every, self.length, self.snooze):
-            menu.configure(command=lambda v: self._save_break())
+        self.snooze = _duration(b, "Snooze", "each time", LABEL_W, self._save_break)
+        self.length.configure(command=lambda v: self._save_break())
+        self.break_error = ctk.CTkLabel(b, text="", text_color=theme.DANGER, height=16)   # packed while it says something
         self.break_text = _message(b, "It says", reminders.BREAK_TEXT, LABEL_W, self._save_break)
         ctk.CTkLabel(b, text="Your own words, or leave empty for this one. {every} and {length} are filled in.",
                      text_color=MUTED, font=theme.body(11), wraplength=330, justify="left").pack(
@@ -618,9 +618,10 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.sleep_guarded.select() if s.get("guarded") else self.sleep_guarded.deselect()
         b = reminders.load(self.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
         self.break_on.select() if b["on"] else self.break_on.deselect()
-        self.every.set(f"{b['every']} min")
+        for entry, seconds in ((self.every, b["every_sec"]), (self.snooze, b.get("snooze_sec", 300))):
+            entry.delete(0, "end")
+            entry.insert(0, reminders.seconds_text(seconds))
         self.length.set(f"{b['length']} min")
-        self.snooze.set(f"{b.get('snooze', 5)} min")
         self.strict.select() if b.get("strict") else self.strict.deselect()
         self.break_guarded.select() if b.get("guarded") else self.break_guarded.deselect()
         self.max_snooze.set(str(b.get("max_snooze", 2)))
@@ -649,14 +650,14 @@ class RemindersView(ctk.CTkScrollableFrame):
 
     # ---------- sleep / breaks ----------
 
-    def _tier_row(self, every: str = "15", after: str = "21:00"):
+    def _tier_row(self, every: str = "15 min", after: str = "21:00"):
         row = ctk.CTkFrame(self.tier_box, fg_color="transparent")
         row.pack(anchor="w", pady=2)
         ctk.CTkLabel(row, text="every", text_color=MUTED).pack(side="left")
-        row.every = ctk.CTkEntry(row, width=44, justify="center")
+        row.every = ctk.CTkEntry(row, width=64, justify="center")   # "15 min", "30s", "1h"
         row.every.insert(0, every)
         row.every.pack(side="left", padx=6)
-        ctk.CTkLabel(row, text="min, after", text_color=MUTED).pack(side="left")
+        ctk.CTkLabel(row, text="after", text_color=MUTED).pack(side="left")
         row.after = ctk.CTkEntry(row, width=60, justify="center")
         row.after.insert(0, after)
         row.after.pack(side="left", padx=6)
@@ -681,13 +682,13 @@ class RemindersView(ctk.CTkScrollableFrame):
             row.destroy()
         self.tier_rows = []
         for t in tiers:
-            self._tier_row(str(t.get("every", 5)), t.get("from", "21:00"))
+            self._tier_row(reminders.seconds_text(t.get("every_sec", 300)), t.get("from", "21:00"))
 
     def _read_tiers(self):
         tiers = []
         for row in self.tier_rows:
-            after, every = parse_hhmm(row.after.get()), int(reminders.parse_minutes(row.every.get(), allow_off=False))
-            tiers.append({"from": f"{after:%H:%M}", "every": max(1, every)})
+            after, every = parse_hhmm(row.after.get()), reminders.parse_interval(row.every.get())
+            tiers.append({"from": f"{after:%H:%M}", "every_sec": every})
         return sorted(tiers, key=lambda t: parse_hhmm(t["from"]))
 
     def _pick_wait(self, value: str):
@@ -721,7 +722,7 @@ class RemindersView(ctk.CTkScrollableFrame):
             before = reminders.parse_minutes(self.before.get(), most=12 * 60)
             tiers = self._read_tiers()
         except ValueError:
-            self._sleep_says("Steps need minutes like 5 and a time like 21:00.")
+            self._sleep_says("Steps need how often (5 min, 30s - at least 5s) and a time like 21:00.")
             return
         try:
             wait = reminders.parse_seconds(self.dismiss_wait_entry.get())
@@ -733,7 +734,7 @@ class RemindersView(ctk.CTkScrollableFrame):
         old = reminders.load(self.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
         self._save_guarded("bedtime", old, reminders.SLEEP_KEY, {
             "on": bool(self.sleep_on.get()), "bedtime": f"{bedtime:%H:%M}", "wake": f"{wake:%H:%M}",
-            "before": before, "repeat": 5, "tiers": tiers, "warn_text": self.sleep_warn_text.get().strip(),
+            "before": before, "repeat_sec": 300, "tiers": tiers, "warn_text": self.sleep_warn_text.get().strip(),
             "text": self.sleep_text.get().strip(),
             "guarded": bool(self.sleep_guarded.get()), "dismiss_wait": wait,
             "mode": self.mode_ids.get(self.sleep_mode.get(), "")})
@@ -743,11 +744,18 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.sleep_error.pack(anchor="w")
 
     def _save_break(self):
+        try:
+            every, snooze = (reminders.parse_interval(e.get()) for e in (self.every, self.snooze))
+        except ValueError as e:
+            self.break_error.configure(text=str(e))
+            self.break_error.pack(anchor="w")
+            return
+        self.break_error.pack_forget()
         old = reminders.load(self.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
         self._save_guarded("break", old, reminders.BREAK_KEY, {
-            "on": bool(self.break_on.get()), "every": int(self.every.get().split()[0]),
+            "on": bool(self.break_on.get()), "every_sec": every,
             "length": int(self.length.get().split()[0]), "strict": bool(self.strict.get()),
-            "snooze": int(self.snooze.get().split()[0]), "max_snooze": int(self.max_snooze.get()),
+            "snooze_sec": snooze, "max_snooze": int(self.max_snooze.get()),
             "twenty": bool(self.twenty.get()), "text": self.break_text.get().strip(),
             "twenty_text": self.twenty_text.get().strip(), "guarded": bool(self.break_guarded.get())})
 
@@ -766,9 +774,9 @@ class RemindersView(ctk.CTkScrollableFrame):
         every_row = ctk.CTkFrame(self.r_interval, fg_color="transparent")
         every_row.pack(anchor="w")
         ctk.CTkLabel(every_row, text="Every").pack(side="left")
-        self.r_every = ctk.CTkEntry(every_row, width=56, justify="center")
+        self.r_every = ctk.CTkEntry(every_row, width=72, justify="center")   # "60", "30s", "1h30"
         self.r_every.pack(side="left", padx=8)
-        ctk.CTkLabel(every_row, text="minutes of use (time away from the PC doesn't count)",
+        ctk.CTkLabel(every_row, text="of use, e.g. 60, 30s or 1h30 (time away from the PC doesn't count)",
                      text_color=MUTED).pack(side="left")
         days = ctk.CTkFrame(b, fg_color="transparent")      # which days - for every kind of reminder
         days.pack(anchor="w", pady=(8, 0))
@@ -853,7 +861,7 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.r_hours.select() if r.get("hours") else self.r_hours.deselect()
         self.r_per_day.set(str(r.get("per_day") or "No limit"))
         self.r_guarded.select() if r.get("guarded") else self.r_guarded.deselect()
-        for entry, value in ((self.r_every, str(r["every"])), (self.r_at, ", ".join(r["times"])),
+        for entry, value in ((self.r_every, reminders.seconds_text(r["every_sec"])), (self.r_at, ", ".join(r["times"])),
                              (self.r_from, r["window"][0]), (self.r_to, r["window"][1]),
                              (self.r_hours_from, r["window"][0]), (self.r_hours_to, r["window"][1])):
             entry.delete(0, "end")
@@ -879,11 +887,11 @@ class RemindersView(ctk.CTkScrollableFrame):
             if not text:
                 raise ValueError("Write what to remind you of.")
             try:
-                every = int(self.r_every.get().strip())
-            except ValueError:
-                raise ValueError("Minutes must be a whole number.") from None
-            if kind == "interval" and not 1 <= every <= 1440:
-                raise ValueError("Minutes must be between 1 and 1440.")
+                every = reminders.parse_interval(self.r_every.get())
+            except ValueError as e:
+                if kind == "interval":
+                    raise ValueError(f"How often: {e}") from None
+                every = (self.editing or reminders.DEFAULT_CUSTOM)["every_sec"]   # (not used by this kind)
             try:
                 times = [f"{parse_hhmm(t):%H:%M}" for t in self.r_at.get().replace(";", ",").split(",") if t.strip()]
                 window = [f"{parse_hhmm(self.r_from.get()):%H:%M}", f"{parse_hhmm(self.r_to.get()):%H:%M}"]
@@ -904,7 +912,7 @@ class RemindersView(ctk.CTkScrollableFrame):
             return
         items = reminders.load(self.db, reminders.CUSTOM_KEY, [])
         new = {"id": self.editing["id"] if self.editing else uuid.uuid4().hex[:8], "on": True, "text": text,
-               "kind": kind, "every": every, "times": times or ["12:00"], "days": days, "window": window,
+               "kind": kind, "every_sec": every, "times": times or ["12:00"], "days": days, "window": window,
                "snooze": int(self.r_snooze.get().split()[0]), "max_snooze": int(self.r_max.get()),
                "check": CHECKS[self.r_check.get()], "packs": [n for n, b in self.r_packs.items() if b.get()],
                "quotes": self.r_quotes.get("1.0", "end").strip(),

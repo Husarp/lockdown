@@ -182,6 +182,7 @@ class LockdownApp(ctk.CTk):
         self._poll_minimize()
         self.reminder_ui = ReminderUI(self)
         self.reminders = self.reminder_ui.engine = reminders.Engine(self.db, self.reminder_ui)
+        self.reminder_dt = reminders.TICK_SEC   # seconds since the last reminders tick (it comes sooner when due)
         self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
         self.after(PREBUILD_MS[0], self._prebuild)
         distracting.seed(self.db)          # games, streaming ... are Distracting by default
@@ -661,16 +662,20 @@ class LockdownApp(ctk.CTk):
 
     def _poll_reminders(self):
         """Sleep / break / your reminders. Popups wait while a full-screen app (a game) is in front, and
-        everything waits - the bedtime screen too - while Do not disturb is on."""
+        everything waits - the bedtime screen too - while Do not disturb is on. Every TICK_SEC, or sooner when
+        something timed is due before then (reminders.Engine.next_tick: an alert set in seconds)."""
+        delay = reminders.TICK_SEC
         try:
             if antibypass.is_off(self.db):     # switched off: bedtime, breaks and your reminders all stop
                 return
             now = now_from_db(self.db)
             state = modes.active(self.db, now)
             quiet = bool(state and state["mode"].get("mute")) or win.do_not_disturb()
-            self.reminders.tick(now, win.idle_seconds(), win.is_fullscreen(), quiet=quiet)
+            self.reminders.tick(now, win.idle_seconds(), win.is_fullscreen(), dt=self.reminder_dt, quiet=quiet)
+            delay = self.reminders.next_tick(now)
         finally:
-            self.after(reminders.TICK_SEC * 1000, self._poll_reminders)
+            self.reminder_dt = delay
+            self.after(round(delay * 1000), self._poll_reminders)
 
     # ---------- a newer Lockdown ----------
     # Checked every time you open the window (at most once per updates.RETRY_MIN minutes), and in the background

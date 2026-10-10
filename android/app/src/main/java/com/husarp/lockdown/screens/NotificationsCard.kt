@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.AlertsCfg
+import com.husarp.lockdown.engine.Interval
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.SwitchRowInline
@@ -82,10 +83,11 @@ fun NotificationsCard() {
                 }
                 Text("While I'm using it, remind me again every", style = MaterialTheme.typography.bodyMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Alerts.REPEAT_OPTIONS.forEach { m ->
-                        Chip(if (m == 0) "Never" else "$m min", a.repeatMin == m) { setAlerts { it.copy(repeatMin = m) } }
+                    Alerts.REPEAT_OPTIONS.forEach { sec ->
+                        Chip(if (sec == 0) "Never" else Interval.text(sec), a.repeatSeconds == sec) { setAlerts { it.copy(repeatSec = sec) } }
                     }
                 }
+                IntervalField("Or any (e.g. 30 s)", a.repeatSeconds, optional = true) { sec -> setAlerts { it.copy(repeatSec = sec) } }
             }
             SwitchRowInline("Notify me when a block starts", a.started) { on -> setAlerts { it.copy(started = on) } }
             Text("Blocks from the same group come as one (\"Evenings starts in 5 min: ...\"). Pause my blocks with Silence alerts holds them; a mode that mutes lets through only what's about the app in front.",

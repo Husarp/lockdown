@@ -19,9 +19,12 @@ data class AlertsCfg(
     val cooldownMin: Int = 30,                         // the same thing explained at most once per this
     val warn: Boolean = true,                          // warn before something gets blocked
     val warnMin: Int = 5,
-    val repeatMin: Int = 0,                            // while you're using it, again every (0 = don't)
+    val repeatMin: Int = 0,                            // minutes, saved before seconds: read through [repeatSeconds]
     val started: Boolean = true,                       // notify when a block starts
-)
+    val repeatSec: Int? = null,                        // while you're using it, again every this many seconds (0 = don't)
+) {
+    val repeatSeconds: Int get() = repeatSec ?: (repeatMin * 60)
+}
 
 /** Message formatting and the per-item / per-reason / cooldown check, ported from the PC alerts.py. Pure. */
 object Alerts {
@@ -46,7 +49,7 @@ object Alerts {
     )
     val COOLDOWN_OPTIONS = listOf(1, 5, 15, 30, 60)
     val WARN_MINUTE_OPTIONS = listOf(1, 2, 5, 10, 15, 20, 30, 60)
-    val REPEAT_OPTIONS = listOf(0, 1, 2, 5, 10)
+    val REPEAT_OPTIONS = listOf(0, 60, 120, 300, 600)       // seconds; any other is typed
     private val DAY_NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
     private val HM = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -126,7 +129,7 @@ class BlockWatcher {
         urgent.clear()
         warned.entries.removeIf { Duration.between(it.value, now).toHours() >= 48 }
         val warnSec = cfg.warnMin * 60L
-        val repeatSec = cfg.repeatMin * 60L
+        val repeatSec = cfg.repeatSeconds.toLong()
         val upcoming = LinkedHashMap<String, Upcoming>()
         val blocked = LinkedHashMap<String, Pair<Item, Block>>()
         if (!paused) for (item in items) {

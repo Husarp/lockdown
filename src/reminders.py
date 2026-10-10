@@ -17,6 +17,9 @@ import pause
 from rules import TIME_FMT, days_text, parse_hhmm
 
 TICK_SEC = 5
+FAST_TICK_SEC = 0.5            # the soonest a tick comes when something timed is due before the next one (next_tick)
+MIN_INTERVAL_SEC = 5           # the shortest "every" / "comes back" / snooze an alert can have (one tick)
+UNPACED_UNDER_SEC = 60         # an interval under a minute (seconds: a nag you asked for) isn't held by the pace
 USING_IDLE_SEC = 60            # input within the last minute = using the PC
 BREAK_RESET_SEC = 5 * 60       # away this long = you had a break
 TWENTY_SEC = 20 * 60
@@ -29,18 +32,20 @@ SLEEP_WARN_TEXT = "Bedtime is at {bedtime} - time to wrap up."
 SLEEP_TEXT = "It's {time}. Sleep well - the screen can wait until tomorrow."
 BREAK_TEXT = "You've been at the PC for {every} min. Take {length} min away from the screen."
 TWENTY_TEXT = "20-20-20: look at something 20 feet (6 m) away for 20 seconds."
-DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat": 5, "mode": "",
+# Alert intervals are in seconds ("every_sec", "repeat_sec", "snooze_sec"); settings saved before that had them in
+# minutes ("every", "repeat", "snooze") and are read through in_seconds.
+DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30, "repeat_sec": 5 * 60, "mode": "",
                  "warn_text": "", "text": "",
                  # The later it gets, the more often the bedtime screen comes back after you dismiss it - so that
-                 # going to bed is easier than fending it off. Each tier is {"from": "HH:MM", "every": minutes},
+                 # going to bed is easier than fending it off. Each tier is {"from": "HH:MM", "every_sec": seconds},
                  # read within the night; the latest tier whose time has passed wins. Fully editable.
-                 "tiers": [{"from": "21:00", "every": 15}, {"from": "00:00", "every": 5},
-                           {"from": "03:00", "every": 1}],
+                 "tiers": [{"from": "21:00", "every_sec": 15 * 60}, {"from": "00:00", "every_sec": 5 * 60},
+                           {"from": "03:00", "every_sec": 60}],
                  "guarded": False,   # dismissing the bedtime screen needs the Anti-Bypass challenge
                  "dismiss_wait": 0}  # seconds before the bedtime screen's Dismiss works (0 = at once)
-DEFAULT_BREAK = {"on": True, "every": 45, "length": 5, "strict": False, "snooze": 5, "max_snooze": 2,
-                 "twenty": False, "text": "", "twenty_text": "", "guarded": False}
-DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every": 60, "times": ["12:00"],
+DEFAULT_BREAK = {"on": True, "every_sec": 45 * 60, "length": 5, "strict": False, "snooze_sec": 5 * 60,
+                 "max_snooze": 2, "twenty": False, "text": "", "twenty_text": "", "guarded": False}
+DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every_sec": 60 * 60, "times": ["12:00"],
                   "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
                   "check": 0, "packs": [], "quotes": "",
                   "hours": False,      # only between window[0] and window[1] (every kind, not just random)
@@ -102,6 +107,19 @@ def minutes_text(minutes: float) -> str:
     return f"{whole} min"
 
 
+def parse_interval(text: str, allow_off: bool = False) -> int:
+    """How often an alert comes, as typed ("30s", "5 min", a bare 5 = minutes, "1h30"), in whole seconds: from
+    MIN_INTERVAL_SEC to 24 h. allow_off: "Off" / "0" -> 0."""
+    return round(parse_minutes(text, allow_off=allow_off, least=MIN_INTERVAL_SEC / 60) * 60)
+
+
+def seconds_text(seconds: int) -> str:
+    """An interval in seconds for its box and its buttons: 30 -> "30s", 90 -> "90s", 300 -> "5 min", 5400 -> "1h30",
+    0 -> "Off"."""
+    seconds = round(seconds)
+    return f"{seconds}s" if seconds % 60 else minutes_text(seconds // 60)
+
+
 DISMISS_WAITS = {"Off": 0, "10 s": 10, "30 s": 30, "60 s": 60}   # quick picks; any number of seconds in between
 MAX_DISMISS_WAIT = 600
 
@@ -140,11 +158,42 @@ def message(custom: str, default: str, **values) -> str:
         return text
 
 
+def _minutes_to_seconds(d, keys: tuple) -> dict:
+    if not isinstance(d, dict):
+        return d
+    d = dict(d)
+    for k in keys:
+        if k in d:
+            minutes = d.pop(k)
+            try:
+                d[f"{k}_sec"] = round(float(minutes) * 60)
+            except (TypeError, ValueError):
+                pass   # (not a number: the default applies)
+    return d
+
+
+def in_seconds(key: str, saved):
+    """Reminder settings saved before alert intervals were in seconds had them in minutes: the bedtime steps'
+    "every" and the flat "repeat", the break's "every" and "snooze", your reminders' "every" (their snooze stays
+    minutes). Read as "..._sec". A minutes key wins over a seconds one in the same dict: only an older copy, an old
+    backup or a test writes it - Lockdown now writes only the seconds."""
+    if key == SLEEP_KEY and isinstance(saved, dict):
+        saved = _minutes_to_seconds(saved, ("repeat",))
+        if isinstance(saved.get("tiers"), list):
+            saved["tiers"] = [_minutes_to_seconds(t, ("every",)) for t in saved["tiers"]]
+    elif key == BREAK_KEY:
+        saved = _minutes_to_seconds(saved, ("every", "snooze"))
+    elif key == CUSTOM_KEY and isinstance(saved, list):
+        saved = [_minutes_to_seconds(r, ("every",)) for r in saved]
+    return saved
+
+
 def load(db, key: str, default):
     try:
         saved = json.loads(db.get_setting(key, "") or "null")
     except ValueError:
         saved = None
+    saved = in_seconds(key, saved)
     if isinstance(default, dict):
         return {**default, **(saved or {})}
     return saved if saved is not None else default
@@ -209,7 +258,7 @@ def tiers_of(s: dict) -> list[dict]:
 
 def schedule_text(r: dict) -> str:
     if r["kind"] == "interval":
-        text = f"every {r['every']} min of use"
+        text = f"every {seconds_text(r['every_sec'])} of use"
         if r.get("hours"):
             text += f", {r['window'][0]}-{r['window'][1]}"
     elif r["kind"] == "times":
@@ -238,6 +287,7 @@ class Engine:
         self.snoozed: dict[str, datetime] = {}               # key -> fire again at
         self.snoozes_used: dict[str, int] = {}               # key -> snoozes since it was last done
         self.counters: dict[str, float] = {}                 # interval reminders: seconds of use so far
+        self.use_left: dict[str, float] = {}                 # this tick: seconds of use until the break / one is due
         self.fired: set[tuple] = set()                       # (id, date, "HH:MM") already shown
         self.random_at: dict[tuple, time] = {}               # (id, date) -> today's random time
         self.checks: dict[str, datetime] = {}                # reminder id -> ask "did you do it?" at
@@ -281,9 +331,10 @@ class Engine:
             return False
         return self.last_interruption is not None and now - self.last_interruption < timedelta(minutes=PACE_MIN)
 
-    def _every(self, key: str, minutes: float, now: datetime) -> float:
-        """An interval - doubled for the rest of the day once you have waved it away BACKOFF_AFTER times running."""
-        return minutes * (2 if self.backed_off.get(key) == now.date() else 1)
+    def _every(self, key: str, seconds: float, now: datetime) -> float:
+        """An interval in seconds - doubled for the rest of the day once you have waved it away BACKOFF_AFTER times
+        running."""
+        return seconds * (2 if self.backed_off.get(key) == now.date() else 1)
 
     def _dismissed(self, key: str, name: str, now: datetime):
         """A reminder you keep waving away is noise. After BACKOFF_AFTER in a row it asks half as often for the
@@ -322,6 +373,7 @@ class Engine:
         self.silent = pause.silent_until(self.db, now)
         self.paused = max(filter(None, (emergency.alerts_paused_until(self.db, now), self.silent)), default=None)
         using = idle_sec < USING_IDLE_SEC
+        self.use_left = {}
         self._breaks(now, idle_sec, using, dt)
         self._sleep(now)
         if self.silent:
@@ -341,6 +393,16 @@ class Engine:
         if not fullscreen:
             for key, (title, text, buttons) in list(self.waiting.items()):
                 self._popup(key, title, text, buttons)
+
+    def next_tick(self, now: datetime) -> float:
+        """Seconds until the next tick: TICK_SEC, or sooner when something timed falls due before then (the bedtime
+        screen back after a dismiss, a snooze, "did you do it?", a strict break's end, and while you use the PC a break
+        or reminder after so much use) - so an alert set to 5 or 30 seconds comes on time, not up to a tick late.
+        Faster only right before that, at most every FAST_TICK_SEC."""
+        due = [*self.sleep_next.values(), *self.snoozed.values(), *self.checks.values(), self.break_until]
+        soon = [(t - now).total_seconds() for t in due if t and t > now]
+        soon += [s for s in self.use_left.values() if s > 0]   # a break / reminder after so much use (while using)
+        return max(FAST_TICK_SEC, min([TICK_SEC, *soon]))
 
     # ---------- breaks ----------
 
@@ -385,11 +447,13 @@ class Engine:
                     self.ui.toast(message(b.get("twenty_text"), TWENTY_TEXT))
         if now < self.snoozed.get("break", now):
             return
-        if self.continuous >= self._every("break", b["every"], now) * 60 and "break" not in self.open:
+        if using and "break" not in self.open:
+            self.use_left["break"] = self._every("break", b["every_sec"], now) - self.continuous
+        if self.continuous >= self._every("break", b["every_sec"], now) and "break" not in self.open:
             if b.get("strict") and self.break_snoozes >= b.get("max_snooze", 2):
                 self._start_break(now, b)   # strict, out of snoozes -> starts by itself, and never waits for the pace
                 return
-            if "break" not in self.snoozed and self._paced(now):
+            if "break" not in self.snoozed and b["every_sec"] >= UNPACED_UNDER_SEC and self._paced(now):
                 return                      # too soon after the last one: it comes when the pace allows
             self.snoozed.pop("break", None)  # (back from a snooze: you asked for it now, so it does not wait)
             self.break_due = b              # (shown at the end of the tick - see tick)
@@ -417,10 +481,13 @@ class Engine:
         snoozes_left = self.break_snoozes < b.get("max_snooze", 2)
         buttons = [("Start break", "start")]
         if not strict or snoozes_left:
-            buttons.append((f"Snooze {b.get('snooze', 5)} min", "snooze"))
+            buttons.append((f"Snooze {seconds_text(b.get('snooze_sec', 300))}", "snooze"))
         if not strict:          # a strict break must not gain a one-click way out
             buttons.append((DISMISS_MARK, "dismiss"))
-        text = (message(b.get("text"), BREAK_TEXT, every=b["every"], length=b["length"])
+        # {every} says "45 min" or "30s"; a "{every} min" (from when it was a number of minutes) says it the same
+        text = (message((b.get("text") or "").replace("{every} min", "{every}"),
+                        BREAK_TEXT.replace("{every} min", "{every}"), every=seconds_text(b["every_sec"]),
+                        length=b["length"])
                 + (f"\n\nStrict break: {b.get('max_snooze', 2) - self.break_snoozes} snooze"
                    f"{'s' * (b.get('max_snooze', 2) - self.break_snoozes != 1)} left, then it starts on its "
                    "own." if strict else ""))
@@ -455,23 +522,23 @@ class Engine:
         return None
 
     def _sleep_interval(self, s: dict, bed: datetime, now: datetime) -> int:
-        """Minutes until the bedtime screen returns after a dismiss - from the active escalation tier. With no
-        tiers set it falls back to the old flat `repeat`."""
-        wake_t = parse_hhmm(s["wake"])
+        """Seconds until the bedtime screen returns after a dismiss - from the active escalation step (at least
+        MIN_INTERVAL_SEC). A step's time is placed in the night counted from bedtime; one in the daytime gap before
+        bedtime (at or after wake) counts from bedtime - also with a bedtime after midnight: a 23:00 or 00:30 step
+        with bedtime 01:00 used to be dated the evening after (or past wake) and never applied (the phone's rule
+        since 0.5.14). Two steps at the same time: the more frequent one. With no steps, or before the first, the
+        flat `repeat_sec`."""
+        def since_bed(t) -> int:            # minutes from bedtime to t, going forward through the night
+            return (t.hour * 60 + t.minute - bed.hour * 60 - bed.minute) % 1440
+        wake_off = since_bed(parse_hhmm(s["wake"])) or 1440
         best = None
         for t in tiers_of(s):
-            tier_t = parse_hhmm(t["from"])
-            if tier_t >= bed.time():                       # same evening, at/after bedtime (e.g. 23:30)
-                when = datetime.combine(bed.date(), tier_t)
-            elif tier_t < wake_t:                          # after midnight, before waking (e.g. 00:00, 03:00)
-                when = datetime.combine(bed.date() + timedelta(days=1), tier_t)
-            else:                                          # earlier in the evening than bedtime (e.g. 21:00):
-                when = bed                                 # already past by the time the screen starts
-            if when <= now and (best is None or when > best[0]):
-                best = (when, int(t["every"]))
-        if best:
-            return max(1, int(best[1]))          # tiers are whole minutes, never below 1
-        return s.get("repeat", 5)                # past bedtime but before the first tier: the old flat value
+            off = since_bed(parse_hhmm(t["from"]))
+            when = bed if off >= wake_off else bed + timedelta(minutes=off)
+            every = int(t["every_sec"])
+            if when <= now and (best is None or when > best[0] or (when == best[0] and every < best[1])):
+                best = (when, every)
+        return max(MIN_INTERVAL_SEC, best[1] if best else int(s.get("repeat_sec", 300)))
 
     def _sleep(self, now):
         s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)
@@ -544,9 +611,11 @@ class Engine:
             if r["kind"] == "interval":
                 if using and not self._outstanding(r["id"]):
                     self.counters[r["id"]] = self.counters.get(r["id"], 0) + dt
-                if self.counters.get(r["id"], 0) >= self._every(r["id"], r["every"], now) * 60:
+                if self.counters.get(r["id"], 0) >= self._every(r["id"], r["every_sec"], now):
                     self.counters[r["id"]] = 0
-                    self._fire(r, now)
+                    self._fire(r, now, paced=r["every_sec"] >= UNPACED_UNDER_SEC)
+                if using and not self._outstanding(r["id"]):
+                    self.use_left[key] = self._every(r["id"], r["every_sec"], now) - self.counters.get(r["id"], 0)
             elif r["kind"] == "times":
                 for t in r["times"]:
                     at = datetime.combine(today, parse_hhmm(t))
@@ -666,7 +735,7 @@ class Engine:
                     self.streak[rid] = 0
             elif action == "snooze":
                 self.break_snoozes += 1
-                self.snoozed["break"] = now + timedelta(minutes=b.get("snooze", 5))
+                self.snoozed["break"] = now + timedelta(seconds=b.get("snooze_sec", 300))
                 log(self.db, "break", "snoozed", now)
                 self.folded = folded                    # they come back with it
             elif action == "dismiss":
@@ -707,7 +776,7 @@ class Engine:
                     self.sleep_next[nkey] = now + timedelta(minutes=max(1, int(action.split(":", 1)[1])))
                     log(self.db, "sleep", "snoozed", now)
                 else:                                        # "dismiss": back after the escalating interval
-                    self.sleep_next[nkey] = now + timedelta(minutes=self._sleep_interval(s, bed, now))
+                    self.sleep_next[nkey] = now + timedelta(seconds=self._sleep_interval(s, bed, now))
                     log(self.db, "sleep", "dismissed", now)
         elif key.startswith("custom:"):
             by_id = {x["id"]: x for x in custom_list(self.db)}

@@ -8,6 +8,7 @@ from gui.widgets import Corner
 
 import alerts
 import digest
+import reminders   # (parse_interval / seconds_text: the same "30s", "5 min" boxes as the reminders)
 from rules import DAY_NAMES
 
 MUTED = theme.MUTED
@@ -168,20 +169,31 @@ class NotificationsPage(ctk.CTkFrame):
         repeat = ctk.CTkFrame(box, fg_color="transparent")
         repeat.pack(anchor="w", padx=16, pady=4)
         ctk.CTkLabel(repeat, text="While I'm using it, remind me again every").pack(side="left")
-        self.repeat = ctk.CTkOptionMenu(repeat, width=90, values=[self._repeat_label(m) for m in alerts.REPEAT_OPTIONS],
-                                        command=lambda v: self.draft.set_setting(
-                                            "notify.warn.repeat_min", "0" if v == "never" else v.split()[0]))
+        self.repeat = ctk.CTkEntry(repeat, width=72, justify="center")   # any time: "Off", "30s", "2 min"
         self.repeat.pack(side="left", padx=8)
-        ctk.CTkLabel(repeat, text="until it's blocked", text_color=MUTED).pack(side="left")
+        self.repeat.bind("<Return>", lambda e: self._set_repeat())
+        self.repeat.bind("<FocusOut>", lambda e: self._set_repeat())
+        ctk.CTkLabel(repeat, text="until it's blocked (\"Off\", \"30s\", \"2 min\")", text_color=MUTED).pack(
+            side="left")
         self.started_switch = ctk.CTkSwitch(box, text="Notify me when a block starts", command=lambda: self.draft.set_setting(
             "notify.started.enabled", "1" if self.started_switch.get() else "0"))
         self.started_switch.pack(anchor="w", padx=16, pady=(4, 6))
         ctk.CTkLabel(box, text="Blocks from the same group are announced together (\"Night schedule starts in 5 min: ...\").",
                      text_color=MUTED).pack(anchor="w", padx=16, pady=(0, 12))
 
-    @staticmethod
-    def _repeat_label(minutes: int) -> str:
-        return "never" if minutes == 0 else f"{minutes} min"
+    def _set_repeat(self):
+        """The typed repeat, in seconds (5 s at least, or Off); something that isn't a time goes back to the last."""
+        try:
+            seconds = str(reminders.parse_interval(self.repeat.get(), allow_off=True))
+        except ValueError:
+            seconds = None
+        if seconds is not None and seconds != self.draft.settings["notify.warn.repeat_sec"]:
+            self.draft.set_setting("notify.warn.repeat_sec", seconds)
+        self._show_repeat()
+
+    def _show_repeat(self):
+        self.repeat.delete(0, "end")
+        self.repeat.insert(0, reminders.seconds_text(int(self.draft.settings["notify.warn.repeat_sec"])))
 
     def load(self):
         """Show the draft's values (on start and after Discard)."""
@@ -196,7 +208,7 @@ class NotificationsPage(ctk.CTkFrame):
         self.fmt.set(alerts.FORMATS[s["notify.format"]])
         self.warn_switch.select() if s["notify.warn.enabled"] == "1" else self.warn_switch.deselect()
         self.warn_minutes.set(f"{s['notify.warn.minutes']} min")
-        self.repeat.set(self._repeat_label(int(s["notify.warn.repeat_min"])))
+        self._show_repeat()
         self.started_switch.select() if s["notify.started.enabled"] == "1" else self.started_switch.deselect()
 
 

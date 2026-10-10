@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.CustomCfg
+import com.husarp.lockdown.engine.Interval
 import com.husarp.lockdown.engine.ReminderTier
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.engine.Rules
@@ -142,7 +143,7 @@ private fun RemList(open: (RemPage) -> Unit) {
                     Spacer(Modifier.size(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Breaks", style = MaterialTheme.typography.titleSmall)
-                        Text("${cfg.breaks.length} min every ${cfg.breaks.every} min" + if (cfg.breaks.twenty) " · 20-20-20 on" else "",
+                        Text("${cfg.breaks.length} min every ${Interval.text(cfg.breaks.everySeconds)}" + if (cfg.breaks.twenty) " · 20-20-20 on" else "",
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
                     Switch(checked = cfg.breaks.on, onCheckedChange = { on ->
@@ -229,10 +230,10 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                             onRemove = { set { c -> c.copy(tiers = c.tiers.filterIndexed { j, _ -> j != i }) } })
                     }
                 }
-                if (s.tiers.isEmpty()) Text("Every ${s.repeat} min, all night.", style = MaterialTheme.typography.bodyMedium)
+                if (s.tiers.isEmpty()) Text("Every ${Interval.text(s.repeatSeconds)}, all night.", style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = { set { c -> c.copy(tiers = c.tiers + newStep(c)) } }) { Text("+ Add step") }
                 Text("The later it is, the more often the bedtime screen returns after you dismiss it. " +
-                    "A step earlier in the evening than bedtime counts from bedtime.",
+                    "A step earlier in the evening than bedtime counts from bedtime. Type how often like 30 s, 5 min or 1h (at least 5 s).",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {
@@ -285,15 +286,12 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     }
 }
 
-/** One escalation step: "from HH:MM, every N min", with × to remove it. */
+/** One escalation step: "from HH:MM, every 5 min / 30 s", with × to remove it. */
 @Composable
 private fun TierRow(s: SleepCfg, t: ReminderTier, onChange: (ReminderTier) -> Unit, onRemove: () -> Unit) {
-    var every by remember(t.every) { mutableStateOf(t.every.toString()) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TimeField("From", t.from, Modifier.weight(1f)) { onChange(t.copy(from = it)) }
-        OutlinedTextField(every, { v -> every = v; v.trim().toIntOrNull()?.takeIf { it >= 1 }?.let { onChange(t.copy(every = minOf(it, 12 * 60))) } },
-            label = { Text("Every (min)") }, singleLine = true, isError = (every.trim().toIntOrNull() ?: 0) < 1,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+        IntervalField("Every", t.seconds, Modifier.weight(1f), hint = null) { onChange(t.copy(everySec = it)) }
         IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, "Remove step") }
     }
     if (RemindersEngine.stepFromBedtime(s, t.from))
@@ -302,9 +300,25 @@ private fun TierRow(s: SleepCfg, t: ReminderTier, onChange: (ReminderTier) -> Un
 
 /** A new step: at bedtime if there is none, else an hour after the last one, as often. */
 private fun newStep(s: SleepCfg): ReminderTier {
-    val last = s.tiers.lastOrNull() ?: return ReminderTier(s.bedtime, 15)
-    val t = runCatching { Rules.parseHhmm(last.from).plusHours(1) }.getOrNull() ?: return ReminderTier(s.bedtime, 15)
-    return ReminderTier("%02d:%02d".format(t.hour, t.minute), last.every)
+    val last = s.tiers.lastOrNull() ?: return ReminderTier(s.bedtime, everySec = 15 * 60)
+    val t = runCatching { Rules.parseHhmm(last.from).plusHours(1) }.getOrNull() ?: return ReminderTier(s.bedtime, everySec = 15 * 60)
+    return ReminderTier("%02d:%02d".format(t.hour, t.minute), everySec = last.seconds)
+}
+
+/** A "how often" box: "30 s", "5 min", "1h30" (a bare number is minutes, as before), 5 s to 24 h. Only a real time
+ *  reaches [onChange]; while the box holds something else it shows the error and the setting keeps its last value.
+ *  [optional]: empty is fine (a choice next to it covers it, e.g. Never). */
+@Composable
+internal fun IntervalField(label: String, seconds: Int, modifier: Modifier = Modifier.fillMaxWidth(), optional: Boolean = false,
+                           hint: String? = "e.g. 30 s, 5 min or 1h30 - at least 5 s", onChange: (Int) -> Unit) {
+    fun shown(sec: Int) = if (sec > 0) Interval.text(sec) else ""
+    var text by remember { mutableStateOf(shown(seconds)) }
+    // a change from outside (Discard, a chip) shows, unless what's typed already says it ("3" while typing 3 min)
+    LaunchedEffect(seconds) { if (Interval.parse(text) != seconds) text = shown(seconds) }
+    val bad = if (text.isBlank()) !optional else Interval.parse(text) == null
+    OutlinedTextField(text, { v -> text = v; Interval.parse(v)?.let { if (it != seconds) onChange(it) } },
+        label = { Text(label) }, singleLine = true, isError = bad,
+        supportingText = if (hint != null) { { Text(hint) } } else null, modifier = modifier)
 }
 
 /** "9:30" / "09:30" as "09:30", or null while it isn't a time yet. */
@@ -379,9 +393,13 @@ private fun BreakEditor(onClose: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         EditorHeader("Breaks", onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            StepperRow("Remind every", b.every, "min of use", 5, min = 5) { set { c -> c.copy(every = it) } }
+            Card(color = cs.surfaceContainerLow) {
+                IntervalField("Remind me after this much use", b.everySeconds) { v -> set { c -> c.copy(everySec = v) } }
+            }
             StepperRow("Break length", b.length, "min", 1, min = 1, max = 60) { set { c -> c.copy(length = it) } }
-            StepperRow("Snooze", b.snooze, "min each time", 5, min = 5) { set { c -> c.copy(snooze = it) } }
+            Card(color = cs.surfaceContainerLow) {
+                IntervalField("Snooze, each time", b.snoozeSeconds) { v -> set { c -> c.copy(snoozeSec = v) } }
+            }
             Card(color = cs.surfaceContainerLow) {
                 SwitchRowInline("Strict break (covers the screen until it's over)", b.strict) { set { c -> c.copy(strict = it) } }
                 SwitchRowInline("20-20-20 eye breaks", b.twenty) { set { c -> c.copy(twenty = it) } }
@@ -440,7 +458,9 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
             SectionLabel("When")
             Segmented(listOf("Every…", "Set times", "Random once"), kindIdx) { draft = draft.copy(kind = when (it) { 1 -> "times"; 2 -> "random"; else -> "interval" }) }
             when (draft.kind) {
-                "interval" -> StepperRow("Every", draft.every, "min of use", 15, min = 1) { draft = draft.copy(every = it) }
+                "interval" -> Card(color = cs.surfaceContainerLow) {
+                    IntervalField("Every (of use)", draft.everySeconds) { draft = draft.copy(everySec = it) }
+                }
                 "times" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // tap a time to change it, × to remove it, + to add one (all with the system clock dialog)
                     draft.times.forEachIndexed { i, tm ->
@@ -502,9 +522,9 @@ private fun DaysRow(days: List<Int>, onChange: (List<Int>) -> Unit) {
     }
 }
 
-/** "every 15 → 5 → 1 min" (the steps' intervals in order), or the flat one with no steps. */
+/** "every 15 min → 5 min → 30 s" (the steps' intervals in order), or the flat one with no steps. */
 private fun stepsText(s: SleepCfg): String =
-    if (s.tiers.isEmpty()) "every ${s.repeat} min" else "every " + s.tiers.joinToString(" → ") { "${it.every}" } + " min"
+    "every " + if (s.tiers.isEmpty()) Interval.text(s.repeatSeconds) else s.tiers.joinToString(" → ") { Interval.text(it.seconds) }
 
 private fun updateCustom(id: String, block: (CustomCfg) -> CustomCfg) =
     Store.update { s -> s.copy(customs = s.customs.map { if (it.id == id) block(it) else it }) }
@@ -512,5 +532,5 @@ private fun updateCustom(id: String, block: (CustomCfg) -> CustomCfg) =
 private fun scheduleText(c: CustomCfg): String = when (c.kind) {
     "times" -> "At ${c.times.joinToString(", ")}"
     "random" -> "Once a day, ${c.window.getOrElse(0) { "" }}–${c.window.getOrElse(1) { "" }}"
-    else -> "Every ${c.every} min of use" + if (c.hours) " · ${c.window.getOrElse(0) { "" }}–${c.window.getOrElse(1) { "" }}" else ""
+    else -> "Every ${Interval.text(c.everySeconds)} of use" + if (c.hours) " · ${c.window.getOrElse(0) { "" }}–${c.window.getOrElse(1) { "" }}" else ""
 } + if (c.perDay > 0) " · stops after ${c.perDay}×" else ""

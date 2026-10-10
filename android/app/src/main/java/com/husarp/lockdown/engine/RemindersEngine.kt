@@ -18,8 +18,12 @@ import kotlin.random.Random
  * (at most one interruption per [PACE_MIN] min) and back-off (waved away too often → asks half as often).
  */
 
+/** A bedtime "comes back" step. Intervals are in seconds now: [every] (minutes) is a step saved before that, read
+ *  through [seconds] when [everySec] is missing; it stays in the file so an older copy (in Island) still reads it. */
 @Serializable
-data class ReminderTier(val from: String, val every: Int)
+data class ReminderTier(val from: String, val every: Int = 0, val everySec: Int? = null) {
+    val seconds: Int get() = everySec ?: (every * 60)
+}
 
 @Serializable
 data class SleepCfg(
@@ -27,16 +31,19 @@ data class SleepCfg(
     val bedtime: String = "23:00",
     val wake: String = "07:00",
     val before: Int = 30,                       // warn this many minutes before bedtime
-    val repeat: Int = 5,                        // fallback interval when no tier applies yet
+    val repeat: Int = 5,                        // minutes, saved before seconds: read through [repeatSeconds]
     val mode: String = "",                      // mode to start at bedtime (empty = none)
     val warnText: String = "",
     val text: String = "",
     // "Comes back every N min after you dismiss it, from HH:MM": the latest step that has passed wins. A step set
-    // earlier in the evening than bedtime counts from bedtime. No steps: back every [repeat] min.
+    // earlier in the evening than bedtime counts from bedtime. No steps: back every [repeatSeconds].
     val tiers: List<ReminderTier> = listOf(ReminderTier("23:00", 15), ReminderTier("00:00", 5), ReminderTier("03:00", 1)),
     val guarded: Boolean = false,               // dismissing needs the anti-bypass challenge
     val dismissWait: Int = 0,                   // seconds before Dismiss works on the bedtime screen (0 = off)
-)
+    val repeatSec: Int? = null,                 // fallback interval (seconds) when no step applies yet
+) {
+    val repeatSeconds: Int get() = repeatSec ?: (repeat * 60)
+}
 
 /** Should bedtime grayscale be on at [mins] (minutes since midnight)? Only with the toggle on, Bedtime on, and inside bedtime→wake. */
 fun bedtimeGrayscaleWanted(toggle: Boolean, s: SleepCfg, mins: Int): Boolean {
@@ -93,16 +100,21 @@ fun grayscaleStuck(wanted: Boolean, switchOn: Boolean, mark: Boolean?, isOn: Boo
 @Serializable
 data class BreakCfg(
     val on: Boolean = true,
-    val every: Int = 45,
+    val every: Int = 45,                        // minutes, saved before seconds: read through [everySeconds]
     val length: Int = 5,
     val strict: Boolean = false,
-    val snooze: Int = 5,
+    val snooze: Int = 5,                        // minutes, saved before seconds: read through [snoozeSeconds]
     val maxSnooze: Int = 2,
     val twenty: Boolean = false,                // 20-20-20 eye breaks
     val text: String = "",
     val twentyText: String = "",
     val guarded: Boolean = false,
-)
+    val everySec: Int? = null,                  // seconds of use between breaks
+    val snoozeSec: Int? = null,                 // a snooze, in seconds
+) {
+    val everySeconds: Int get() = everySec ?: (every * 60)
+    val snoozeSeconds: Int get() = snoozeSec ?: (snooze * 60)
+}
 
 @Serializable
 data class CustomCfg(
@@ -110,7 +122,7 @@ data class CustomCfg(
     val on: Boolean = true,
     val text: String = "",
     val kind: String = "interval",              // "interval" | "times" | "random"
-    val every: Int = 60,                        // interval: minutes of use between reminders
+    val every: Int = 60,                        // minutes, saved before seconds: read through [everySeconds]
     val times: List<String> = listOf("12:00"),  // times: the set times
     val days: List<Int> = listOf(0, 1, 2, 3, 4, 5, 6),
     val window: List<String> = listOf("10:00", "18:00"),
@@ -122,7 +134,10 @@ data class CustomCfg(
     val hours: Boolean = false,                 // interval kind: only inside the window
     val perDay: Int = 0,                        // stop for the day after this many Done (0 = no limit)
     val guarded: Boolean = false,
-)
+    val everySec: Int? = null,                  // interval: seconds of use between reminders
+) {
+    val everySeconds: Int get() = everySec ?: (every * 60)
+}
 
 data class RButton(val label: String, val action: String)
 
@@ -220,9 +235,9 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             }
         }
         if (now.isBefore(snoozed["break"] ?: now)) return null
-        if (continuous >= every("break", b.every.toDouble(), now) * 60 && "break" !in open) {
+        if (continuous >= every("break", b.everySeconds.toDouble(), now) && "break" !in open) {
             if (b.strict && breakSnoozes >= b.maxSnooze) { startBreak(now, b, out); return null }
-            if ("break" !in snoozed && paced(now)) return null
+            if ("break" !in snoozed && b.everySeconds >= UNPACED_UNDER_SEC && paced(now)) return null
             snoozed.remove("break")
             return b                                           // shown at the end of the tick
         }
@@ -245,9 +260,11 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         val snoozesLeft = breakSnoozes < b.maxSnooze
         val buttons = ArrayList<RButton>()
         buttons.add(RButton("Start break", "start"))
-        if (!b.strict || snoozesLeft) buttons.add(RButton("Snooze ${b.snooze} min", "snooze"))
+        if (!b.strict || snoozesLeft) buttons.add(RButton("Snooze ${Interval.text(b.snoozeSeconds)}", "snooze"))
         if (!b.strict) buttons.add(RButton(DISMISS, "dismiss"))
-        var text = message(b.text, BREAK_TEXT, "every" to b.every.toString(), "length" to b.length.toString())
+        // {every} says "45 min" or "30 s"; a "{every} min" (from when it was a number of minutes) says it the same
+        var text = message(b.text.replace("{every} min", "{every}"), BREAK_TEXT.replace("{every} min", "{every}"),
+            "every" to Interval.text(b.everySeconds), "length" to b.length.toString())
         if (b.strict) {
             val left = b.maxSnooze - breakSnoozes
             text += "\n\nStrict break: $left snooze${if (left != 1) "s" else ""} left, then it starts on its own."
@@ -281,10 +298,10 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         return null
     }
 
-    /** A step's time is placed in the night counted from bedtime; one in the daytime gap before bedtime (at or
-     *  after wake) counts from bedtime. Two steps at the same time: the more frequent one. */
+    /** Seconds (at least [Interval.MIN_SEC]). A step's time is placed in the night counted from bedtime; one in the
+     *  daytime gap before bedtime (at or after wake) counts from bedtime. Two steps at the same time: the more frequent one. */
     private fun sleepInterval(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): Int {
-        val wakeT = hm(s.wake) ?: return s.repeat
+        val wakeT = hm(s.wake) ?: return maxOf(Interval.MIN_SEC, s.repeatSeconds)
         val wakeOff = sinceBed(bed.toLocalTime(), wakeT).let { if (it == 0) 1440 else it }
         var best: Pair<LocalDateTime, Int>? = null
         for (t in s.tiers) {
@@ -293,9 +310,9 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             val whenAt = if (off >= wakeOff) bed else bed.plusMinutes(off.toLong())
             if (whenAt.isAfter(now)) continue
             val b = best
-            if (b == null || whenAt.isAfter(b.first) || (whenAt == b.first && t.every < b.second)) best = whenAt to t.every
+            if (b == null || whenAt.isAfter(b.first) || (whenAt == b.first && t.seconds < b.second)) best = whenAt to t.seconds
         }
-        return best?.let { maxOf(1, it.second) } ?: s.repeat
+        return maxOf(Interval.MIN_SEC, best?.second ?: s.repeatSeconds)
     }
 
     private fun sleep(now: LocalDateTime, s: SleepCfg, quiet: Boolean, paused: Boolean, emergencyLeft: Int, out: Out) {
@@ -358,8 +375,8 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             when (r.kind) {
                 "interval" -> {
                     if (using && !outstanding(r.id)) counters[r.id] = (counters[r.id] ?: 0.0) + dt
-                    if ((counters[r.id] ?: 0.0) >= every(r.id, r.every.toDouble(), now) * 60) {
-                        counters[r.id] = 0.0; fire(r, now, customs, out)
+                    if ((counters[r.id] ?: 0.0) >= every(r.id, r.everySeconds.toDouble(), now)) {
+                        counters[r.id] = 0.0; fire(r, now, customs, out, paced = r.everySeconds >= UNPACED_UNDER_SEC)
                     }
                 }
                 "times" -> for (t in r.times) {
@@ -481,7 +498,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
                         streak["break"] = 0
                         for (rid in fld) streak[rid] = 0
                     }
-                    "snooze" -> { breakSnoozes++; snoozed["break"] = now.plusMinutes(brk.snooze.toLong()); folded.addAll(fld) }
+                    "snooze" -> { breakSnoozes++; snoozed["break"] = now.plusSeconds(brk.snoozeSeconds.toLong()); folded.addAll(fld) }
                     "dismiss" -> {
                         continuous = 0.0; breakSnoozes = 0
                         dismissed("break", "Time for a break", now, out)
@@ -496,7 +513,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
                         action == "off_tonight" -> sleepNext[nkey] = wake
                         action == "back" -> sleepNext[nkey] = now      // up again on the next tick, its wait from the start
                         action.startsWith("snooze:") -> sleepNext[nkey] = now.plusMinutes(maxOf(1L, action.substringAfter(":").toLong()))
-                        else -> sleepNext[nkey] = now.plusMinutes(sleepInterval(sleep, bed, now).toLong())
+                        else -> sleepNext[nkey] = now.plusSeconds(sleepInterval(sleep, bed, now).toLong())
                     }
                 }
             }
@@ -532,8 +549,9 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         return Duration.between(last, now).seconds < PACE_MIN * 60
     }
 
-    private fun every(key: String, minutes: Double, now: LocalDateTime): Double =
-        minutes * (if (backedOff[key] == now.toLocalDate()) 2 else 1)
+    /** An interval in seconds, doubled for the rest of the day once waved away [BACKOFF_AFTER] times running. */
+    private fun every(key: String, seconds: Double, now: LocalDateTime): Double =
+        seconds * (if (backedOff[key] == now.toLocalDate()) 2 else 1)
 
     private fun dismissed(key: String, name: String, now: LocalDateTime, out: Out) {
         streak[key] = (streak[key] ?: 0) + 1
@@ -579,6 +597,8 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         const val TWENTY_SEC = 20 * 60
         const val LATE_FIRE_MIN = 30L
         const val PACE_MIN = 20
+        /** A break or reminder set under a minute (seconds: a nag you asked for) isn't held back by the pace. */
+        const val UNPACED_UNDER_SEC = 60
         const val BACKOFF_AFTER = 3
         const val DISMISS = "✕"
 

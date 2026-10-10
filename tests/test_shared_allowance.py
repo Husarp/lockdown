@@ -72,7 +72,7 @@ def test_splitting_the_pot_needs_the_guard():
     assert not rule_looser({**shared, "allowance_shared": 0}, shared, NOW)
 
 
-SETTINGS = {"notify.warn.enabled": "0", "notify.warn.minutes": "5", "notify.warn.repeat_min": "0",
+SETTINGS = {"notify.warn.enabled": "0", "notify.warn.minutes": "5", "notify.warn.repeat_sec": "0",
             "notify.started.enabled": "1"}
 
 

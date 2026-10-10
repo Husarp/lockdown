@@ -56,7 +56,7 @@ def _spent(item, seconds):
     return Usage({(_item_owner(rule), bucket): seconds})
 
 
-SETTINGS = {"notify.warn.enabled": "1", "notify.warn.minutes": "5", "notify.warn.repeat_min": "0",
+SETTINGS = {"notify.warn.enabled": "1", "notify.warn.minutes": "5", "notify.warn.repeat_sec": "0",
             "notify.started.enabled": "0"}
 
 

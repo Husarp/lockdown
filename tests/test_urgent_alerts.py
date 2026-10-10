@@ -7,7 +7,7 @@ import alerts
 from rules import Usage
 
 NOW = datetime(2026, 9, 21, 20, 55)      # five minutes before a 21:00 block
-SETTINGS = {"notify.warn.enabled": "1", "notify.warn.minutes": "10", "notify.warn.repeat_min": "0",
+SETTINGS = {"notify.warn.enabled": "1", "notify.warn.minutes": "10", "notify.warn.repeat_sec": "0",
             "notify.started.enabled": "1"}
 
 

@@ -27,12 +27,12 @@ DEFAULT_MESSAGES = {
 FORMATS = {"toast": "Windows notifications (recommended)", "inapp": "Lockdown pop-ups", "both": "Both"}   # "Show as"
 COOLDOWN_OPTIONS = [1, 5, 15, 30, 60]
 WARN_MINUTE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 60]
-REPEAT_OPTIONS = [0, 1, 2, 5, 10]   # 0 = don't repeat
 # notify.format defaults to Windows' own notifications (0.84.7): Windows draws them, so they never go over a game
 # the way Lockdown's pop-up window did (it made full-screen games stutter). While something is full-screen even
 # "Lockdown pop-ups" / "Both" use them (App._show).
 DEFAULTS = {"notify.cooldown_min": "30", "notify.format": "toast",
-            "notify.warn.enabled": "1", "notify.warn.minutes": "5", "notify.warn.repeat_min": "0",
+            "notify.warn.enabled": "1", "notify.warn.minutes": "5",
+            "notify.warn.repeat_sec": "0",   # "remind me again every", in seconds (0 = don't); see get
             "notify.started.enabled": "1"}
 for _r in REASONS:
     DEFAULTS[f"notify.enabled.{_r}"] = "1"
@@ -40,7 +40,11 @@ for _r in REASONS:
 
 
 def get(db, key: str) -> str:
-    return db.get_setting(key, DEFAULTS[key])
+    value = db.get_setting(key)
+    if value is None and key == "notify.warn.repeat_sec":   # saved before seconds: notify.warn.repeat_min, minutes
+        minutes = db.get_setting("notify.warn.repeat_min")
+        value = str(int(minutes) * 60) if minutes and minutes.isdigit() else None
+    return DEFAULTS[key] if value is None else value
 
 
 def until_text(until: str | None, now: datetime) -> str:
@@ -126,7 +130,7 @@ class BlockWatcher:
         self.urgent = set()
         warn_on = settings["notify.warn.enabled"] == "1"
         warn_sec = int(settings["notify.warn.minutes"]) * 60
-        repeat_sec = int(settings["notify.warn.repeat_min"]) * 60
+        repeat_sec = int(settings.get("notify.warn.repeat_sec") or 0)
         upcoming: dict[tuple, dict] = {}
         blocked: dict[int, tuple] = {}
         for item in items:

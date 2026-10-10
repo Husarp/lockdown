@@ -62,7 +62,7 @@ def test_group_warning_is_combined_and_shown_once():
 
 
 def test_repeat_reminder_only_while_in_use():
-    s = settings(warn_minutes="20", warn_repeat_min="5")
+    s = settings(warn_minutes="20", warn_repeat_sec="300")
     w = BlockWatcher()
     t0 = datetime(2026, 9, 14, 20, 40)
     assert len(w.check(ITEMS, GROUP, no_usage, t0, set(), s)) == 1

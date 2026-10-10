@@ -129,7 +129,8 @@ def _rules_for_ui(db) -> list[dict]:
 
 def _reminders_for_ui(db) -> list[dict]:
     return [{"id": r["id"], "n": r["text"], "msg": r["text"], "on": bool(r["on"]), "g": "",
-             "mode": r["kind"], "interval": r["every"], "times": list(r.get("times") or []),
+             "mode": r["kind"], "interval": r["every_sec"] / 60,   # (the page counts minutes; 0.5 = 30 s)
+             "times": list(r.get("times") or []),
              "days": list(r.get("days") or [])} for r in reminders.custom_list(db)]
 
 
@@ -313,7 +314,7 @@ class Api:
                       "id": rid or __import__("uuid").uuid4().hex[:8],
                       "text": reminder.get("msg") or reminder.get("n") or "",
                       "on": bool(reminder.get("on", True)), "kind": reminder.get("mode", "interval"),
-                      "every": int(reminder.get("interval", 60) or 60),
+                      "every_sec": round(float(reminder.get("interval", 60) or 60) * 60),
                       "times": list(reminder.get("times") or ["12:00"])}
             out = [merged if r["id"] == merged["id"] else r for r in existing]
             if merged["id"] not in by_id:
