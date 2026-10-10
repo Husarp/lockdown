@@ -410,7 +410,7 @@ class Database:
                 ways = json.loads(g["member_blocks"] or "{}")
             except ValueError:
                 continue
-            new = {i: block_method.merge("app", g["app_block"] or items[int(i)], w) if int(i) in items and w else w
+            new = {i: block_method.own_app_way(g["app_block"], items[int(i)], w) if int(i) in items else w
                    for i, w in ways.items()}
             if new != ways:
                 self.conn.execute("UPDATE block_groups SET member_blocks = ? WHERE id = ?", (json.dumps(new), g["id"]))

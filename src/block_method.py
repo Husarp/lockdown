@@ -55,6 +55,12 @@ def merge(k: str, *block_types: str | None) -> str:
     return make_block_type(f)
 
 
+def own_app_way(group_app_block: str | None, item_block_type: str | None, extra: str | None) -> str | None:
+    """The own way an app member has since 0.84.13, from an old "extra on top" way: the merge of what it was blocked
+    with (the group's way, else its own setting) and the extra - blocked exactly as before."""
+    return merge("app", group_app_block or item_block_type, extra) if extra else extra
+
+
 def group_way(group: dict, k: str) -> str | None:
     """What the group chose for its members of this kind (None: not chosen)."""
     return group.get(GROUP_KEYS[k])

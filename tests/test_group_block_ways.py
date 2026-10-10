@@ -534,3 +534,64 @@ def test_the_member_window_gives_an_app_its_own_way_and_a_site_only_more(monkeyp
         assert win.own is None
     finally:
         root.destroy()
+
+
+# ---------------------------------------------------------------- backups from before an app's own way replaced the group's
+def _old_backup(db):
+    data = json.loads(json.dumps(backup.export(db)))
+    data["lockdown"] = 1
+    return data
+
+
+def test_an_old_backup_s_app_extra_is_merged_into_the_group_s_way_on_restore(tmp_path):
+    db = Database(tmp_path / "t.db")
+    _yt, game, _gid = _setup(db, app_block="close", member_blocks={"game": "minimize"})   # old: extra on top
+    data = _old_backup(db)
+    other = Database(tmp_path / "other.db")
+    backup.restore(other, data)
+    new_game = next(i["id"] for i in other.list_items() if i["display_name"] == "Game")
+    [g] = other.list_groups()
+    assert g["member_blocks"] == {new_game: block_method.merge("app", "close", "minimize")}
+    assert block_method.flags("app", g["member_blocks"][new_game]) >= block_method.flags("app", "close")
+    assert _way(other, new_game) == g["member_blocks"][new_game]
+
+
+def test_an_old_backup_without_a_group_way_merges_with_the_app_s_own(tmp_path):
+    db = Database(tmp_path / "t.db")
+    _setup(db, game_type="close", member_blocks={"game": "minimize"})
+    other = Database(tmp_path / "other.db")
+    backup.restore(other, _old_backup(db))
+    new_game = next(i["id"] for i in other.list_items() if i["display_name"] == "Game")
+    [g] = other.list_groups()
+    assert g["member_blocks"] == {new_game: block_method.merge("app", "close", "minimize")}
+
+
+def test_a_new_backup_restores_own_ways_as_they_are_and_a_site_is_never_merged(tmp_path):
+    db = Database(tmp_path / "t.db")
+    _setup(db, app_block="close", site_block="dns", member_blocks={"game": "minimize", "yt": "close"})
+    data = json.loads(json.dumps(backup.export(db)))
+    assert data["lockdown"] == backup.FORMAT == 2
+    other = Database(tmp_path / "other.db")
+    backup.restore(other, data)
+    ids = {i["display_name"]: i["id"] for i in other.list_items()}
+    [g] = other.list_groups()
+    assert g["member_blocks"] == {ids["Game"]: "minimize", ids["YouTube"]: "close"}
+    again = backup.export(other)   # a round trip changes nothing (ids are renumbered, so compare by name)
+    name = {str(i["id"]): i["display_name"] for i in again["items"]}
+    assert again["lockdown"] == 2
+    assert {name[i]: w for i, w in again["groups"][0]["member_blocks"].items()} == {"Game": "minimize", "YouTube": "close"}
+    old = Database(tmp_path / "old.db")
+    backup.restore(old, _old_backup(db))
+    yt_old = next(i["id"] for i in old.list_items() if i["display_name"] == "YouTube")
+    assert old.list_groups()[0]["member_blocks"][yt_old] == "close"
+
+
+def test_a_backup_file_of_either_format_loads_and_a_newer_one_is_refused(tmp_path):
+    for fmt, ok in ((1, True), (2, True), (3, False), (0, False)):
+        path = tmp_path / f"b{fmt}.json"
+        path.write_text(json.dumps({"lockdown": fmt, "items": []}))
+        if ok:
+            assert backup.load(str(path))["lockdown"] == fmt
+        else:
+            with pytest.raises(ValueError):
+                backup.load(str(path))

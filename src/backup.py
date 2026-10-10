@@ -6,9 +6,11 @@ import csv
 import json
 from datetime import date, timedelta
 
+import block_method
 import emergency
 
-FORMAT = 1
+FORMAT = 2   # 2: a group's app member's own way replaces the group's (1: it was added on top - converted on restore)
+OLDEST = 1
 RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "clock_zone", "dns_filter.saved",
                 "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last",
                 "retention.last_day",   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
@@ -61,7 +63,8 @@ def load(path: str) -> dict:
             data = json.load(f)
     except (OSError, ValueError) as e:
         raise ValueError(f"Couldn't read that file ({e}).") from None
-    if not isinstance(data, dict) or data.get("lockdown") != FORMAT or not isinstance(data.get("items"), list):
+    if (not isinstance(data, dict) or data.get("lockdown") not in range(OLDEST, FORMAT + 1)
+            or not isinstance(data.get("items"), list)):
         raise ValueError("That isn't a Lockdown backup file.")
     return data
 
@@ -122,14 +125,21 @@ def restore(db, data: dict):
     for group_id in db.group_ids():
         db.remove_group(group_id)
     new_ids = {}
+    blocks = {}
     for item in data["items"]:
         new_ids[str(item["id"])] = db.add_item(item["display_name"], item["target"].split(), item["item_type"],
                                                item.get("source") or "backup", item.get("rules", []),
                                                item.get("notify"), item.get("block_type"), item.get("app_path"))
+        blocks[new_ids[str(item["id"])]] = item.get("block_type")
     for g in data.get("groups", []):
         members = {new_ids[i]: o for i, o in g.get("members", {}).items() if i in new_ids}
+        member_blocks = {new_ids[i]: w for i, w in (g.get("member_blocks") or {}).items() if i in new_ids}
+        if data.get("lockdown", FORMAT) < 2:   # a backup from before an app's own way replaced the group's
+            kinds = {new_ids[str(it["id"])]: it["item_type"] for it in data["items"]}
+            member_blocks = {i: block_method.own_app_way(g.get("app_block"), blocks[i], w)
+                             if kinds[i] != "site" else w for i, w in member_blocks.items()}
         ways = {"app_block": g.get("app_block"), "site_block": g.get("site_block"),
-                "member_blocks": {new_ids[i]: w for i, w in (g.get("member_blocks") or {}).items() if i in new_ids}}
+                "member_blocks": member_blocks}
         db.add_group(g["name"], g.get("rules", []), members, ways)
     for c in data.get("categories", []):
         db.set_category(c["kind"], c["name"], c["category"])
