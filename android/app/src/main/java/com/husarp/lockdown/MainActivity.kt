@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -30,6 +31,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -42,17 +45,19 @@ import com.husarp.lockdown.screens.ModesScreen
 import com.husarp.lockdown.screens.NetLogScreen
 import com.husarp.lockdown.screens.ReminderScreen
 import com.husarp.lockdown.screens.SettingsScreen
+import com.husarp.lockdown.ui.theme.Hue
 import com.husarp.lockdown.ui.theme.LockdownTheme
+import com.husarp.lockdown.ui.theme.tone
 
-/** The app's sections. The first five are the bottom bar; Guardrails and Settings are top-bar icons. */
-enum class Dest(val route: String, val label: String, val icon: ImageVector, val inBottomBar: Boolean = true) {
-    HOME("home", "Home", Icons.Filled.Home),
-    BLOCKING("blocking", "Blocking", Icons.Filled.Block),
-    MODES("modes", "Modes", Icons.Filled.Tune),
-    INSIGHTS("insights", "Insights", Icons.Filled.BarChart),
-    REMINDERS("reminders", "Reminders", Icons.Filled.Notifications),
-    GUARDRAILS("guardrails", "Guardrails", Icons.Filled.Shield, inBottomBar = false),
-    SETTINGS("settings", "Settings", Icons.Filled.Settings, inBottomBar = false),
+/** The app's sections, each with its colour. The first five are the bottom bar; Guardrails and Settings are top-bar icons. */
+enum class Dest(val route: String, val label: String, val icon: ImageVector, val hue: Hue, val inBottomBar: Boolean = true) {
+    HOME("home", "Home", Icons.Filled.Home, Hue.ORANGE),
+    BLOCKING("blocking", "Blocking", Icons.Filled.Block, Hue.RED),
+    MODES("modes", "Modes", Icons.Filled.Tune, Hue.BLUE),
+    INSIGHTS("insights", "Insights", Icons.Filled.BarChart, Hue.TEAL),
+    REMINDERS("reminders", "Reminders", Icons.Filled.Notifications, Hue.INDIGO),
+    GUARDRAILS("guardrails", "Guardrails", Icons.Filled.Shield, Hue.VIOLET, inBottomBar = false),
+    SETTINGS("settings", "Settings", Icons.Filled.Settings, Hue.SLATE, inBottomBar = false),
 }
 
 class MainActivity : ComponentActivity() {
@@ -130,7 +135,7 @@ fun App(askOff: MutableState<Boolean>) {
     com.husarp.lockdown.screens.BedtimeAsk()
     com.husarp.lockdown.ui.UnsavedDialog()
     val current by nav.currentBackStackEntryAsState()
-    val route = current?.destination?.route
+    val route = current?.destination?.route?.substringBefore("?")
     val here = Dest.entries.firstOrNull { it.route == route } ?: Dest.HOME
 
     Scaffold(
@@ -147,11 +152,14 @@ fun App(askOff: MutableState<Boolean>) {
         bottomBar = {
             NavigationBar {
                 for (d in Dest.entries.filter { it.inBottomBar }) {
+                    val t = tone(d.hue)
                     NavigationBarItem(
                         selected = here == d,
                         onClick = { nav.go(d) },
                         icon = { Icon(d.icon, d.label) },
                         label = { Text(d.label) },
+                        colors = NavigationBarItemDefaults.colors(indicatorColor = t.container, selectedIconColor = t.onContainer,
+                            selectedTextColor = t.accent),
                     )
                 }
             }
@@ -165,6 +173,9 @@ fun App(askOff: MutableState<Boolean>) {
                     onOpenBlocking = { nav.go(Dest.BLOCKING) },
                     onOpenModes = { nav.go(Dest.MODES) },
                     onOpenGuardrails = { nav.go(Dest.GUARDRAILS) },
+                    onOpenInsights = { nav.go(Dest.INSIGHTS) },
+                    onOpenReminders = { nav.go(Dest.REMINDERS) },
+                    onOpenSettings = { section -> nav.goSettings(section) },
                 )
             }
             composable(Dest.BLOCKING.route) { BlockingScreen(onOpenNetLog = { nav.navigate("netlog") }) }
@@ -173,7 +184,10 @@ fun App(askOff: MutableState<Boolean>) {
             composable(Dest.INSIGHTS.route) { InsightsScreen() }
             composable(Dest.REMINDERS.route) { ReminderScreen() }
             composable(Dest.GUARDRAILS.route) { GuardrailsScreen(onBack = { nav.popBackStack() }) }
-            composable(Dest.SETTINGS.route) { SettingsScreen(onBack = { nav.popBackStack() }) }
+            composable(Dest.SETTINGS.route + "?section={section}",
+                arguments = listOf(navArgument("section") { type = NavType.StringType; nullable = true })) { entry ->
+                SettingsScreen(onBack = { nav.popBackStack() }, start = entry.arguments?.getString("section"))
+            }
         }
         }
     }
@@ -181,12 +195,22 @@ fun App(askOff: MutableState<Boolean>) {
 
 /** Navigate to a top-level section without stacking duplicates; from a page with unsaved edits, Save / Discard first. */
 private fun androidx.navigation.NavController.go(dest: Dest) {
-    if (currentDestination?.route == dest.route) return
+    if (currentDestination?.route?.substringBefore("?") == dest.route) return
     com.husarp.lockdown.ui.Unsaved.leave {
         navigate(dest.route) {
             popUpTo(Dest.HOME.route) { saveState = true }
             launchSingleTop = true
             restoreState = true
+        }
+    }
+}
+
+/** Settings, opened at one of its sections ([section] null: the index), e.g. Home's "Island · Set up". */
+private fun androidx.navigation.NavController.goSettings(section: String?) {
+    com.husarp.lockdown.ui.Unsaved.leave {
+        navigate(Dest.SETTINGS.route + (section?.let { "?section=$it" } ?: "")) {
+            popUpTo(Dest.HOME.route) { saveState = true }
+            launchSingleTop = true
         }
     }
 }

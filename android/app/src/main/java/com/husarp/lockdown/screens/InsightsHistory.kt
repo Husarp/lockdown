@@ -37,8 +37,17 @@ import com.husarp.lockdown.engine.HistoryLog
 import com.husarp.lockdown.engine.Stats
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.ui.Card
+import com.husarp.lockdown.ui.IconTile
+import com.husarp.lockdown.ui.Kinds
 import com.husarp.lockdown.ui.SectionLabel
-import com.husarp.lockdown.ui.theme.LockdownTheme
+import com.husarp.lockdown.ui.theme.Hue
+import com.husarp.lockdown.ui.theme.tone
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Timer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -137,6 +146,7 @@ fun InsightsHistory(back: Int, len: Int) {
     }
     val h = d ?: return
     val muted = cs.onSurfaceVariant
+    val teal = tone(Hue.TEAL).accent
 
     Card(color = cs.surfaceContainerLow) {
         SectionLabel("Your patterns")
@@ -145,8 +155,8 @@ fun InsightsHistory(back: Int, len: Int) {
                 Modifier.padding(top = 6.dp), color = muted)
         } else {
             Spacer(Modifier.height(10.dp))
-            val ex = LockdownTheme.extra
-            val kinds = listOf(Triple("productive", "Productive", ex.success), Triple("neutral", "Neutral", cs.outline), Triple("distracting", "Distracting", cs.error))
+            val kinds = listOf("productive" to "Productive", "neutral" to "Neutral", "distracting" to "Distracting")
+                .map { (k, n) -> Triple(k, n, tone(Kinds.category(k).hue).accent) }
             Row(Modifier.fillMaxWidth().height(10.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 kinds.forEach { (k, _, c) ->
                     val s = h.kinds[k] ?: 0
@@ -163,13 +173,13 @@ fun InsightsHistory(back: Int, len: Int) {
             }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth()) {
-                Stat("Sessions", "${h.sessions}", "longest ${Stats.hm(h.longestSession)}", Modifier.weight(1f))
-                Stat("Longest focus", h.focus?.let { Stats.hm(it.first) } ?: "-", h.focus?.second ?: "", Modifier.weight(1f))
+                Stat("Sessions", "${h.sessions}", "longest ${Stats.hm(h.longestSession)}", Modifier.weight(1f), Icons.Filled.Timer, Hue.TEAL)
+                Stat("Longest focus", h.focus?.let { Stats.hm(it.first) } ?: "-", h.focus?.second ?: "", Modifier.weight(1f), Icons.Filled.CenterFocusStrong, Hue.GREEN)
             }
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth()) {
-                Stat("Switches", "${h.switches}", "${h.shortVisits} under 30 s", Modifier.weight(1f))
-                Stat("Time saved", Stats.hm(h.savedSec), "${h.blocked} blocked tr${if (h.blocked == 1) "y" else "ies"}", Modifier.weight(1f))
+                Stat("Switches", "${h.switches}", "${h.shortVisits} under 30 s", Modifier.weight(1f), Icons.Filled.SwapHoriz, Hue.AMBER)
+                Stat("Time saved", Stats.hm(h.savedSec), "${h.blocked} blocked tr${if (h.blocked == 1) "y" else "ies"}", Modifier.weight(1f), Icons.Filled.Savings, Hue.RED)
             }
         }
     }
@@ -185,7 +195,7 @@ fun InsightsHistory(back: Int, len: Int) {
                 }
                 Spacer(Modifier.height(5.dp))
                 Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(cs.surfaceContainerHighest)) {
-                    Box(Modifier.fillMaxWidth((sec.toFloat() / max).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(cs.primary))
+                    Box(Modifier.fillMaxWidth((sec.toFloat() / max).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(teal))
                 }
             }
         }
@@ -196,8 +206,8 @@ fun InsightsHistory(back: Int, len: Int) {
         SectionLabel("Streaks")
         Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
             Stat("Within your goal", h.goalStreak?.let { "$it day${if (it == 1) "" else "s"}" } ?: "-",
-                if (h.goalStreak == null) "Set a daily goal in Settings" else "in a row", Modifier.weight(1f))
-            Stat("No emergency unlock", "${h.noUnlock} day${if (h.noUnlock == 1) "" else "s"}", "in a row", Modifier.weight(1f))
+                if (h.goalStreak == null) "Set a daily goal in Settings" else "in a row", Modifier.weight(1f), Icons.Filled.Flag, Hue.GREEN)
+            Stat("No emergency unlock", "${h.noUnlock} day${if (h.noUnlock == 1) "" else "s"}", "in a row", Modifier.weight(1f), Kinds.EMERGENCY.icon, Kinds.EMERGENCY.hue)
         }
     }
 
@@ -210,7 +220,7 @@ fun InsightsHistory(back: Int, len: Int) {
                     Text(h.heatRows[i], Modifier.width(36.dp), style = MaterialTheme.typography.labelSmall, color = muted)
                     row.forEach { level ->
                         Box(Modifier.weight(1f).height(12.dp).padding(horizontal = 1.dp).clip(RoundedCornerShape(2.dp))
-                            .background(if (level == 0) cs.surfaceContainerHighest else cs.primary.copy(alpha = 0.2f + 0.2f * level)))
+                            .background(if (level == 0) cs.surfaceContainerHighest else teal.copy(alpha = 0.2f + 0.2f * level)))
                     }
                 }
             }
@@ -228,10 +238,14 @@ fun InsightsHistory(back: Int, len: Int) {
 }
 
 @Composable
-private fun Stat(title: String, value: String, note: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.titleMedium)
-        if (note.isNotEmpty()) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+private fun Stat(title: String, value: String, note: String, modifier: Modifier = Modifier,
+                 icon: androidx.compose.ui.graphics.vector.ImageVector, hue: Hue) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        IconTile(icon, hue, 28.dp, modifier = Modifier.padding(top = 2.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.titleMedium)
+            if (note.isNotEmpty()) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
     }
 }

@@ -24,19 +24,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +49,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -68,6 +74,11 @@ import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.EditorHeader
+import com.husarp.lockdown.ui.IconTile
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.PillRow
+import com.husarp.lockdown.ui.theme.Hue
+import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.Segmented
 import com.husarp.lockdown.ui.SectionLabel
 import java.time.LocalDateTime
@@ -84,13 +95,13 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
         EditorHeader(title = "Block something", onBack = onDone)
         when (kind) {
             null -> Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { kind = ItemType.APP }) { Text("An app") }
-                OutlinedButton(onClick = { kind = ItemType.SITE }) { Text("A website") }
-                OutlinedButton(onClick = {
+                AddTile("An app", "From your phone", Icons.Filled.Apps, Hue.RED, Modifier.weight(1f)) { kind = ItemType.APP }
+                AddTile("A website", "By its address", Icons.Filled.Language, Hue.TEAL, Modifier.weight(1f)) { kind = ItemType.SITE }
+                AddTile("A group", "Shared rules", Icons.Filled.Folder, Hue.VIOLET, Modifier.weight(1f)) {
                     val g = Group(UUID.randomUUID().toString().take(8), "New group")
                     Store.update { it.copy(groups = it.groups + g) }
                     onEditGroup(g)
-                }) { Text("A group") }
+                }
             }
             ItemType.APP -> {
                 val apps = rememberInstalledApps()
@@ -142,6 +153,17 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
     }
 }
 
+/** One of Add's three choices: a tile, its name and a one-line hint. */
+@Composable
+private fun AddTile(label: String, hint: String, icon: androidx.compose.ui.graphics.vector.ImageVector, hue: Hue, modifier: Modifier, onClick: () -> Unit) {
+    Card(modifier = modifier, padding = androidx.compose.foundation.layout.PaddingValues(12.dp), onClick = onClick) {
+        IconTile(icon, hue, 48.dp)
+        Spacer(Modifier.height(10.dp))
+        Text(label, style = MaterialTheme.typography.titleSmall)
+        Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RuleEditor(item: Item, onClose: () -> Unit) {
@@ -166,6 +188,10 @@ fun RuleEditor(item: Item, onClose: () -> Unit) {
             // live sentence summary
             Card(color = cs.surfaceContainer, shape = MaterialTheme.shapes.extraLarge) {
                 Text(sentence(draft), style = MaterialTheme.typography.bodyLarge)
+                if (draft.rules.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    PillRow(Kinds.rulePills(draft.rules), max = 4)
+                }
             }
 
             SectionLabel("Blocking rules")
@@ -180,8 +206,9 @@ fun RuleEditor(item: Item, onClose: () -> Unit) {
             SectionLabel("Block notice")
             NotifyChips(draft.notify) { draft = draft.copy(notify = it) }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                com.husarp.lockdown.ui.SwitchRowInline("Paused", draft.disabled) { draft = draft.copy(disabled = it) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.PauseCircle, null, tint = cs.onSurfaceVariant)
+                Box(Modifier.weight(1f)) { com.husarp.lockdown.ui.SwitchRowInline("Paused", draft.disabled) { draft = draft.copy(disabled = it) } }
             }
 
             TextButton(onClick = {
@@ -189,7 +216,9 @@ fun RuleEditor(item: Item, onClose: () -> Unit) {
                     Store.update { c -> c.copy(items = c.items.filterNot { it.id == draft.id }) }
                     onClose()
                 }
-            }) { Icon(Icons.Filled.Delete, null); Spacer(Modifier.size(6.dp)); Text("Remove this block") }
+            }, colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = cs.error)) {
+                Icon(Icons.Filled.Delete, null); Spacer(Modifier.size(6.dp)); Text("Remove this block")
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Outlined.Shield, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
@@ -210,43 +239,54 @@ fun RuleFields(rules: List<Rule>, group: Boolean = false, onChange: (List<Rule>)
     fun of(type: RuleType) = rules.firstOrNull { it.type == type }
     val ctx = LocalContext.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        RuleTypeSection("Always blocked", of(RuleType.PERMANENT) != null,
+        RuleTypeSection(RuleType.PERMANENT, "Always blocked", of(RuleType.PERMANENT) != null,
             { on -> set(RuleType.PERMANENT, if (on) Rule(RuleType.PERMANENT) else null) }) {}
-        RuleTypeSection("Scheduled hours", of(RuleType.SCHEDULED) != null,
+        RuleTypeSection(RuleType.SCHEDULED, "Scheduled hours", of(RuleType.SCHEDULED) != null,
             { on -> set(RuleType.SCHEDULED, if (on) Rule(RuleType.SCHEDULED, schedule = Schedule(SchedMode.BLOCK, listOf(Window((0..6).toList(), "22:00", "07:00")))) else null) }) {
             of(RuleType.SCHEDULED)?.let { ScheduleFields(it, group) { r -> set(RuleType.SCHEDULED, r) } }
         }
-        RuleTypeSection("Time limit", of(RuleType.TIME_LIMIT) != null,
+        RuleTypeSection(RuleType.TIME_LIMIT, "Time limit", of(RuleType.TIME_LIMIT) != null,
             { on -> set(RuleType.TIME_LIMIT, if (on) Rule(RuleType.TIME_LIMIT, dailyLimitMin = 60) else null) }) {
             of(RuleType.TIME_LIMIT)?.let { TimeLimitFields(it) { r -> set(RuleType.TIME_LIMIT, r) } }
         }
-        RuleTypeSection("Opening limit", of(RuleType.SWITCH_LIMIT) != null,
+        RuleTypeSection(RuleType.SWITCH_LIMIT, "Opening limit", of(RuleType.SWITCH_LIMIT) != null,
             { on -> set(RuleType.SWITCH_LIMIT, if (on) Rule(RuleType.SWITCH_LIMIT, dailySwitchLimit = 10) else null) }) {
             of(RuleType.SWITCH_LIMIT)?.let { SwitchLimitFields(it) { r -> set(RuleType.SWITCH_LIMIT, r) } }
         }
-        RuleTypeSection("Temporary", of(RuleType.TEMPORARY) != null,
+        RuleTypeSection(RuleType.TEMPORARY, "Temporary", of(RuleType.TEMPORARY) != null,
             { on -> set(RuleType.TEMPORARY, if (on) Rule(RuleType.TEMPORARY, tempUntil = com.husarp.lockdown.guard.TrustedTime.local(ctx).plusHours(1).toString()) else null) }) {
             of(RuleType.TEMPORARY)?.let { TemporaryFields(it) { r -> set(RuleType.TEMPORARY, r) } }
         }
     }
 }
 
+/** One kind of rule: its tile (grey while off), a stripe in its colour while on, and its fields. */
 @Composable
-private fun RuleTypeSection(name: String, on: Boolean, onToggle: (Boolean) -> Unit, fields: @Composable () -> Unit) {
-    Card(color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+private fun RuleTypeSection(type: RuleType, name: String, on: Boolean, onToggle: (Boolean) -> Unit, fields: @Composable () -> Unit) {
+    val look = Kinds.rule(type)
+    val accent = tone(look.hue).accent
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+    Card(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = shape,
+        modifier = if (!on) Modifier else Modifier.clip(shape).drawWithContent {
+            drawContent(); drawRect(accent, size = androidx.compose.ui.geometry.Size(4.dp.toPx(), size.height))
+        }) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            IconTile(look.icon, look.hue, 32.dp, on = on)
             Text(name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             androidx.compose.material3.Switch(checked = on, onCheckedChange = onToggle)
         }
-        if (on) { Spacer(Modifier.height(10.dp)); fields() }
+        if (on) { Spacer(Modifier.height(10.dp)); CompositionLocalProvider(LocalAccent provides accent) { fields() } }
     }
 }
+
+/** The open rule section's colour, for its big numbers (amber minutes and opens, violet hours, indigo grace). */
+private val LocalAccent = androidx.compose.runtime.compositionLocalOf<androidx.compose.ui.graphics.Color?> { null }
 
 @Composable
 private fun Stepper(value: Int, suffix: String, step: Int, min: Int = 0, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         IconButton(onClick = { onChange((value - step).coerceAtLeast(min)) }) { Icon(Icons.Filled.Remove, "less") }
-        com.husarp.lockdown.ui.Numeral("$value", sizeSp = 36)
+        com.husarp.lockdown.ui.Numeral("$value", sizeSp = 36, color = LocalAccent.current ?: MaterialTheme.colorScheme.onSurface)
         Text(suffix, style = MaterialTheme.typography.titleMedium)
         IconButton(onClick = { onChange(value + step) }) { Icon(Icons.Filled.Add, "more") }
     }
@@ -457,7 +497,8 @@ fun SiteWayChips(selected: Set<String>, locked: Set<String> = emptySet(), onTogg
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf("dns" to "Cut the connection", "back" to "Go back", "close" to "Leave the browser").forEach { (key, label) ->
             val fixed = key in locked
-            Chip(label, key in selected || fixed, modifier = if (fixed) Modifier.alpha(0.5f) else Modifier) {
+            val look = Kinds.way(key, site = true)
+            Chip(label, key in selected || fixed, modifier = if (fixed) Modifier.alpha(0.5f) else Modifier, icon = look.icon, hue = look.hue) {
                 if (!fixed) onToggle(if (key in selected) selected - key else selected + key)
             }
         }
@@ -470,8 +511,9 @@ fun SiteWayChips(selected: Set<String>, locked: Set<String> = emptySet(), onTogg
 @Composable
 fun AppWayChips(grey: Boolean, onChange: (Boolean) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Chip("Close it", !grey) { if (grey) onChange(false) }
-        Chip("Grey it", grey) { if (!grey) onChange(true) }
+        val close = Kinds.way("close", site = false)
+        Chip("Close it", !grey, icon = close.icon, hue = close.hue) { if (grey) onChange(false) }
+        Chip("Grey it", grey, icon = Kinds.GREY.icon, hue = Kinds.GREY.hue) { if (!grey) onChange(true) }
     }
 }
 

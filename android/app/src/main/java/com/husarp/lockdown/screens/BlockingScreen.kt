@@ -15,17 +15,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,11 +46,16 @@ import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Modes
-import com.husarp.lockdown.ui.Avatar
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
-import com.husarp.lockdown.ui.ListRow
+import com.husarp.lockdown.ui.GroupLook
+import com.husarp.lockdown.ui.IconTile
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.MemberStack
+import com.husarp.lockdown.ui.PillRow
+import com.husarp.lockdown.ui.PillSpec
 import com.husarp.lockdown.ui.SectionLabel
+import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.Status
 import com.husarp.lockdown.ui.StatusChip
 import java.time.LocalDateTime
@@ -96,17 +102,34 @@ private fun BlockList(
     val now = com.husarp.lockdown.guard.TrustedTime.local(androidx.compose.ui.platform.LocalContext.current)
     val mode = com.husarp.lockdown.data.ModesStore.current(now)
 
-    val matches = cfg.items.filter { it.name.contains(query, true) || it.target.contains(query, true) }
-    // The blocked list can be thousands long, so it stays collapsed and paginates: 20 rows at a time, loading 20
-    // more as you scroll. Status is computed per VISIBLE row only. Searching opens it automatically.
+    val byId = remember(cfg.items) { cfg.items.associateBy { it.id } }
+    // which groups each item is in, built once per change of the groups (each row's pills read it)
+    val memberOf = remember(cfg.groups) {
+        HashMap<String, MutableList<Group>>().also { m -> cfg.groups.forEach { g -> g.memberIds.forEach { m.getOrPut(it) { ArrayList() }.add(g) } } }
+    }
+    val apps = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP } }
+    val sites = remember(cfg.items) { cfg.items.filter { it.type == ItemType.SITE } }
+    val matches = if (query.isBlank()) emptyList() else cfg.items.filter { it.name.contains(query, true) || it.target.contains(query, true) }
+    // The list can be thousands long (imported sites), so the sites stay collapsed and every list pages: 20 rows at a
+    // time, 20 more as you scroll to its end. Status is computed per VISIBLE row only. Searching shows one list.
     val listState = rememberLazyListState()
-    var expanded by remember { mutableStateOf(false) }
+    var appsOpen by remember { mutableStateOf<Boolean?>(null) }       // null: open when there are 30 or fewer
+    var sitesOpen by remember { mutableStateOf(false) }
+    var appsShown by remember { mutableIntStateOf(20) }
+    var sitesShown by remember { mutableIntStateOf(20) }
     var shown by remember { mutableIntStateOf(20) }
-    val open = expanded || query.isNotBlank()
+    val showApps = appsOpen ?: (apps.size <= 30)
     LaunchedEffect(query) { shown = 20 }
-    LaunchedEffect(listState, matches.size, open) {
+    LaunchedEffect(listState, matches.size, apps.size, sites.size, showApps, sitesOpen, query.isBlank()) {
         snapshotFlow { val li = listState.layoutInfo; (li.visibleItemsInfo.lastOrNull()?.index ?: 0) to li.totalItemsCount }
-            .collect { (last, total) -> if (open && shown < matches.size && last >= total - 3) shown = (shown + 20).coerceAtMost(matches.size) }
+            .collect { (last, total) ->
+                if (last < total - 3) return@collect
+                when {
+                    query.isNotBlank() -> if (shown < matches.size) shown = (shown + 20).coerceAtMost(matches.size)
+                    sitesOpen && sitesShown < sites.size -> sitesShown = (sitesShown + 20).coerceAtMost(sites.size)
+                    !sitesOpen && showApps && appsShown < apps.size -> appsShown = (appsShown + 20).coerceAtMost(apps.size)
+                }
+            }
     }
 
     Scaffold(
@@ -130,48 +153,45 @@ private fun BlockList(
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("Protection ${cfg.protection.enabled.size}", selected = cfg.protection.enabled.isNotEmpty(), icon = Icons.Outlined.Shield) { onProtection() }
-                    Chip("Keywords", selected = cfg.keywords.enabled, icon = Icons.Outlined.Key) { onKeywords() }
+                    val prot = cfg.protection.enabled.size
+                    Chip(if (prot > 0) "Protection · $prot" else "Protection", selected = prot > 0, icon = Kinds.PROTECTION.icon,
+                        hue = Kinds.PROTECTION.hue, iconTint = tone(Kinds.PROTECTION.hue).accent) { onProtection() }
+                    Chip("Blocked words", selected = cfg.keywords.enabled, icon = Kinds.WORDS.icon, hue = Kinds.WORDS.hue,
+                        iconTint = tone(Kinds.WORDS.hue).accent) { onKeywords() }
                 }
             }
-            if (cfg.groups.isNotEmpty()) {
-                item { SectionLabel("Groups") }
-                items(cfg.groups) { g ->
-                    Card(color = cs.surfaceContainerHigh, padding = androidx.compose.foundation.layout.PaddingValues(0.dp), onClick = { onEditGroup(g) }) {
-                        ListRow(
-                            title = g.name,
-                            subtitle = "${g.memberIds.size} items · ${g.rules.size} shared rule(s)",
-                            leading = { Avatar(g.name, bg = cs.primaryContainer, fg = cs.onPrimaryContainer) },
-                        )
+            if (query.isNotBlank()) {
+                item { SectionLabel("Matches · ${matches.size}") }
+                val list = matches.take(shown)
+                items(list, key = { it.id }) { item -> ItemRow(item, cfg, memberOf, now, mode) { onEdit(item) } }
+                if (shown < matches.size) item { MoreNote(list.size, matches.size) }
+            } else {
+                if (cfg.groups.isNotEmpty()) {
+                    item { SectionLabel("Groups · ${cfg.groups.size}") }
+                    items(cfg.groups, key = { "g:" + it.id }) { g -> GroupRow(g, byId, now) { onEditGroup(g) } }
+                }
+                if (apps.isNotEmpty()) {
+                    item { Header("Apps · ${apps.size}", showApps) { appsOpen = !showApps } }
+                    if (showApps) {
+                        val list = apps.take(appsShown)
+                        items(list, key = { it.id }) { item -> ItemRow(item, cfg, memberOf, now, mode) { onEdit(item) } }
+                        if (appsShown < apps.size) item {
+                            if (sitesOpen) TextButton(onClick = { appsShown = (appsShown + 20).coerceAtMost(apps.size) }) {
+                                Text("Show more apps (${apps.size - appsShown} left)")
+                            } else MoreNote(list.size, apps.size)
+                        }
                     }
                 }
-            }
-            if (matches.isNotEmpty()) {
-                item {
-                    Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SectionLabel(if (query.isBlank()) "Blocked · ${matches.size}" else "Matches · ${matches.size}", Modifier.weight(1f))
-                        if (query.isBlank()) Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, if (open) "collapse" else "expand", tint = cs.onSurfaceVariant)
-                    }
-                }
-                if (open) {
-                    val list = matches.take(shown)
-                    items(list, key = { it.id }) { item ->
-                        val st = Live.status(cfg, item, now, mode)   // computed only for this visible row
-                        ListRow(
-                            title = item.name,
-                            subtitle = ruleSummary(item),
-                            leading = { com.husarp.lockdown.ui.ItemIcon(item.type, item.target, item.name) },
-                            trailing = { StatusChip(statusText(st, cfg, item, now, mode), st) },
-                            onClick = { onEdit(item) },
-                        )
-                    }
-                    if (shown < matches.size) item {
-                        Text("Showing ${list.size} of ${matches.size} — scroll for more", Modifier.padding(8.dp),
+                if (sites.isNotEmpty()) {
+                    item { Header("Sites · ${sites.size}", sitesOpen) { sitesOpen = !sitesOpen } }
+                    if (sitesOpen) {
+                        val list = sites.take(sitesShown)
+                        items(list, key = { it.id }) { item -> ItemRow(item, cfg, memberOf, now, mode) { onEdit(item) } }
+                        if (sitesShown < sites.size) item { MoreNote(list.size, sites.size) }
+                    } else item {
+                        Text("Tap to show the blocked sites", Modifier.padding(horizontal = 4.dp),
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
-                } else item {
-                    Text("Tap to show the blocked list", Modifier.padding(horizontal = 4.dp),
-                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
             }
             if (cfg.items.isEmpty()) item {
@@ -184,24 +204,73 @@ private fun BlockList(
     }
 }
 
-private fun statusText(status: Status, cfg: com.husarp.lockdown.data.Config, item: Item, now: LocalDateTime,
-                       mode: com.husarp.lockdown.engine.ModeState?): String = when (status) {
-    Status.BLOCKED -> Live.blockedLine(cfg, item, now, mode)
+/** A collapsible list's label ("Apps · 12") with its chevron. */
+@Composable
+private fun Header(text: String, open: Boolean, onToggle: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onToggle() }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        SectionLabel(text, Modifier.weight(1f))
+        Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, if (open) "collapse" else "expand",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun MoreNote(shown: Int, total: Int) {
+    Text("Showing $shown of $total — scroll for more", Modifier.padding(8.dp),
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** A group: its icon and colour, "6 members" and its shared rules, the members' icons. */
+@Composable
+private fun GroupRow(g: Group, byId: Map<String, Item>, now: LocalDateTime, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val members = remember(g.memberIds, byId) { g.memberIds.mapNotNull { byId[it] } }
+    val pills = remember(g) {
+        (if (g.disabled) listOf(PillSpec("Paused", Kinds.PAUSE.hue, Kinds.PAUSE.icon)) else emptyList()) + Kinds.rulePills(g.rules, now)
+    }
+    Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(0.dp), onClick = onClick) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            GroupTile(g)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(g.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("${members.size} member${if (members.size == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    PillRow(pills)
+                }
+            }
+            MemberStack(members)
+            Icon(Icons.Filled.ChevronRight, null, tint = cs.onSurfaceVariant)
+        }
+    }
+}
+
+/** An app or a site: its icon, its own rules and its groups as pills, and its status now (computed for this
+ *  visible row only). */
+@Composable
+private fun ItemRow(item: Item, cfg: com.husarp.lockdown.data.Config, memberOf: Map<String, List<Group>>, now: LocalDateTime,
+                    mode: com.husarp.lockdown.engine.ModeState?, onClick: () -> Unit) {
+    val pills = remember(item, memberOf) { Kinds.itemPills(item, memberOf[item.id].orEmpty(), now) }
+    val st = Live.status(cfg, item, now, mode)
+    val info = if (st == Status.BLOCKED) Live.blockedInfo(cfg, item, now, mode) else null
+    Row(Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        com.husarp.lockdown.ui.ItemIcon(item.type, item.target, item.name)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            PillRow(pills)
+        }
+        StatusChip(info?.text ?: statusText(st, cfg, item, now), st, grey = info?.grey == true)
+    }
+}
+
+/** A group's icon in its colour (picked, or from its name and id). */
+@Composable
+fun GroupTile(g: Group, size: androidx.compose.ui.unit.Dp = 40.dp) = IconTile(GroupLook.icon(g), GroupLook.hue(g), size)
+
+private fun statusText(status: Status, cfg: com.husarp.lockdown.data.Config, item: Item, now: LocalDateTime): String = when (status) {
+    Status.BLOCKED -> "Blocked"
     Status.SOON -> Live.dayLimitFraction(cfg, item, now)?.let { "${it.second} min left" } ?: "Soon"
     Status.ALLOWED -> "Allowed"
     Status.PAUSED -> "Paused"
-}
-
-/** A one-line human summary of an item's own rules, for the list. */
-fun ruleSummary(item: Item): String {
-    if (item.rules.isEmpty()) return if (item.type == ItemType.APP) "App" else "Site"
-    return item.rules.joinToString(" · ") { r ->
-        when (r.type) {
-            com.husarp.lockdown.engine.RuleType.PERMANENT -> "Always blocked"
-            com.husarp.lockdown.engine.RuleType.TEMPORARY -> "Temporary"
-            com.husarp.lockdown.engine.RuleType.TIME_LIMIT -> timeLimitText(r)
-            com.husarp.lockdown.engine.RuleType.SWITCH_LIMIT -> openingLimitText(r)
-            com.husarp.lockdown.engine.RuleType.SCHEDULED -> "Scheduled hours"
-        }
-    }
 }

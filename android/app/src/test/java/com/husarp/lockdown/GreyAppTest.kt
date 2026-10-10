@@ -13,6 +13,11 @@ import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.engine.grayscaleRestore
 import com.husarp.lockdown.engine.grayscaleStep
+import com.husarp.lockdown.data.Live
+import com.husarp.lockdown.engine.Reason
+import com.husarp.lockdown.engine.SchedMode
+import com.husarp.lockdown.engine.Schedule
+import com.husarp.lockdown.engine.Window
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -131,5 +136,31 @@ class GreyAppTest {
         assertEquals(null to true, grayscaleStep(wanted = true, switchOn = true, mark = true, isOn = true))
         // grey of the user's own before the app: it stays as it was
         assertEquals(1 to 0, grayscaleRestore(1, 0, ownGrey = true))
+    }
+
+    // ---------- the list's line and look (Live.blockedInfo) ----------
+
+    @Test fun the_blocked_line_says_grey_and_why_for_a_limit_a_schedule_and_a_grey_only_app() {
+        val noUse = { _: String, _: String -> 0 }
+        val grey = Live.blockedInfo(Config(items = listOf(insta)), insta, t0, usage = noUse)
+        assertTrue(grey.grey)
+        assertTrue(grey.text.startsWith("Grey"))
+        assertEquals(Reason.PERMANENT, grey.reason)
+
+        val limited = insta.copy(blockType = "", rules = listOf(Rule(RuleType.TIME_LIMIT, dailyLimitMin = 30)))
+        val used = { owner: String, bucket: String -> if (owner == "item:i" && bucket.startsWith("day:")) 1800 else 0 }
+        val lim = Live.blockedInfo(Config(items = listOf(limited)), limited, t0, usage = used)
+        assertFalse(lim.grey)
+        assertTrue(lim.text.startsWith("Blocked"))
+        assertEquals(Reason.LIMIT, lim.reason)
+        assertEquals(Reason.LIMIT, Live.blockedInfo(Config(items = listOf(limited.copy(blockType = "grey"))), limited.copy(blockType = "grey"), t0, usage = used)
+            .let { assertTrue(it.grey); it.reason })
+
+        val night = Schedule(SchedMode.BLOCK, listOf(Window((0..6).toList(), "11:00", "13:00")))
+        val hours = insta.copy(blockType = "", rules = listOf(Rule(RuleType.SCHEDULED, schedule = night)))
+        val sch = Live.blockedInfo(Config(items = listOf(hours)), hours, t0, usage = noUse)
+        assertEquals(Reason.SCHEDULE, sch.reason)
+        assertEquals("Blocked until 13:00", sch.text)
+        assertFalse(sch.grey)
     }
 }

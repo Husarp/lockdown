@@ -74,6 +74,9 @@ data class Group(
     val appBlock: String? = null,
     // what a member adds on top of that, in this group: itemId -> flags (only ever more, never less)
     val memberBlocks: Map<String, String> = emptyMap(),
+    // looks only (ui/GroupLook.kt): a picked icon key and colour (a Hue name); null = chosen from the name / id
+    val icon: String? = null,
+    val color: String? = null,
 )
 
 /** A rule flattened for evaluation: the rule plus who owns its usage counters (item vs shared group pot). */

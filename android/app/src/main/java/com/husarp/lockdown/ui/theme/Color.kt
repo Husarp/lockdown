@@ -3,6 +3,7 @@ package com.husarp.lockdown.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
@@ -60,7 +61,7 @@ data class ExtraColors(
 )
 
 val LightExtra = ExtraColors(
-    success = Color(0xFF2E7D4F), successContainer = Color(0xFFC8EED3), onSuccessContainer = Color(0xFF00391C),
+    success = Color(0xFF306A43), successContainer = Color(0xFFC8EED3), onSuccessContainer = Color(0xFF00391C),
     warning = Color(0xFF8A5A00), warningContainer = Color(0xFFFFDFA6), onWarningContainer = Color(0xFF2B1700),
 )
 
@@ -70,3 +71,45 @@ val DarkExtra = ExtraColors(
 )
 
 val LocalExtraColors = staticCompositionLocalOf { LightExtra }
+
+/**
+ * The colour language (redesign 2026-10): one hue per kind of block, state and section, always with an icon and a
+ * word. Each hue is an accent (icons, bars, text on surfaces), a container (tiles, pills) and the text on that
+ * container, made from Material's HCT tonal palettes and checked for WCAG contrast. ORANGE is the brand primary,
+ * GREEN and AMBER are [ExtraColors]' success and warning. A plain enum, so the meaning tables are unit-testable.
+ */
+enum class Hue { RED, ORANGE, AMBER, GREEN, TEAL, BLUE, INDIGO, VIOLET, PINK, SLATE }
+
+@Immutable
+data class Tone(val accent: Color, val container: Color, val onContainer: Color)
+
+private fun tone(a: Long, c: Long, on: Long) = Tone(Color(a), Color(c), Color(on))
+
+/** Indexed by [Hue.ordinal]. */
+val LightTones: Array<Tone> = arrayOf(
+    tone(0xFFAD2F41, 0xFFFFDADA, 0xFF40000C),   // RED (crimson, away from the brand orange)
+    tone(0xFFA93D17, 0xFFFFDBCF, 0xFF3A0B00),   // ORANGE (= primary)
+    tone(0xFF8A5A00, 0xFFFFDFA6, 0xFF2B1700),   // AMBER (= warning)
+    tone(0xFF306A43, 0xFFC8EED3, 0xFF00391C),   // GREEN (= success)
+    tone(0xFF246867, 0xFFADEEEC, 0xFF00201F),   // TEAL
+    tone(0xFF006496, 0xFFCCE5FF, 0xFF001E31),   // BLUE
+    tone(0xFF4359A9, 0xFFDCE1FF, 0xFF001551),   // INDIGO
+    tone(0xFF6E4DA1, 0xFFECDCFF, 0xFF280056),   // VIOLET
+    tone(0xFF983D71, 0xFFFFD8E8, 0xFF3C0028),   // PINK
+    tone(0xFF575F67, 0xFFDBE4ED, 0xFF141D23),   // SLATE
+)
+
+val DarkTones: Array<Tone> = arrayOf(
+    tone(0xFFFFB3B6, 0xFF8C142C, 0xFFFFDADA),
+    tone(0xFFFFB59C, 0xFF7E2B0C, 0xFFFFDBCF),
+    tone(0xFFF5C04E, 0xFF5E4200, 0xFFFFDFA6),
+    tone(0xFF8BD9A0, 0xFF0E5128, 0xFFC8EED3),
+    tone(0xFF91D2D0, 0xFF00504F, 0xFFADEEEC),
+    tone(0xFF91CDFF, 0xFF004B72, 0xFFCCE5FF),
+    tone(0xFFB7C4FF, 0xFF294190, 0xFFDCE1FF),
+    tone(0xFFD6BAFF, 0xFF563587, 0xFFECDCFF),
+    tone(0xFFFFAFD6, 0xFF7B2559, 0xFFFFD8E8),
+    tone(0xFFBFC8D0, 0xFF3F484F, 0xFFDBE4ED),
+)
+
+val LocalTones = staticCompositionLocalOf { LightTones }

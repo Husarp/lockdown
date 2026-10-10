@@ -126,4 +126,28 @@ class DraftsTest {
         assertEquals(listOf("b", "a"), inSavedOrder(listOf("b", "a"), listOf("a", "b")))
         assertEquals(listOf("a", "c"), inSavedOrder(listOf("b", "a"), listOf("c", "a")))
     }
+
+    @Test fun the_settings_sections_with_unsaved_changes_get_their_dot() {
+        val s = SettingsEdit.of(Config())
+        assertEquals(emptySet<String>(), s.changedSections(s))
+        assertEquals(setOf("filter"), s.copy(siteFilter = true).changedSections(s))
+        assertEquals(setOf("filter"), s.copy(protection = setOf("gambling")).changedSections(s))
+        assertEquals(setOf("filter"), s.copy(networkLog = !s.networkLog, forceSafeSearch = !s.forceSafeSearch).changedSections(s))
+        assertEquals(setOf("limits"), s.copy(pauseSec = 20).changedSections(s))
+        assertEquals(setOf("limits"), s.copy(dailyGoalMin = 180, pauseBeforeOpen = true).changedSections(s))
+        assertEquals(setOf("extras"), s.copy(weeklyDigest = true).changedSections(s))
+        assertEquals(setOf("filter", "limits", "extras"),
+            s.copy(siteFilter = true, pauseSec = 20, bedtimeGrayscale = true).changedSections(s))
+    }
+
+    @Test fun the_guardrails_sections_with_unsaved_changes_get_their_dot() {
+        val g = gr()
+        assertEquals(emptySet<String>(), g.changedSections(g))
+        assertEquals(setOf("challenge"), g.copy(ab = g.ab.copy(phrase = true)).changedSections(g))
+        assertEquals(setOf("emergency"), g.copy(emergencyOn = false).changedSections(g))
+        assertEquals(setOf("emergency"), g.copy(tiers = listOf(week.copy(minutes = 10))).changedSections(g))
+        assertEquals(setOf("switches"), g.copy(guardrails = Guardrails(persist = false)).changedSections(g))
+        assertEquals(setOf("challenge", "switches"),
+            g.copy(ab = g.ab.copy(waitMin = 5), guardrails = Guardrails(trustedTime = false)).changedSections(g))
+    }
 }

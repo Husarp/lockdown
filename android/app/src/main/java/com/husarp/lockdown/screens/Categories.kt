@@ -23,6 +23,8 @@ import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Modes
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Chip
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.theme.tone
 
 /*
  * Productive / Neutral / Distracting for apps and sites (PC: the Screen Time page). Modes block by these: Work,
@@ -58,10 +60,20 @@ fun CategoryChips(item: Item) {
     val set = rememberCategorySetter()
     val current = Modes.itemCategory(item, cfg.categories)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        CATEGORY_NAMES.forEach { (key, label) -> Chip(label, key == current) { if (key != current) set(categoryKeys(item), current, key) } }
+        CATEGORY_NAMES.forEach { (key, label) ->
+            val look = Kinds.category(key)
+            Chip(label, key == current, icon = look.icon, hue = look.hue) { if (key != current) set(categoryKeys(item), current, key) }
+        }
     }
     Text("Work, Study, Focus and Do Not Disturb block what's Distracting. Saved at once.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** An app's category: a listed app is Distracting until chosen otherwise; another app is in no category (null)
+ *  until chosen. */
+fun appCategory(cfg: com.husarp.lockdown.data.Config, pkg: String): String? {
+    val listed = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
+    return listed?.let { Modes.itemCategory(it, cfg.categories) } ?: cfg.categories["app:${pkg.lowercase()}"]
 }
 
 /** A small "Distracting ▾" menu for an app in Insights (an app on your list, or any other app). */
@@ -70,16 +82,17 @@ fun CategoryMenu(pkg: String) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val set = rememberCategorySetter()
     var open by remember { mutableStateOf(false) }
-    val listed = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
-    // a listed app is Distracting until chosen otherwise; another app is in no category until chosen
-    val current = listed?.let { Modes.itemCategory(it, cfg.categories) } ?: cfg.categories["app:${pkg.lowercase()}"]
+    val current = appCategory(cfg, pkg)
     Box {
         TextButton(onClick = { open = true }) {
-            Text((CATEGORY_NAMES.firstOrNull { it.first == current }?.second ?: "Category") + " ▾", style = MaterialTheme.typography.labelMedium)
+            Text((CATEGORY_NAMES.firstOrNull { it.first == current }?.second ?: "Category") + " ▾", style = MaterialTheme.typography.labelMedium,
+                color = tone(Kinds.category(current).hue).accent)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             CATEGORY_NAMES.forEach { (key, label) ->
-                DropdownMenuItem(text = { Text(label) }, onClick = {
+                DropdownMenuItem(text = { Text(label) }, leadingIcon = {
+                    androidx.compose.material3.Icon(Kinds.category(key).icon, null, tint = tone(Kinds.category(key).hue).accent)
+                }, onClick = {
                     open = false
                     if (key != current) set(listOf("app:${pkg.lowercase()}"), current, key)
                 })

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -45,6 +46,9 @@ import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.EditorHeader
+import com.husarp.lockdown.ui.IconTile
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.ListRow
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
@@ -66,21 +70,23 @@ private fun ModeList(onEdit: (Mode) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val now = com.husarp.lockdown.guard.TrustedTime.local(androidx.compose.ui.platform.LocalContext.current)     // trusted time, as the blocking uses
     val current = ModesStore.current(now)
+    val blue = tone(Kinds.MODE.hue)
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(modes) { mode ->
             val isOn = current?.mode?.id == mode.id
-            Card(color = if (isOn) cs.primaryContainer else cs.surfaceContainerLow, contentColor = if (isOn) cs.onPrimaryContainer else cs.onSurface, onClick = { onEdit(mode) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Card(color = if (isOn) blue.container else cs.surfaceContainerLow, contentColor = if (isOn) blue.onContainer else cs.onSurface, onClick = { onEdit(mode) }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    IconTile(Kinds.modeIcon(mode.id), Kinds.MODE.hue)
                     Column(Modifier.weight(1f)) {
                         Text(mode.name, style = MaterialTheme.typography.titleMedium)
-                        Text(Modes.describe(mode), style = MaterialTheme.typography.bodySmall, color = if (isOn) cs.onPrimaryContainer else cs.onSurfaceVariant)
+                        Text(Modes.describe(mode), style = MaterialTheme.typography.bodySmall, color = if (isOn) blue.onContainer else cs.onSurfaceVariant)
                     }
                     if (isOn) {
                         Button(onClick = {
                             val locked = current?.locked == true && current?.scheduled == false
                             guard(locked) { ModesStore.stop(force = true) }
-                        }, colors = ButtonDefaults.buttonColors(containerColor = cs.primary)) {
+                        }, colors = ButtonDefaults.buttonColors(containerColor = blue.onContainer, contentColor = blue.container)) {
                             Icon(Icons.Filled.Stop, null); Spacer(Modifier.width(6.dp)); Text("Stop")
                         }
                     }
@@ -90,7 +96,12 @@ private fun ModeList(onEdit: (Mode) -> Unit) {
         item {
             Card(color = cs.surfaceContainerLow, onClick = {
                 onEdit(Mode(Modes.newId(modes), "New mode", categories = listOf("distracting")))
-            }) { Text("+ New mode", style = MaterialTheme.typography.titleSmall, color = cs.primary) }
+            }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Filled.Add, null, tint = blue.accent)
+                    Text("New mode", style = MaterialTheme.typography.titleSmall, color = blue.accent)
+                }
+            }
         }
     }
 }
@@ -121,7 +132,8 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
             SectionLabel("What it blocks")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 CATS.forEach { (key, label) ->
-                    Chip(label, key in draft.categories) {
+                    val look = Kinds.category(key)
+                    Chip(label, key in draft.categories, icon = look.icon, hue = look.hue) {
                         draft = draft.copy(categories = if (key in draft.categories) draft.categories - key else draft.categories + key)
                     }
                 }
@@ -147,13 +159,15 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 val rows = (shown.map { it.name to it } + apps.map { it.label to it }).sortedBy { it.first.lowercase() }.map { it.second }
                 androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
                     items(rows, key = { if (it is com.husarp.lockdown.engine.Item) it.id else "pkg:" + (it as com.husarp.lockdown.block.InstalledApp).pkg }) { row ->
-                        if (row is com.husarp.lockdown.engine.Item) ListRow(title = row.name, subtitle = row.target, trailing = {
+                        if (row is com.husarp.lockdown.engine.Item) ListRow(title = row.name, subtitle = row.target,
+                            leading = { com.husarp.lockdown.ui.ItemIcon(row.type, row.target, row.name) }, trailing = {
                             Checkbox(checked = row.id in draft.items, onCheckedChange = { on ->
                                 draft = draft.copy(items = if (on) draft.items + row.id else draft.items - row.id)
                             })
                         }) else {
                             val a = row as com.husarp.lockdown.block.InstalledApp
-                            ListRow(title = a.label, subtitle = "App · not on your list", trailing = {
+                            ListRow(title = a.label, subtitle = "App · not on your list",
+                                leading = { com.husarp.lockdown.ui.AppIcon(a.pkg, a.label) }, trailing = {
                                 Checkbox(checked = isExtra(a.pkg), onCheckedChange = { on ->
                                     draft = draft.copy(extra = if (on) draft.extra + com.husarp.lockdown.engine.ModeExtra(a.label, ItemType.APP, listOf(a.pkg))
                                         else draft.extra.filterNot { it.kind == ItemType.APP && it.targets == listOf(a.pkg) })

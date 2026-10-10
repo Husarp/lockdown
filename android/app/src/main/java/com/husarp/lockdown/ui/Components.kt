@@ -14,7 +14,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import com.husarp.lockdown.ui.theme.Hue
+import com.husarp.lockdown.ui.theme.tone
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,7 +42,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.husarp.lockdown.ui.theme.LockdownTheme
 import com.husarp.lockdown.ui.theme.Numerals
 
 /** A small uppercase section label, like the mockups' "RUNNING LOW". */
@@ -68,35 +80,41 @@ fun Numeral(text: String, sizeSp: Int = 44, color: Color = MaterialTheme.colorSc
 /** Status pill: blocked / soon / allowed / paused. */
 enum class Status { BLOCKED, SOON, ALLOWED, PAUSED }
 
+/** Status pill v2: blocked (red, or slate when only greyed) and running low are filled; allowed and paused are just
+ *  coloured text with their icon, so a long list isn't a wall of green. */
 @Composable
-fun StatusChip(text: String, status: Status) {
-    val cs = MaterialTheme.colorScheme
-    val ex = LockdownTheme.extra
-    val (bg, fg) = when (status) {
-        Status.BLOCKED -> cs.errorContainer to cs.onErrorContainer
-        Status.SOON -> ex.warningContainer to ex.onWarningContainer
-        Status.ALLOWED -> ex.successContainer to ex.onSuccessContainer
-        Status.PAUSED -> cs.surfaceContainerHigh to cs.onSurfaceVariant
-    }
-    Box(Modifier.background(bg, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = fg, fontWeight = FontWeight.SemiBold)
+fun StatusChip(text: String, status: Status, grey: Boolean = false) {
+    val look = Kinds.status(status, grey)
+    val t = tone(look.hue)
+    val filled = status == Status.BLOCKED || status == Status.SOON
+    Row(
+        Modifier.then(if (filled) Modifier.background(t.container, RoundedCornerShape(6.dp)) else Modifier)
+            .padding(horizontal = if (filled) 8.dp else 2.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(look.icon, null, Modifier.size(14.dp), tint = t.accent)
+        Text(text, style = MaterialTheme.typography.labelMedium, color = if (filled) t.onContainer else t.accent,
+            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** A small selectable chip (rule type, mode category, filter). */
+/** A small selectable chip (rule type, mode category, filter). [hue]: selected, it takes that hue's container (and
+ *  its icon the accent) instead of the brand's. [iconTint]: the icon's colour while not selected. */
 @Composable
-fun Chip(text: String, selected: Boolean, modifier: Modifier = Modifier, icon: ImageVector? = null, onClick: () -> Unit) {
+fun Chip(text: String, selected: Boolean, modifier: Modifier = Modifier, icon: ImageVector? = null, hue: Hue? = null,
+         iconTint: Color? = null, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val bg = if (selected) cs.primaryContainer else cs.surface
-    val fg = if (selected) cs.onPrimaryContainer else cs.onSurface
-    val border = if (selected) cs.primaryContainer else cs.outlineVariant
+    val t = hue?.let { tone(it) }
+    val bg = if (!selected) cs.surface else t?.container ?: cs.primaryContainer
+    val fg = if (!selected) cs.onSurface else t?.onContainer ?: cs.onPrimaryContainer
+    val border = if (selected) bg else cs.outlineVariant
     Surface(
         modifier = modifier.clickable { onClick() },
         color = bg, contentColor = fg, shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, border),
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (icon != null) Icon(icon, null, Modifier.size(16.dp))
+            if (icon != null) Icon(icon, null, Modifier.size(16.dp), tint = if (selected) t?.accent ?: fg else iconTint ?: fg)
             Text(text, style = MaterialTheme.typography.labelLarge)
         }
     }
@@ -104,9 +122,112 @@ fun Chip(text: String, selected: Boolean, modifier: Modifier = Modifier, icon: I
 
 /** A rounded-square initial avatar (Barlow), used on rule / app rows. */
 @Composable
-fun Avatar(letter: String, modifier: Modifier = Modifier, bg: Color = MaterialTheme.colorScheme.surfaceContainerHigh, fg: Color = MaterialTheme.colorScheme.onSurface) {
-    Box(modifier.size(40.dp).background(bg, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-        Text(letter.take(1).uppercase(), style = MaterialTheme.typography.titleMedium.copy(fontFamily = com.husarp.lockdown.ui.theme.Barlow, fontWeight = FontWeight.Bold), color = fg)
+fun Avatar(letter: String, modifier: Modifier = Modifier, bg: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+           fg: Color = MaterialTheme.colorScheme.onSurface, size: Dp = 40.dp) {
+    Box(modifier.size(size).background(bg, RoundedCornerShape(size * 0.3f)), contentAlignment = Alignment.Center) {
+        Text(letter.take(1).uppercase(), style = MaterialTheme.typography.titleMedium.copy(fontFamily = com.husarp.lockdown.ui.theme.Barlow,
+            fontWeight = FontWeight.Bold, fontSize = (size.value * 0.45f).sp), color = fg)
+    }
+}
+
+/** A rounded square in a hue's container with the icon in its accent (12 dp corners at 40, 10 at 32, 8 at 28).
+ *  [on] false: grey, so something that's off looks off. */
+@Composable
+fun IconTile(icon: ImageVector, hue: Hue, size: Dp = 40.dp, on: Boolean = true, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val t = tone(hue)
+    Box(modifier.size(size).background(if (on) t.container else cs.surfaceContainerHigh, RoundedCornerShape(size * 0.3f)),
+        contentAlignment = Alignment.Center) {
+        Icon(icon, null, Modifier.size(size * 0.55f), tint = if (on) t.accent else cs.onSurfaceVariant)
+    }
+}
+
+/** A small label: filled (the hue's container) or outlined (a hairline, no colour). One line, at most 140 dp. */
+@Composable
+fun Pill(text: String, hue: Hue?, icon: ImageVector? = null, outlined: Boolean = false) {
+    val cs = MaterialTheme.colorScheme
+    val t = hue?.takeIf { !outlined }?.let { tone(it) }
+    Row(
+        Modifier.height(22.dp).widthIn(max = 140.dp)
+            .then(if (t != null) Modifier.background(t.container, RoundedCornerShape(6.dp))
+                  else Modifier.border(1.dp, cs.outlineVariant, RoundedCornerShape(6.dp)))
+            .padding(horizontal = 7.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (icon != null) Icon(icon, null, Modifier.size(12.dp), tint = t?.accent ?: cs.onSurfaceVariant)
+        Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, color = t?.onContainer ?: cs.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun Pill(spec: PillSpec) = Pill(spec.text, spec.hue, spec.icon, spec.outlined)
+
+/** Pills on one line: the first [max], then "+N" for the rest. */
+@Composable
+fun PillRow(pills: List<PillSpec>, max: Int = 2, modifier: Modifier = Modifier) {
+    if (pills.isEmpty()) return
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        pills.take(max).forEach { Pill(it) }
+        if (pills.size > max) Pill("+${pills.size - max}", null, outlined = true)
+    }
+}
+
+/** An index card that opens a section: a tile, the title, a one-line live summary (red when [alert]) and a chevron
+ *  (or [trailing]). [dot]: a small dot on the tile - red "needs a fix", amber "unsaved". */
+@Composable
+fun SectionCard(icon: ImageVector, hue: Hue, title: String, summary: String, alert: Boolean = false, dot: Color? = null,
+                trailing: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(shape = RoundedCornerShape(16.dp), padding = PaddingValues(horizontal = 14.dp, vertical = 12.dp), onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box {
+                IconTile(icon, hue)
+                if (dot != null) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(10.dp)
+                    .background(cs.surfaceContainerLow, CircleShape).padding(1.dp).background(dot, CircleShape))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = if (alert) cs.error else cs.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (trailing != null) trailing() else Icon(Icons.Filled.ChevronRight, null, tint = cs.onSurfaceVariant)
+        }
+    }
+}
+
+/** A Home card: a small tile and an uppercase title in the hue's accent, an optional "See all", then [content]. */
+@Composable
+fun HomePanel(title: String, icon: ImageVector?, hue: Hue?, action: String? = null, onAction: () -> Unit = {},
+              onClick: (() -> Unit)? = null, color: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+              contentColor: Color = MaterialTheme.colorScheme.onSurface, content: @Composable ColumnScope.() -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(color = color, contentColor = contentColor, padding = PaddingValues(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 12.dp), onClick = onClick) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (icon != null && hue != null) IconTile(icon, hue, 28.dp)
+            Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                color = hue?.let { tone(it).accent } ?: cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+            if (action != null) TextButton(onClick = onAction) { Text(action) }
+        }
+        Column(Modifier.padding(end = 8.dp)) { content() }
+    }
+}
+
+/** The first [max] members' icons, overlapping with a ring, then "+N". */
+@Composable
+fun MemberStack(items: List<com.husarp.lockdown.engine.Item>, max: Int = 3) {
+    if (items.isEmpty()) return
+    val cs = MaterialTheme.colorScheme
+    val shown = items.take(max)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width((26 + 16 * (shown.size - 1)).dp).height(26.dp)) {
+            shown.forEachIndexed { i, it ->
+                Box(Modifier.offset(x = (16 * i).dp).size(26.dp).background(cs.surfaceContainerLow, RoundedCornerShape(9.dp)).padding(2.dp)) {
+                    ItemIcon(it.type, it.target, it.name, 22.dp)
+                }
+            }
+        }
+        if (items.size > max) Text("+${items.size - max}", Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
     }
 }
 

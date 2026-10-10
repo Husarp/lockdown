@@ -6,20 +6,34 @@ import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Modes
+import com.husarp.lockdown.engine.Reason
+import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.engine.Rules
+import com.husarp.lockdown.engine.Usage
 import com.husarp.lockdown.ui.Status
 import java.time.LocalDateTime
 
+/** A blocked item's one line ("Blocked until 18:00" / "Grey until 18:00"), whether it's only greyed, and why (the
+ *  most important reason; null when only the running mode blocks it). */
+data class BlockedLine(val text: String, val grey: Boolean, val reason: Reason?)
+
+/** One row of Home's "Blocked now": an item a rule blocks now, why, until when (null = no end) and if only greyed. */
+data class BlockedRow(val item: Item, val reason: Reason, val until: LocalDateTime?, val grey: Boolean)
+
+/** Home's "Blocked now": the always-blocked apps and sites counted (never evaluated one by one - there can be
+ *  thousands of imported sites), and the first [rows] blocked by any other rule, soonest end first, of [total]. */
+data class BlockedNow(val alwaysApps: Int, val alwaysSites: Int, val rows: List<BlockedRow>, val total: Int)
+
 /** Live status of items, computed from the tested engine + the recorded usage counters. For the UI. */
 object Live {
-    fun status(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now(), mode: ModeState? = null): Status {
+    fun status(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now(), mode: ModeState? = null,
+               usage: Usage = UsageStore.usage): Status {
         if (item.disabled) return Status.PAUSED
         val eff = Rules.effectiveRules(item, cfg.groups)
         val byMode = modeBlocks(cfg, item, mode)
         if (eff.isEmpty() && !byMode) return Status.ALLOWED
         if (com.husarp.lockdown.block.Enforce.paused(cfg, now)) return Status.PAUSED    // "Pause my blocks"
         if (byMode) return Status.BLOCKED        // a running mode blocks it: no "min left" then
-        val usage = UsageStore.usage
         val clock = cfg.clock()
         if (Rules.itemBlock(eff, now, usage, clock) != null) return Status.BLOCKED
         val soon = eff.any { Rules.ruleState(it, now, usage, clock) == "soon" }
@@ -28,18 +42,53 @@ object Live {
 
     /** The one line for a blocked item: "Blocked until 18:00" - the block that lasts longest of its own rules, its
      *  groups' and the running mode's, never a line per rule or member. "Grey until 18:00" for an app only greyed. */
-    fun blockedLine(cfg: Config, item: Item, now: LocalDateTime, mode: ModeState? = null): String {
+    fun blockedLine(cfg: Config, item: Item, now: LocalDateTime, mode: ModeState? = null): String =
+        blockedInfo(cfg, item, now, mode).text
+
+    /** [blockedLine], with whether it's only greyed and why it's blocked (the status chip's look, the reason pill). */
+    fun blockedInfo(cfg: Config, item: Item, now: LocalDateTime, mode: ModeState? = null, usage: Usage = UsageStore.usage): BlockedLine {
         val ends = ArrayList<LocalDateTime?>()
         val eff = Rules.effectiveRules(item, cfg.groups)
-        Rules.blockEnd(eff, now, UsageStore.usage, cfg.clock())
+        Rules.blockEnd(eff, now, usage, cfg.clock())
             ?.let { ends.add(it.takeIf { e -> e != LocalDateTime.MAX }) }
         val byMode = modeBlocks(cfg, item, mode)
         if (byMode) ends.add(mode!!.until)
         val until = if (ends.isEmpty() || ends.any { it == null }) null else ends.filterNotNull().max()
         val line = Alerts.blockedLine(until, now)
         val grey = item.type == ItemType.APP && !byMode &&
-            BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, UsageStore.usage, cfg.clock())))
-        return if (grey) line.replaceFirst("Blocked", "Grey") else line
+            BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, usage, cfg.clock())))
+        val reason = Rules.itemBlock(eff, now, usage, cfg.clock())?.reason
+        return BlockedLine(if (grey) line.replaceFirst("Blocked", "Grey") else line, grey, reason)
+    }
+
+    /**
+     * Home's "Blocked now", cheap with thousands of items: an item that is only always-blocked (its own rules all
+     * permanent, in no group, not paused) is counted, not evaluated. The few others (in a group, or with another
+     * rule) are evaluated; one a permanent rule blocks counts as always blocked too, the rest are the rows. A running
+     * mode is left out here (Home sums it up in one line). Main thread only, like the blocking ([usage]).
+     */
+    fun blockedNow(cfg: Config, now: LocalDateTime, limit: Int = 5, usage: Usage = UsageStore.usage): BlockedNow {
+        val grouped = HashSet<String>()
+        for (g in cfg.groups) if (!g.disabled) grouped.addAll(g.memberIds)
+        var apps = 0; var sites = 0
+        fun always(item: Item) { if (item.type == ItemType.APP) apps++ else sites++ }
+        val rows = ArrayList<BlockedRow>()
+        val clock = cfg.clock()
+        for (item in cfg.items) {
+            if (item.disabled) continue
+            val inGroup = item.id in grouped
+            if (!inGroup && item.rules.isEmpty()) continue
+            if (!inGroup && item.rules.all { it.type == RuleType.PERMANENT }) { always(item); continue }
+            val eff = Rules.effectiveRules(item, cfg.groups)
+            val block = Rules.itemBlock(eff, now, usage, clock) ?: continue
+            if (block.reason == Reason.PERMANENT) { always(item); continue }
+            val end = Rules.blockEnd(eff, now, usage, clock)?.takeIf { it != LocalDateTime.MAX }
+            val grey = item.type == ItemType.APP &&
+                BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, usage, clock)))
+            rows.add(BlockedRow(item, block.reason, end, grey))
+        }
+        rows.sortWith(compareBy<BlockedRow> { it.until ?: LocalDateTime.MAX }.thenBy { it.item.name.lowercase() })
+        return BlockedNow(apps, sites, rows.take(limit), rows.size)
     }
 
     /** The running mode blocks [item] (as Enforce does: by its app, or by any of its hostnames). */
@@ -51,8 +100,7 @@ object Live {
     }
 
     /** The daily limit with the least time left (fraction used 0..1, minutes left), or null if none. */
-    fun dayLimitFraction(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now()): Pair<Float, Int>? {
-        val usage = UsageStore.usage
+    fun dayLimitFraction(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now(), usage: Usage = UsageStore.usage): Pair<Float, Int>? {
         val clock = cfg.clock()
         var best: Pair<Float, Int>? = null
         for (eff in Rules.effectiveRules(item, cfg.groups)) {

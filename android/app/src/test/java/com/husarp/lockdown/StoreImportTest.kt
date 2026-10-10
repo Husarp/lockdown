@@ -1,9 +1,11 @@
 package com.husarp.lockdown
 
 import com.husarp.lockdown.data.Config
+import com.husarp.lockdown.data.HomeCard
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -37,4 +39,25 @@ class StoreImportTest {
         val got = Store.decodeImport(json.encodeToString(Config()), current)!!
         assertEquals(until, got.antibypass.unlockedUntil)
     }
+
+    @Test fun an_old_config_reads_with_the_new_looks_unset_and_they_survive_a_round_trip() {
+        val old = """{"items":[],"groups":[{"id":"g","name":"Social","memberIds":["a"]}],"settings":{"theme":"dark"}}"""
+        val got = Store.decodeImport(old, Config())!!
+        assertNull(got.groups.single().icon)
+        assertNull(got.groups.single().color)
+        assertNull(got.settings.home)
+        assertEquals("dark", got.settings.theme)
+        val c = got.copy(groups = got.groups.map { it.copy(icon = "moon", color = "INDIGO") },
+            settings = got.settings.copy(home = listOf(HomeCard("apps"), HomeCard("blocked", on = false))))
+        val back = Store.decodeImport(json.encodeToString(c), Config())!!
+        assertEquals("moon", back.groups.single().icon)
+        assertEquals("INDIGO", back.groups.single().color)
+        assertEquals(c.settings.home, back.settings.home)
+        // an older copy (the Island helper before this version) ignores what it doesn't know
+        val lenient = Json { ignoreUnknownKeys = true }
+        assertEquals("Social", lenient.decodeFromString<OldGroup>(json.encodeToString(c.groups.single())).name)
+    }
+
+    @kotlinx.serialization.Serializable
+    private data class OldGroup(val id: String, val name: String, val memberIds: List<String> = emptyList())
 }

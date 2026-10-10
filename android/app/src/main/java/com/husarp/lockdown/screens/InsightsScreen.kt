@@ -34,6 +34,10 @@ import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.Numeral
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.fmtDuration
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.theme.Hue
+import com.husarp.lockdown.ui.theme.tone
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.usage.Usage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -50,6 +54,8 @@ fun InsightsScreen() {
     var range by remember { mutableIntStateOf(0) }
     var selected by remember { mutableIntStateOf(-1) }
     val ranges = listOf("Today" to (0 to 1), "Yesterday" to (1 to 1), "7 days" to (0 to 7), "30 days" to (0 to 30))
+    val cfg by com.husarp.lockdown.data.Store.state.collectAsStateWithLifecycle()
+    val teal = tone(Hue.TEAL)
 
     val data by produceState<InsightData?>(null, range) {
         selected = -1
@@ -77,7 +83,7 @@ fun InsightsScreen() {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ranges.forEachIndexed { i, r -> Chip(r.first, i == range) { range = i } }
+            ranges.forEachIndexed { i, r -> Chip(r.first, i == range, hue = Hue.TEAL) { range = i } }
         }
         val d = data
         if (d == null) { Text("Loading…", color = cs.onSurfaceVariant) } else {
@@ -96,7 +102,13 @@ fun InsightsScreen() {
                     d.bars.forEachIndexed { i, b ->
                         Column(Modifier.weight(1f).clickable { selected = if (selected == i) -1 else i }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
                             val h = (100 * b.ms / max).toInt().dp.coerceAtLeast(if (b.ms > 0) 3.dp else 1.dp)
-                            Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(4.dp)).background(if (i == selected) cs.onPrimaryContainer else cs.primary))
+                            // a day's hours inside bedtime -> wake are indigo
+                            val night = d.hourly && cfg.sleep.on && inBedtime(i * 60, cfg.sleep.bedtime, cfg.sleep.wake)
+                            Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(4.dp)).background(when {
+                                i == selected -> teal.onContainer
+                                night -> tone(Hue.INDIGO).accent
+                                else -> teal.accent
+                            }))
                             if (b.label.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Text(b.label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
                         }
                     }
@@ -106,6 +118,7 @@ fun InsightsScreen() {
                 SectionLabel("Top apps", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 val topMax = (d.perApp.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
                 d.perApp.forEach { a ->
+                    val barColor = tone(Kinds.category(appCategory(cfg, a.pkg)).hue).accent
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         AppIcon(a.pkg, a.label)
                         Column(Modifier.weight(1f)) {
@@ -115,7 +128,7 @@ fun InsightsScreen() {
                             }
                             Spacer(Modifier.height(5.dp))
                             Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(cs.surfaceContainerHighest)) {
-                                Box(Modifier.fillMaxWidth((a.ms.toFloat() / topMax).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(cs.primary))
+                                Box(Modifier.fillMaxWidth((a.ms.toFloat() / topMax).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(barColor))
                             }
                         }
                         CategoryMenu(a.pkg)
@@ -129,4 +142,17 @@ fun InsightsScreen() {
             InsightsHistory(back, len)
         }
     }
+}
+
+/** [minute] of the day (0-1439) is inside bedtime -> wake ("23:00" -> "07:00", past midnight or not). */
+internal fun inBedtime(minute: Int, bedtime: String, wake: String): Boolean {
+    fun min(t: String): Int? {
+        val p = t.trim().split(":")
+        val h = p.getOrNull(0)?.toIntOrNull() ?: return null
+        val m = p.getOrNull(1)?.toIntOrNull() ?: return null
+        return h * 60 + m
+    }
+    val b = min(bedtime) ?: return false
+    val w = min(wake) ?: return false
+    return if (b <= w) minute in b until w else minute >= b || minute < w
 }

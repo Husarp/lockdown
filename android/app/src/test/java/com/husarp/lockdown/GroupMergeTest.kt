@@ -225,4 +225,11 @@ class GroupMergeTest {
         assertEquals(Reason.LIMIT, block(yt, listOf(g), t, c)!!.reason)
         assertNull(block(tw, listOf(g), t, c))
     }
+
+    @Test fun a_groups_icon_and_colour_are_looks_only_never_looser() {
+        val g = Group("g", "Evenings", rules = listOf(Rule(RuleType.PERMANENT)), memberIds = listOf("yt"))
+        assertFalse(AntiBypass.groupLooser(g, g.copy(icon = "moon", color = "INDIGO"), monNoon))
+        assertFalse(AntiBypass.groupLooser(g.copy(icon = "moon", color = "INDIGO"), g, monNoon))      // back to automatic
+        assertTrue(AntiBypass.groupLooser(g, g.copy(icon = "moon", memberIds = emptyList()), monNoon))  // the rest still counts
+    }
 }

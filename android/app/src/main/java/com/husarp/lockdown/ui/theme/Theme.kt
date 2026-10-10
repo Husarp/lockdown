@@ -4,6 +4,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 
 /**
  * The Lockdown look: the designer's orange-seeded Material 3 scheme (light + dark), Barlow Condensed / Inter
@@ -17,7 +18,7 @@ fun LockdownTheme(pref: String = "system", content: @Composable () -> Unit) {
         "dark" -> true
         else -> isSystemInDarkTheme()
     }
-    CompositionLocalProvider(LocalExtraColors provides if (dark) DarkExtra else LightExtra) {
+    CompositionLocalProvider(LocalExtraColors provides if (dark) DarkExtra else LightExtra, LocalTones provides if (dark) DarkTones else LightTones) {
         MaterialTheme(
             colorScheme = if (dark) DarkColors else LightColors,
             typography = LockdownTypography,
@@ -31,4 +32,11 @@ fun LockdownTheme(pref: String = "system", content: @Composable () -> Unit) {
 object LockdownTheme {
     val extra: ExtraColors
         @Composable get() = LocalExtraColors.current
+
+    val tones: Array<Tone>
+        @Composable @ReadOnlyComposable get() = LocalTones.current
 }
+
+/** The theme's [Tone] for [h] (an array lookup, nothing allocated). */
+@Composable @ReadOnlyComposable
+fun tone(h: Hue): Tone = LocalTones.current[h.ordinal]

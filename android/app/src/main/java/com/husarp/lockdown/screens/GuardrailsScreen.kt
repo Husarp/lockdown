@@ -73,6 +73,13 @@ import com.husarp.lockdown.guard.rememberFresh
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.SectionCard
+import com.husarp.lockdown.ui.theme.Hue
+import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.ToggleOn
+import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
@@ -138,9 +145,28 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
     UnsavedChanges(d.dirty, onBack, ::save, d::clear)
     // Fix (Reliability) turns uninstall protection on at once: a draft being edited follows it
     LaunchedEffect(cfg.guardrails.uninstallProtection) { d.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = cfg.guardrails.uninstallProtection)) } }
+    // Sections: the index, or one section's page, all on the one draft (one Save, one challenge). Back from a section
+    // goes to the index without asking (composed after UnsavedChanges, so it wins).
+    var section by remember { mutableStateOf<String?>(null) }
+    androidx.activity.compose.BackHandler(enabled = section != null) { section = null }
+    val changed = remember(e, d.saved) { e.changedSections(d.saved) }
+    val link by com.husarp.lockdown.link.IslandLink.mainState.collectAsStateWithLifecycle()
+    val greyNeeded = (cfg.settings.bedtimeGrayscale || com.husarp.lockdown.engine.BlockMethod.greyUsed(cfg.items, cfg.groups)) &&
+        !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx)      // only an adb command can fix it - Fix copies it
+    val islandShown = link.state.isNotEmpty() && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx)   // Fix opens Lockdown in Island
+    val islandOk = remember(fresh, link) { com.husarp.lockdown.link.IslandLink.healthy(ctx) }
+    val failing = listOfNotNull(
+        if (a11y != Perm.ON) "App blocking not running" else null,
+        if (!battery) "Battery restricted" else null,
+        if (!admin) "Uninstall protection off" else null,
+        if (greyNeeded && !grayOk) "Grayscale permission missing" else null,
+        if (islandShown && !islandOk) "Island not checking in" else null,
+    )
 
     Column(Modifier.fillMaxSize()) {
+    section?.let { sec -> com.husarp.lockdown.ui.EditorHeader(GUARD_SECTIONS.getValue(sec), onBack = { section = null }) }
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (section == null) {
         // Unlock box (like the PC): while the challenge is on, pass it once to open a short window where loosening
         // edits save without re-asking each time.
         if (AntiBypass.active(ab)) {
@@ -174,7 +200,35 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
         SectionLabel("Pause my blocks")
         PauseCard(now, guard)
 
-        SectionLabel("Reliability")
+        val warnDot = ex.warning
+        SectionCard(Icons.Filled.HealthAndSafety, Hue.GREEN, "Reliability",
+            if (failing.isEmpty()) "All good" else failing.first() + if (failing.size > 1) " · ${failing.size - 1} more" else "",
+            alert = failing.isNotEmpty(), dot = if (failing.isNotEmpty()) cs.error else null) { section = "reliability" }
+        SectionCard(Icons.Filled.Password, Hue.VIOLET, "Before loosening (challenge)", challengeSummary(dab, ownPhrase),
+            dot = if ("challenge" in changed) warnDot else null) { section = "challenge" }
+        run {
+            val em = cfg.emergency
+            val tiers = em.tierList()
+            val left = tiers.map { it to Emergency.usesLeft(cfg.allUses(), it, now, cfg.clock()) }
+            SectionCard(Kinds.EMERGENCY.icon, Kinds.EMERGENCY.hue, "Emergency unlock", when {
+                    !em.enabled -> "Off"
+                    tiers.isEmpty() -> "No kinds set"
+                    tiers.size == 1 -> left[0].let { (t, u) -> "${u.left} of ${u.allowed} left ${Emergency.PERIODS[t.per]} · ${t.minutes} min" }
+                    else -> "${tiers.size} kinds · ${left.sumOf { it.second.left }} left"
+                }, dot = if ("emergency" in changed) warnDot else null,
+                trailing = {
+                    val pink = tone(Kinds.EMERGENCY.hue)
+                    Button(onClick = { pickUnlock = true }, enabled = em.enabled && left.any { it.second.left > 0 },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = pink.container, contentColor = pink.onContainer)) { Text("Use") }
+                }) { section = "emergency" }
+        }
+        SectionCard(Icons.Filled.ToggleOn, Hue.SLATE, "Switches",
+            listOfNotNull(if (e.guardrails.persist) "Keep running" else null, if (e.guardrails.trustedTime) "Trusted time" else null,
+                if (e.guardrails.uninstallProtection && admin) "Uninstall protection" else null).joinToString(" · ").ifEmpty { "All off" },
+            dot = if ("switches" in changed) warnDot else null) { section = "switches" }
+        }
+
+        if (section == "reliability") {
         Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
             HealthRow("App blocking active", a11y == Perm.ON, if (a11y == Perm.NOT_RUNNING) A11Y_NOT_RUNNING else null) {
                 ctx.startActivity(BlockService.settingsIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -184,14 +238,13 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 Store.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = true)) }
                 ctx.startActivity(adminIntent(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            if ((cfg.settings.bedtimeGrayscale || com.husarp.lockdown.engine.BlockMethod.greyUsed(cfg.items, cfg.groups)) &&
-                !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // only an adb command can fix it - Fix copies it
-                HealthRow("Grayscale permission", grayOk) { copyGrant(ctx) }
-            val link by com.husarp.lockdown.link.IslandLink.mainState.collectAsStateWithLifecycle()
-            if (link.state.isNotEmpty() && !com.husarp.lockdown.remind.Grayscale.otherProfile(ctx))   // Fix opens Lockdown in Island
-                HealthRow("Island helper checking in", remember(fresh, link) { com.husarp.lockdown.link.IslandLink.healthy(ctx) }) { com.husarp.lockdown.link.IslandLink.openOtherProfile(ctx) }
+            if (greyNeeded) HealthRow("Grayscale permission", grayOk) { copyGrant(ctx) }
+            if (islandShown) HealthRow("Island helper checking in", islandOk) { com.husarp.lockdown.link.IslandLink.openOtherProfile(ctx) }
         }
-        // A reinstall or a reset to get out of the rules shows here as a fresh date.
+        }
+
+        if (section == null) {
+        // A reinstall or a reset to get out of the rules shows here as a fresh date (on the index: always in sight).
         val installed = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).firstInstallTime }.getOrDefault(0L) }
         val linkedAt = com.husarp.lockdown.link.IslandLink.linkedAt()
         Text("Installed ${dateTime(installed)}" + when {
@@ -199,8 +252,9 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
             com.husarp.lockdown.link.IslandLink.mainState.value.state.isNotEmpty() -> " · Island linked (by an older version, time not kept)"
             else -> ""
         }, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
 
-        SectionLabel("Before loosening anything")
+        if (section == "challenge") {
         Card(color = cs.surfaceContainerLow) {
             Text("Tightening a rule never asks. Loosening needs:", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
@@ -266,8 +320,9 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 HoursEditor(dab.windows) { w -> setAb { it.copy(windows = w) } }
             }
         }
+        }
 
-        SectionLabel("Emergency unlock")
+        if (section == "emergency") {
         Card(color = cs.surfaceContainer) {
             val em = cfg.emergency                              // what's in effect: the meter and Use unlock
             val tiers = em.tierList()
@@ -310,8 +365,9 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                     Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
         }
+        }
 
-        SectionLabel("Switches")
+        if (section == "switches") {
         Card(color = cs.surfaceContainerLow) {
             SwitchRowInline("Keep running (restart on kill/boot)", e.guardrails.persist) { on ->
                 d.update { it.copy(guardrails = it.guardrails.copy(persist = on)) }
@@ -331,6 +387,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 else d.update { it.copy(guardrails = it.guardrails.copy(uninstallProtection = on)) }
             }
         }
+        }
     }
     SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
@@ -339,6 +396,17 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
 }
 
 private val RESET_FMT = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM HH:mm")
+
+/** Guardrails' sections (key -> title). */
+private val GUARD_SECTIONS = mapOf("reliability" to "Reliability", "challenge" to "Before loosening anything",
+    "emergency" to "Emergency unlock", "switches" to "Switches")
+
+/** The challenge as set (in the page's draft) in a line: "Random phrase, 40 characters · 5 min cool-off", or "Off". */
+private fun challengeSummary(ab: AntiBypassCfg, own: Boolean): String = listOfNotNull(
+    if (!ab.phrase) null else if (own) "Your own phrase" else "Random phrase, ${ab.length} characters",
+    if (ab.hours) "only in set hours" else null,
+    if (ab.waitMin > 0) "${ab.waitMin} min cool-off" else null,
+).joinToString(" · ").ifEmpty { "Off" }
 
 /** One emergency kind: uses, period and length, and [left] (null for a kind not added yet) as a small meter. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -392,6 +460,8 @@ private fun PauseCard(now: LocalDateTime, guard: (Boolean, () -> Unit) -> Unit) 
     var silent by remember { mutableStateOf(false) }
     Card(color = cs.surfaceContainer) {
         val running = Pause.state(cfg.pause, now)
+        com.husarp.lockdown.ui.IconTile(Kinds.PAUSE.icon, Kinds.PAUSE.hue, 32.dp)
+        Spacer(Modifier.height(10.dp))
         if (running != null) {
             Text("Your blocks are paused until ${hhmm(LocalDateTime.parse(running.until))}" +
                 if (running.silent) " - alerts are silenced." else ".", style = MaterialTheme.typography.titleSmall, color = cs.primary)
@@ -432,9 +502,10 @@ fun PauseBanner() {
     var tick by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) { while (true) { delay(5000); tick++ } }      // a pause that runs out takes the banner with it
     val until = remember(cfg.pause, tick) { Pause.until(cfg.pause, TrustedTime.local(ctx)) } ?: return
-    val cs = MaterialTheme.colorScheme
-    androidx.compose.material3.Surface(color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+    val slate = tone(Kinds.PAUSE.hue)          // paused is slate
+    androidx.compose.material3.Surface(color = slate.container, contentColor = slate.onContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Kinds.PAUSE.icon, null, tint = slate.accent, modifier = Modifier.size(20.dp))
             Text("Blocking paused until ${hhmm(until)}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
             TextButton(onClick = { resumeBlocks(ctx) }) { Text("Resume now") }
         }
@@ -482,7 +553,7 @@ private fun cleanPhrase(s: String) = s.trim().split(Regex("\\s+")).filter { it.i
 /** "Use unlock": tick what to free (and/or pause the alerts); with several kinds, pick how long - the shortest with
  *  a use left is picked first. One use of that kind, checked again as it's saved. */
 @Composable
-private fun EmergencyDialog(onDismiss: () -> Unit) {
+internal fun EmergencyDialog(onDismiss: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val picked = remember { mutableStateOf(setOf<String>()) }
@@ -529,7 +600,8 @@ private fun EmergencyDialog(onDismiss: () -> Unit) {
                 items.forEach { item ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = item.id in picked.value, onCheckedChange = { on -> picked.value = if (on) picked.value + item.id else picked.value - item.id })
-                        Text(if (item.type == ItemType.SITE) "${item.name} · site" else item.name)
+                        com.husarp.lockdown.ui.ItemIcon(item.type, item.target, item.name, 28.dp)
+                        Text(if (item.type == ItemType.SITE) "${item.name} · site" else item.name, Modifier.padding(start = 10.dp))
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

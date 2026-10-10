@@ -22,12 +22,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
@@ -73,8 +79,11 @@ import com.husarp.lockdown.ui.Numeral
 import com.husarp.lockdown.ui.SaveBar
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.Segmented
-import com.husarp.lockdown.ui.StatusChip
-import com.husarp.lockdown.ui.Status
+import com.husarp.lockdown.ui.IconTile
+import com.husarp.lockdown.ui.Kinds
+import com.husarp.lockdown.ui.Pill
+import com.husarp.lockdown.ui.theme.Hue
+import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.SwitchRowInline
 import com.husarp.lockdown.ui.UnsavedChanges
 import com.husarp.lockdown.ui.rememberDraft
@@ -115,10 +124,13 @@ private fun RemList(open: (RemPage) -> Unit) {
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Bedtime hero
-            Card(color = cs.surfaceContainer, shape = MaterialTheme.shapes.extraLarge, onClick = { open(RemPage.Bedtime) }) {
+            val indigo = tone(Hue.INDIGO)
+            Card(color = indigo.container, contentColor = indigo.onContainer, shape = MaterialTheme.shapes.extraLarge, onClick = { open(RemPage.Bedtime) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Bedtime, null, tint = cs.primary)
-                    Spacer(Modifier.size(10.dp))
+                    Box(Modifier.size(40.dp).background(cs.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Bedtime, null, tint = indigo.accent, modifier = Modifier.size(22.dp))
+                    }
+                    Spacer(Modifier.size(12.dp))
                     Text("Bedtime", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Switch(checked = cfg.sleep.on, onCheckedChange = { on ->
                         if (on) { Store.update { it.copy(sleep = it.sleep.copy(on = true)) }; Grayscale.sync(ctx) }
@@ -130,17 +142,17 @@ private fun RemList(open: (RemPage) -> Unit) {
                     })
                 }
                 Spacer(Modifier.height(10.dp))
-                Numeral("${cfg.sleep.bedtime} → ${cfg.sleep.wake}", sizeSp = 36)
+                Numeral("${cfg.sleep.bedtime} → ${cfg.sleep.wake}", sizeSp = 36, color = indigo.onContainer)
                 Spacer(Modifier.height(8.dp))
                 Text((if (cfg.sleep.before > 0) "Heads-up ${cfg.sleep.before} min before · " else "") +
                     "full-screen at bedtime · comes back ${stepsText(cfg.sleep)}",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    style = MaterialTheme.typography.bodySmall, color = indigo.onContainer)
             }
             // Breaks
             Card(color = cs.surfaceContainerLow, onClick = { open(RemPage.Breaks) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Coffee, null, tint = cs.onSurfaceVariant)
-                    Spacer(Modifier.size(12.dp))
+                    IconTile(Icons.Filled.Coffee, Hue.TEAL)
+                    Spacer(Modifier.size(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Breaks", style = MaterialTheme.typography.titleSmall)
                         Text("${cfg.breaks.length} min every ${Interval.text(cfg.breaks.everySeconds)}" + if (cfg.breaks.twenty) " · 20-20-20 on" else "",
@@ -156,10 +168,13 @@ private fun RemList(open: (RemPage) -> Unit) {
             cfg.customs.forEach { c ->
                 Card(color = cs.surfaceContainerLow, onClick = { open(RemPage.Custom(c)) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(Icons.Filled.NotificationsActive, Hue.AMBER, on = c.on)
+                        Spacer(Modifier.size(14.dp))
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(c.text.ifBlank { "(no text)" }, style = MaterialTheme.typography.titleSmall)
-                                if (c.guarded) StatusChip("Important", Status.BLOCKED)
+                                Text(c.text.ifBlank { "(no text)" }, style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                if (c.guarded) Pill("Important", Hue.VIOLET, Icons.Filled.Lock)
                             }
                             Text(scheduleText(c), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                         }
@@ -223,7 +238,7 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 }
             }
             Card(color = cs.surfaceContainerLow) {
-                Text("Comes back after you dismiss it", style = MaterialTheme.typography.titleSmall)
+                CardTitle(Icons.Filled.Repeat, "Comes back after you dismiss it")
                 s.tiers.forEachIndexed { i, t ->
                     key(i, d.resets) {
                         TierRow(s, t, onChange = { n -> set { c -> c.copy(tiers = c.tiers.mapIndexed { j, x -> if (j == i) n else x }) } },
@@ -238,7 +253,7 @@ private fun BedtimeEditor(onClose: () -> Unit) {
             }
             Card(color = cs.surfaceContainerLow) {
                 // shorter (or off) loosens bedtime: the challenge on Save; longer is free
-                Text("Wait before Dismiss", style = MaterialTheme.typography.titleSmall)
+                CardTitle(Icons.Filled.HourglassTop, "Wait before Dismiss")
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (n in RemindersEngine.DISMISS_WAITS) Chip(if (n == 0) "Off" else "$n s", s.dismissWait == n) { set { it.copy(dismissWait = n) } }
@@ -257,14 +272,16 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {
-                Text("Turn on a mode at bedtime, until wake-up", style = MaterialTheme.typography.titleSmall)
+                CardTitle(Kinds.MODE.icon, "Turn on a mode at bedtime, until wake-up", tone(Kinds.MODE.hue).accent)
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("No mode", s.mode.isEmpty()) { set { it.copy(mode = "") } }
-                    modes.forEach { m -> Chip(m.name, s.mode == m.id) { set { it.copy(mode = m.id) } } }
+                    modes.forEach { m -> Chip(m.name, s.mode == m.id, icon = Kinds.modeIcon(m.id), hue = Kinds.MODE.hue) { set { it.copy(mode = m.id) } } }
                 }
             }
             Card(color = cs.surfaceContainerLow) {
+                CardTitle(Icons.Filled.TextFields, "What it says")
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(s.warnText, { v -> set { it.copy(warnText = v) } }, label = { Text("Heads-up says") },
                     placeholder = { Text(RemindersEngine.SLEEP_WARN_TEXT) }, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
@@ -283,6 +300,15 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 "or an emergency unlock while you have one.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         SaveBar(d.dirty, onDiscard = d::clear) { save {} }
+    }
+}
+
+/** An editor card's title with its icon (grey, or [tint]). */
+@Composable
+private fun CardTitle(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, tint: androidx.compose.ui.graphics.Color? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(icon, null, Modifier.size(20.dp), tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text, style = MaterialTheme.typography.titleSmall)
     }
 }
 

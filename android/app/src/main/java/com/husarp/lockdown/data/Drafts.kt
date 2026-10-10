@@ -25,6 +25,14 @@ data class GuardrailsEdit(
             (old.guardrails.trustedTime && !guardrails.trustedTime) ||
             (old.guardrails.uninstallProtection && !guardrails.uninstallProtection)
 
+    /** The Guardrails sections whose settings differ from [old] (their unsaved dot): "challenge", "emergency",
+     *  "switches". */
+    fun changedSections(old: GuardrailsEdit): Set<String> = buildSet {
+        if (ab != old.ab) add("challenge")
+        if (emergencyOn != old.emergencyOn || tiers != old.tiers) add("emergency")
+        if (guardrails != old.guardrails) add("switches")
+    }
+
     /** Why it can't be saved, or null: hours with a window of no days would never let a change through. */
     fun problem(): String? =
         if (ab.hours && (ab.windows.isEmpty() || ab.windows.any { it.days.isEmpty() })) "Pick at least one day for each time window."
@@ -67,6 +75,16 @@ data class SettingsEdit(
         (old.siteFilter && !siteFilter) || !protection.containsAll(old.protection) ||
             (old.pauseBeforeOpen && !pauseBeforeOpen) || pauseSec < old.pauseSec ||
             (old.forceSafeSearch && !forceSafeSearch)
+
+    /** The Settings sections whose settings differ from [old] (their unsaved dot): "filter" (site filter, protection
+     *  lists, SafeSearch, network log), "limits" (pause before opening, daily goal), "extras" (bedtime grayscale,
+     *  weekly digest). */
+    fun changedSections(old: SettingsEdit): Set<String> = buildSet {
+        if (siteFilter != old.siteFilter || protection != old.protection || forceSafeSearch != old.forceSafeSearch ||
+            networkLog != old.networkLog) add("filter")
+        if (pauseBeforeOpen != old.pauseBeforeOpen || pauseSec != old.pauseSec || dailyGoalMin != old.dailyGoalMin) add("limits")
+        if (bedtimeGrayscale != old.bedtimeGrayscale || weeklyDigest != old.weeklyDigest) add("extras")
+    }
 
     /** [c] with these settings. The site filter isn't written here: starting or stopping it does that. */
     fun applyTo(c: Config): Config = c.copy(
