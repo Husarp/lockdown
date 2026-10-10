@@ -178,6 +178,8 @@ def _blocked_minutes(schedule_json: str) -> set[int]:
         a, b = a.hour * 60 + a.minute, b.hour * 60 + b.minute
         length = b - a if a < b else 1440 - a + b
         for day in w["days"]:
+            if not 0 <= day <= 6:      # enforcement (rules.window_until) never matches such a day
+                continue
             inside.update((day * 1440 + a + i) % week for i in range(length))
     return inside if s["mode"] != ALLOW else set(range(week)) - inside
 

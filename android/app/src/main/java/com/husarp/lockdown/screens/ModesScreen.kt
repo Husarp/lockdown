@@ -1,5 +1,7 @@
 package com.husarp.lockdown.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -84,7 +86,7 @@ private fun ModeList(onEdit: (Mode) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(mode.name, style = MaterialTheme.typography.titleMedium)
                         Text(Modes.describe(mode), style = MaterialTheme.typography.bodySmall, color = if (isOn) blue.onContainer else cs.onSurfaceVariant)
-                        scheduleLine(mode, now)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (isOn) blue.onContainer else cs.onSurfaceVariant) }
+                        scheduleLine(mode, now)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (isOn) blue.onContainer else cs.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
                     }
                     if (isOn) {
                         Button(onClick = {
@@ -122,9 +124,11 @@ private fun scheduleLine(mode: Mode, now: java.time.LocalDateTime): String? {
 private fun PomStepper(label: String, value: Int, range: IntRange, step: Int, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        androidx.compose.material3.TextButton(onClick = { onChange((value - step).coerceIn(range)) }) { Text("−$step") }
+        androidx.compose.material3.TextButton(onClick = { onChange((value - step).coerceIn(range)) },
+            Modifier.semantics { contentDescription = "$label, less by $step" }) { Text("−$step") }
         Text("$value", Modifier.width(36.dp), style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        androidx.compose.material3.TextButton(onClick = { onChange((value + step).coerceIn(range)) }) { Text("+$step") }
+        androidx.compose.material3.TextButton(onClick = { onChange((value + step).coerceIn(range)) },
+            Modifier.semantics { contentDescription = "$label, more by $step" }) { Text("+$step") }
     }
 }
 

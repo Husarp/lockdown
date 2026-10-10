@@ -1,5 +1,9 @@
 package com.husarp.lockdown.screens
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -233,7 +237,7 @@ internal fun AddMembersPage(draft: Group, cfg: Config, newApps: List<Item>, onMe
                         } else {
                             val a = row as InstalledApp
                             fun add() = onNewApp(Item(java.util.UUID.randomUUID().toString().take(8), a.label, a.pkg, ItemType.APP))  // no own rule: the group's govern it
-                            ListRow(title = a.label, subtitle = "App · not on your list yet", subtitlePill = true,
+                            ListRow(title = a.label, subtitle = "App · not on your list", subtitlePill = true,
                                 leading = { AppIcon(a.pkg, a.label) },
                                 trailing = { Checkbox(checked = false, onCheckedChange = { if (it) add() }) },
                                 onClick = { add() })
@@ -295,8 +299,12 @@ internal fun IconColourDialog(g: Group, onPick: (icon: String?, color: String?) 
                     Hue.entries.forEach { h ->
                         val sel = h == hue
                         val ht = tone(h)
-                        Box(Modifier.size(32.dp).background(ht.accent, CircleShape).clickable { color = h.name }, contentAlignment = Alignment.Center) {
-                            if (sel) Icon(Icons.Filled.Check, h.name, Modifier.size(18.dp), tint = ht.container)
+                        Box(Modifier.size(40.dp)
+                            .semantics { contentDescription = h.name.lowercase(); selected = sel }
+                            .clickable(role = Role.RadioButton) { color = h.name }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(32.dp).background(ht.accent, CircleShape), contentAlignment = Alignment.Center) {
+                                if (sel) Icon(Icons.Filled.Check, null, Modifier.size(18.dp), tint = ht.container)
+                            }
                         }
                     }
                 }

@@ -167,6 +167,16 @@ class AntiBypassEngineTest {
         assertTrue(looser(hours("22:00", "00:00"), hours("22:00", "00:00", mode = SchedMode.ALLOW)))
     }
 
+    @Test fun days_outside_the_week_never_block() {
+        fun looser(a: Rule, b: Rule) = AntiBypass.ruleLooser(a, b, t0)
+        assertTrue(looser(hours("22:00", "00:00", listOf(0)), hours("22:00", "00:00", listOf(7))))
+        assertTrue(looser(hours("22:00", "00:00", listOf(0)), hours("22:00", "00:00", listOf(-1))))   // no crash
+        assertFalse(looser(hours("22:00", "00:00", listOf(7)), hours("22:00", "00:00", listOf(0))))
+        assertFalse(looser(hours("22:00", "00:00", listOf(0)), hours("22:00", "00:00", listOf(0, 7))))
+        assertFalse(looser(hours("22:00", "00:00", listOf(0), SchedMode.ALLOW), hours("22:00", "00:00", listOf(7), SchedMode.ALLOW)))
+        assertTrue(looser(hours("22:00", "00:00", listOf(7), SchedMode.ALLOW), hours("22:00", "00:00", listOf(0), SchedMode.ALLOW)))
+    }
+
     @Test fun block_until_midnight_can_be_moved_later_for_free() {
         val mid = LocalDateTime.of(2026, 9, 29, 0, 0)
         val a = Rule(RuleType.TEMPORARY, tempUntil = mid.toString())

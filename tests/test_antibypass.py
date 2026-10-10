@@ -200,6 +200,22 @@ def test_schedule_extending_is_free_across_midnight():
     assert ab.rule_looser(sched("22:00", "00:00"), sched("22:00", "00:00", mode="allow"), NOW)
 
 
+def test_schedule_days_outside_week_never_block():
+    from rules import make_schedule
+
+    def sched(days, mode="block"):
+        return {"rule_type": "scheduled", "schedule": make_schedule(mode, [(list(days), "22:00", "00:00")])}
+
+    # day 7 / -1 never match in rules.window_until, so moving a block there stops it: looser
+    assert ab.rule_looser(sched([0]), sched([7]), NOW)
+    assert ab.rule_looser(sched([0]), sched([-1]), NOW)      # no wrap, no crash
+    assert not ab.rule_looser(sched([7]), sched([0]), NOW)
+    assert not ab.rule_looser(sched([0]), sched([0, 7]), NOW)
+    # allow mode: an allowed window on day 7 never allows anything, so everything is blocked
+    assert not ab.rule_looser(sched([0], "allow"), sched([7], "allow"), NOW)
+    assert ab.rule_looser(sched([7], "allow"), sched([0], "allow"), NOW)
+
+
 def test_block_until_midnight_can_be_moved_later_free():
     temp = {"rule_type": "temporary", "temp_until": "2026-09-21 00:00:00"}
     assert not ab.rule_looser(temp, {**temp, "temp_until": "2026-09-21 00:30:00"}, NOW)

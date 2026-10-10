@@ -133,7 +133,7 @@ object AntiBypass {
             val a = Rules.parseHhmm(w.start).let { it.hour * 60 + it.minute }
             val b = Rules.parseHhmm(w.end).let { it.hour * 60 + it.minute }
             val length = if (a < b) b - a else 1440 - a + b
-            for (day in w.days) for (i in 0 until length) inside[(day * 1440 + a + i) % week] = true
+            for (day in w.days) if (day in 0..6) for (i in 0 until length) inside[(day * 1440 + a + i) % week] = true
         }
         return if (s.mode == SchedMode.ALLOW) BooleanArray(week) { !inside[it] } else inside
     }

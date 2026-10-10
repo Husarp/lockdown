@@ -1,5 +1,8 @@
 package com.husarp.lockdown.ui
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -110,7 +113,7 @@ fun Chip(text: String, selected: Boolean, modifier: Modifier = Modifier, icon: I
     val fg = if (!selected) cs.onSurface else t?.onContainer ?: cs.onPrimaryContainer
     val border = if (selected) bg else cs.outlineVariant
     Surface(
-        modifier = modifier.clickable { onClick() },
+        modifier = modifier.semantics { this.selected = selected }.clickable(role = Role.Button) { onClick() },
         color = bg, contentColor = fg, shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, border),
     ) {
