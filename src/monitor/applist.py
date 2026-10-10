@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from blocker.apps import PROTECTED
+from blocker.apps import PROGRAM_TYPES, PROTECTED, shortcut_program
 from monitor import win
 
 START_MENUS = [Path(os.environ.get("ProgramData", r"C:\ProgramData")) / r"Microsoft\Windows\Start Menu\Programs",
@@ -32,6 +32,39 @@ def _resolve_shortcuts() -> list[tuple[str, str]]:
         return out
     finally:
         comtypes.CoUninitialize()
+
+
+def read_shortcut(path: str) -> tuple[str, str, str]:
+    """(target, arguments, working folder) of a shortcut (.lnk)."""
+    import comtypes
+    import comtypes.client
+    comtypes.CoInitialize()
+    try:
+        link = comtypes.client.CreateObject("WScript.Shell", dynamic=True).CreateShortcut(str(path))
+        return link.TargetPath or "", link.Arguments or "", link.WorkingDirectory or ""
+    finally:
+        comtypes.CoUninitialize()
+
+
+KINDS_TEXT = "programs (.exe), Java games (.jar), scripts (.py, .bat, .cmd, .ps1, .vbs, .js ...) and shortcuts to them"
+
+
+def program_file(path: str, read=read_shortcut) -> str:
+    """The program a file picked in "Pick a program file..." stands for: itself (an .exe, a .jar, a script), or what
+    a shortcut starts - a Java game's shortcut runs javaw.exe -jar game.jar: that is game.jar
+    (apps.shortcut_program). Raises ValueError with a message for you."""
+    name = path.rsplit("\\", 1)[-1]
+    if path.lower().endswith(".lnk"):
+        try:
+            found = shortcut_program(*read(path))
+        except Exception:
+            raise ValueError(f"Couldn't read the shortcut {name}.") from None
+        if not found:
+            raise ValueError(f"{name} doesn't start a program. Lockdown can block {KINDS_TEXT}.")
+        return found
+    if path.lower().endswith(PROGRAM_TYPES):
+        return path
+    raise ValueError(f"Lockdown can block {KINDS_TEXT} - not {name}.")
 
 
 def list_apps() -> list[dict]:

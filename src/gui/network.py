@@ -16,6 +16,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 from PIL import ImageTk
 
+import alerts
 import search
 from gui import appinfo, icons, theme
 from gui.charts import MinuteBars
@@ -219,7 +220,7 @@ class NetworkPage(ctk.CTkFrame):
         rows += [{"minute": e["timestamp"][:16], "exe": "", "ip": "", "port": "", "domain": e["hostname"],
                   "count": 1, "windows": 0, "local": 0, "blocked": True, "name": e["display_name"],
                   "reason": e["reason"]}
-                 for e in self.db.block_events_since(since) if not e["hostname"].endswith(".exe")]
+                 for e in self.db.block_events_since(since) if not alerts.is_app_event(e)]
         rows.sort(key=lambda r: r["minute"], reverse=True)
         self.all_rows = rows
         text = self.search.get().strip().lower()

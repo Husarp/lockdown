@@ -1,13 +1,15 @@
 """Popup for picking an app to block: Start Menu apps, Steam games + apps with an open window, with icons and search.
 Rows are made once and reused (rebuilding hundreds of buttons on every key made searching slow); the search waits
-until you pause typing and shows the first MAX_SHOWN matches. Design 3l: search + "Other .exe", a count line with an
-All / Running / Games filter, the list on its own bordered surface (icon · name · exe · RUNNING), Cancel at the foot."""
+until you pause typing and shows the first MAX_SHOWN matches. Design 3l: search + "Pick a program file...", a count
+line with an All / Running / Games filter, the list on its own bordered surface (icon · name · exe · RUNNING), Cancel
+at the foot."""
 import threading
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
 import search
+from blocker.apps import PROGRAM_TYPES, PROTECTED, interpreter
 from gui import icons, theme
 from gui.components import Rows, Segmented, hairline
 
@@ -64,7 +66,7 @@ class AppBrowser(ctk.CTkToplevel):
         self.search = ctk.CTkEntry(top, placeholder_text="Search apps and Steam games...")
         self.search.pack(side="left", fill="x", expand=True)
         self.search.bind("<KeyRelease>", lambda e: self._search_soon())
-        ctk.CTkButton(top, text="Other .exe...", width=110, **theme.OUTLINE, command=self._browse_file).pack(
+        ctk.CTkButton(top, text="Pick a program file...", width=150, **theme.OUTLINE, command=self._browse_file).pack(
             side="left", padx=(9, 0))
         line = ctk.CTkFrame(self, fg_color="transparent")
         line.pack(fill="x", padx=13, pady=(0, 10))
@@ -147,15 +149,37 @@ class AppBrowser(ctk.CTkToplevel):
                 w.bind("<Button-3>", lambda e, a=a: self._menu(a))
         more = len(found) - len(shown)
         count = f"{len(found)} app{'s' * (len(found) != 1)}"
-        self.status.configure(text=count + (f" · first {len(shown)} shown - type to narrow down" if more else ""))
+        self.status.configure(text=count + (f" · first {len(shown)} shown - type to narrow down" if more else ""),
+                              text_color=MUTED)
         self.body._parent_canvas.yview_moveto(0)   # back to the top (a shorter list keeps no stale scroll position)
 
     def _browse_file(self):
-        from monitor import win
-        path = filedialog.askopenfilename(parent=self, title="Choose an app", filetypes=[("Programs", "*.exe")])
-        if path:
-            path = path.replace("/", "\\")
-            self._pick({"name": path.rsplit("\\", 1)[-1][:-4], "exe": win.exe_name(path), "path": path})
+        """Any program file: an .exe, a Java game (.jar), a script, or a shortcut to one - a shortcut stands for
+        what it starts (applist.program_file), and is named after the shortcut."""
+        from monitor import applist, win
+        picked = ask_program_file(self)
+        if not picked:
+            return
+        try:
+            path = applist.program_file(picked)
+        except ValueError as e:
+            self.status.configure(text=str(e), text_color=theme.DANGER)
+            return
+        exe = win.exe_name(path)
+        if interpreter(exe) and not self._whole_interpreter(exe):
+            return
+        name = picked.rsplit("\\", 1)[-1].rsplit(".", 1)[0]
+        self._pick({"name": name, "exe": exe, "path": path})
+
+    def _whole_interpreter(self, exe: str) -> bool:
+        """javaw.exe / python.exe / cmd.exe ... picked itself (or a shortcut with no file in it): that blocks every
+        program it runs - asked first. Lockdown's own (python.exe) can't be blocked at all."""
+        hint = "To block one game or script, pick its own file (.jar, .py, .bat ...) or its shortcut."
+        if exe in PROTECTED:
+            self.status.configure(text=f"{exe} can't be blocked (Lockdown needs it). {hint}", text_color=theme.DANGER)
+            return False
+        return messagebox.askyesno("Block every program it runs?", f"{exe} runs other programs too - blocking it "
+                                   f"blocks every one of them.\n\n{hint}\n\nBlock all of {exe}?", parent=self)
 
     def _cancel(self):
         self.grab_release()
@@ -167,3 +191,52 @@ class AppBrowser(ctk.CTkToplevel):
         self.grab_release()
         self.destroy()
         self.on_pick(app)
+
+
+OFN_NOCHANGEDIR, OFN_HIDEREADONLY, OFN_PATHMUSTEXIST, OFN_FILEMUSTEXIST = 0x8, 0x4, 0x800, 0x1000
+OFN_EXPLORER, OFN_NODEREFERENCELINKS = 0x80000, 0x100000
+
+
+def ask_program_file(parent) -> str | None:
+    """A program file picked in Windows' Open dialog (None: cancelled). A shortcut stays the shortcut
+    (OFN_NODEREFERENCELINKS) - the dialog would otherwise hand back only its target, and a Java game's shortcut
+    would come back as javaw.exe without the game it runs. Tk's own dialog if that one can't be shown."""
+    patterns = ";".join("*" + e for e in (*PROGRAM_TYPES, ".lnk"))
+    try:
+        return _open_dialog(parent, f"Programs, Java games, scripts, shortcuts\0{patterns}\0All files\0*.*\0\0")
+    except Exception:
+        path = filedialog.askopenfilename(parent=parent, title="Pick a program file",
+                                          filetypes=[("Programs, Java games, scripts, shortcuts", patterns.replace(";", " ")),
+                                                     ("All files", "*.*")])
+        return path.replace("/", "\\") if path else None
+
+
+def _open_dialog(parent, filters: str) -> str | None:
+    import ctypes
+    from ctypes import wintypes
+
+    class OPENFILENAMEW(ctypes.Structure):
+        _fields_ = [("lStructSize", wintypes.DWORD), ("hwndOwner", wintypes.HWND), ("hInstance", wintypes.HINSTANCE),
+                    ("lpstrFilter", ctypes.c_void_p), ("lpstrCustomFilter", ctypes.c_void_p),
+                    ("nMaxCustFilter", wintypes.DWORD), ("nFilterIndex", wintypes.DWORD),
+                    ("lpstrFile", ctypes.c_void_p), ("nMaxFile", wintypes.DWORD), ("lpstrFileTitle", ctypes.c_void_p),
+                    ("nMaxFileTitle", wintypes.DWORD), ("lpstrInitialDir", ctypes.c_void_p),
+                    ("lpstrTitle", wintypes.LPCWSTR), ("Flags", wintypes.DWORD), ("nFileOffset", wintypes.WORD),
+                    ("nFileExtension", wintypes.WORD), ("lpstrDefExt", ctypes.c_void_p), ("lCustData", wintypes.LPARAM),
+                    ("lpfnHook", ctypes.c_void_p), ("lpTemplateName", ctypes.c_void_p), ("pvReserved", ctypes.c_void_p),
+                    ("dwReserved", wintypes.DWORD), ("FlagsEx", wintypes.DWORD)]
+
+    filter_buf = ctypes.create_unicode_buffer(filters)   # (the NULs between the parts are kept)
+    file_buf = ctypes.create_unicode_buffer(1024)
+    ofn = OPENFILENAMEW(lStructSize=ctypes.sizeof(OPENFILENAMEW), hwndOwner=int(parent.wm_frame(), 16),
+                        lpstrFilter=ctypes.addressof(filter_buf), nFilterIndex=1,
+                        lpstrFile=ctypes.addressof(file_buf), nMaxFile=len(file_buf), lpstrTitle="Pick a program file",
+                        Flags=OFN_EXPLORER | OFN_NODEREFERENCELINKS | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST
+                        | OFN_HIDEREADONLY | OFN_NOCHANGEDIR)
+    comdlg32 = ctypes.WinDLL("comdlg32")
+    comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
+    if comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
+        return file_buf.value
+    if comdlg32.CommDlgExtendedError():
+        raise OSError("the Open dialog failed")
+    return None   # cancelled

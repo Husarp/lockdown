@@ -7,13 +7,14 @@ from gui import theme
 
 from gui.components import help_icon
 
-from blocker.apps import PROTECTED, block_flags, exe_name, make_block_type, typed_path
+from blocker.apps import PROTECTED, block_flags, exe_name, in_folder, is_hosted, make_block_type, typed_path
 from blocker.site_block import make_site_block_type, site_flags
 from blocker.hosts import normalize_host
 from gui.app_browser import AppBrowser
 from gui.site_picker import SiteEntry
 from gui.widgets import clear_entry, once
 from importer.popular import POPULAR_SITES
+from paths import APP_DIR
 
 ACTIONS = {"close": ("Close app", "asked to close first (10 s to save), then force-closed; started while blocked: "
                                   "closed at once"),
@@ -29,6 +30,16 @@ SITE_ACTIONS = {"dns": ("Can't load it", "the address goes nowhere, in every bro
                 "back": ("Go back", "the browser goes back instead; if that doesn't leave the page, the tab is "
                                     "closed")}
 MUTED = theme.MUTED
+HOSTED_NOTE = ("A Java game or a script runs inside javaw.exe / python / cmd / PowerShell, which other programs use "
+               "too: Lockdown closes or minimises this one only - found by its file name, wherever the file is (a "
+               "renamed copy is not). It can't cut its internet: that would cut every Java / Python program's.")
+
+
+def typed_program(text: str) -> bool:
+    """Typed in as an app: an .exe, or a program file (game.jar, start.bat) - a .py only as a path: "x.com.py" is
+    a site (Paraguay's)."""
+    name = exe_name(text)
+    return name.endswith(".exe") or (is_hosted(name) and (not name.endswith(".py") or bool(typed_path(text))))
 
 
 def popular_hosts(host: str) -> tuple[str, list[str]] | None:
@@ -77,6 +88,8 @@ class TargetPicker(ctk.CTkFrame):
         self.app_box = ctk.CTkFrame(self.block_row, fg_color="transparent")
         self.site_box = ctk.CTkFrame(self.block_row, fg_color="transparent")
         self.flag_boxes = self._boxes(self.app_box, ACTIONS, self._flag_ticked)
+        self.hosted_note = ctk.CTkLabel(self.app_box, text=HOSTED_NOTE, text_color=MUTED, font=theme.body(11),
+                                        justify="left", anchor="w", wraplength=520)
         self.site_boxes = self._boxes(self.site_box, SITE_ACTIONS, self._site_flag_ticked)
         self.reset()
 
@@ -145,7 +158,11 @@ class TargetPicker(ctk.CTkFrame):
         entry.insert(0, text)
 
     def _is_app(self) -> bool:
-        return not self.category and (bool(self.app) or exe_name(self.entry.get()).endswith(".exe"))
+        return not self.category and (bool(self.app) or typed_program(self.entry.get()))
+
+    def _hosted(self) -> bool:
+        """A program file run by an interpreter (a Java game, a script): closed or minimised only."""
+        return self._is_app() and is_hosted(self.app["exe"] if self.app else self.entry.get())
 
     def _wants_block_row(self) -> bool:
         """Apps - and a category, whose apps get closed / minimised the same way."""
@@ -164,6 +181,11 @@ class TargetPicker(ctk.CTkFrame):
                                             "When blocked (tick one or more; Close and Minimize exclude each other):")
             self.app_box.pack(anchor="w")
             self.block_row.pack(anchor="w", pady=(8, 0))
+            self._update_background()
+            if self._hosted():
+                self.hosted_note.pack(anchor="w", pady=(4, 0))
+            else:
+                self.hosted_note.pack_forget()
         elif self._is_site():
             self.block_label.configure(text="When blocked (tick one or more; Close the tab and Go back exclude "
                                             "each other):")
@@ -232,11 +254,14 @@ class TargetPicker(ctk.CTkFrame):
         self._update_background()
 
     def _update_background(self):
-        """"Also close its background processes" only goes with Close app."""
-        box = self.flag_boxes["background"]
-        if not self.flag_boxes["close"].get():
-            box.deselect()
-        box.configure(state="normal" if self.flag_boxes["close"].get() else "disabled")
+        """"Also close its background processes" only goes with Close app. A program file (a Java game, a script)
+        has neither it nor Block internet (apps.hosted_way)."""
+        hosted = self._hosted()
+        for flag, allowed in (("background", self.flag_boxes["close"].get() and not hosted), ("internet", not hosted)):
+            box = self.flag_boxes[flag]
+            if not allowed:
+                box.deselect()
+            box.configure(state="normal" if allowed else "disabled")
 
     def selected_block_type(self) -> str | None:
         """None if nothing is ticked."""
@@ -258,13 +283,16 @@ class TargetPicker(ctk.CTkFrame):
         if self._is_app():
             # (a path typed or pasted in - "C:\Games\Foo\Foo.exe" - is that exe; the path is kept as where it is)
             exe = self.app["exe"] if self.app else exe_name(text)
-            if exe in PROTECTED:
+            path = (self.app or {}).get("path") or typed_path(text)
+            if exe in PROTECTED or (is_hosted(exe) and in_folder(path, str(APP_DIR).lower())):
                 raise ValueError(f"{exe} is part of Windows (or Lockdown) and can't be blocked.")
             if self.selected_block_type() is None:
-                raise ValueError("Tick at least one of Close app / Minimize / Block internet.")
-            return {"kind": "app", "targets": [exe], "name": name or (self.app or {}).get("name") or exe[:-4].title(),
+                raise ValueError("Tick Close app or Minimize." if is_hosted(exe) else
+                                 "Tick at least one of Close app / Minimize / Block internet.")
+            return {"kind": "app", "targets": [exe],
+                    "name": name or (self.app or {}).get("name") or exe.rsplit(".", 1)[0].title(),
                     "source": "app-browser" if self.app else "manual", "block_type": self.selected_block_type(),
-                    "app_path": (self.app or {}).get("path") or typed_path(text)}
+                    "app_path": path}
         host = normalize_host(text)
         entry = popular_hosts(host)   # known site: block all of its hostnames
         if self.selected_site_block_type() is None:

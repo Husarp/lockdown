@@ -439,6 +439,29 @@ def minimize_app(exe: str) -> int:
     return count
 
 
+def _windows_of(pids) -> list[int]:
+    return [hwnd for hwnd, _title, _path in top_windows() if window_pid(hwnd) in pids]
+
+
+def close_windows(pids) -> int:
+    """Ask every window of these processes to close - a Java game or a script runs as javaw.exe / python.exe, so
+    its windows go by the processes the service says run it (usage.pids_of), not by an exe name."""
+    hwnds = _windows_of(pids)
+    for hwnd in hwnds:
+        _user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+    return len(hwnds)
+
+
+def minimize_windows(pids) -> int:
+    """Minimize every window of these processes (close_windows). Returns how many were minimized."""
+    count = 0
+    for hwnd in _windows_of(pids):
+        if not _user32.IsIconic(hwnd):
+            _user32.ShowWindow(hwnd, SW_MINIMIZE)
+            count += 1
+    return count
+
+
 def minimize_all() -> int:
     """Minimize every visible top-level window except Lockdown's own (used for a strict break)."""
     count = 0
