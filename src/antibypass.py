@@ -38,8 +38,8 @@ from datetime import datetime, timedelta
 import block_method
 from blocker.apps import block_flags
 from blocker.site_block import site_flags
-from rules import (OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, day_limits, next_window_start,
-                   window_until)
+from rules import (ALLOW, OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, day_limits,
+                   load_schedule, next_window_start, parse_hhmm, window_until)
 
 SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": bool, "windows": [...],
 #                                     "wait_min": minutes, "unlocked_from"/"unlocked_until": "Y-m-d H:M:S"}
@@ -167,6 +167,32 @@ def _temp_end(rule: dict, now: datetime) -> datetime:
     return datetime.strptime(rule["temp_until"], TIME_FMT) if rule.get("temp_until") else now
 
 
+def _blocked_minutes(schedule_json: str) -> set[int]:
+    """The minutes of the week (Mon 00:00 = 0) that an hours rule blocks. A window runs past midnight when its end
+    is not after its start (22:00-00:00 and 22:00-01:00 both do), as in rules.window_until."""
+    s = load_schedule(schedule_json)
+    week = 7 * 1440
+    inside: set[int] = set()
+    for w in s["windows"]:
+        a, b = parse_hhmm(w["start"]), parse_hhmm(w["end"])
+        a, b = a.hour * 60 + a.minute, b.hour * 60 + b.minute
+        length = b - a if a < b else 1440 - a + b
+        for day in w["days"]:
+            inside.update((day * 1440 + a + i) % week for i in range(length))
+    return inside if s["mode"] != ALLOW else set(range(week)) - inside
+
+
+def schedule_looser(old_json: str | None, new_json: str | None) -> bool:
+    """Does the new hours rule leave some minute unblocked that the old one blocked? A later end, an earlier start,
+    more days or a switch to blocking more is stricter and free; only a rule that blocks less loosens."""
+    if old_json == new_json:
+        return False
+    try:
+        return bool(_blocked_minutes(old_json) - _blocked_minutes(new_json))
+    except (TypeError, ValueError, KeyError):
+        return True        # unreadable: can't prove it is stricter
+
+
 def rule_looser(old: dict, new: dict | None, now: datetime) -> bool:
     """Is `new` (same rule type, None = removed) weaker than `old`?"""
     if new is None:
@@ -175,7 +201,7 @@ def rule_looser(old: dict, new: dict | None, now: datetime) -> bool:
     if kind == "temporary":
         return _temp_end(new, now) < _temp_end(old, now) - timedelta(minutes=1)
     if kind == "scheduled":
-        return (new.get("schedule") != old.get("schedule")
+        return (schedule_looser(old.get("schedule"), new.get("schedule"))
                 or (new.get("allowance_min") or 0) > (old.get("allowance_min") or 0)
                 or (allowance_shared(old) and not allowance_shared(new)))
     if kind == "time_limit" and any(_raised(a, b) for a, b in zip(_per_weekday(old), _per_weekday(new))):

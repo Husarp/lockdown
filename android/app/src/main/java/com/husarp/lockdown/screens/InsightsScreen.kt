@@ -64,7 +64,13 @@ fun InsightsScreen() {
         value = withContext(Dispatchers.IO) {
             val (back, len) = ranges[range].second
             val du = runCatching { Usage.range(ctx, Usage.dayBounds(back + len - 1).first, Usage.dayBounds(back).second) }.getOrNull()
-            val apps = du?.apps?.take(6)?.map { AppRow(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList()
+            // Island apps count too: the helper's per-app time (over the link) is merged into main's by package
+            val today = LocalDate.now()
+            val island = runCatching { com.husarp.lockdown.link.IslandLink.islandUse(ctx, today.minusDays(back + len - 1L), today.minusDays(back.toLong())) }
+                .getOrDefault(emptyMap())
+            val apps = com.husarp.lockdown.engine.IslandUse.topApps(
+                du?.apps?.map { com.husarp.lockdown.engine.AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island,
+            ).take(6).map { AppRow(it.pkg, it.label, it.ms) }
             val hourly = len == 1
             val bars: List<Bar> = if (hourly) {
                 (0..23).map { h -> Bar("%02d".format(h), du?.hourly?.getOrElse(h) { 0L } ?: 0L) }

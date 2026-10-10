@@ -8,6 +8,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import com.husarp.lockdown.engine.IslandUse
+import com.husarp.lockdown.engine.IslandUseRow
 import java.util.Calendar
 
 /** One app's usage over a period: total foreground time and how many times it was opened. */
@@ -130,5 +132,29 @@ object Usage {
         }
         for ((_, f) in resumedAt) add(f, end)
         return totals.toList()
+    }
+
+    /** Helper: this profile's foreground seconds per app and day over the last [IslandUse.DAYS] days (one query). */
+    fun islandRows(ctx: Context): List<IslandUseRow> {
+        val zone = java.time.ZoneId.systemDefault()
+        val start = java.time.LocalDate.now().minusDays(IslandUse.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = System.currentTimeMillis()
+        val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val events = usm.queryEvents(start, end)
+        val totals = HashMap<Pair<String, String>, Long>()
+        val resumedAt = HashMap<String, Long>()
+        val e = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            val pkg = e.packageName ?: continue
+            when (e.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = e.timeStamp
+                UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->
+                    resumedAt.remove(pkg)?.let { IslandUse.addSpan(totals, pkg, it, e.timeStamp, zone) }
+            }
+        }
+        for ((pkg, from) in resumedAt) IslandUse.addSpan(totals, pkg, from, end, zone)
+        val pm = ctx.packageManager
+        return IslandUse.rows(totals) { pkg -> runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg) }
     }
 }

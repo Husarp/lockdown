@@ -124,12 +124,36 @@ object AntiBypass {
     private fun limitsLooser(old: List<Int?>, new: List<Int?>): Boolean =
         old.indices.any { old[it] != null && (new[it] == null || new[it]!! > old[it]!!) }
 
+    /** The minutes of the week (Mon 00:00 = 0) that an hours rule blocks. A window runs past midnight when its end
+     *  is not after its start (22:00-00:00 and 22:00-01:00 both do), as in [Rules.windowUntil]. */
+    private fun blockedMinutes(s: Schedule): BooleanArray {
+        val week = 7 * 1440
+        val inside = BooleanArray(week)
+        for (w in s.windows) {
+            val a = Rules.parseHhmm(w.start).let { it.hour * 60 + it.minute }
+            val b = Rules.parseHhmm(w.end).let { it.hour * 60 + it.minute }
+            val length = if (a < b) b - a else 1440 - a + b
+            for (day in w.days) for (i in 0 until length) inside[(day * 1440 + a + i) % week] = true
+        }
+        return if (s.mode == SchedMode.ALLOW) BooleanArray(week) { !inside[it] } else inside
+    }
+
+    /** Does the new hours rule leave a minute unblocked that the old one blocked? A later end, an earlier start,
+     *  more days is stricter and free; only a rule that blocks less loosens (PC schedule_looser). */
+    fun scheduleLooser(old: Schedule?, new: Schedule?): Boolean {
+        if (old == new) return false
+        if (old == null || new == null) return true
+        val before = blockedMinutes(old)
+        val after = blockedMinutes(new)
+        return before.indices.any { before[it] && !after[it] }
+    }
+
     /** Is [new] (same rule type; null = removed) weaker than [old]? */
     fun ruleLooser(old: Rule, new: Rule?, now: LocalDateTime): Boolean {
         if (new == null) return true
         return when (old.type) {
             RuleType.TEMPORARY -> tempEnd(new, now).isBefore(tempEnd(old, now).minusMinutes(1))
-            RuleType.SCHEDULED -> old.schedule != new.schedule ||
+            RuleType.SCHEDULED -> scheduleLooser(old.schedule, new.schedule) ||
                 (new.allowanceMin ?: 0) > (old.allowanceMin ?: 0) ||
                 (old.allowanceShared && !new.allowanceShared)
             // raising any weekday's amount, or clearing a day's limit, loosens; lowering one is free (PC 0.84.12)

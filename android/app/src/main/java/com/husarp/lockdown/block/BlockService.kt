@@ -83,6 +83,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private var lastHistMs = 0L                       // the history was last given time (elapsed ms)
     @Volatile private var inUseIds: Set<String> = emptySet()   // the items in front at the last step
     private val watcher = BlockWatcher()
+    private val debounce = com.husarp.lockdown.engine.BlockDebounce()   // leftover events of an app whose notice was just dismissed
+    private var shownApp: String? = null              // the app the notice up is for (null: a site / keyword)
     private var alertSeq = 0
 
     override fun onServiceConnected() {
@@ -110,7 +112,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
     private fun step() {
         val cfg = Store.config
-        val pkg = currentPkg
+        // the app whose notice was just dismissed is still closing: not in front (until really brought back)
+        val pkg = currentPkg.takeUnless { debounce.leftover(it, SystemClock.elapsedRealtime()) } ?: ""
         val now = Enforce.ldt(TrustedTime.now(this))
         UsageStore.counter.clock = cfg.clock()
         val ms = SystemClock.elapsedRealtime()
@@ -213,6 +216,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             }
             if (!IslandLink.isHelper) History.blocked(now, item?.id ?: "", item?.target?.substringBefore(' ') ?: if (v.site) v.name else pkg)
         } else loud = !quietUp
+        shownApp = pkg.takeUnless { v.site }
         showBlock(v, homeOnOk = !navigates, loud = loud, sub = if (loud) Alerts.ownMessage(cfg.alerts, v.reason)
             ?.let { Alerts.format(it, v.name, v.reason, v.until, now) } ?: v.sub else null)
         val ms = SystemClock.elapsedRealtime()
@@ -274,6 +278,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             val pkg = event.packageName?.toString() ?: return@runCatching
             if (pkg == packageName || pkg == "com.android.systemui" || isKeyboard(pkg)) return@runCatching
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                val at = SystemClock.elapsedRealtime()
+                debounce.otherFront(pkg, at)
+                if (debounce.leftover(pkg, at)) return@runCatching     // the dismissed app closing, not opened again
                 currentPkg = pkg
                 IslandLink.islandFront = null                   // a main-profile window came to the front
                 if (isBrowser(pkg)) readBar(pkg)
@@ -359,7 +366,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         col.addView(Button(this).apply {
             text = "OK"; setTextColor(Color.parseColor("#5C1900"))
             setBackgroundColor(accent)
-            setOnClickListener { val home = this@BlockService.homeOnOk; removeOverlay(); if (home) { lastUrl.remove(currentPkg); performGlobalAction(GLOBAL_ACTION_HOME) } }
+            setOnClickListener {
+                val home = this@BlockService.homeOnOk
+                shownApp?.let { debounce.dismissed(it, SystemClock.elapsedRealtime()) }
+                removeOverlay(); if (home) { lastUrl.remove(currentPkg); performGlobalAction(GLOBAL_ACTION_HOME) } }
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130); lp.topMargin = 48
             layoutParams = lp
         })

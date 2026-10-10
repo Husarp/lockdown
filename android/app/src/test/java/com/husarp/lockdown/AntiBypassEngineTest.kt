@@ -10,6 +10,8 @@ import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
+import com.husarp.lockdown.engine.SchedMode
+import com.husarp.lockdown.engine.Schedule
 import com.husarp.lockdown.engine.Window
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -143,5 +145,32 @@ class AntiBypassEngineTest {
         assertTrue(AntiBypass.settingsLooser(base, base.copy(length = 249)))       // any shorter: the challenge
         assertTrue(AntiBypass.settingsLooser(base.copy(length = 1500), base))
         assertEquals(2000, AntiBypass.newPhrase(2000).replace(" ", "").length)
+    }
+
+    private fun hours(start: String, end: String, days: List<Int> = listOf(0), mode: SchedMode = SchedMode.BLOCK) =
+        Rule(RuleType.SCHEDULED, schedule = Schedule(mode, listOf(Window(days, start, end))))
+
+    @Test fun extending_hours_across_midnight_is_free() {
+        fun looser(a: Rule, b: Rule) = AntiBypass.ruleLooser(a, b, t0)
+        assertFalse(looser(hours("22:00", "00:00"), hours("22:00", "01:00")))
+        assertFalse(looser(hours("22:00", "23:00"), hours("22:00", "00:00")))
+        assertFalse(looser(hours("22:00", "00:00"), hours("21:00", "00:00")))
+        assertFalse(looser(hours("22:00", "00:00"), hours("22:00", "00:00", listOf(0, 1))))
+        assertFalse(looser(hours("22:00", "00:00"), hours("22:00", "22:00")))
+        assertFalse(looser(hours("22:00", "00:00", listOf(6)), hours("22:00", "01:00", listOf(6))))
+        assertTrue(looser(hours("22:00", "01:00"), hours("22:00", "00:00")))
+        assertTrue(looser(hours("22:00", "00:00"), hours("23:00", "00:00")))
+        assertTrue(looser(hours("22:00", "00:00"), hours("22:00", "00:00", listOf(1))))
+        assertTrue(looser(hours("22:00", "00:00", listOf(0, 1)), hours("22:00", "00:00")))
+        assertTrue(looser(hours("09:00", "17:00", mode = SchedMode.ALLOW), hours("09:00", "18:00", mode = SchedMode.ALLOW)))
+        assertFalse(looser(hours("09:00", "17:00", mode = SchedMode.ALLOW), hours("09:00", "16:00", mode = SchedMode.ALLOW)))
+        assertTrue(looser(hours("22:00", "00:00"), hours("22:00", "00:00", mode = SchedMode.ALLOW)))
+    }
+
+    @Test fun block_until_midnight_can_be_moved_later_for_free() {
+        val mid = LocalDateTime.of(2026, 9, 29, 0, 0)
+        val a = Rule(RuleType.TEMPORARY, tempUntil = mid.toString())
+        assertFalse(AntiBypass.ruleLooser(a, Rule(RuleType.TEMPORARY, tempUntil = mid.plusMinutes(30).toString()), t0))
+        assertTrue(AntiBypass.ruleLooser(Rule(RuleType.TEMPORARY, tempUntil = mid.plusMinutes(30).toString()), a, t0))
     }
 }

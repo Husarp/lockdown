@@ -174,3 +174,33 @@ def test_custom_phrase_length_bounds_and_looseness():
     assert ab.settings_looser(base, {**base, "length": 249})           # any shorter: the challenge
     assert ab.settings_looser({**base, "length": 1500}, {**base, "length": 250})
     assert len(ab.new_phrase(2000).replace(" ", "")) == 2000
+
+
+def test_schedule_extending_is_free_across_midnight():
+    from rules import make_schedule
+
+    def sched(start, end, days=(0,), mode="block"):
+        return {"rule_type": "scheduled", "schedule": make_schedule(mode, [(list(days), start, end)])}
+
+    # ending at midnight, then moved later: stricter, free
+    assert not ab.rule_looser(sched("22:00", "00:00"), sched("22:00", "01:00"), NOW)
+    assert not ab.rule_looser(sched("22:00", "23:00"), sched("22:00", "00:00"), NOW)
+    assert not ab.rule_looser(sched("22:00", "00:00"), sched("21:00", "00:00"), NOW)      # earlier start
+    assert not ab.rule_looser(sched("22:00", "00:00"), sched("22:00", "00:00", (0, 1)), NOW)   # more days
+    assert not ab.rule_looser(sched("22:00", "00:00"), sched("22:00", "22:00"), NOW)      # whole 24 h
+    assert not ab.rule_looser(sched("22:00", "00:00", (6,)), sched("22:00", "01:00", (6,)), NOW)   # Sunday night into Monday
+    # shortened or moved away: still a loosening
+    assert ab.rule_looser(sched("22:00", "01:00"), sched("22:00", "00:00"), NOW)
+    assert ab.rule_looser(sched("22:00", "00:00"), sched("23:00", "00:00"), NOW)
+    assert ab.rule_looser(sched("22:00", "00:00"), sched("22:00", "00:00", (1,)), NOW)    # other day
+    assert ab.rule_looser(sched("22:00", "00:00", (0, 1)), sched("22:00", "00:00"), NOW)  # fewer days
+    # allow mode: a longer allowed window blocks less
+    assert ab.rule_looser(sched("09:00", "17:00", mode="allow"), sched("09:00", "18:00", mode="allow"), NOW)
+    assert not ab.rule_looser(sched("09:00", "17:00", mode="allow"), sched("09:00", "16:00", mode="allow"), NOW)
+    assert ab.rule_looser(sched("22:00", "00:00"), sched("22:00", "00:00", mode="allow"), NOW)
+
+
+def test_block_until_midnight_can_be_moved_later_free():
+    temp = {"rule_type": "temporary", "temp_until": "2026-09-21 00:00:00"}
+    assert not ab.rule_looser(temp, {**temp, "temp_until": "2026-09-21 00:30:00"}, NOW)
+    assert ab.rule_looser({**temp, "temp_until": "2026-09-21 00:30:00"}, temp, NOW)
