@@ -1,0 +1,40 @@
+/* The Anti-Bypass challenge dialog (js/challenge.js). The phrase box itself (.phrase) lives in app.css. */
+
+.ch-changes { display: grid; gap: 2px; }
+.ch-chg { display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
+.ch-chg b { color: var(--brand); font-weight: var(--fw-semibold); flex: none; }
+.ch-chg span { min-width: 0; overflow-wrap: anywhere; }
+.ch-more { color: var(--text-3); font-size: var(--fs-sm); padding-left: calc(18px * var(--s)); }
+
+.ch-phrase { white-space: pre-wrap; }
+.ch-cur { display: inline-block; width: 0; height: 0; }
+.ch-msg.err, .ch-status.err { color: var(--k-block); }
+.ch-err { color: var(--k-block); font-size: var(--fs-sm); min-height: 1.2em; }
+
+/* the tinted note under the title (Waiting / Closed) */
+.ch-note { padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--line); border-left: 3px solid var(--k, var(--brand));
+  background: var(--surface-2); color: var(--text); line-height: 1.5; white-space: pre-line; }
+.ch-note.pending { --k: var(--k-limit); }
+.ch-note.closed { --k: var(--k-block); }
+.ch-wait-line { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-lg); }
+.ch-wait-line b { font-weight: var(--fw-semibold); }
+.ch-fill { width: 0; transition: width 1s linear; }
+
+/* 3x3 word grid */
+.ch-ghead { display: flex; align-items: center; gap: var(--sp-3); }
+.ch-chip { font: var(--fw-semibold) var(--fs-lg) var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: .04em;
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--r-sm); background: var(--surface-3); user-select: none; overflow-wrap: anywhere; }
+.ch-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.ch-box { height: calc(42px * var(--s)); border-width: 2px; font-size: var(--fs-lg); text-align: center; }
+.ch-box:disabled { opacity: .55; background: var(--surface); }
+.ch-box.lit { border-color: var(--brand); background: var(--surface-2); opacity: 1; animation: ch-breathe 2.4s ease-in-out infinite; }
+.ch-box.lit.bad { border-color: var(--k-block); animation: none; }
+@keyframes ch-breathe {
+  0%, 100% { border-color: var(--brand); box-shadow: 0 0 0 0 var(--brand-soft); }
+  50% { border-color: color-mix(in srgb, var(--brand) 45%, var(--line-strong)); box-shadow: 0 0 0 3px var(--brand-soft); }
+}
+html[data-hidden] .ch-box.lit { animation-play-state: paused; }
+
+/* the standalone window (uninstaller): nothing behind the dialog */
+html[data-standalone], html[data-standalone] body { background: var(--bg); }
+html[data-standalone] .dialog { box-shadow: none; }

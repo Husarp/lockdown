@@ -5,6 +5,9 @@
             tray Exit (e.g. killed in Task Manager); does nothing (quickly) when it's running.
 --challenge TEXT: only show the Anti-Bypass challenge for TEXT; exit code 0 = passed (used by the uninstaller).
 --selftest REPORT: build check - every page built with a temporary data folder, result written to REPORT.
+--new-ui / --legacy: use the new web window (src/agent.py) or the customtkinter one. Without either, the setting
+            ui.engine = "web" / "legacy" picks one; with neither saved, ui_theme.DEFAULT_ENGINE decides (today: the
+            customtkinter app).
 """
 import os
 import queue
@@ -20,11 +23,32 @@ if "--selftest" in sys.argv:   # (before paths is imported: it reads the data fo
 
 from gui import single_instance  # noqa: E402
 from paths import ASSETS, command_line, gui_command  # noqa: E402
+from ui_theme import ENGINE_KEY, engine_of  # noqa: E402   # (the saved window choice; the default: ui_theme.DEFAULT_ENGINE)
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WATCHDOG_TASK = "Lockdown Agent Watchdog"
 APP_ID = "com.husarp.lockdown"   # Windows app identity: notifications / taskbar show "Lockdown" + its icon, not "Python"
 ICON = ASSETS / "lockdown.ico"
+
+
+def read_engine_setting() -> str | None:
+    """The saved ui.engine by a plain read-only query (fast, no migrations); None when there is no readable DB."""
+    from ui_theme import read_setting
+    return read_setting(ENGINE_KEY)
+
+
+def use_new_ui(argv: list[str], db_setting) -> bool:
+    """New web window or the old one? --legacy wins, then --new-ui, then the setting (a value, or a function that
+    reads it - only called when no flag decided). Anything unclear (or unreadable) means the default window."""
+    if "--legacy" in argv:
+        return False
+    if "--new-ui" in argv:
+        return True
+    try:
+        value = db_setting() if callable(db_setting) else db_setting
+    except Exception:
+        value = None
+    return engine_of(value) == "web"
 
 
 def set_identity():
@@ -136,11 +160,19 @@ def selftest(report: str) -> int:
 
 
 if __name__ == "__main__":
+    new_ui = use_new_ui(sys.argv, read_engine_setting)
+    if new_ui:
+        import agent
+        new_ui = agent.handles(sys.argv)   # (a flag the agent can't do yet stays with the old window)
     if "--selftest" in sys.argv:
+        if new_ui:
+            sys.exit(agent.main(sys.argv))
         sys.exit(selftest(sys.argv[sys.argv.index("--selftest") + 1]))
     if "--watchdog" in sys.argv and not watchdog_should_start():
         sys.exit(0)
     set_identity()
+    if new_ui:   # (--tray / --watchdog / --challenge too: the agent handles them)
+        sys.exit(agent.main(sys.argv, on_first_instance=register_autostart_later))
     if "--challenge" in sys.argv:
         sys.exit(challenge(sys.argv[sys.argv.index("--challenge") + 1]))
     events: queue.Queue = queue.Queue()

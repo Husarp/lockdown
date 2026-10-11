@@ -1,0 +1,161 @@
+/* Lockdown - design tokens. Every colour, size and radius lives here.
+   Theme:  <html data-theme="light|dark|amoled">  (System is resolved by js/theme.js from prefers-color-scheme)
+   Size:   --s on <html> (1 = Auto / 100 %, .9, .8, .7), accent: --brand and friends - js/theme.js sets all of them
+   live, no reload. The brand values below are the defaults for the default accent (Orange #DB5126). */
+
+:root {
+  /* ---- scale (Settings > Interface size: Auto / 100 / 90 / 80 / 70 %) ---- */
+  --s: 1;
+
+  /* ---- type: one font, system stack ---- */
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --fs-cap: calc(11px * var(--s));
+  --fs-sm: calc(12px * var(--s));
+  --fs-body: calc(14px * var(--s));
+  --fs-lg: calc(16px * var(--s));
+  --fs-title: calc(20px * var(--s));
+  --fs-page: calc(26px * var(--s));
+  --fs-num: calc(28px * var(--s));
+  --fs-hero: calc(56px * var(--s));
+  --fw-regular: 400;
+  --fw-semibold: 600;
+  --lh: 1.4;
+
+  /* ---- spacing (4px grid) ---- */
+  --sp-1: calc(4px * var(--s));
+  --sp-2: calc(8px * var(--s));
+  --sp-3: calc(12px * var(--s));
+  --sp-4: calc(16px * var(--s));
+  --sp-5: calc(20px * var(--s));
+  --sp-6: calc(24px * var(--s));
+  --sp-8: calc(32px * var(--s));
+  --sp-10: calc(40px * var(--s));
+
+  /* ---- sizes ---- */
+  --sidebar-w: calc(212px * var(--s));
+  --rail-w: calc(56px * var(--s));
+  --topbar-h: calc(44px * var(--s));
+  --control-h: calc(32px * var(--s));
+  --control-h-sm: calc(26px * var(--s));
+  --row-h: calc(52px * var(--s));        /* list rows (virtual lists read this) */
+  --row-h-sm: calc(36px * var(--s));     /* dense rows: network log, pickers */
+  --icon: calc(16px * var(--s));
+  --icon-lg: calc(20px * var(--s));
+  --app-icon: calc(24px * var(--s));
+  --app-icon-sm: calc(18px * var(--s));
+  --content-max: 1240px;
+
+  /* ---- radius ---- */
+  --r-xs: 3px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-pill: 999px;
+
+  /* ---- effects (only two shadows in the whole app) ---- */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .05);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, .22);
+  --dur: 120ms;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* ================= LIGHT ================= */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg: #F3F2F1;
+  --surface: #FFFFFF;
+  --surface-2: #F8F7F6;      /* inputs, hover */
+  --surface-3: #EDEBE9;      /* pressed, skeleton, tracks */
+  --line: #E2DFDC;
+  --line-strong: #C7C2BE;
+  --text: #1C1B1A;
+  --text-2: #57524D;
+  --text-3: #736D67;
+  --scrim: rgba(20, 18, 16, .45);
+
+  --brand: #DB5126;
+  --brand-hover: #BC4621;
+  --on-brand: #FFFFFF;
+  --brand-soft: #FAE7E1;
+  --on-brand-soft: #AF411E;
+
+  /* meaning colours — same as the phone app */
+  --k-block: #AD2F41;    --k-block-soft: #FBE8EA;     /* blocked / always blocked */
+  --k-limit: #8A5A00;    --k-limit-soft: #FAF0DC;     /* time limit / opening limit */
+  --k-sched: #4359A9;    --k-sched-soft: #E9EDFA;     /* scheduled hours */
+  --k-temp: #6E4DA1;     --k-temp-soft: #F1EBF9;      /* temporary block */
+  --k-mode: #006496;     --k-mode-soft: #E1F0F8;      /* mode */
+  --k-protect: #246867;  --k-protect-soft: #E1F1F0;   /* protection lists, words, site filter */
+  --k-grey: #575F67;     --k-grey-soft: #ECEEF0;      /* grey-screen way */
+  --k-emerg: #983D71;    --k-emerg-soft: #F8E9F1;     /* emergency unlock */
+  --ok: #306A43;         --ok-soft: #E4F1E7;          /* allowed */
+  --on-k: #FFFFFF;                                    /* text on filled meaning chips */
+
+  /* categories */
+  --cat-prod: #306A43;
+  --cat-neutral: #8A9199;
+  --cat-dist: #AD2F41;
+  --cat-idle: #D9D5D1;
+}
+
+/* ================= DARK ================= */
+[data-theme="dark"], [data-theme="amoled"] {
+  color-scheme: dark;
+  --bg: #191817;
+  --surface: #232221;
+  --surface-2: #2B2928;
+  --surface-3: #353331;
+  --line: #3A3735;
+  --line-strong: #55504C;
+  --text: #EFECEA;
+  --text-2: #BDB6B0;
+  --text-3: #9A938D;
+  --scrim: rgba(0, 0, 0, .6);
+
+  --brand: #DB5126;
+  --brand-hover: #E06944;
+  --on-brand: #FFFFFF;
+  --brand-soft: #4F2D22;
+  --on-brand-soft: #E68567;
+
+  --k-block: #FFB3B7;    --k-block-soft: #48242A;
+  --k-limit: #F0BF5E;    --k-limit-soft: #3B2F1C;
+  --k-sched: #B9C4FF;    --k-sched-soft: #272D46;
+  --k-temp: #D6BCFF;     --k-temp-soft: #352C46;
+  --k-mode: #8ECDFF;     --k-mode-soft: #1B3241;
+  --k-protect: #82D4D1;  --k-protect-soft: #1B3534;
+  --k-grey: #C0C8D0;     --k-grey-soft: #2D3237;
+  --k-emerg: #FFAFD7;    --k-emerg-soft: #43273A;
+  --ok: #95D4A3;         --ok-soft: #203428;
+  --on-k: #1A1918;
+
+  --cat-prod: #95D4A3;
+  --cat-neutral: #8E959C;
+  --cat-dist: #FFB3B7;
+  --cat-idle: #3D3A38;
+
+  --shadow-card: none;
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, .5);
+}
+
+/* ================= AMOLED: the dark tokens on pure black ================= */
+[data-theme="amoled"] {
+  --bg: #000000;
+  --surface: #0E0D0D;
+  --surface-2: #161514;
+  --surface-3: #232120;
+  --line: #2A2827;
+  --line-strong: #46423F;
+  --scrim: rgba(0, 0, 0, .75);
+  --cat-idle: #2E2B29;
+  --brand-soft: #3F1D13;
+  --on-brand-soft: #E06B47;
+}
+
+/* group colours (user picks one) — tile background, white glyph, AA in both themes */
+:root {
+  --g-1: #3B6EA8; --g-2: #2E7D5B; --g-3: #7E4FB0; --g-4: #B5482A; --g-5: #8C6A00;
+  --g-6: #1F7A8C; --g-7: #A8396F; --g-8: #5B6B2E; --g-9: #6B5A4C; --g-10: #4A4F9E;
+}

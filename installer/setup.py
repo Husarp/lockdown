@@ -25,9 +25,11 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import tkinter as tk
 import tkinter.font as tkfont
+import urllib.request
 import winreg
 import zipfile
 from contextlib import closing
@@ -164,12 +166,71 @@ def start(log):
     run("sc", "start", SERVICE)
 
 
+# The new window needs the WebView2 Runtime (Windows 11 has it; some Windows 10 PCs don't). The old window doesn't,
+# so a failure here is only a warning.
+WEBVIEW2_CLIENT = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+WEBVIEW2_KEYS = (("HKLM", rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT}"),
+                 ("HKLM", rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT}"),
+                 ("HKCU", rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT}"))
+WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"   # the small Evergreen bootstrapper
+
+
+def read_registry_value(hive: str, path: str, name: str):
+    """The value, or None when the key or value isn't there."""
+    root = winreg.HKEY_LOCAL_MACHINE if hive == "HKLM" else winreg.HKEY_CURRENT_USER
+    try:
+        with winreg.OpenKey(root, path) as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except OSError:
+        return None
+
+
+def webview2_present(read=None) -> bool:
+    """Is the WebView2 Runtime installed? read(hive, path, name) -> value | None (faked in the tests)."""
+    read = read or read_registry_value
+    for hive, path in WEBVIEW2_KEYS:
+        version = str(read(hive, path, "pv") or "").strip()
+        if version and version != "0.0.0.0":
+            return True
+    return False
+
+
+def download_bootstrapper() -> Path:
+    """The Evergreen bootstrapper in a temp file."""
+    target = Path(tempfile.mkdtemp(prefix="lockdown-wv2-")) / "MicrosoftEdgeWebview2Setup.exe"
+    with urllib.request.urlopen(WEBVIEW2_URL, timeout=60) as response, open(target, "wb") as out:
+        shutil.copyfileobj(response, out)
+    return target
+
+
+def run_bootstrapper(path: Path) -> int:
+    return subprocess.run([str(path), "/silent", "/install"], capture_output=True, creationflags=NO_WINDOW,
+                          timeout=300).returncode
+
+
+def webview2_step(log, present=None, download=None, run_it=None) -> str:
+    """Make sure the WebView2 Runtime is there. Returns "present", "installed" or "failed"; never raises
+    (the old window works without it, so a failure is a line in the log, not an aborted install)."""
+    if (present or webview2_present)():
+        return "present"
+    log("Installing the WebView2 Runtime (needed for the new window)...")
+    try:
+        code = (run_it or run_bootstrapper)((download or download_bootstrapper)())
+    except Exception as e:
+        log(f"Warning: the WebView2 Runtime could not be installed ({e}). Lockdown still works.")
+        return "failed"
+    if code != 0:
+        log(f"Warning: the WebView2 setup ended with code {code}. Lockdown still works.")
+        return "failed"
+    return "installed"
+
+
 def launch_app():
     """Open the Lockdown window. It runs as you, not as admin, so let Explorer start it."""
     subprocess.Popen([tool("explorer.exe"), str(INSTALL_DIR / "Lockdown.exe")], creationflags=NO_WINDOW)
 
 
-INSTALL_WEIGHTS = (15, 55, 2, 12, 8, 2, 6)   # each step's share of the bar (copying is most of the time)
+INSTALL_WEIGHTS = (15, 55, 2, 12, 8, 2, 6, 5)   # each step's share of the bar (copying is most of the time)
 
 
 def install(log, at=None):
@@ -190,6 +251,8 @@ def install(log, at=None):
     at(6)
     start(log)
     at(7)
+    webview2_step(log)
+    at(8)
     log(f"Lockdown {VERSION} is installed. Blocking is active.")
 
 

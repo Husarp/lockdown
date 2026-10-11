@@ -14,6 +14,7 @@ from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton, ConfirmDialog, once
 from gui.components import Card, Segmented, accent_bar, hairline, help_icon, page_head, LockedStrip
 from trusted_time import now_from_db
+from ui_theme import ENGINE_KEY, engine_of   # (= main.ENGINE_KEY; default window: ui_theme.DEFAULT_ENGINE)
 
 MUTED = theme.MUTED
 ERROR = theme.DANGER
@@ -54,6 +55,7 @@ class SettingsPage(ctk.CTkFrame):
         self._build_categories(left)
         self._build_emergency(right)
         self._build_backup(right)
+        self._build_engine(right)
         self.load()
 
     def _row(self, parent, label: str, pady=(0, 10)) -> ctk.CTkFrame:
@@ -442,6 +444,30 @@ class SettingsPage(ctk.CTkFrame):
         if path:
             rows = backup.screen_time_csv(self.db, path)
             self._backup_msg(f"{rows} rows saved to {path}", theme.ALLOWED)
+
+    # ---------- the new window (preview) ----------
+
+    def _build_engine(self, parent):
+        card = Card(parent, "New window (preview)")
+        card.pack(fill="x", pady=(0, 14))
+        box = card.body
+        self.engine_switch = ctk.CTkSwitch(box, text="Use the new window (preview)", command=self._engine_changed)
+        self.engine_switch.pack(anchor="w", pady=(6, 6))
+        if engine_of(self.db.get_setting(ENGINE_KEY)) == "web":
+            self.engine_switch.select()
+        ctk.CTkLabel(box, text="Lockdown opens in the new window the next time it starts. Switch it off to come "
+                               "back to this one.", text_color=MUTED, font=theme.body(12), anchor="w", justify="left",
+                     wraplength=RIGHT_W - 40).pack(anchor="w")
+        self.engine_line = ctk.CTkFrame(box, fg_color="transparent")
+        ctk.CTkLabel(self.engine_line, text="Restart Lockdown to switch now.", text_color=theme.WARNING).pack(
+            side="left")
+        ctk.CTkButton(self.engine_line, text="Restart now", width=110, command=self.app.restart).pack(
+            side="left", padx=10)
+
+    def _engine_changed(self):
+        """The switch writes ui.engine ("web" / "legacy") and offers a restart; nothing else changes."""
+        self.db.set_setting(ENGINE_KEY, "web" if self.engine_switch.get() else "legacy")
+        self.engine_line.pack(anchor="w", pady=(6, 0))
 
     # ---------- load ----------
 

@@ -114,12 +114,12 @@ def test_copy_reports_every_file(setup, tmp_path, monkeypatch):
 def test_install_steps_keep_their_order(setup, monkeypatch):
     done = []
     for name in ("stop_everything", "copy_files", "data_folder", "register_service", "shortcuts",
-                 "uninstall_entry", "start"):
+                 "uninstall_entry", "start", "webview2_step"):
         monkeypatch.setattr(setup, name, lambda *a, _n=name: done.append(_n))
     steps = []
     setup.install(lambda text: None, lambda step, fraction=0.0, name=None: steps.append(step))
     assert done == ["stop_everything", "copy_files", "data_folder", "register_service", "shortcuts",
-                    "uninstall_entry", "start"]
+                    "uninstall_entry", "start", "webview2_step"]
     assert steps == list(range(len(setup.INSTALL_WEIGHTS) + 1))
 
 

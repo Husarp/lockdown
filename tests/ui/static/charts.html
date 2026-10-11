@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><title>charts</title><link rel="icon" href="data:,">
+<link rel="stylesheet" href="/css/tokens.css"><link rel="stylesheet" href="/css/components.css"><link rel="stylesheet" href="/css/app.css">
+</head>
+<body style="padding:24px;background:var(--bg);color:var(--text)">
+<div id="bars" style="width:640px;margin-bottom:16px"></div>
+<div id="trend" style="width:640px;margin-bottom:16px"></div>
+<div id="timeline" style="width:640px;margin-bottom:16px"></div>
+<div id="heat" style="width:640px;margin-bottom:16px"></div>
+<div style="display:flex;gap:24px"><div id="donut"></div><div id="hours" style="width:420px"></div></div>
+<script type="module">
+import { barChart, trendChart, timelineChart, heatmapChart, donutChart, hourBarChart } from "/js/charts.js";
+const days = (n) => Array.from({ length: n }, (_, i) => ({ label: "D" + (i + 1), value: 3600 * (1 + (i % 6)) + (i * 97) % 900, tip: "day " + (i + 1), today: i === n - 1, unlocks: i % 9 === 0 ? 1 : 0 }));
+const charts = {
+  bars: barChart(document.getElementById("bars")), trend: trendChart(document.getElementById("trend")),
+  timeline: timelineChart(document.getElementById("timeline")), heat: heatmapChart(document.getElementById("heat")),
+  donut: donutChart(document.getElementById("donut")), hours: hourBarChart(document.getElementById("hours")),
+};
+const data = {
+  bars: { bars: days(30), goal: 18000, goalLabel: "goal 5 h" },
+  trend: { points: days(30).map((d, i) => ({ ...d, avg: i < 6 ? null : 12000 })), goal: 18000 },
+  timeline: { segments: [{ start: 400, len: 90, kind: "prod" }, { start: 500, len: 40, kind: "dist" }, { start: 560, len: 120, kind: "neutral" }], names: { prod: "Productive", dist: "Distracting", neutral: "Other" } },
+  heat: { rows: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, r) => ({ label, minutes: Array.from({ length: 24 }, (_, h) => (r * 7 + h * 3) % 61) })) },
+  donut: { parts: [{ value: 5, color: "var(--cat-prod)", tip: "Productive 5 h" }, { value: 3, color: "var(--cat-dist)", tip: "Distracting 3 h" }, { value: 2, color: "var(--cat-neutral)", tip: "Other 2 h" }], center: "10 h" },
+  hours: { counts: { 9: 4, 10: 9, 14: 6, 15: 5, 16: 1 } },
+};
+window.charts = charts; window.chartData = data; window.days = days;
+for (const k in charts) charts[k].update(data[k]);
+window.__ready = true;
+</script>
+</body>
+</html>

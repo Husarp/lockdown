@@ -1,0 +1,2681 @@
+{
+ "about": "Shared by tests/test_rebuild_rule_forms.py (src/rule_forms.py) and tests/ui/js/summary.test.mjs (src/ui/js/rules/summary.js). Expected values are written by hand from the legacy editors (src/gui/rule_editors.py).",
+ "now": "2026-10-11 15:42:17",
+ "meta": {
+  "rule_types": [
+   "scheduled",
+   "time_limit",
+   "switch_limit",
+   "permanent",
+   "temporary"
+  ],
+  "names": {
+   "scheduled": "By time",
+   "time_limit": "Time limit",
+   "switch_limit": "Opening limit",
+   "permanent": "Permanent",
+   "temporary": "Temporary"
+  },
+  "subtitles": {
+   "scheduled": "allowed only inside these windows - or blocked inside them",
+   "time_limit": "a cap on how long per day / week",
+   "switch_limit": "a cap on how often it's opened",
+   "permanent": "blocked all the time, until removed",
+   "temporary": "blocked for a while from now"
+  },
+  "durations": [
+   [
+    "15 min",
+    15
+   ],
+   [
+    "30 min",
+    30
+   ],
+   [
+    "1 hour",
+    60
+   ],
+   [
+    "2 hours",
+    120
+   ],
+   [
+    "3 hours",
+    180
+   ],
+   [
+    "4 hours",
+    240
+   ],
+   [
+    "8 hours",
+    480
+   ],
+   [
+    "24 hours",
+    1440
+   ]
+  ],
+  "units": [
+   [
+    "days",
+    1440
+   ],
+   [
+    "hours",
+    60
+   ],
+   [
+    "minutes",
+    1
+   ]
+  ]
+ },
+ "forms": [
+  {
+   "id": "hours-default",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": null,
+    "allowance_shared": null
+   },
+   "summary": "Allowed only 09:00-17:00 Every day"
+  },
+  {
+   "id": "hours-block-overnight-two-windows-allowance",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "10",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4
+      ],
+      "start": "22:30",
+      "end": "07:00"
+     },
+     {
+      "days": [
+       5,
+       6
+      ],
+      "start": "23:00",
+      "end": "08:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1, 2, 3, 4], \"start\": \"22:30\", \"end\": \"07:00\"}, {\"days\": [5, 6], \"start\": \"23:00\", \"end\": \"08:00\"}]}",
+    "allowance_min": 10,
+    "allowance_shared": null
+   },
+   "summary": "Blocked 22:30-07:00 Monday–Friday +1 more · +10 min"
+  },
+  {
+   "id": "hours-group-pot-unticked",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "15",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ],
+    "pot": false
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": 15,
+    "allowance_shared": 0
+   },
+   "summary": "Blocked 09:00-17:00 Every day · +15 min each",
+   "shared": true
+  },
+  {
+   "id": "hours-group-pot-ticked",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "15",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ],
+    "pot": true
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": 15,
+    "allowance_shared": 1
+   },
+   "summary": "Blocked 09:00-17:00 Every day · +15 min",
+   "shared": true
+  },
+  {
+   "id": "hours-group-pot-default-is-shared",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "15",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": 15,
+    "allowance_shared": 1
+   },
+   "summary": "Blocked 09:00-17:00 Every day · +15 min",
+   "shared": true
+  },
+  {
+   "id": "hours-pot-ignored-outside-a-group",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "15",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ],
+    "pot": false
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": 15,
+    "allowance_shared": null
+   },
+   "summary": "Blocked 09:00-17:00 Every day · +15 min"
+  },
+  {
+   "id": "hours-window-without-days-is-ignored",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [],
+      "start": "bad",
+      "end": "worse"
+     },
+     {
+      "days": [
+       2
+      ],
+      "start": "09:00",
+      "end": "12:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [2], \"start\": \"09:00\", \"end\": \"12:00\"}]}",
+    "allowance_min": null,
+    "allowance_shared": null
+   },
+   "summary": "Allowed only 09:00-12:00 Wednesday"
+  },
+  {
+   "id": "hours-days-sorted-and-unique",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       4,
+       2,
+       2,
+       0
+      ],
+      "start": "08:00",
+      "end": "09:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [0, 2, 4], \"start\": \"08:00\", \"end\": \"09:00\"}]}",
+    "allowance_min": null,
+    "allowance_shared": null
+   },
+   "summary": "Allowed only 08:00-09:00 Monday, Wednesday, Friday"
+  },
+  {
+   "id": "hours-times-kept-as-typed",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": " 9:00",
+      "end": "17:00 "
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"9:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": null,
+    "allowance_shared": null
+   },
+   "summary": "Allowed only 9:00-17:00 Every day"
+  },
+  {
+   "id": "hours-empty-allowance-is-none",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": null,
+    "allowance_shared": null
+   },
+   "summary": "Allowed only 09:00-17:00 Every day"
+  },
+  {
+   "id": "hours-allowance-1440",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "1440",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+    "allowance_min": 1440,
+    "allowance_shared": null
+   },
+   "summary": "Blocked 09:00-17:00 Every day · +1440 min"
+  },
+  {
+   "id": "hours-no-window-with-days",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "windows",
+    "message": "Add a time window (with at least one day on)."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-no-windows-at-all",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": []
+   },
+   "error": {
+    "field": "windows",
+    "message": "Add a time window (with at least one day on)."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-bad-time",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "9:61"
+     }
+    ]
+   },
+   "error": {
+    "field": "windows.0",
+    "message": "Hours must look like 09:00 or 21:30."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-bad-time-second-window",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     },
+     {
+      "days": [
+       1
+      ],
+      "start": "",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "windows.1",
+    "message": "Hours must look like 09:00 or 21:30."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-hour-24",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "24:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "windows.0",
+    "message": "Hours must look like 09:00 or 21:30."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-allowance-too-big",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "1441",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "allowance",
+    "message": "Allowance must be 0-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-allowance-text",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "abc",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "allowance",
+    "message": "Allowance must be 0-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-allowance-negative",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "-5",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "allowance",
+    "message": "Allowance must be 0-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-allowance-decimal",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "12.5",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   },
+   "error": {
+    "field": "allowance",
+    "message": "Allowance must be 0-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "hours-allowance-error-comes-first",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "9999",
+    "windows": []
+   },
+   "error": {
+    "field": "allowance",
+    "message": "Allowance must be 0-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-default-30m",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "30m",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": 30,
+    "weekly_limit_min": null,
+    "monthly_limit_min": null
+   },
+   "summary": "30m per day"
+  },
+  {
+   "id": "limit-all-three",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "1h30",
+    "week": "10h",
+    "month": "40h",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": 90,
+    "weekly_limit_min": 600,
+    "monthly_limit_min": 2400
+   },
+   "summary": "1h30 per day · 10h per week · 40h per month"
+  },
+  {
+   "id": "limit-formats",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "2 H 30",
+    "week": "90",
+    "month": "1:30",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": 150,
+    "weekly_limit_min": 90,
+    "monthly_limit_min": 90
+   },
+   "summary": "2h30 per day · 1h30 per week · 1h30 per month"
+  },
+  {
+   "id": "limit-week-only",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "5h",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": null,
+    "weekly_limit_min": 300,
+    "monthly_limit_min": null
+   },
+   "summary": "5h per week"
+  },
+  {
+   "id": "limit-weekdays-grid",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "30m",
+    "week": "20h",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "3h",
+     "3h",
+     "3h",
+     "3h",
+     "3h",
+     "2h",
+     "2h"
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": "[180, 180, 180, 180, 180, 120, 120]",
+    "daily_limit_min": null,
+    "weekly_limit_min": 1200,
+    "monthly_limit_min": null
+   },
+   "summary": "per day 3h Mon–Fri, 2h Sat–Sun · 20h per week"
+  },
+  {
+   "id": "limit-weekdays-grid-all-equal-is-one-amount",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "1h",
+     "1h",
+     "1h",
+     "1h",
+     "1h",
+     "1h",
+     "1h"
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": 60,
+    "weekly_limit_min": null,
+    "monthly_limit_min": null
+   },
+   "summary": "1h per day"
+  },
+  {
+   "id": "limit-weekdays-grid-with-a-free-day",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "3h",
+     "3h",
+     "3h",
+     "3h",
+     "3h",
+     "2h",
+     ""
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": "[180, 180, 180, 180, 180, 120, null]",
+    "daily_limit_min": null,
+    "weekly_limit_min": null,
+    "monthly_limit_min": null
+   },
+   "summary": "per day 3h Mon–Fri, 2h Sat, no limit Sun"
+  },
+  {
+   "id": "limit-weekdays-text-ignored-when-same",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "45m",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "x",
+     "x",
+     "x",
+     "x",
+     "x",
+     "x",
+     "x"
+    ]
+   },
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": 45,
+    "weekly_limit_min": null,
+    "monthly_limit_min": null
+   },
+   "summary": "45m per day"
+  },
+  {
+   "id": "limit-day-over-24h",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "25h",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "day",
+    "message": "The limit per day must be between 1m and 24h."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-day-zero",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "0",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "day",
+    "message": "The limit per day must be between 1m and 24h."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-week-over-168h",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "169h",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "week",
+    "message": "The limit per week must be between 1m and 168h."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-month-over-744h",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "745h",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "month",
+    "message": "The limit per month must be between 1m and 744h."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-saturday-over-24h",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "1h",
+     "1h",
+     "1h",
+     "1h",
+     "1h",
+     "25h",
+     "1h"
+    ]
+   },
+   "error": {
+    "field": "weekdays.5",
+    "message": "The limit on Saturday must be between 1m and 24h."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-monday-zero",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "0",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "weekdays.0",
+    "message": "The limit on Monday must be between 1m and 24h."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-nothing-filled",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "any",
+    "message": "Fill in at least one time limit (per day, week or month)."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-grid-nothing-filled",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "any",
+    "message": "Fill in at least one time limit (per day, week or month)."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-cant-read",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "abc",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "day",
+    "message": "Can't read 'abc' - write e.g. 45m, 2h or 1h30."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-cant-read-shows-cleaned-text",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "2 X",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "week",
+    "message": "Can't read '2x' - write e.g. 45m, 2h or 1h30."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-cant-read-colon",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "1:5",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "day",
+    "message": "Can't read '1:5' - write e.g. 45m, 2h or 1h30."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "limit-shared-reads-the-same",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "abc",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "error": {
+    "field": "day",
+    "message": "Can't read 'abc' - write e.g. 45m, 2h or 1h30."
+   },
+   "summary": "check the settings",
+   "shared": true
+  },
+  {
+   "id": "opens-default-10",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "10",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "rule": {
+    "rule_type": "switch_limit",
+    "daily_switch_limit": 10,
+    "weekly_switch_limit": null,
+    "monthly_switch_limit": null,
+    "switch_mode": "visit",
+    "visit_gap_min": 5
+   },
+   "summary": "10 opens per day"
+  },
+  {
+   "id": "opens-all-three-every-switch",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "5",
+    "week": "20",
+    "month": "0",
+    "counts": "switch",
+    "gap": "bad gap is ignored"
+   },
+   "rule": {
+    "rule_type": "switch_limit",
+    "daily_switch_limit": 5,
+    "weekly_switch_limit": 20,
+    "monthly_switch_limit": 0,
+    "switch_mode": "switch"
+   },
+   "summary": "5 opens per day · 20 opens per week · 0 opens per month"
+  },
+  {
+   "id": "opens-visit-gap",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "",
+    "week": "30",
+    "month": "",
+    "counts": "visit",
+    "gap": "45"
+   },
+   "rule": {
+    "rule_type": "switch_limit",
+    "daily_switch_limit": null,
+    "weekly_switch_limit": 30,
+    "monthly_switch_limit": null,
+    "switch_mode": "visit",
+    "visit_gap_min": 45
+   },
+   "summary": "30 opens per week"
+  },
+  {
+   "id": "opens-10000",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "10000",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "rule": {
+    "rule_type": "switch_limit",
+    "daily_switch_limit": 10000,
+    "weekly_switch_limit": null,
+    "monthly_switch_limit": null,
+    "switch_mode": "visit",
+    "visit_gap_min": 5
+   },
+   "summary": "10000 opens per day"
+  },
+  {
+   "id": "opens-over-10000",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "10001",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "error": {
+    "field": "day",
+    "message": "Openings per day must be a number 0-10000."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-text",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "",
+    "week": "ten",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "error": {
+    "field": "week",
+    "message": "Openings per week must be a number 0-10000."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-negative",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "",
+    "week": "",
+    "month": "-1",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "error": {
+    "field": "month",
+    "message": "Openings per month must be a number 0-10000."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-decimal",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "2.5",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "error": {
+    "field": "day",
+    "message": "Openings per day must be a number 0-10000."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-nothing-filled",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   },
+   "error": {
+    "field": "any",
+    "message": "Fill in at least one opening limit (per day, week or month)."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-gap-zero",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "3",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "0"
+   },
+   "error": {
+    "field": "gap",
+    "message": "Minutes away must be 1-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-gap-empty",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "3",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": ""
+   },
+   "error": {
+    "field": "gap",
+    "message": "Minutes away must be 1-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-gap-too-big",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "3",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "1441"
+   },
+   "error": {
+    "field": "gap",
+    "message": "Minutes away must be 1-1440 minutes."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "opens-amount-error-comes-before-gap",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "x",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "0"
+   },
+   "error": {
+    "field": "day",
+    "message": "Openings per day must be a number 0-10000."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-default-1-hour",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "60",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 60
+   },
+   "summary": "for 1h 00m"
+  },
+  {
+   "id": "temp-15-min",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "15",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 15
+   },
+   "summary": "for 15m"
+  },
+  {
+   "id": "temp-24-hours",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "1440",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 1440
+   },
+   "summary": "for 1d 0h"
+  },
+  {
+   "id": "temp-choice-missing-is-1-hour",
+   "form": {
+    "rule_type": "temporary"
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 60
+   },
+   "summary": "for 1h 00m"
+  },
+  {
+   "id": "temp-custom-3-hours",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "3",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 180
+   },
+   "summary": "for 3h 00m"
+  },
+  {
+   "id": "temp-custom-90-minutes",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "90",
+    "unit": "minutes",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 90
+   },
+   "summary": "for 1h 30m"
+  },
+  {
+   "id": "temp-custom-2-days",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "2",
+    "unit": "days",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 2880
+   },
+   "summary": "for 2d 0h"
+  },
+  {
+   "id": "temp-custom-30-days",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "30",
+    "unit": "days",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 43200
+   },
+   "summary": "for 30d 0h"
+  },
+  {
+   "id": "temp-custom-1-minute",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": " 1 ",
+    "unit": "minutes",
+    "keep_until": null
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 1
+   },
+   "summary": "for 1m"
+  },
+  {
+   "id": "temp-keep",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "keep",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": "2026-10-11 18:00:00"
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "temp_until": "2026-10-11 18:00:00"
+   },
+   "summary": "keeps its current end",
+   "now": "2026-10-11 15:42:17"
+  },
+  {
+   "id": "temp-keep-without-a-clock",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "keep",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": "2026-10-11 10:00:00"
+   },
+   "rule": {
+    "rule_type": "temporary",
+    "temp_until": "2026-10-11 10:00:00"
+   },
+   "summary": "keeps its current end"
+  },
+  {
+   "id": "temp-keep-already-ended",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "keep",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": "2026-10-11 10:00:00"
+   },
+   "error": {
+    "field": "choice",
+    "message": "That block has already ended - pick a new length."
+   },
+   "summary": "check the settings",
+   "now": "2026-10-11 15:42:17"
+  },
+  {
+   "id": "temp-keep-without-an-end",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "keep",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "error": {
+    "field": "choice",
+    "message": "There is no running block to keep."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-keep-bad-date",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "keep",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": "2026-13-40 10:00:00"
+   },
+   "error": {
+    "field": "choice",
+    "message": "There is no running block to keep."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-unknown-preset",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "45",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "error": {
+    "field": "choice",
+    "message": "Pick how long to block."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-custom-over-30-days",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "31",
+    "unit": "days",
+    "keep_until": null
+   },
+   "error": {
+    "field": "amount",
+    "message": "Custom duration must be between 1 minute and 30 days."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-custom-43201-minutes",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "43201",
+    "unit": "minutes",
+    "keep_until": null
+   },
+   "error": {
+    "field": "amount",
+    "message": "Custom duration must be between 1 minute and 30 days."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-custom-zero",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "0",
+    "unit": "minutes",
+    "keep_until": null
+   },
+   "error": {
+    "field": "amount",
+    "message": "Custom duration must be between 1 minute and 30 days."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-custom-text",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "abc",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "error": {
+    "field": "amount",
+    "message": "Custom duration must be between 1 minute and 30 days."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-custom-empty",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "",
+    "unit": "hours",
+    "keep_until": null
+   },
+   "error": {
+    "field": "amount",
+    "message": "Custom duration must be between 1 minute and 30 days."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "temp-custom-bad-unit",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "5",
+    "unit": "weeks",
+    "keep_until": null
+   },
+   "error": {
+    "field": "amount",
+    "message": "Custom duration must be between 1 minute and 30 days."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "permanent",
+   "form": {
+    "rule_type": "permanent"
+   },
+   "rule": {
+    "rule_type": "permanent"
+   },
+   "summary": "always blocked"
+  },
+  {
+   "id": "unknown-kind",
+   "form": {
+    "rule_type": "bogus"
+   },
+   "error": {
+    "field": "rule_type",
+    "message": "Unknown kind of blocker."
+   },
+   "summary": "check the settings"
+  },
+  {
+   "id": "no-kind",
+   "form": {},
+   "error": {
+    "field": "rule_type",
+    "message": "Unknown kind of blocker."
+   },
+   "summary": "check the settings"
+  }
+ ],
+ "loads": [
+  {
+   "id": "load-default-hours",
+   "rule": null,
+   "type": "scheduled",
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "start": "09:00",
+      "end": "17:00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "load-hours-group-not-shared",
+   "shared": true,
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"block\", \"windows\": [{\"days\": [0, 1], \"start\": \"22:00\", \"end\": \"06:00\"}]}",
+    "allowance_min": 20,
+    "allowance_shared": 0
+   },
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "20",
+    "windows": [
+     {
+      "days": [
+       0,
+       1
+      ],
+      "start": "22:00",
+      "end": "06:00"
+     }
+    ],
+    "pot": false
+   }
+  },
+  {
+   "id": "load-hours-group-pot-unset-is-shared",
+   "shared": true,
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [4], \"start\": \"08:00\", \"end\": \"09:00\"}]}",
+    "allowance_min": null,
+    "allowance_shared": null
+   },
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       4
+      ],
+      "start": "08:00",
+      "end": "09:00"
+     }
+    ],
+    "pot": true
+   }
+  },
+  {
+   "id": "load-hours-item-has-no-pot",
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [4], \"start\": \"08:00\", \"end\": \"09:00\"}]}",
+    "allowance_min": 5,
+    "allowance_shared": null
+   },
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "allow",
+    "allowance": "5",
+    "windows": [
+     {
+      "days": [
+       4
+      ],
+      "start": "08:00",
+      "end": "09:00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "load-hours-0.2.0-format",
+   "rule": {
+    "rule_type": "scheduled",
+    "schedule": "{\"days\": [0, 1], \"start\": \"22:00\", \"end\": \"06:00\"}"
+   },
+   "form": {
+    "rule_type": "scheduled",
+    "mode": "block",
+    "allowance": "0",
+    "windows": [
+     {
+      "days": [
+       0,
+       1
+      ],
+      "start": "22:00",
+      "end": "06:00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "load-default-limit",
+   "rule": null,
+   "type": "time_limit",
+   "form": {
+    "rule_type": "time_limit",
+    "day": "30m",
+    "week": "",
+    "month": "",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   }
+  },
+  {
+   "id": "load-limit-all-three",
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": null,
+    "daily_limit_min": 90,
+    "weekly_limit_min": 600,
+    "monthly_limit_min": 2400
+   },
+   "form": {
+    "rule_type": "time_limit",
+    "day": "1h30",
+    "week": "10h",
+    "month": "40h",
+    "same": true,
+    "weekdays": [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   }
+  },
+  {
+   "id": "load-limit-per-weekday",
+   "rule": {
+    "rule_type": "time_limit",
+    "daily_limit_days": "[180, 180, 180, 180, 180, 120, null]",
+    "daily_limit_min": null,
+    "weekly_limit_min": 1200,
+    "monthly_limit_min": null
+   },
+   "form": {
+    "rule_type": "time_limit",
+    "day": "",
+    "week": "20h",
+    "month": "",
+    "same": false,
+    "weekdays": [
+     "3h",
+     "3h",
+     "3h",
+     "3h",
+     "3h",
+     "2h",
+     ""
+    ]
+   }
+  },
+  {
+   "id": "load-default-opens",
+   "rule": null,
+   "type": "switch_limit",
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "10",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "5"
+   }
+  },
+  {
+   "id": "load-opens-weekly-switch",
+   "rule": {
+    "rule_type": "switch_limit",
+    "daily_switch_limit": null,
+    "weekly_switch_limit": 7,
+    "monthly_switch_limit": null,
+    "switch_mode": "switch"
+   },
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "",
+    "week": "7",
+    "month": "",
+    "counts": "switch",
+    "gap": "5"
+   }
+  },
+  {
+   "id": "load-opens-zero-is-kept",
+   "rule": {
+    "rule_type": "switch_limit",
+    "daily_switch_limit": 0,
+    "weekly_switch_limit": null,
+    "monthly_switch_limit": null,
+    "switch_mode": "visit",
+    "visit_gap_min": 30
+   },
+   "form": {
+    "rule_type": "switch_limit",
+    "day": "0",
+    "week": "",
+    "month": "",
+    "counts": "visit",
+    "gap": "30"
+   }
+  },
+  {
+   "id": "load-default-temporary",
+   "rule": null,
+   "type": "temporary",
+   "form": {
+    "rule_type": "temporary",
+    "choice": "60",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   }
+  },
+  {
+   "id": "load-temporary-preset",
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 240
+   },
+   "form": {
+    "rule_type": "temporary",
+    "choice": "240",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": null
+   }
+  },
+  {
+   "id": "load-temporary-running-is-keep",
+   "rule": {
+    "rule_type": "temporary",
+    "temp_until": "2026-10-11 18:00:00"
+   },
+   "form": {
+    "rule_type": "temporary",
+    "choice": "keep",
+    "amount": "1",
+    "unit": "hours",
+    "keep_until": "2026-10-11 18:00:00"
+   }
+  },
+  {
+   "id": "load-temporary-custom-minutes",
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 150
+   },
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "150",
+    "unit": "minutes",
+    "keep_until": null
+   }
+  },
+  {
+   "id": "load-temporary-custom-hours",
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 360
+   },
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "6",
+    "unit": "hours",
+    "keep_until": null
+   }
+  },
+  {
+   "id": "load-temporary-custom-days",
+   "rule": {
+    "rule_type": "temporary",
+    "duration_min": 2880
+   },
+   "form": {
+    "rule_type": "temporary",
+    "choice": "custom",
+    "amount": "2",
+    "unit": "days",
+    "keep_until": null
+   }
+  },
+  {
+   "id": "load-permanent",
+   "rule": {
+    "rule_type": "permanent"
+   },
+   "form": {
+    "rule_type": "permanent"
+   }
+  }
+ ],
+ "lists": [
+  {
+   "id": "list-sorted-into-display-order",
+   "forms": [
+    {
+     "rule_type": "temporary",
+     "choice": "60",
+     "amount": "1",
+     "unit": "hours",
+     "keep_until": null
+    },
+    {
+     "rule_type": "scheduled",
+     "mode": "allow",
+     "allowance": "0",
+     "windows": [
+      {
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "start": "09:00",
+       "end": "17:00"
+      }
+     ]
+    },
+    {
+     "rule_type": "time_limit",
+     "day": "1h",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    }
+   ],
+   "rules": [
+    {
+     "rule_type": "scheduled",
+     "schedule": "{\"mode\": \"allow\", \"windows\": [{\"days\": [0, 1, 2, 3, 4, 5, 6], \"start\": \"09:00\", \"end\": \"17:00\"}]}",
+     "allowance_min": null,
+     "allowance_shared": null
+    },
+    {
+     "rule_type": "time_limit",
+     "daily_limit_days": null,
+     "daily_limit_min": 60,
+     "weekly_limit_min": null,
+     "monthly_limit_min": null
+    },
+    {
+     "rule_type": "temporary",
+     "duration_min": 60
+    }
+   ],
+   "errors": []
+  },
+  {
+   "id": "list-same-kind-twice",
+   "forms": [
+    {
+     "rule_type": "time_limit",
+     "day": "1h",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    },
+    {
+     "rule_type": "time_limit",
+     "day": "2h",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    }
+   ],
+   "rules": [
+    {
+     "rule_type": "time_limit",
+     "daily_limit_days": null,
+     "daily_limit_min": 60,
+     "weekly_limit_min": null,
+     "monthly_limit_min": null
+    }
+   ],
+   "errors": [
+    {
+     "rule_type": "time_limit",
+     "field": "rule_type",
+     "message": "Each blocker can only be set once."
+    }
+   ]
+  },
+  {
+   "id": "list-one-bad-one-good",
+   "forms": [
+    {
+     "rule_type": "time_limit",
+     "day": "abc",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    },
+    {
+     "rule_type": "permanent"
+    }
+   ],
+   "rules": [
+    {
+     "rule_type": "permanent"
+    }
+   ],
+   "errors": [
+    {
+     "rule_type": "time_limit",
+     "field": "day",
+     "message": "Can't read 'abc' - write e.g. 45m, 2h or 1h30."
+    }
+   ]
+  },
+  {
+   "id": "list-every-bad-one-is-reported",
+   "forms": [
+    {
+     "rule_type": "time_limit",
+     "day": "abc",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    },
+    {
+     "rule_type": "switch_limit",
+     "day": "x",
+     "week": "",
+     "month": "",
+     "counts": "visit",
+     "gap": "5"
+    }
+   ],
+   "rules": [],
+   "errors": [
+    {
+     "rule_type": "time_limit",
+     "field": "day",
+     "message": "Can't read 'abc' - write e.g. 45m, 2h or 1h30."
+    },
+    {
+     "rule_type": "switch_limit",
+     "field": "day",
+     "message": "Openings per day must be a number 0-10000."
+    }
+   ]
+  },
+  {
+   "id": "list-empty-is-fine",
+   "forms": [],
+   "rules": [],
+   "errors": []
+  },
+  {
+   "id": "list-empty-but-one-is-required",
+   "forms": [],
+   "require_one": true,
+   "rules": [],
+   "errors": [
+    {
+     "rule_type": null,
+     "field": "rules",
+     "message": "Tick at least one blocker."
+    }
+   ]
+  },
+  {
+   "id": "list-nobody-is-not-a-list",
+   "forms": "nope",
+   "rules": [],
+   "errors": [
+    {
+     "rule_type": null,
+     "field": "rules",
+     "message": "The settings arrived in a form this window can't read."
+    }
+   ]
+  }
+ ],
+ "sentences": [
+  {
+   "id": "sentence-two",
+   "name": "YouTube",
+   "forms": [
+    {
+     "rule_type": "scheduled",
+     "mode": "allow",
+     "allowance": "0",
+     "windows": [
+      {
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "start": "09:00",
+       "end": "17:00"
+      }
+     ]
+    },
+    {
+     "rule_type": "time_limit",
+     "day": "30m",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    }
+   ],
+   "sentence": "YouTube will be blocked: by time (Allowed only 09:00-17:00 Every day); time limit (30m per day)."
+  },
+  {
+   "id": "sentence-no-name",
+   "name": "  ",
+   "forms": [
+    {
+     "rule_type": "permanent"
+    }
+   ],
+   "sentence": "It will be blocked: permanent (always blocked)."
+  },
+  {
+   "id": "sentence-all-five",
+   "name": "Games",
+   "forms": [
+    {
+     "rule_type": "scheduled",
+     "mode": "block",
+     "allowance": "5",
+     "windows": [
+      {
+       "days": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+       ],
+       "start": "09:00",
+       "end": "17:00"
+      }
+     ]
+    },
+    {
+     "rule_type": "time_limit",
+     "day": "1h",
+     "week": "",
+     "month": "",
+     "same": true,
+     "weekdays": [
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    },
+    {
+     "rule_type": "switch_limit",
+     "day": "3",
+     "week": "",
+     "month": "",
+     "counts": "visit",
+     "gap": "5"
+    },
+    {
+     "rule_type": "permanent"
+    },
+    {
+     "rule_type": "temporary",
+     "choice": "15",
+     "amount": "1",
+     "unit": "hours",
+     "keep_until": null
+    }
+   ],
+   "sentence": "Games will be blocked: by time (Blocked 09:00-17:00 Every day · +5 min); time limit (1h per day); opening limit (3 opens per day); permanent (always blocked); temporary (for 15m)."
+  },
+  {
+   "id": "sentence-none",
+   "name": "YouTube",
+   "forms": [],
+   "sentence": ""
+  }
+ ],
+ "durations": [
+  [
+   "45",
+   45
+  ],
+  [
+   "45m",
+   45
+  ],
+  [
+   "2h",
+   120
+  ],
+  [
+   "2h30",
+   150
+  ],
+  [
+   "2h 30m",
+   150
+  ],
+  [
+   "2H30M",
+   150
+  ],
+  [
+   "1:30",
+   90
+  ],
+  [
+   "",
+   null
+  ],
+  [
+   "   ",
+   null
+  ],
+  [
+   "0",
+   0
+  ],
+  [
+   "90",
+   90
+  ],
+  [
+   "1h90",
+   150
+  ],
+  [
+   "  3 h ",
+   180
+  ],
+  [
+   "abc",
+   "Can't read 'abc' - write e.g. 45m, 2h or 1h30."
+  ],
+  [
+   "h",
+   "Can't read 'h' - write e.g. 45m, 2h or 1h30."
+  ],
+  [
+   "1:5",
+   "Can't read '1:5' - write e.g. 45m, 2h or 1h30."
+  ],
+  [
+   "2.5h",
+   "Can't read '2.5h' - write e.g. 45m, 2h or 1h30."
+  ],
+  [
+   "-5",
+   "Can't read '-5' - write e.g. 45m, 2h or 1h30."
+  ],
+  [
+   "2 X",
+   "Can't read '2x' - write e.g. 45m, 2h or 1h30."
+  ]
+ ],
+ "format_duration": [
+  [
+   0,
+   ""
+  ],
+  [
+   null,
+   ""
+  ],
+  [
+   1,
+   "1m"
+  ],
+  [
+   30,
+   "30m"
+  ],
+  [
+   59,
+   "59m"
+  ],
+  [
+   60,
+   "1h"
+  ],
+  [
+   90,
+   "1h30"
+  ],
+  [
+   125,
+   "2h05"
+  ],
+  [
+   1440,
+   "24h"
+  ],
+  [
+   2400,
+   "40h"
+  ]
+ ],
+ "duration_text": [
+  [
+   0,
+   "0m"
+  ],
+  [
+   59,
+   "0m"
+  ],
+  [
+   60,
+   "1m"
+  ],
+  [
+   2700,
+   "45m"
+  ],
+  [
+   3600,
+   "1h 00m"
+  ],
+  [
+   3900,
+   "1h 05m"
+  ],
+  [
+   86400,
+   "1d 0h"
+  ],
+  [
+   90000,
+   "1d 1h"
+  ],
+  [
+   -5,
+   "0m"
+  ],
+  [
+   183600,
+   "2d 3h"
+  ]
+ ],
+ "days_text": [
+  [
+   [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "Monday–Friday"
+  ],
+  [
+   [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "Every day"
+  ],
+  [
+   [
+    0,
+    2,
+    5,
+    6
+   ],
+   "Monday, Wednesday, Saturday–Sunday"
+  ],
+  [
+   [
+    3
+   ],
+   "Thursday"
+  ],
+  [
+   [
+    6,
+    5
+   ],
+   "Saturday–Sunday"
+  ],
+  [
+   [
+    0,
+    6
+   ],
+   "Monday, Sunday"
+  ]
+ ],
+ "day_limits_text": [
+  [
+   [
+    180,
+    180,
+    180,
+    180,
+    180,
+    120,
+    120
+   ],
+   "3h Mon–Fri, 2h Sat–Sun"
+  ],
+  [
+   [
+    60,
+    null,
+    null,
+    null,
+    null,
+    null,
+    60
+   ],
+   "1h Mon, no limit Tue–Sat, 1h Sun"
+  ],
+  [
+   [
+    90,
+    90,
+    90,
+    90,
+    90,
+    90,
+    90
+   ],
+   "1h30 Mon–Sun"
+  ]
+ ]
+}

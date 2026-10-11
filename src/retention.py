@@ -26,6 +26,18 @@ LAST_KEY = "retention.last_day"   # the trusted date retention last finished on 
 START_DELAY_SEC = 120             # let the app start first
 CHECK_SEC = 3600                  # then look once an hour whether a new day has come
 
+# Functions called (no arguments) after a roll-up deleted a day's detail rows. Whatever keeps sums of the old rows in
+# memory (the Screen Time page, webapi/screentime.py) drops them there and works them out again from the new tables.
+changed: list = []
+
+
+def _announce():
+    for fn in list(changed):
+        try:
+            fn()
+        except Exception:
+            log.exception("A retention listener failed")
+
 
 def cutoff(today: date) -> date:
     """The first day whose detail is kept; everything before it is rolled up."""
@@ -96,6 +108,8 @@ def roll_up_day(db, day: date) -> int:
     except BaseException:
         conn.rollback()
         raise
+    if n:
+        _announce()
     return n
 
 

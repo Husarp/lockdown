@@ -68,6 +68,19 @@ def test_rule_looser():
     assert not ab.rule_looser({"rule_type": "permanent"}, {"rule_type": "permanent"}, NOW)
 
 
+def test_a_categorys_way_is_compared_like_an_apps():
+    """A category blocks apps, so closing it -> minimizing it (or dropping a way) is as much a loosening as for an app."""
+    cat = {"id": 3, "display_name": "Games", "target": "games", "item_type": "category",
+           "block_type": "close,background,internet", "rules": [{"rule_type": "permanent"}]}
+    for lighter in ("minimize,internet", "minimize", "close", "close,background", "internet", None):
+        assert ab.item_looser(cat, {**cat, "block_type": lighter}, NOW) == (lighter != "close,background,internet"), lighter
+    assert ab.draft_changes({3: cat}, {3: {**cat, "block_type": "minimize"}}, {}, {}, NOW) == ["Loosen Games"]
+    assert not ab.item_looser(cat, dict(cat), NOW)
+    minimized = {**cat, "block_type": "minimize"}
+    for stricter in ("close", "minimize,internet", "close,internet", "close,background,internet"):
+        assert not ab.item_looser(minimized, {**cat, "block_type": stricter}, NOW), stricter
+
+
 def test_draft_changes():
     yt = {"id": 1, "display_name": "YouTube", "target": "youtube.com youtu.be", "item_type": "site",
           "rules": [{"rule_type": "time_limit", "daily_limit_min": 60}]}

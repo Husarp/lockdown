@@ -88,6 +88,13 @@ def daily_active(db, start: date, end: date) -> Counter:
     return Counter({d: a for d, a in rows})
 
 
+def active_on(db, day: date) -> int:
+    """Active seconds on one day from the minute detail (what totals(activity(day, day + 1))[0] gives, one SQL sum).
+    Meant for today, which is never rolled up."""
+    return db.conn.execute("SELECT COALESCE(SUM(active_seconds), 0) FROM activity WHERE minute >= ? AND minute < ?",
+                           (f"{day} 00:00", f"{day + timedelta(days=1)} 00:00")).fetchone()[0]
+
+
 def app_totals(db, start: date, end: date) -> Counter:
     """Active seconds per app for [start, end) (detail + roll-ups), in the order per_app(activity(...)) lists
     them - by when each app was first seen - so most_common() breaks ties the same way."""
@@ -328,6 +335,45 @@ def time_saved(events: list[dict], items: list[dict], history_rows: list[dict], 
             matched = sorted({n for h in names for n in under.get(h, ())}, key=order.__getitem__)
             secs = [s for n in matched for s in lengths[n]]   # same values, same order as before: same sum
             usual[names] = sum(secs) / len(secs) if secs else DEFAULT_VISIT_SEC
+        total += usual[names]
+    return total
+
+
+def visit_totals(db, start: date, end: date) -> tuple[dict[str, list], dict | None]:
+    """The 30-day part of `time_saved` without building a dict or a datetime per event: ({name: [seconds, visits]},
+    last) for the switch events in [start, end). A visit lasts until the next event in the range and counts under its
+    site, else its app; `last` is the final event (or None) - its visit ends at whatever comes after the range, which
+    the caller adds with visits(), as time_saved does. Lengths are whole seconds, so sums do not depend on the order."""
+    lo, hi = f"{start} 00:00:00", f"{end} 00:00:00"
+    rows = db.conn.execute("SELECT CAST(strftime('%s', timestamp) AS INTEGER), COALESCE(NULLIF(site, ''), exe) "
+                           "FROM switch_events WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp, id",
+                           (lo, hi)).fetchall()
+    totals: dict[str, list] = {}
+    for (at, name), (nxt, _) in zip(rows, rows[1:]):
+        if name is not None:
+            have = totals.setdefault(name, [0, 0])
+            have[0] += max(0, nxt - at)
+            have[1] += 1
+    last = db.conn.execute("SELECT timestamp, exe, site FROM switch_events WHERE timestamp >= ? AND timestamp < ? "
+                           "ORDER BY timestamp DESC, id DESC LIMIT 1", (lo, hi)).fetchone() if rows else None
+    return totals, ({"ts": _ts(last[0]), "exe": last[1], "site": last[2] or ""} if last else None)
+
+
+def time_saved_totals(events: list[dict], items: list[dict], totals: dict[str, list]) -> float:
+    """time_saved() from visit_totals() (plus the visits after them, added by the caller): the same number, without
+    keeping every visit - the average per target is sum / count of the names it covers."""
+    by_id = {i["id"]: i for i in items}
+    usual: dict[tuple, float] = {}
+    total = 0.0
+    for e in events:
+        item = by_id.get(e["item_id"])
+        names = tuple(item["target"].split() if item else [e["target"]])
+        if names not in usual:
+            sec = n = 0
+            for name, (s, c) in totals.items():
+                if any(name == h or name.endswith("." + h) for h in names):
+                    sec, n = sec + s, n + c
+            usual[names] = sec / n if n else DEFAULT_VISIT_SEC
         total += usual[names]
     return total
 

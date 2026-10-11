@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><title>rule editors</title><link rel="icon" href="data:,">
+<link rel="stylesheet" href="/css/tokens.css"><link rel="stylesheet" href="/css/components.css"><link rel="stylesheet" href="/css/app.css">
+</head>
+<body style="overflow:auto;height:auto">
+<!-- Test page for js/rules/*.js (tests/ui/test_rule_editors.py): ?kind=stack, ?shared=1, ?compact=1, ?theme=light|amoled -->
+<div id="host" style="max-width:1100px;padding:16px;display:grid;gap:12px">
+  <label class="hstack">Name <input class="input" id="name" value="YouTube"></label>
+</div>
+<script type="module">
+import "/js/bridge.js";
+import { installControls } from "/js/ui.js";
+import { injectSprite } from "/js/icons.js";
+import { createRail, createStack } from "/js/rules/rail.js";
+import { CUSTOMIZABLE, RULE_NAMES } from "/js/rules/summary.js";
+
+const q = new URLSearchParams(location.search);
+if (q.get("theme")) document.documentElement.dataset.theme = q.get("theme");
+installControls();
+injectSprite();
+const NOW = Date.parse("2026-10-11T15:42:17");          // the trusted time of the test harness (local, like the Api's)
+window.changes = [];
+const opts = {
+  shared: q.get("shared") === "1", compact: q.get("compact") === "1", requireOne: q.get("requireOne") === "1",
+  name: () => document.getElementById("name").value, now: () => NOW,
+  onChange: (c) => window.changes.push(c),
+};
+const t0 = performance.now();
+let rail;
+if (q.get("kind") === "stack") {
+  rail = createStack({ ...opts, types: CUSTOMIZABLE, title: (t) => "Also limit this member: " + RULE_NAMES[t].toLowerCase() });
+} else {
+  rail = createRail(opts);
+}
+document.getElementById("host").append(rail.el);
+document.getElementById("name").addEventListener("input", () => rail.refresh());
+window.rail = rail;
+window.buildMs = performance.now() - t0;
+window.__ready = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anti-Bypass</title>
+<link rel="icon" href="data:,">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#101418;color:#EFECEA}html[data-theme=light],html[data-theme=light] body{background:#EFF1F4;color:#1C1B1A}html[data-theme=amoled],html[data-theme=amoled] body{background:#000}</style>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/challenge.css">
+</head>
+<body>
+<!-- The uninstaller's `--challenge TEXT` window: the same component as the main window, alone. The ticket comes from
+     Python (agent.py) in the address; Python decides everything, this page only shows and types. -->
+<svg id="sprite" xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"></svg>
+<dialog class="dialog" id="dlg"></dialog>
+<script type="module">
+import { ld } from "./js/bridge.js";
+import { applyLook } from "./js/theme.js";
+import { injectSprite } from "./js/icons.js";
+import { openChallenge, CANCELLED } from "./js/challenge.js";
+
+injectSprite();
+const ticket = new URLSearchParams(location.search).get("ticket");
+try { applyLook(await ld.call("get_theme")); } catch (_) { /* the default look is fine */ }
+const outcome = await openChallenge(ticket);        // passed -> the change ran in Python; anything else -> CANCELLED
+try { await ld.call("challenge_window_close", outcome !== CANCELLED); } catch (_) { /* (only the standalone window has it) */ }
+</script>
+</body>
+</html>
