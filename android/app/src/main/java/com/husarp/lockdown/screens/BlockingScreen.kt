@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -55,6 +56,7 @@ import com.husarp.lockdown.ui.MemberStack
 import com.husarp.lockdown.ui.PillRow
 import com.husarp.lockdown.ui.PillSpec
 import com.husarp.lockdown.ui.SectionLabel
+import com.husarp.lockdown.ui.theme.Hue
 import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.Status
 import com.husarp.lockdown.ui.StatusChip
@@ -70,7 +72,7 @@ private sealed interface BlockPage {
 }
 
 @Composable
-fun BlockingScreen(onOpenNetLog: () -> Unit) {
+fun BlockingScreen(onOpenNetLog: () -> Unit, onOpenCalendar: () -> Unit = {}) {
     var page by remember { mutableStateOf<BlockPage>(BlockPage.List) }
     when (val p = page) {
         BlockPage.List -> BlockList(
@@ -79,6 +81,7 @@ fun BlockingScreen(onOpenNetLog: () -> Unit) {
             onEditGroup = { page = BlockPage.EditGroup(it) },
             onProtection = { page = BlockPage.Protection },
             onKeywords = { page = BlockPage.Keywords },
+            onCalendar = onOpenCalendar,
         )
         BlockPage.Add -> AddItemSheet(onDone = { page = BlockPage.List }, onEdit = { page = BlockPage.Edit(it) }, onEditGroup = { page = BlockPage.EditGroup(it) })
         is BlockPage.Edit -> RuleEditor(p.item, onClose = { page = BlockPage.List })
@@ -95,6 +98,7 @@ private fun BlockList(
     onEditGroup: (Group) -> Unit,
     onProtection: () -> Unit,
     onKeywords: () -> Unit,
+    onCalendar: () -> Unit,
 ) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
@@ -158,6 +162,8 @@ private fun BlockList(
                         hue = Kinds.PROTECTION.hue, iconTint = tone(Kinds.PROTECTION.hue).accent) { onProtection() }
                     Chip("Blocked words", selected = cfg.keywords.enabled, icon = Kinds.WORDS.icon, hue = Kinds.WORDS.hue,
                         iconTint = tone(Kinds.WORDS.hue).accent) { onKeywords() }
+                    Chip("Calendar", selected = false, icon = androidx.compose.material.icons.Icons.Filled.CalendarMonth, hue = Hue.INDIGO,
+                        iconTint = tone(Hue.INDIGO).accent) { onCalendar() }
                 }
             }
             if (query.isNotBlank()) {

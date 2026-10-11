@@ -37,6 +37,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.husarp.lockdown.screens.BlockCalendarScreen
 import com.husarp.lockdown.screens.BlockingScreen
 import com.husarp.lockdown.screens.GuardrailsScreen
 import com.husarp.lockdown.screens.HomeScreen
@@ -185,7 +186,8 @@ fun App(askOff: MutableState<Boolean>) {
                     onOpenSettings = { section -> nav.goSettings(section) },
                 )
             }
-            composable(Dest.BLOCKING.route) { BlockingScreen(onOpenNetLog = { nav.navigate("netlog") }) }
+            composable(Dest.BLOCKING.route) { BlockingScreen(onOpenNetLog = { nav.navigate("netlog") }, onOpenCalendar = { nav.navigate("blockcal") }) }
+            composable("blockcal") { BlockCalendarScreen() }
             composable("netlog") { NetLogScreen() }
             composable(Dest.MODES.route) { ModesScreen() }
             composable(Dest.INSIGHTS.route) { InsightsScreen() }
