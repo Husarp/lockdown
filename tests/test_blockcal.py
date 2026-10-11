@@ -41,3 +41,10 @@ def test_lane_packing_stacks_overlaps():
     n = blockcal.lanes(bars)
     assert n == 2
     assert {b["end"]: b["lane"] for b in bars} == {100: 0, 150: 1, 250: 0}
+
+
+def test_block_window_start_equals_end_is_24h_from_start():
+    r = sched("block", [{"days": [2], "start": "08:00", "end": "08:00"}])   # Wed 08:00 -> Thu 08:00
+    assert blockcal.item_day_intervals([r], 2) == [(480, 1440)]
+    assert blockcal.item_day_intervals([r], 3) == [(0, 480)]
+    assert blockcal.item_day_intervals([r], 1) == []

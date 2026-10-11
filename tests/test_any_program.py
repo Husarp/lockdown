@@ -382,7 +382,7 @@ def test_a_java_game_open_when_its_block_begins_is_asked_to_close_and_says_so(jw
 
 
 @pytest.mark.parametrize("name, cmd, found", [
-    ("javaw.exe", r"javaw -cp lib\a.jar;game.jar com.game.Main", [r"lib\a.jar", "game.jar", "com.game.Main.class"]),
+    ("javaw.exe", r"javaw -cp lib\a.jar;game.jar com.game.Main", [r"lib\a.jar", "game.jar", "com.game.Main.class", r"-m:com\game\Main.class"]),
     ("java.exe", r"java -Xmx1G -classpath C:/g/game.jar;lib/* Main arg", [r"C:\g\game.jar", "Main.class"]),
     ("java.exe", "java -cp . Main", ["Main.class"]),
     ("java.exe", "java -jar game.jar", ["game.jar"]),
@@ -461,3 +461,12 @@ def test_dotted_modules_match_by_path_not_last_segment(monkeypatch):
     e = make_enforcer(monkeypatch, procs, cmds, target="tool.py")
     e.enforce_apps()
     assert e.killed == [3]                        # ... and tool.py by name
+
+
+def test_a_packaged_java_main_class_is_matched_by_its_path(monkeypatch):
+    procs = [(1, "java.exe"), (2, "java.exe"), (3, "java.exe")]
+    cmds = {1: r"java -cp C:\g com.game.Main", 2: r"java -cp C:\g com.other.Main", 3: "java -cp . Main"}
+    e = make_enforcer(monkeypatch, procs, cmds, target="main.class")
+    e.app_items["main.class"]["app_path"] = r"C:\g\com\game\Main.class"
+    e.enforce_apps()
+    assert e.killed == [1, 3]   # (com.other.Main is another Main; a plain "Main" has no package to compare)

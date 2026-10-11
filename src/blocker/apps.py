@@ -284,7 +284,7 @@ def hosted_file(name: str | None, cmd: str | None) -> str | None:
 def hosted_files(name: str | None, cmd: str | None) -> list[str]:
     """Every program file an interpreter process may be running, for matching against the listed ones: hosted_file's,
     plus what the other launch styles name - java -cp: each .jar on the class path and the main class
-    ("com.game.Main" -> com.game.Main.class); python -m tool: tool.py and tool\\__main__.py, python -m pkg.sub: pkg\\sub.py and pkg\\sub\\__main__.py (marked "-m:" - they
+    ("com.game.Main" -> com.game.Main.class, and com\\game\\Main.class marked "-m:"); python -m tool: tool.py and tool\\__main__.py, python -m pkg.sub: pkg\\sub.py and pkg\\sub\\__main__.py (marked "-m:" - they
     match a listed file by its path, not its name alone: service.hosted_processes); cmd /c "cd /d X && x.bat":
     every .bat / .cmd anywhere in the /c command."""
     first = hosted_file(name, cmd)
@@ -305,6 +305,8 @@ def hosted_files(name: str | None, cmd: str | None) -> list[str]:
                 k += 1
             elif not a.startswith(("-", "@")):
                 out.append(a + ".class")   # (the main class; -m module/Class is the first non-option too)
+                if "." in a:   # (a packaged class is a listed ...\\com\\game\\Main.class: by its path, like python -m pkg.sub)
+                    out.append("-m:" + a.replace(".", "\\") + ".class")
                 break
             k += 1
     elif kind == "python":

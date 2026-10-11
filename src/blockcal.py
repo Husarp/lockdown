@@ -19,9 +19,7 @@ def _window_on(win: dict, weekday: int) -> list[tuple[int, int]]:
     start, end, days = _minutes(win["start"]), _minutes(win["end"]), win["days"]
     if start < end:
         return [(start, end)] if weekday in days else []
-    # overnight, or full 24h when start == end
-    if start == end:
-        return [(0, DAY)] if (weekday in days or (weekday - 1) % 7 in days) else []
+    # overnight; start == end is 24 h from start (start..24:00, then 0..start next day), as rules.py enforces
     out = []
     if weekday in days:
         out.append((start, DAY))               # evening part on the start day
