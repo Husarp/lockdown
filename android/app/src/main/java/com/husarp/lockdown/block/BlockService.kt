@@ -644,9 +644,28 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
      *  Held while a pause silences the alerts; a mode that mutes lets through only what's about the thing in front. */
     private val alertTick = object : Runnable {
         override fun run() {
+            runCatching { syncDnd() }
             runCatching { watchBlocks() }
             handler.postDelayed(this, ALERT_MS)
         }
+    }
+
+    /** Is a mode that mutes running (and blocking on)? Main only. */
+    private fun muteWanted(now: LocalDateTime): Boolean =
+        !IslandLink.isHelper && Store.config.enabled && ModesStore.current(now)?.mode?.mute == true
+
+    /** Do Not Disturb follows a muting mode (engine/MuteDnd.kt). Only main does it (it is the whole phone's); what it
+     *  changed is remembered in prefs, so a mode that ended while the app was dead still puts the user's setting back. */
+    private fun syncDnd() {
+        if (IslandLink.isHelper) return
+        val p = getSharedPreferences("mute-dnd", MODE_PRIVATE)
+        val saved = com.husarp.lockdown.engine.MuteDnd.decode(p.getString("saved", null))
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        val now = Enforce.ldt(TrustedTime.now(this))
+        val step = com.husarp.lockdown.engine.MuteDnd.decide(muteWanted(now), nm.isNotificationPolicyAccessGranted,
+            nm.currentInterruptionFilter, saved)
+        step.filter?.let { nm.setInterruptionFilter(it) }
+        if (step.saved != saved) p.edit().putString("saved", com.husarp.lockdown.engine.MuteDnd.encode(step.saved)).apply()
     }
 
     private fun watchBlocks() {

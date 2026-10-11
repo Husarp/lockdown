@@ -79,7 +79,7 @@ object ReminderRunner {
         }
         gone(ctx)
         val r = e.tick(now, idleSec, cfg.sleep, cfg.breaks, cfg.customs, dt,
-            paused = Enforce.alertsPaused(cfg, now), emergencyLeft = emergencyLeft(cfg, now), silent = Enforce.silenced(cfg, now))
+            paused = Enforce.alertsPaused(cfg, now), emergencyLeft = emergencyLeft(cfg, now), silent = Enforce.silenced(cfg, now) || (cfg.enabled && com.husarp.lockdown.data.ModesStore.current(now)?.mode?.mute == true))   // a muting mode holds them too
         apply(ctx, r, now)
     }
 

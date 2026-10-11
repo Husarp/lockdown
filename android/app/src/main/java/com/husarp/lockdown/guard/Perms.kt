@@ -33,6 +33,11 @@ object Perms {
         NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
     )
 
+    /** Do Not Disturb access (lets a mode that mutes turn Do Not Disturb on). */
+    fun dnd(ctx: Context): Boolean = ctx.getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted
+
+    fun dndIntent(): Intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+
     fun notificationsIntent(ctx: Context): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
 
