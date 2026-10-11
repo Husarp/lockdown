@@ -121,6 +121,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
         protection_watch.attach(pool, win.publisher.publish, lambda: win.publisher.visible)
         pool.start()
         app_catalog.start()   # (R11: reads the cached list, scans again if it is over a day old)
+        webapi.screentime.start_warmup(ctx)   # (a few seconds on, in the background: the first visit of Screen Time finds its day sums ready)
         if not any(a in argv for a in TRAY_ARGS):
             windows.show_main(win)
     windows.start(ready)

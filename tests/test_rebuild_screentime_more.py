@@ -153,11 +153,11 @@ def test_equal_peaks_pick_the_hour_with_the_earliest_switch(tmp_path):
     assert peak == 9 and d["peak"].startswith("Peak between 09:00 and 10:00 - 2 switches")
 
 
-def test_the_peak_in_the_last_hour_wraps_to_midnight(tmp_path):
+def test_the_peak_in_the_last_hour_ends_at_24_00_like_the_old_window(tmp_path):
     ctx, api, db = blank(tmp_path)
     put(db, TODAY, "09:00")
     switch(db, TODAY, "23:10:00")
-    assert data(api.screentime_get("switches", "7 days"))["peak"] == "Peak between 23:00 and 00:00 - 1 switch."
+    assert data(api.screentime_get("switches", "7 days"))["peak"] == "Peak between 23:00 and 24:00 - 1 switch."
 
 
 def test_an_empty_switch_log_is_an_empty_tab(tmp_path):
@@ -306,6 +306,21 @@ def test_a_finished_month_counts_every_day(fresh):
     d = month(fresh.api, 2026, 9)
     cards = {c["key"]: c for c in d["stats"]}
     assert cards["average"]["sub"] == "over 30 days" and cards["within"]["value"].endswith(" / 30")
+
+
+def test_the_busiest_day_of_a_month_with_only_idle_time_is_0_m(tmp_path):
+    """The old window listed every day that has rows (idle-only ones too): its busiest day is then "0 m", not "-"."""
+    ctx, api, db = blank(tmp_path)
+    put(db, TODAY - timedelta(days=3), "09:00", seconds=60, active=0)
+    put(db, TODAY - timedelta(days=2), "09:00", seconds=60, active=0)
+    cards = {c["key"]: c for c in month(api, 2026, 10)["stats"]}
+    assert cards["busiest"]["value"] == "0 m" and cards["busiest"]["sub"] == "Thursday 8 Oct"      # (the first of equals)
+    put(db, TODAY - timedelta(days=1), "09:00", seconds=60, active=60)
+    st.forget(ctx)
+    cards = {c["key"]: c for c in month(api, 2026, 10)["stats"]}
+    assert (cards["busiest"]["value"], cards["busiest"]["sub"]) == ("1 m", "Saturday 10 Oct")
+    # a month with nothing recorded at all stays "-"
+    assert {c["key"]: c for c in month(api, 2026, 8)["stats"]}["busiest"]["value"] == "-"
 
 
 def test_an_empty_month_has_dashes(tmp_path):

@@ -293,6 +293,57 @@ def test_streaks(fresh):
     assert by["goal"]["sub"] == "daily goal 5 h"
 
 
+def streak_numbers(d):
+    """(goal run or None, no-unlock run) from the Overview's two streak rows."""
+    by = {x["key"]: x["text"] for x in d["streaks"]}
+    num = lambda t: int(t.split()[0]) if t[0].isdigit() else 0
+    return (num(by["goal"]) if "goal" in by else None), num(by["no_unlock"])
+
+
+@pytest.mark.parametrize("today_minutes,unlock_back,goal", [(60, None, "2"), (200, None, "2"), (60, 0, "2"), (60, 3, "2"),
+                                                            (60, None, "0"), (30, 9, "1"), (0, None, "2")])
+def test_the_streaks_equal_stats_streaks_with_the_past_kept(tmp_path, today_minutes, unlock_back, goal):
+    ctx, api, db = blank(tmp_path)
+    db.set_setting(st.GOAL_KEY, goal)
+    for back, minutes in enumerate([today_minutes, 90, 100, 150, 110, 30, 20, 130, 40], start=0):
+        for m in range(minutes):
+            put(db, TODAY - timedelta(days=back), f"{6 + m // 60:02d}:{m % 60:02d}")
+    if unlock_back is not None:
+        start = datetime.combine(TODAY - timedelta(days=unlock_back), datetime.min.time()) + timedelta(hours=8)
+        db.add_unlock([1], ["x"], start, start + timedelta(hours=1))
+    want = stats.streaks(db, TODAY, float(goal) * 3600 or None)
+    for _ in range(2):                                                    # (the second answer comes from what was kept)
+        assert streak_numbers(get(api, "overview", "Today")) == ((want["goal"] if float(goal) else None), want["no_unlock"])
+        assert streak_numbers(get(api, "overview", "30 days")) == ((want["goal"] if float(goal) else None), want["no_unlock"])
+
+
+def test_the_streaks_of_the_past_are_worked_out_once_a_day(tmp_path, monkeypatch):
+    ctx, api, db = blank(tmp_path)
+    db.set_setting(st.GOAL_KEY, "2")
+    for back in range(0, 6):
+        for m in range(60):
+            put(db, TODAY - timedelta(days=back), f"{6 + m // 60:02d}:{m % 60:02d}")
+    calls = []
+    real, real_unlocks = stats.daily_active, db.unlocks_since
+    monkeypatch.setattr(stats, "daily_active", lambda *a, **k: calls.append(a[1:]) or real(*a, **k))
+    first = get(api, "overview", "Today")
+    n = len(calls)
+    assert any(c[1] == TODAY for c in calls[1:])                         # (the earlier days were looked up)
+    for _ in range(3):
+        again = get(api, "overview", "Today")
+    assert again["streaks"] == first["streaks"]
+    assert calls[n:] == [(TODAY, TODAY + timedelta(days=1))] * 3         # only the trend's totals incl. today, no streak look-up
+    # an emergency unlock today shows at once; the kept past is not touched
+    start = datetime.combine(TODAY, datetime.min.time()) + timedelta(hours=8)
+    db.add_unlock([1], ["x"], start, start + timedelta(hours=1))
+    assert [x["text"] for x in get(api, "overview", "Today")["streaks"] if x["key"] == "no_unlock"] == ["Emergency unlock used today"]
+    # a change of the goal or more activity today is seen at once, too
+    db.set_setting(st.GOAL_KEY, "0.5")
+    assert [x["text"] for x in get(api, "overview", "Today")["streaks"] if x["key"] == "goal"] == ["Over your goal today"]
+    db.set_setting(st.GOAL_KEY, "5")
+    assert streak_numbers(get(api, "overview", "Today"))[0] == stats.streaks(db, TODAY, 5 * 3600)["goal"]
+
+
 # ---------------------------------------------------------------- sessions and the longest focus, even over midnight
 
 def put(db, day, hhmm, exe="code.exe", site="", seconds=60, active=60):
@@ -572,44 +623,186 @@ def test_a_finished_day_is_read_once_and_kept(tmp_path, monkeypatch):
     # something written to today shows at once
     put(db, TODAY, "09:01")
     assert get(api, "overview", "Today")["cards"][0]["value"] == "2 m"
-    # a day that was over keeps its cached numbers (they can't change), until the cache is dropped or has expired
+    # a day that was over keeps its cached numbers (they can't change), until the cache is dropped
     put(db, TODAY - timedelta(days=1), "20:00")
     assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "30 m"
     st.forget(ctx)
     assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "31 m"
-    put(db, TODAY - timedelta(days=1), "20:01")
-    monkeypatch.setattr(st, "CACHE_SEC", 0)
-    assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "32 m"
 
 
-def test_the_cache_is_per_agent_not_per_database_file(tmp_path):
-    ctx1, api1, db1 = blank(tmp_path / "a")
-    ctx2, api2, db2 = blank(tmp_path / "b")
-    put(db1, TODAY - timedelta(days=1), "10:00")
-    assert get(api1, "overview", "Yesterday")["cards"][0]["value"] == "1 m"
-    assert get(api2, "overview", "Yesterday")["empty"] is True
+def test_a_finished_day_never_expires_by_the_clock(tmp_path, monkeypatch):
+    """The cache used to forget every finished day 15 minutes after it was made - all of them at once, so the shown page
+    worked out 29 days in one refresh. Now only data drops a day (forget / retention), however long it has been."""
+    ctx, api, db = blank(tmp_path)
+    for back in range(1, 10):
+        put(db, TODAY - timedelta(days=back), "10:00")
+    put(db, TODAY, "09:00")
+    get(api, "overview", "30 days")
+    spans = []
+    real = st._activity_rows
+    monkeypatch.setattr(st, "_activity_rows", lambda db_, a, b: spans.append((a, b)) or real(db_, a, b))
+    later = time.monotonic() + 86400 * 3
+    monkeypatch.setattr(st.time, "monotonic", lambda: later)
+    for _ in range(3):
+        get(api, "overview", "30 days")
+        get(api, "apps", "7 days")
+    assert spans and all((a, b) == (TODAY, TODAY + timedelta(days=1)) for a, b in spans)       # only today, every time
 
 
-def test_days_retention_rolled_up_still_count(tmp_path):
+def test_a_day_that_ended_minutes_ago_is_not_kept_yet(tmp_path):
+    """The tracker writes in batches: just after midnight yesterday still gets its last minute. Until SETTLE_SEC has passed
+    the day is worked out each time, then it is kept."""
+    clock = [datetime(2026, 10, 12, 0, 1, 0)]
+    path = tmp_path / "late.db"
+    Database(path).close()
+    ctx = webapi.make_context(path, clock=lambda db: clock[0])
+    api, db = core.build_api(ctx), ctx.db
+    yesterday = date(2026, 10, 11)
+    put(db, yesterday, "23:58")
+    put(db, yesterday, "23:59")
+    assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "2 m"
+    put(db, yesterday, "23:59", exe="chrome.exe")                         # (the tracker's last batch lands)
+    assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "3 m"
+    assert get(api, "overview", "7 days")["bars"]["bars"][-2]["value"] == 3.0 and get(api, "overview", "7 days")["trend"]["points"][-2]["value"] == 3.0
+    assert yesterday not in ctx.st_cache.days and yesterday not in ctx.st_cache.totals and ctx.st_cache.streaks == {}
+    clock[0] = datetime(2026, 10, 12, 0, 3, 1)                            # three minutes later: it is over for good
+    assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "3 m"
+    assert yesterday in ctx.st_cache.days and yesterday in ctx.st_cache.totals and ctx.st_cache.streaks
+    put(db, yesterday, "20:00")                                           # (not seen any more: kept)
+    assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "3 m"
+
+
+def test_the_kept_days_have_a_cap(tmp_path, monkeypatch):
+    ctx, api, db = blank(tmp_path)
+    for back in range(0, 20):
+        put(db, TODAY - timedelta(days=back), "10:00")
+    monkeypatch.setattr(st, "MAX_DIGESTS", 5)
+    monkeypatch.setattr(st, "MAX_TOTALS", 8)
+    get(api, "overview", "30 days")
+    assert sorted(ctx.st_cache.days) == [TODAY - timedelta(days=i) for i in (5, 4, 3, 2, 1)]       # the newest
+    assert len(ctx.st_cache.totals) == 8 and max(ctx.st_cache.totals) == TODAY - timedelta(days=1)
+    assert get(api, "overview", "30 days")["cards"][0]["value"] == "20 m"                          # (and it is still right)
+
+
+def test_a_roll_up_by_retention_drops_what_is_kept(tmp_path):
+    """retention.roll_up_day rewrites a day's rows into the daily totals; the kept digests are dropped by it (no explicit
+    forget here) and what the page shows stays the same."""
     ctx, api, db = blank(tmp_path)
     day = TODAY - timedelta(days=3)
     for m in range(10):
         put(db, day, f"10:{m:02d}", exe="code.exe")
-        put(db, day, f"11:{m:02d}", exe="chrome.exe", site="docs.python.org", active=45)
-    db.add_switch(datetime.combine(day, datetime.min.time()) + timedelta(hours=10), "code.exe", "")
     put(db, TODAY, "08:00")
-    before = {r["key"]: (r["sec"], r["count"]) for r in get(api, "apps", "7 days")["rows"]}
-    day_before = get(api, "overview", "7 days")
-    retention.roll_up_day(db, day)                                     # the minute rows are gone, the totals stay
-    assert db.conn.execute("SELECT COUNT(*) FROM activity WHERE minute < ?", (f"{TODAY} 00:00",)).fetchone()[0] == 0
-    st.forget(ctx)
-    after = {r["key"]: (r["sec"], r["count"]) for r in get(api, "apps", "7 days")["rows"]}
-    assert after == before
-    now = get(api, "overview", "7 days")
-    assert card(now, "active")["value"] == card(day_before, "active")["value"]
-    assert now["bars"]["bars"] == day_before["bars"]["bars"] and now["trend"]["points"] == day_before["trend"]["points"]
-    sites = {r["key"]: r["sec"] for r in get(api, "websites", "7 days")["rows"]}
-    assert sites == {"docs.python.org": 450}
+    before = get(api, "overview", "7 days")
+    assert day in ctx.st_cache.days and ctx.st_cache.totals
+    retention.roll_up_day(db, day)
+    assert ctx.st_cache.days == {} and ctx.st_cache.totals == {} and ctx.st_cache.streaks == {}
+    after = get(api, "overview", "7 days")
+    assert after["bars"] == before["bars"] and after["trend"] == before["trend"] and card(after, "active") == card(before, "active")
+    other, other_api, other_db = blank(tmp_path / "other")                # (every agent context is told, not just one)
+    get(other_api, "overview", "7 days")
+    put(db, day - timedelta(days=1), "10:00")
+    retention.roll_up_day(db, day - timedelta(days=1))
+    assert other.st_cache.days == {}
+    retention.roll_up_day(db, day - timedelta(days=9))                    # (nothing to roll: nothing is dropped)
+    get(api, "overview", "7 days")
+    retention.roll_up_day(db, day - timedelta(days=9))
+    assert ctx.st_cache.days
+
+
+def test_a_failing_retention_listener_does_not_stop_the_others(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(retention, "changed", [lambda: 1 / 0, lambda: seen.append("ok")])
+    ctx, api, db = blank(tmp_path)
+    put(db, TODAY - timedelta(days=2), "10:00")
+    retention.roll_up_day(db, TODAY - timedelta(days=2))
+    assert seen == ["ok"]
+
+
+def test_warm_fills_the_cache_so_the_first_visit_reads_only_today(tmp_path, monkeypatch):
+    ctx, api, db = blank(tmp_path)
+    for back in range(1, 25):
+        for m in range(5):
+            put(db, TODAY - timedelta(days=back), f"10:{m:02d}")
+    put(db, TODAY, "09:00")
+    db.add_unlock([1], ["x"], datetime.combine(TODAY - timedelta(days=9), datetime.min.time()), datetime.combine(TODAY - timedelta(days=9), datetime.min.time()) + timedelta(hours=1))
+    db.set_setting(st.GOAL_KEY, "5")
+    st.warm(ctx)
+    assert len(ctx.st_cache.days) == 29 and len(ctx.st_cache.totals) == 29 and ctx.st_cache.streaks
+    spans, totals = [], []
+    real_rows, real_daily = st._activity_rows, stats.daily_active
+    monkeypatch.setattr(st, "_activity_rows", lambda db_, a, b: spans.append((a, b)) or real_rows(db_, a, b))
+    monkeypatch.setattr(stats, "daily_active", lambda *a, **k: totals.append(a[1:]) or real_daily(*a, **k))
+    d = get(api, "overview", "30 days")
+    assert spans == [(TODAY, TODAY + timedelta(days=1))] and totals == [(TODAY, TODAY + timedelta(days=1))]       # today, nothing else
+    assert card(d, "active")["value"] == stats.hm(24 * 5 * 60 + 60)
+
+
+def test_warm_on_an_empty_database_does_nothing_and_a_warm_cache_is_left_alone(tmp_path):
+    ctx, api, db = blank(tmp_path)
+    st.warm(ctx)
+    assert ctx.st_cache.days == {}
+    put(db, TODAY - timedelta(days=1), "10:00")
+    st.warm(ctx)
+    held = dict(ctx.st_cache.days)
+    st.warm(ctx)
+    assert held and all(ctx.st_cache.days[d] is held[d] for d in held)            # (nothing was built twice)
+
+
+def wait_until(check, seconds=10):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if check():
+            return True
+        time.sleep(0.02)
+    return check()
+
+
+def test_the_warm_up_thread_warms_once_after_the_delay_and_stops_on_request(tmp_path, monkeypatch):
+    ctx, api, db = blank(tmp_path)
+    for back in range(1, 6):
+        put(db, TODAY - timedelta(days=back), "10:00")
+    seen = []
+    real = st.warm
+    monkeypatch.setattr(st, "warm", lambda c, wait=0.0: seen.append((threading.current_thread().name, wait)) or real(c))
+    thread = st.start_warmup(ctx, delay=0)
+    try:
+        assert thread.daemon and wait_until(lambda: len(getattr(ctx, "st_cache", None) and ctx.st_cache.days or ()) >= 5)
+        assert seen == [("lockdown-st-warm", st.WARM_CATALOG_WAIT_SEC)]             # (once; the next try is tomorrow)
+    finally:
+        thread.stop_event.set()
+        thread.join(10)
+    assert not thread.is_alive()
+    late = st.start_warmup(ctx, delay=60)                                          # (stopped during the delay: never runs)
+    late.stop_event.set()
+    late.join(10)
+    assert len(seen) == 1
+
+
+def test_the_warm_up_runs_again_for_each_new_day_and_after_a_failure(tmp_path, monkeypatch):
+    ctx, api, db = blank(tmp_path)
+    put(db, TODAY - timedelta(days=1), "10:00")
+    runs = []
+
+    def flaky(c, wait=0.0):
+        runs.append(wait)
+        if len(runs) == 2:
+            raise RuntimeError("boom")
+    monkeypatch.setattr(st, "warm", flaky)
+    monkeypatch.setattr(st, "_seconds_to_next_day", lambda now: 0.01)
+    monkeypatch.setattr(st, "WARM_RETRY_SEC", 0.01)
+    thread = st.start_warmup(ctx, delay=0)
+    try:
+        assert wait_until(lambda: len(runs) >= 4)                                  # (a failure is logged, then tried again)
+    finally:
+        thread.stop_event.set()
+        thread.join(10)
+    assert runs[:4] == [st.WARM_CATALOG_WAIT_SEC, 0.0, 0.0, 0.0]                  # (the catalog is waited for in the first run only)
+
+
+def test_the_next_warm_up_is_when_the_new_day_has_settled():
+    assert st._seconds_to_next_day(datetime(2026, 10, 11, 23, 59, 0)) == 60 + st.SETTLE_SEC + 2
+    assert st._seconds_to_next_day(datetime(2026, 10, 12, 0, 0, 0)) == 24 * 3600 + st.SETTLE_SEC + 2
+    assert st._seconds_to_next_day(datetime(2026, 10, 12, 0, 3, 30)) == 24 * 3600 - 3 * 60 - 30 + st.SETTLE_SEC + 2
 
 
 # ---------------------------------------------------------------- start-up answer, CSV

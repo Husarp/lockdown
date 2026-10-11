@@ -5,8 +5,11 @@ Calendar's month and day, and the CSV export.
 range activity at all. Every number comes from small pre-summed pieces:
 - one DIGEST per day (`_Digest`: active / at-the-PC seconds, seconds per app / site, active seconds per hour, sessions
   and the longest run in one app), worked out in a single pass over that day's minute rows. A day that is over can't
-  change any more, so its digest is kept in memory (`_Cache`, 15 minutes at most, then it is read again) and a range
-  of 30 days is then 30 dictionary look-ups plus today's own digest - not a scan of 17 000 minute rows;
+  change any more (a few minutes after midnight the tracker has written its last batch), so its digest is kept in
+  memory (`_Cache`) and a range of 30 days is then 30 dictionary look-ups plus today's own digest - not a scan of 17 000
+  minute rows. Nothing expires by the clock: what is kept is dropped by `forget` / `forget_all` (retention's roll-up
+  calls the latter) and `warm` fills it in the background when the agent starts and after each midnight, so the first
+  visit doesn't pay for it either;
 - the daily totals (`stats.daily_active`, which also counts days retention has rolled up) for the trend and the bars;
 - one grouped query for the switch / visit counts of the Apps and Websites tables.
 Sessions and the longest focus are put together from the digests exactly as stats.sessions / stats.longest_focus would
@@ -15,13 +18,16 @@ give them on the whole range (a session or a run in one app that goes over midni
 Nothing here can loosen a block. The Display settings (the tab / range Screen Time opens with) are written by
 webapi/dashboard.py `display_set`; this module only reads them.
 """
+import logging
 import threading
 import time
+import weakref
 from collections import Counter
 from datetime import date, datetime, timedelta
 from itertools import groupby
 from operator import itemgetter
 
+import retention
 import stats
 from rules import DAY_NAMES
 
@@ -34,11 +40,17 @@ GOAL_KEY, DEFAULT_GOAL_HOURS = "stats.goal_hours", "5"              # the daily 
 MAX_ROWS = 40                   # the Apps / Websites tables list this many at most ...
 MIN_ROW_SEC = 60                # ... and only those with at least this much active time
 MAX_SEGMENTS = 150              # the day timeline draws the longest ones anyway (charts.js MAX_SEGMENTS)
-CACHE_SEC = 900                 # a finished day's digest is read again after this long, in case something wrote to it
-STREAK_CACHE_SEC = 60           # the streaks cost the most to work out and change slowly
+SETTLE_SEC = 180                # a day is kept only this long after it ended: the tracker writes in batches, so its last minute
+                                # lands a few seconds after midnight (until then the day is worked out fresh each time)
+MAX_DIGESTS = 45                # finished days kept: the 30-day range and its week, with room to spare
+MAX_TOTALS = 400                # finished days' totals kept (the Calendar pages back through the months)
+WARM_DELAY_SEC = 3.0            # `start_warmup` waits this long, so the window comes up first
+WARM_CATALOG_WAIT_SEC = 120.0   # ... and then waits (at most) this long for the app catalog, whose names the tables use
+WARM_RETRY_SEC = 600.0          # ... and tries again this long after a failure
 NAMES_CACHE_SEC = 600
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 DAY_MIN = 1440
+log = logging.getLogger("lockdown.screentime")
 
 
 # ---------------------------------------------------------------- one day, summed once
@@ -143,19 +155,28 @@ def _rolled_digest(rows) -> _Digest:
 
 class _Cache:
     """Per agent (ctx.st_cache): finished days' digests and totals, the streaks, the app names. Plain dicts: a call that
-    comes in on another thread at the same time may work a day out twice, which is harmless."""
+    comes in on another thread at the same time may work a day out twice, which is harmless. Nothing here expires by the
+    clock: a finished day is kept until `clear` (retention rolled days up / `forget`) or until newer days push it out."""
 
     def __init__(self):
-        self.days: dict = {}        # date -> (when, _Digest)
-        self.totals: dict = {}      # date -> (when, active seconds)
-        self.streaks: dict = {}     # key -> (when, {goal, no_unlock})
+        self.clear()
+        _caches.add(self)
+
+    def clear(self):
+        self.days: dict = {}        # date -> _Digest
+        self.totals: dict = {}      # date -> active seconds, or None when nothing was recorded that day
+        self.streaks: dict = {}     # key -> {goal, no_unlock} of the days before today
         self.names = None           # (when, catalog loaded?, {exe: (name, path)})
 
-    def prune(self, today: date):
-        old = today - timedelta(days=45)
-        for table in (self.days, self.totals):
-            for d in [d for d in table if d < old]:
-                table.pop(d, None)
+    @staticmethod
+    def trim(table: dict, limit: int):
+        """Keep the newest `limit` days."""
+        if len(table) > limit:
+            for day in sorted(table)[:len(table) - limit]:
+                table.pop(day, None)
+
+
+_caches: "weakref.WeakSet[_Cache]" = weakref.WeakSet()
 
 
 def _cache(ctx) -> _Cache:
@@ -168,7 +189,21 @@ def _cache(ctx) -> _Cache:
 @core.internal
 def forget(ctx):
     """Drop everything kept (tests; and anything that rewrites old activity)."""
-    ctx.__dict__.pop("st_cache", None)
+    cache = ctx.__dict__.pop("st_cache", None)
+    if cache is not None:
+        cache.clear()
+
+
+@core.internal
+def forget_all():
+    """Drop what every agent context keeps. Retention calls this after it rolled a day's minute rows up into daily totals
+    (`retention.changed`), the one thing that rewrites old activity while the app runs."""
+    for cache in list(_caches):
+        cache.clear()
+
+
+if forget_all not in retention.changed:
+    retention.changed.append(forget_all)
 
 
 def _activity_rows(db, start: date, end: date):
@@ -179,14 +214,13 @@ def _activity_rows(db, start: date, end: date):
 
 def _digests(req, days: list) -> dict:
     """{date: _Digest} for these days (any order). Days that are over come from the cache or are worked out in one query
-    for the stretch that is missing, and kept; today is always worked out fresh."""
-    cache, today = req.cache, req.today
-    now = time.monotonic()
+    for the stretch that is missing, and kept; today (and a day that ended only minutes ago) is always worked out fresh."""
+    cache, today, settled = req.cache, req.today, req.settled
     out, missing = {}, []
     for day in days:
-        hit = cache.days.get(day) if day < today else None
-        if hit is not None and now - hit[0] < CACHE_SEC:
-            out[day] = hit[1]
+        hit = cache.days.get(day) if day < settled else None
+        if hit is not None:
+            out[day] = hit
         else:
             missing.append(day)
     if missing:
@@ -203,23 +237,23 @@ def _digests(req, days: list) -> dict:
             key = day.isoformat()
             d = built.get(key) or rolled.get(key) or _Digest()
             out[day] = d
-            if day < today:
-                cache.days[day] = (now, d)
-        cache.prune(today)
+            if day < settled:
+                cache.days[day] = d
+        cache.trim(cache.days, MAX_DIGESTS)
     return out
 
 
 def _daily_totals(req, first: date, last: date) -> dict:
-    """{date: active seconds} for first..last (a day with nothing is 0). Finished days are kept; stats.daily_active does
-    the sums in SQL and includes days retention has rolled up."""
-    cache, today = req.cache, req.today
-    now = time.monotonic()
+    """{date: active seconds} for first..last, for the days that have something recorded (a day with only idle time is
+    there with 0, a day with nothing is not there). Finished days are kept; stats.daily_active does the sums in SQL and
+    includes days retention has rolled up."""
+    cache, settled = req.cache, req.settled
     out, missing = {}, []
     day = first
     while day <= last:
-        hit = cache.totals.get(day) if day < today else None
-        if hit is not None and now - hit[0] < CACHE_SEC:
-            out[day] = hit[1]
+        if day < settled and day in cache.totals:
+            if cache.totals[day] is not None:
+                out[day] = cache.totals[day]
         else:
             missing.append(day)
         day += timedelta(days=1)
@@ -227,9 +261,12 @@ def _daily_totals(req, first: date, last: date) -> dict:
         lo, hi = min(missing), max(missing)
         found = stats.daily_active(req.db, lo, hi + timedelta(days=1))
         for day in missing:
-            out[day] = found.get(day.isoformat(), 0)
-            if day < today:
-                cache.totals[day] = (now, out[day])
+            sec = found.get(day.isoformat())
+            if sec is not None:
+                out[day] = sec
+            if day < settled:
+                cache.totals[day] = sec
+        cache.trim(cache.totals, MAX_TOTALS)
     return out
 
 
@@ -262,6 +299,7 @@ class _Req:
         self.cache = _cache(ctx)
         self.now = ctx.now()
         self.today = self.now.date()
+        self.settled = (self.now - timedelta(seconds=SETTLE_SEC)).date()      # (the days before this one are over for good)
         self.range = range_name
         self.start, self.end = stats.range_dates(range_name, self.today)        # [start, end)
         self.days = [self.start + timedelta(days=i) for i in range((self.end - self.start).days)]
@@ -488,18 +526,57 @@ def _donut(req, digests: list, active: int) -> dict:
             "caption": "total"}
 
 
-def _streaks(req) -> list:
-    """The goal streak (days in a row within the daily goal) and the days without an emergency unlock."""
-    db, today, goal = req.db, req.today, req.goal
+def _streak_runs(req, goal, start: date) -> tuple:
+    """(days in a row within the goal, days in a row without an emergency unlock) for the days BEFORE today, looking back as
+    far as `start`. These can't change during the day, so they are kept (key: the day, the goal, when recording started
+    and what the emergency unlocks look like) - unless yesterday ended only minutes ago and may still get its last batch."""
+    db, today = req.db, req.today
     unlocks = tuple(db.conn.execute("SELECT COUNT(*), MAX(started) FROM emergency_unlocks").fetchone())
-    key = (today, goal, unlocks)
-    now = time.monotonic()
+    key = (today, goal, start, unlocks)
     held = req.cache.streaks.get(key)
-    if held is None or now - held[0] > STREAK_CACHE_SEC:
+    if held is not None:
+        return held
+    run_goal, end = 0, today
+    # (the run of days within the goal usually stops soon: a week is looked at first, then further back)
+    for size in (7, 60, 400) if goal else ():
+        lo = max(start, end - timedelta(days=size))
+        active = stats.daily_active(db, lo, end)
+        days = [end - timedelta(days=i) for i in range(1, (end - lo).days + 1)]
+        over = next((n for n, day in enumerate(days) if active.get(day.isoformat(), 0) > goal), None)
+        if over is not None:
+            run_goal += over
+            break
+        run_goal += len(days)
+        end = lo
+    unlocked = {u["started"].date() for u in db.unlocks_since(datetime.combine(start, datetime.min.time()))}
+    run_unlock = 0
+    for day in (today - timedelta(days=i) for i in range(1, (today - start).days + 1)):
+        if day in unlocked:
+            break
+        run_unlock += 1
+    runs = (run_goal, run_unlock)
+    if today - timedelta(days=1) < req.settled:
         if len(req.cache.streaks) > 20:
             req.cache.streaks.clear()
-        held = req.cache.streaks[key] = (now, stats.streaks(db, today, goal))
-    streak = held[1]
+        req.cache.streaks[key] = runs
+    return runs
+
+
+def _streaks(req, today_active: int) -> list:
+    """The goal streak (days in a row within the daily goal) and the days without an emergency unlock: what stats.streaks
+    gives, with the days before today kept for the day and only today worked out now - today ends a streak when it is over
+    the goal / has an unlock, else it adds one day to the run before it."""
+    db, today, goal = req.db, req.today, req.goal
+    first = stats.first_activity(db)
+    start = max(first.date(), today - timedelta(days=366)) if first else None
+    if start is None or start > today:
+        streak = {"goal": 0, "no_unlock": 0}
+    else:
+        run_goal, run_unlock = _streak_runs(req, goal, start)
+        unlocked_today = db.conn.execute("SELECT 1 FROM emergency_unlocks WHERE started >= ? AND started < ? LIMIT 1",
+                                         (f"{today} 00:00:00", f"{today + timedelta(days=1)} 00:00:00")).fetchone()
+        over = today_active > goal if goal else True
+        streak = {"goal": 0 if over else run_goal + 1, "no_unlock": 0 if unlocked_today else run_unlock + 1}
     out = []
     if goal:
         n = streak["goal"]
@@ -532,7 +609,8 @@ def _overview(req) -> dict:
              {"key": "sessions", "label": "Sessions", "value": str(len(sessions)),
               "sub": f"avg {stats.hm(avg)} each" if sessions else ""}]
     return {"cards": cards, "trend": _trend(req), "timeline": _timeline(req), "heat": _heat(req, digests),
-            "bars": _bars(req), "donut": _donut(req, in_range, active), "streaks": _streaks(req)}
+            "bars": _bars(req), "donut": _donut(req, in_range, active),
+            "streaks": _streaks(req, digests[req.today].active)}
 
 
 # ---------------------------------------------------------------- Apps and Websites
@@ -664,7 +742,7 @@ def _switches(req) -> dict:
     if n:
         best = max(hours)           # (a tie goes to the hour that had its first switch earliest, as Counter.most_common does)
         hour = min((h for h in range(24) if hours[h] == best), key=lambda h: sw["hour_first"][h])
-        peak = f"Peak between {hour:02d}:00 and {(hour + 1) % 24:02d}:00 - {best} switch{'es' * (best != 1)}."
+        peak = f"Peak between {hour:02d}:00 and {hour + 1:02d}:00 - {best} switch{'es' * (best != 1)}."
     rows = []
     for (kind, name), count, avg in sw["targets"][:5]:
         text, tone = VISIT_STYLES[stats.visit_style(count, avg)]
@@ -728,7 +806,8 @@ def screentime_month(ctx, year=None, month=None):
         cards.append({"key": "within", "label": "Within goal", "value": f"{within} / {past}", "sub": f"goal {stats.hm(goal)} a day"})
     else:
         cards.append({"key": "within", "label": "Within goal", "value": "-", "sub": "no daily goal set (Settings)"})
-    busy = max((d for d in days if not d["future"] and d["sec"] > 0), key=lambda d: d["sec"], default=None)
+    recorded = {d.isoformat() for d in per_day}         # (a day with only idle time counts: it is "0 m", as in the old window)
+    busy = max((d for d in days if not d["future"] and d["date"] in recorded), key=lambda d: d["sec"], default=None)
     cards.append({"key": "busiest", "label": "Busiest day", "value": stats.hm(busy["sec"]) if busy else "-",
                   "sub": _day_tip(date.fromisoformat(busy["date"]), 0).split("  ")[0] if busy else ""})
     return {"year": first.year, "month": first.month, "title": f"{MONTH_NAMES[first.month - 1]} {first.year}",
@@ -799,6 +878,62 @@ def screentime_get(ctx, tab=None, range=None):
     if not out["empty"]:
         out.update(builder(req))
     return out
+
+
+# ---------------------------------------------------------------- warming up
+
+@core.internal
+def warm(ctx, catalog_wait: float = 0.0):
+    """(a background thread) Work out what the first visit of Screen Time would otherwise work out while the owner waits: the
+    digests of the last 30 days, their daily totals, the streaks, and - once the app catalog has loaded (`catalog_wait` =
+    how many seconds to wait for it) - the app names. Returns nothing, it only fills what `_Cache` keeps; with nothing
+    recorded yet there is nothing to do. Cheap when it is warm already."""
+    req = _Req(ctx, "30 days")
+    if stats.first_activity(req.db) is None:
+        return
+    digests = req.digests(req.days)
+    _daily_totals(req, req.today - timedelta(days=29), req.today)
+    _streaks(req, digests[req.today].active)
+    catalog = shared._catalog(ctx)
+    if catalog_wait and not catalog.loaded.is_set():
+        catalog.loaded.wait(catalog_wait)
+    if catalog.loaded.is_set():
+        req.names()
+
+
+def _seconds_to_next_day(now: datetime) -> float:
+    """Seconds from `now` until the day that is running has ended AND settled: from then on there is one more finished day
+    to keep (and the streaks start again from the new day)."""
+    nxt = datetime.combine(now.date() + timedelta(days=1), datetime.min.time()) + timedelta(seconds=SETTLE_SEC + 2)
+    return max(1.0, (nxt - now).total_seconds())
+
+
+@core.internal
+def start_warmup(ctx, delay: float = WARM_DELAY_SEC):
+    """(the agent, once it is up) A daemon thread of its own that runs `warm` `delay` seconds from now, so the window and the
+    first page come first, and again each time a new day has settled - so a window opened after midnight finds the new day
+    ready too. A failure is logged and changes nothing (the page then does the work itself); it is tried again in ten
+    minutes. `thread.stop_event.set()` ends it (tests)."""
+    stop = threading.Event()
+
+    def work():
+        if stop.wait(delay):
+            return
+        wait_for_catalog = WARM_CATALOG_WAIT_SEC
+        while True:
+            try:
+                warm(ctx, wait_for_catalog)
+                wait_for_catalog = 0.0
+                seconds = _seconds_to_next_day(ctx.now())
+            except Exception:
+                log.exception("Screen Time warm-up failed")
+                seconds = WARM_RETRY_SEC
+            if stop.wait(seconds):
+                return
+    thread = threading.Thread(target=work, name="lockdown-st-warm", daemon=True)
+    thread.stop_event = stop
+    thread.start()
+    return thread
 
 
 # ---------------------------------------------------------------- Export CSV (also used by Settings)

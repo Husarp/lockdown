@@ -25,11 +25,13 @@ def open_st(shell, page, **kw):
 
 
 def wait_loaded(page, timeout=8000):
-    """The shown tab has its data for the range that is selected (the pane says which range it shows)."""
+    """The shown tab has its data for the range that is selected (the pane says which range it shows). The Overview draws its
+    lower charts a frame or two after its numbers (data-charts "pending" -> "done"): that is waited for as well."""
     page.wait_for_function("""() => { const p = document.querySelector('.st-pane:not([hidden])');
         const want = document.querySelector('[data-seg="range"] [aria-pressed="true"]')?.dataset.v;
         return !!p && !!want && !document.querySelector('.st-sk') && !p.hasAttribute('aria-busy') &&
           (p.dataset.range === want || p.dataset.pane === 'calendar') &&
+          (p.dataset.pane !== 'overview' || p.querySelector('.st-content').dataset.charts !== 'pending') &&
           !!p.querySelector('.st-content:not([hidden]) :is(.card, .vl-row), .st-empty:not([hidden])'); }""", timeout=timeout)
 
 
@@ -195,6 +197,69 @@ def test_a_range_change_updates_the_charts_in_place(shell, page, harness):
     assert page.evaluate("window.__keep.bars === document.querySelector('[data-card=\"bars\"] svg.ch') && window.__keep.trend.isConnected")
     go_range(page, "Today")
     assert page.evaluate("window.__keep.trend === document.querySelector('[data-card=\"trend\"] svg.ch')")
+
+
+def test_the_overview_paints_the_numbers_and_the_trend_first_and_the_other_charts_a_frame_later(shell, page, harness):
+    """One long task used to build all five charts. Now render() writes the four numbers and the trend, and the heatmap, bars,
+    donut, timeline and streaks follow right after the frame that painted those (data-charts says "pending" until then)."""
+    open_st(shell, page)
+    r = page.evaluate("""async () => {
+        const mod = await import('/js/pages/screentime/overview.js');
+        const a = await window.ld.call('screentime_get', 'overview', '30 days');
+        const content = document.querySelector('[data-pane="overview"] .st-content');
+        const bars = () => document.querySelectorAll('[data-card="bars"] path.ch-bar').length;
+        const frame = () => new Promise((res) => requestAnimationFrame(() => res()));
+        await frame(); await frame(); await frame();
+        const before = { bars: bars(), active: document.querySelector('[data-card="active"] .v').textContent };
+        mod.render(a);
+        const now = { state: content.dataset.charts, bars: bars(), active: document.querySelector('[data-card="active"] .v').textContent,
+          title: document.querySelector('[data-card="bars"] h3').textContent };
+        await frame();
+        const one = { state: content.dataset.charts, bars: bars() };
+        await frame(); await frame();
+        const done = { state: content.dataset.charts, bars: bars(), title: document.querySelector('[data-card="bars"] h3').textContent };
+        return { before, now, one, done, active: a.cards[0].value }; }""")
+    assert r["now"]["state"] == "pending" and r["now"]["active"] == r["active"]            # the numbers are there at once
+    assert r["now"]["bars"] == r["before"]["bars"] == 7 and r["now"]["title"] == "Last 7 days"     # the bars are not
+    assert r["one"]["state"] == "pending" and r["one"]["bars"] == 7                         # (the frame paints what was written)
+    assert r["done"] == {"state": "done", "bars": 30, "title": "Last 30 days"}
+
+
+def test_two_replies_in_a_row_cost_one_second_step(shell, page, harness):
+    open_st(shell, page)
+    r = page.evaluate("""async () => {
+        const mod = await import('/js/pages/screentime/overview.js');
+        const a = await window.ld.call('screentime_get', 'overview', '7 days'), b = await window.ld.call('screentime_get', 'overview', '30 days');
+        const content = document.querySelector('[data-pane="overview"] .st-content');
+        const frame = () => new Promise((res) => requestAnimationFrame(() => res()));
+        await frame(); await frame(); await frame();
+        let done = 0;
+        new MutationObserver(() => { if (content.dataset.charts === 'done') done++; }).observe(content, { attributes: true, attributeFilter: ['data-charts'] });
+        mod.render(a); mod.render(b);
+        for (let i = 0; i < 6; i++) await frame();
+        return { done, bars: document.querySelectorAll('[data-card="bars"] path.ch-bar').length }; }""")
+    assert r == {"done": 1, "bars": 30}                                                      # (the newest reply is the one drawn)
+
+
+def test_the_charts_of_a_render_are_laid_out_without_a_forced_layout_per_chart(shell, page, harness):
+    """Every chart reads its element's width before it draws; a read after a write lays the page out again. Rendering the
+    Overview for another range must cost about the layouts the two frames it spans make by themselves."""
+    open_st(shell, page, width=1280, height=900)
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Performance.enable")
+    count = lambda: {m["name"]: m["value"] for m in cdp.send("Performance.getMetrics")["metrics"]}["LayoutCount"]
+    page.evaluate("""async () => { window.__d = { t: await window.ld.call('screentime_get', 'overview', 'Today'), m: await window.ld.call('screentime_get', 'overview', '30 days') };
+        window.__mod = await import('/js/pages/screentime/overview.js');
+        window.__frames = async (n) => { for (let i = 0; i < n; i++) await new Promise((res) => requestAnimationFrame(() => res())); }; }""")
+    settle = "async (name) => { await window.__frames(4); window.__mod.render(window.__d[name]); await window.__frames(5); }"
+    page.evaluate(settle, "t")
+    runs = []
+    for name in ("m", "t", "m", "t"):
+        before = count()
+        page.evaluate(settle, name)
+        runs.append(count() - before)
+    print(f"\nlayouts per Overview render: {runs}")
+    assert max(runs) <= 3, runs                 # (two: one per frame that painted something; before this change four)
 
 
 def test_a_range_change_asks_only_for_the_shown_tab(shell, page, harness):
