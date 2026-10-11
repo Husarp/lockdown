@@ -1,8 +1,9 @@
 """The resident Lockdown agent with the new web window (switch: `--new-ui` or setting ui.engine = "web").
 
-Starts the local asset server, makes the three windows hidden, shows the tray icon and runs the pywebview loop.
-Workers, the Api and the publisher are added by later tickets. Heavy modules (pywebview, pystray, PIL) are imported
-inside the functions that need them, so `import agent` stays quick and never loads customtkinter."""
+Starts the local asset server, makes the three windows hidden, shows the tray icon, starts the background workers
+(resident/workers.py) and runs the pywebview loop. The Api is added by later tickets. Heavy modules (pywebview,
+pystray, PIL) are imported inside the functions that need them, so `import agent` stays quick and never loads
+customtkinter."""
 import ctypes
 import queue
 import sys
@@ -80,13 +81,19 @@ def main(argv: list[str], on_first_instance=None) -> int:
     windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)
 
+    from resident import workers
+    pool = workers.Workers(log_sink=_log)   # (the background jobs: only the process that owns the port runs them)
+
     def ready():   # (runs once the GUI loop is up)
         from gui.tray import Tray
         tray = Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, tray))
         tray.start()
+        pool.hub.listeners += [workers.tray_listener(tray), workers.publisher_listener(win)]
+        pool.start()
         if not any(a in argv for a in TRAY_ARGS):
             windows.show_main(win)
     windows.start(ready)
+    pool.stop()
     win.publisher.stop()
     server.stop()
     return 0
