@@ -48,6 +48,7 @@ VIEWS: list = []        # (label, page id, click selector, ready selector)
 SCROLLS: list = []      # (label, page id, scroll selector, probe selector)
 SCROLLS.append(("blocking overview", "blocking", "#bo-list", ".vl-row:not([hidden])"))     # R18: the Overview's virtual list
 VIEWS.append(("blocking/calendar", "blocking", '[data-tab="calendar"]', ".cal-row"))     # R22: a tab, first visit
+VIEWS.append(("modes/editor", "modes", '[data-act="new"]', '.md-editor:not([hidden]) [data-k="name"]'))     # R25: the editor module, first open
 
 # the databases: (label, days, rolled up by the retention job, counts against the budget)
 DATABASES = [("60d", 60, False, True), ("730d-raw", 730, False, False), ("730d-rolled", 730, True, True)]

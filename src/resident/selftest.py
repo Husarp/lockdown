@@ -33,6 +33,7 @@ READ_ARGS: dict = {
     "appmenu_info": ["app", "chrome.exe"],     # right-click menu of an app: category, protected, groups
     "blocking_overview_get": ["Next block"],   # Blocking > Overview, in the order that works out the most
     "calendar_get": [None, 7, "all"],           # Blocking > Calendar: the week, the busiest view
+    "mode_extra_check": [{"kind": "site", "text": "reddit.com", "name": "", "ways": ["dns"]}],   # Modes: "+ Other site or app"
 }
 
 # `read` methods that must NOT be called by the self-test or the timing run, with the reason (they open a native

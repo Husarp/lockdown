@@ -19,3 +19,4 @@ pages.about = () => import("./about.js");
 pages.antibypass = () => import("./antibypass.js");
 pages.blocking = () => import("./blocking.js");
 pages.dashboard = () => import("./dashboard.js");
+pages.modes = () => import("./modes.js");
