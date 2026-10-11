@@ -154,7 +154,7 @@ def open_page(browser, harness):
     page.errors = []
     page.on("console", lambda m: page.errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
     page.on("pageerror", lambda e: page.errors.append(f"pageerror: {e}"))
-    page.on("requestfailed", lambda r: page.errors.append(f"requestfailed: {r.url} {r.failure}"))
+    page.on("requestfailed", lambda r: page.errors.append(f"requestfailed: {r.url} {r.failure}") if "ERR_ABORTED" not in (r.failure or "") else None)   # (a cancelled <img> of a reused row is not a failure)
     return ctx, page
 
 

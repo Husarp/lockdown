@@ -22,6 +22,12 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+def cancelled(request) -> bool:
+    """A request the page itself gave up on (an <img> whose src changed before it arrived - a reused row of a virtual list
+    does that) is not a failure."""
+    return "ERR_ABORTED" in (request.failure or "")
+
+
 @pytest.fixture(scope="session")
 def browser():
     from playwright.sync_api import sync_playwright
@@ -47,7 +53,7 @@ def page(browser, harness, request):
     p.errors = []
     p.on("console", lambda m: p.errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
     p.on("pageerror", lambda e: p.errors.append(f"pageerror: {e}"))
-    p.on("requestfailed", lambda r: p.errors.append(f"requestfailed: {r.url} {r.failure}"))
+    p.on("requestfailed", lambda r: p.errors.append(f"requestfailed: {r.url} {r.failure}") if not cancelled(r) else None)
     yield p
     ctx.close()
     if not request.node.get_closest_marker("allow_console_errors"):
