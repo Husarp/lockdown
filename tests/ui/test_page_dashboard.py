@@ -81,17 +81,14 @@ def test_hide_and_move_a_card_persist_after_a_reload(shell, page, harness):
     page.click('[data-card="glance"] [data-hide="glance"]')
     page.click('[data-card="coming"] [data-move="-1"]')                            # coming before limits
     assert order(page)[:4] == ["stats", "today", "coming", "limits"] and "glance" not in order(page)
-    wait_for(page, "true")
-    deadline_ok = False
-    for _ in range(50):
+    for _ in range(50):                                                            # (the save runs in Python a moment later)
         if stored(harness, "dash.hidden") == ["glance"]:
-            deadline_ok = True
             break
         page.wait_for_timeout(50)
-    assert deadline_ok
+    assert stored(harness, "dash.hidden") == ["glance"]
     assert stored(harness, "dash.order")[:4] == ["stats", "today", "coming", "limits"]
     page.reload()
-    open_dash(shell, page) if False else page.wait_for_selector('[data-stat="screen"] .v', timeout=8000)
+    page.wait_for_selector('[data-stat="screen"] .v', timeout=8000)
     assert order(page)[:4] == ["stats", "today", "coming", "limits"] and "glance" not in order(page)
     # and back: the hidden card is a pill in Customise; clicking it shows it (and asks for its data)
     page.click('[data-k="customise"]')
@@ -184,7 +181,9 @@ def test_bedtime_card_shows_the_time_and_counts_to_it(shell, page, harness):
 def test_a_fresh_install_shows_the_empty_state_and_its_two_buttons(shell, page, harness):
     harness.db.write("DELETE FROM activity")
     harness.db.write("DELETE FROM daily_activity")
-    open_dash(shell, page) if False else shell(route="dashboard")
+    page.route("**/js/pages/index.js", lambda route: route.fulfill(     # (only this page is real: the buttons lead to stubs)
+        status=200, content_type="text/javascript", body='export const pages = {dashboard: () => import("./dashboard.js")};'))
+    shell(route="dashboard")
     page.wait_for_selector('[data-k="empty"]:not([hidden])', timeout=8000)
     assert "Tracking started" in page.inner_text('[data-k="empty"]')
     assert page.locator(".dash").is_hidden()
