@@ -128,7 +128,7 @@ def typed_path(target: str | None) -> str | None:
 # A .jar runs as javaw.exe -jar game.jar, a script as python / cmd / powershell / wscript with the file in its
 # command line: the process is the interpreter, which other programs use too. Such an item (target "game.jar") is
 # the interpreter process whose command line names that file (hosted_file) - by its file name, wherever it is.
-HOSTED = {".jar": "java", ".py": "python", ".pyw": "python", ".bat": "cmd", ".cmd": "cmd", ".ps1": "powershell",
+HOSTED = {".jar": "java", ".class": "java", ".py": "python", ".pyw": "python", ".bat": "cmd", ".cmd": "cmd", ".ps1": "powershell",
           ".vbs": "wsh", ".vbe": "wsh", ".js": "wsh", ".jse": "wsh", ".wsf": "wsh"}
 INTERPRETERS = {"java.exe": "java", "javaw.exe": "java", "py.exe": "python", "pyw.exe": "python",
                 "cmd.exe": "cmd", "powershell.exe": "powershell", "pwsh.exe": "powershell",
@@ -136,6 +136,7 @@ INTERPRETERS = {"java.exe": "java", "javaw.exe": "java", "py.exe": "python", "py
 _PYTHON = re.compile(r"pythonw?(\d+(\.\d+)*)?\.exe")   # python.exe, pythonw.exe, python3.12.exe (Store) ...
 _PS1 = re.compile(r"""'([^']+?\.ps1)'|"([^"]+?\.ps1)"|([^\s'"&;|]+?\.ps1)(?=$|[\s'";&|)])""", re.IGNORECASE)
 _PY_CLUSTER = re.compile(r"-[BdEiIOPqRsSuvVx]*[cm]")
+_BAT = re.compile(r'''"([^"]+?\.(?:bat|cmd))"|([^\s"&|<>()^,;=]+?\.(?:bat|cmd))(?=$|[\s"&|<>)^,;=])''', re.IGNORECASE)
 _CALL = re.compile(r"^call\s+", re.IGNORECASE)
 JAVA_VALUE_OPTIONS = {"-cp", "-classpath", "--class-path", "-p", "--module-path", "--upgrade-module-path",
                       "--add-modules", "--add-opens", "--add-exports", "--add-reads", "--limit-modules"}
@@ -226,7 +227,7 @@ def hosted_file(name: str | None, cmd: str | None) -> str | None:
     - cmd: the first word after /c or /k (cmd.exe /c ""C:\\x\\start.bat" " is how Explorer starts a .bat);
     - powershell / pwsh: the first .ps1 in it (-File x.ps1, -Command "& 'x.ps1'", Run with PowerShell);
     - wscript / cscript: the first argument not starting with //.
-    Not seen: java -cp with a main class, python -m, a script started without its extension, an encoded command."""
+    Other launch styles are in hosted_files. Not seen: a script started without its extension, an encoded command."""
     kind = interpreter(name)
     if not kind or not cmd:
         return None
@@ -276,6 +277,56 @@ def hosted_file(name: str | None, cmd: str | None) -> str | None:
         found = next((g for g in match.groups() if g), None) if match else None
     found = (found or "").strip().strip('"').strip().replace("/", "\\")
     return found or None
+
+
+def hosted_files(name: str | None, cmd: str | None) -> list[str]:
+    """Every program file an interpreter process may be running, for matching against the listed ones: hosted_file's,
+    plus what the other launch styles name - java -cp: each .jar on the class path and the main class
+    ("com.game.Main" -> com.game.Main.class); python -m mod.sub: mod.sub.py and sub.py; cmd /c "cd /d X && x.bat":
+    every .bat / .cmd anywhere in the /c command."""
+    first = hosted_file(name, cmd)
+    out = [first] if first else []
+    kind = interpreter(name)
+    if not kind or not cmd:
+        return out
+    if kind == "java" and not first:
+        args, k = split_command_line(cmd)[1:], 0
+        while k < len(args):
+            a = args[k]
+            if a in ("-cp", "-classpath", "--class-path") and k + 1 < len(args):
+                out += [e for e in args[k + 1].replace("/", "\\").split(";") if e.lower().endswith(".jar")]
+                k += 1
+            elif a.startswith("--class-path="):
+                out += [e for e in a[13:].replace("/", "\\").split(";") if e.lower().endswith(".jar")]
+            elif a in JAVA_VALUE_OPTIONS:
+                k += 1
+            elif not a.startswith(("-", "@")):
+                out.append(a + ".class")   # (the main class; -m module/Class is the first non-option too)
+                break
+            k += 1
+    elif kind == "python":
+        args, k = split_command_line(cmd)[1:], 0
+        while k < len(args):
+            a, module = args[k], None
+            cluster = _PY_CLUSTER.match(a)
+            if a == "-m" or (cluster and a[cluster.end() - 1] == "m"):
+                module = (a[cluster.end():] if cluster and cluster.end() < len(a) else
+                          args[k + 1] if k + 1 < len(args) else "")
+            if module:
+                out += [module + ".py", module.rsplit(".", 1)[-1] + ".py"]
+                break
+            if a in ("-c", "-") or cluster or not a.startswith("-"):
+                break
+            k += 2 if a in ("-W", "-X", "--check-hash-based-pycs") else 1
+    elif kind == "cmd":
+        switch = _CMD_SWITCH.search(_first_arg(cmd)[1])
+        if switch:
+            rest = _first_arg(cmd)[1][switch.end():].strip()
+            # (read as written, and without the outer quotes cmd strips: "cd /d X && x.bat" has x.bat inside)
+            for text in (rest, rest[1:-1] if len(rest) > 1 and rest[0] == rest[-1] == '"' else ""):
+                for match in _BAT.finditer(text):
+                    out.append(next(g for g in match.groups() if g).strip().replace("/", "\\"))
+    return out
 
 
 def shortcut_program(target: str | None, arguments: str | None = "", workdir: str | None = "") -> str | None:

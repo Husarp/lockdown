@@ -96,7 +96,7 @@ class Enforcer:
     published: dict | None = None
     app_items: dict = {}   # exe -> item, for every app on the list (track_families)
     hosted: dict = {}      # pid -> the listed program file (game.jar, tool.py ...) that interpreter runs (hosted_processes)
-    cmd_cache: dict = {}   # pid -> (exe, the program file in its command line or "") - read once per process
+    cmd_cache: dict = {}   # pid -> (exe, the program files its command line names) - read once per process
     count_running: set | None = None       # exes running at the service's last counting pass (launches)
     paths_learned_at = float("-inf")       # (learn_paths)
     def __init__(self, db: Database):
@@ -599,10 +599,12 @@ class Enforcer:
                 cmd = apps.command_line(pid)
                 if not cmd:   # (None: gone or protected; "": not filled in yet - tried again)
                     continue
-                cached = self.cmd_cache[pid] = (name, apps.hosted_file(name, cmd) or "")
-            file = apps.exe_name(cached[1])
-            if file in files and not apps.in_folder(cached[1], own) and not apps.in_folder(self._path(pid, name), own):
-                out[pid] = file
+                cached = self.cmd_cache[pid] = (name, tuple(apps.hosted_files(name, cmd)))
+            for path in cached[1]:
+                file = apps.exe_name(path)
+                if file in files and not apps.in_folder(path, own) and not apps.in_folder(self._path(pid, name), own):
+                    out[pid] = file
+                    break
         return out
 
     def _path(self, pid: int, name: str) -> str:

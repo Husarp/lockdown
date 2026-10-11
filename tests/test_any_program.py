@@ -190,7 +190,7 @@ def test_a_blocked_script_closes_its_python_but_never_another(monkeypatch):
     cmds = {20: rf'"{PYTHON}" C:\Tools\farm.py', 21: r"pythonw.exe C:\Tools\other.py", 22: "python -m farm"}
     e = make_enforcer(monkeypatch, procs, cmds, target="farm.py")
     e.enforce_apps()
-    assert e.killed == [20]
+    assert e.killed == [20, 22]                  # (python -m farm runs farm too)
 
 
 def test_a_bat_started_from_explorer_is_closed(monkeypatch):
@@ -379,3 +379,53 @@ def test_a_java_game_open_when_its_block_begins_is_asked_to_close_and_says_so(jw
     assert tray.shown == ["Block Game is blocked until 20:00."]
     w.run(0.5)
     assert not w.alive(game) and w.alive(other)
+
+
+@pytest.mark.parametrize("name, cmd, found", [
+    ("javaw.exe", r"javaw -cp lib\a.jar;game.jar com.game.Main", [r"lib\a.jar", "game.jar", "com.game.Main.class"]),
+    ("java.exe", r"java -Xmx1G -classpath C:/g/game.jar;lib/* Main arg", [r"C:\g\game.jar", "Main.class"]),
+    ("java.exe", "java -cp . Main", ["Main.class"]),
+    ("java.exe", "java -jar game.jar", ["game.jar"]),
+    ("python.exe", "python -m http.server 8000", ["http.server.py", "server.py"]),
+    ("pythonw.exe", "pythonw -u -mgame", ["game.py", "game.py"]),
+    ("python.exe", "python -W ignore -m tool", ["tool.py", "tool.py"]),
+    ("python.exe", "python -c print(1)", []),
+    ("python.exe", "python tool.py -m x", ["tool.py"]),
+    ("cmd.exe", r'cmd /c "cd /d C:\Games\X && x.bat"', [r"cd /d C:\Games\X && x.bat", "x.bat"]),
+    ("cmd.exe", r'cmd /c "cd /d "C:\My Games" && "C:\My Games\run it.cmd" arg"', [r"C:\My Games\run it.cmd"]),
+    ("cmd.exe", r"cmd /c echo hi & call sub.BAT", ["echo", "sub.BAT"]),
+    ("cmd.exe", r"cmd /c dir", ["dir"]),
+    ("notepad.exe", r"notepad -m x.bat", []),
+])
+def test_hosted_files_other_launch_styles(name, cmd, found):
+    got = apps.hosted_files(name, cmd)
+    # (hosted_file's first-word guess can be a whole chain; compare the bare file names that are clean)
+    names = [apps.exe_name(g) for g in got if " " not in apps.exe_name(g) and apps.is_hosted(g)]
+    assert names == [apps.exe_name(f) for f in found if " " not in apps.exe_name(f) and apps.is_hosted(f)]
+
+
+def test_chained_and_module_launches_are_closed(monkeypatch):
+    procs = [(1, "cmd.exe"), (2, "python.exe"), (3, "javaw.exe"), (4, "javaw.exe"), (5, "cmd.exe"), (6, "pythonw.exe")]
+    cmds = {1: r'cmd /c "cd /d C:\Games\X && farm.bat"', 2: "python -m farm", 3: r"javaw -cp lib\other.jar com.Other",
+            4: r"javaw -cp lib com.Other", 5: r"cmd /c cd /d C:\X && other.bat", 6: "pythonw -mfarm"}
+    e = make_enforcer(monkeypatch, procs, cmds, target="farm.bat")
+    e.enforce_apps()
+    assert e.killed == [1]
+    e = make_enforcer(monkeypatch, procs, cmds, target="farm.py")
+    e.enforce_apps()
+    assert e.killed == [2, 6]
+    e = make_enforcer(monkeypatch, procs, cmds, target="other.jar")
+    e.enforce_apps()
+    assert e.killed == [3]
+    e = make_enforcer(monkeypatch, procs, cmds, target="com.other.class")
+    e.enforce_apps()
+    assert e.killed == [3, 4]
+
+
+def test_a_module_in_lockdowns_own_folder_is_never_closed(monkeypatch):
+    own = str(service.APP_DIR).replace("/", "\\")
+    monkeypatch.setattr(service, "APP_DIR", own)
+    e = make_enforcer(monkeypatch, [(1, "python.exe")], {1: "python -m main"}, target="main.py",
+                      paths={1: own + r"\.venv\Scripts\python.exe"})
+    e.enforce_apps()
+    assert e.killed == []
