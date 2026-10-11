@@ -70,6 +70,8 @@ import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.guard.AdminReceiver
 import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.guard.rememberFresh
+import com.husarp.lockdown.guard.rememberNowMs
+import com.husarp.lockdown.guard.rememberTick
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
 import com.husarp.lockdown.ui.Card
@@ -83,7 +85,6 @@ import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
-import kotlinx.coroutines.delay
 import com.husarp.lockdown.ui.HairlineSpacer
 import com.husarp.lockdown.ui.SaveBar
 import com.husarp.lockdown.ui.UnsavedChanges
@@ -100,8 +101,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val ex = com.husarp.lockdown.ui.theme.LockdownTheme.extra
     var pickUnlock by remember { mutableStateOf(false) }
-    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { nowMs = System.currentTimeMillis(); delay(1000) } }
+    val nowMs = rememberNowMs(1000)      // (ticks only while the app is in front)
     val now = remember(nowMs) { TrustedTime.local(ctx) }     // trusted time: the clock set forward or back changes nothing
     val ab = cfg.antibypass
     // Read again on every return to the app (and a moment after), so a permission just granted in Android shows.
@@ -499,8 +499,7 @@ private fun PauseCard(now: LocalDateTime, guard: (Boolean, () -> Unit) -> Unit) 
 fun PauseBanner() {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
-    var tick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(5000); tick++ } }      // a pause that runs out takes the banner with it
+    val tick = rememberTick(5000)      // a pause that runs out takes the banner with it
     val until = remember(cfg.pause, tick) { Pause.until(cfg.pause, TrustedTime.local(ctx)) } ?: return
     val slate = tone(Kinds.PAUSE.hue)          // paused is slate
     androidx.compose.material3.Surface(color = slate.container, contentColor = slate.onContainer, modifier = Modifier.fillMaxWidth()) {

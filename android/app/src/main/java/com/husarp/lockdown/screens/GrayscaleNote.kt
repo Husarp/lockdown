@@ -11,7 +11,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,7 +20,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.husarp.lockdown.remind.Grayscale
-import kotlinx.coroutines.delay
 
 /** Under a grayscale switch that is on: says so when Lockdown can't change the screen's colour (the one-time adb
  *  grant is missing - an uninstall + reinstall removes it - with the command and a Copy button; or this is the
@@ -58,15 +56,15 @@ fun copyGrant(ctx: Context) {
 @Composable
 fun GrayscaleStuck() {
     val ctx = LocalContext.current
-    var tick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(5000); tick++ } }      // goes once the colour is back
+    var tapped by remember { mutableStateOf(0) }
+    val tick = com.husarp.lockdown.guard.rememberTick(5000)             // goes once the colour is back
     val fresh = com.husarp.lockdown.guard.rememberFresh()               // and at once on every return to the app
-    val stuck = remember(tick, fresh) { Grayscale.stuck(ctx) }
+    val stuck = remember(tick, tapped, fresh) { Grayscale.stuck(ctx) }
     if (!stuck) return
     val cs = MaterialTheme.colorScheme
     com.husarp.lockdown.ui.Card(color = cs.errorContainer, contentColor = cs.onErrorContainer) {
         Text("The screen is grey, but it isn't bedtime", style = MaterialTheme.typography.titleSmall)
         Text("Lockdown's grayscale should be off now.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { Grayscale.turnOffNow(ctx); tick++ }, Modifier.padding(top = 8.dp)) { Text("Turn grayscale off now") }
+        Button(onClick = { Grayscale.turnOffNow(ctx); tapped++ }, Modifier.padding(top = 8.dp)) { Text("Turn grayscale off now") }
     }
 }

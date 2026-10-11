@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationManagerCompat
@@ -68,4 +69,31 @@ fun rememberFresh(): Int {
         }
     }
     return key
+}
+
+/**
+ * A clock for a screen that shows seconds or watches for a change: wall-clock ms, refreshed every [periodMs] and once
+ * more each time the app comes to the front - and only while it is in front (RESUMED). A page left open behind other
+ * apps, or with the screen off, used to go on redrawing every second for as long as the app lived.
+ */
+@Composable
+fun rememberNowMs(periodMs: Long): Long {
+    val owner = LocalLifecycleOwner.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(owner, periodMs) {
+        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { now = System.currentTimeMillis(); delay(periodMs) } }
+    }
+    return now
+}
+
+/** A counter that goes up every [periodMs] (and when the app comes to the front), only while the app is in front -
+ *  a key for `remember(tick) { ... }` that must be read again from time to time. */
+@Composable
+fun rememberTick(periodMs: Long): Int {
+    val owner = LocalLifecycleOwner.current
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(owner, periodMs) {
+        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { tick++; delay(periodMs) } }
+    }
+    return tick
 }

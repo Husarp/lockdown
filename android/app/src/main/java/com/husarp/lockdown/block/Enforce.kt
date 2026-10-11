@@ -19,8 +19,10 @@ import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.Block
 import com.husarp.lockdown.engine.BlockMethod
 import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.GreyUsedCache
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
+import com.husarp.lockdown.engine.ModeBlocksCache
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Modes
 import com.husarp.lockdown.engine.Pause
@@ -47,6 +49,10 @@ data class Verdict(
 
 /** The live blocking decision: the tested engine (rules + groups + limit clock + usage) plus the active mode. */
 object Enforce {
+    // What the running mode blocks, and whether anything greys: kept, they were worked out on every step and DNS query.
+    private val modeBlocks = ModeBlocksCache()
+    private val greyUsed = GreyUsedCache()
+
     /** [ms] as local time - in the time zone trusted time accepts (a new zone counts only after 24 h). */
     fun ldt(ms: Long): LocalDateTime = Instant.ofEpochMilli(ms).atZone(com.husarp.lockdown.guard.TrustedTime.zone()).toLocalDateTime()
 
@@ -112,8 +118,7 @@ object Enforce {
         }
         if (item != null && emergencyUntil(cfg, item.id, now) != null) return grey
         if (Modes.blocking(mode)) {
-            val targets = Modes.targets(mode!!.mode, cfg.items, cfg.groups, cfg.categories)
-            if (pkg.lowercase() in Modes.blockedApps(targets))
+            if (modeBlocks.get(mode!!.mode, cfg.items, cfg.groups, cfg.categories).blocksApp(pkg))
                 return Verdict(label, "$label is off in ${mode.mode.name}", modeSub(mode), mode.until, "close", item?.id, reason = "mode")
         }
         return grey
@@ -123,6 +128,10 @@ object Enforce {
      *  app whose block only greys it: the screen stays grey while it's visible, not only while it's in front. */
     fun greyOnScreen(cfg: Config, pkgs: Collection<String>, now: LocalDateTime, mode: ModeState?): Boolean =
         pkgs.any { app(cfg, it, now, mode)?.grey == true }
+
+    /** Some app or group of [cfg] greys apps at all. When none does, no window can be greyed, so the service needn't
+     *  list the windows on screen (that asks every visible app for its root) just to find out. */
+    fun greyPossible(cfg: Config): Boolean = cfg.enabled && greyUsed.used(cfg.items, cfg.groups)
 
     /** Verdict for a site the browser is showing, or null. (DNS handles most site blocks; this covers
      *  time-limited / scheduled / mode-blocked sites that DNS can't express, while a browser shows them.) */
@@ -148,8 +157,7 @@ object Enforce {
         if (matches.isNotEmpty() && matches.all { emergencyUntil(cfg, it.id, now) != null }) return null
         val item = matches.firstOrNull()
         if (Modes.blocking(mode)) {
-            val targets = Modes.targets(mode!!.mode, cfg.items, cfg.groups, cfg.categories)
-            if (Modes.blockedHosts(targets).any { host.lowercase() == it || host.lowercase().endsWith(".$it") })
+            if (modeBlocks.get(mode!!.mode, cfg.items, cfg.groups, cfg.categories).blocksHost(host))
                 return Verdict(host, "$host is off in ${mode.mode.name}", modeSub(mode), mode.until, "dns", item?.id, site = true, reason = "mode")
         }
         return null

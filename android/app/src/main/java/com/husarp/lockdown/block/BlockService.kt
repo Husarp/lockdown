@@ -1,8 +1,10 @@
 package com.husarp.lockdown.block
 
 import android.accessibilityservice.AccessibilityService
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -30,6 +32,7 @@ import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
 import com.husarp.lockdown.engine.Browsers
+import com.husarp.lockdown.engine.Cadence
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
@@ -86,6 +89,13 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private val debounce = com.husarp.lockdown.engine.BlockDebounce()   // leftover events of an app whose notice was just dismissed
     private var shownApp: String? = null              // the app the notice up is for (null: a site / keyword)
     private var alertSeq = 0
+    @Volatile private var stepDelay = Cadence.STEP_MS   // the wait before the step loop's next run (stretched with the screen off)
+
+    /** The screen went off / came on / was unlocked: the loops stretched for the screen being off run now, at the
+     *  pace the screen calls for. A broadcast that can't be missed, so the stretch never delays blocking. */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) { runCatching { wake() } }
+    }
 
     override fun onServiceConnected() {
         connected = true
@@ -93,21 +103,43 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         // see every window (picture-in-picture too); also set in the config, this covers a service bound before the update
         runCatching { serviceInfo = serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS } }
         runCatching { Protection.load(this) }   // so protection lists block in the browser even without the VPN
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
+            }, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        }
         handler.post(tick)
         handler.post(bedtimeTick)
         ReminderRunner.screen = this
         lastInUse = SystemClock.elapsedRealtime(); lastRemindTick = lastInUse
         handler.post(remindTick)
         lastHistMs = lastInUse
-        handler.postDelayed(alertTick, ALERT_MS)
+        handler.postDelayed(alertTick, Cadence.ALERT_MS)
     }
 
-    /** Every few seconds: count usage for what's in front, and block it if a rule (or the active mode) says so. */
+    /** Every few seconds: count usage for what's in front, and block it if a rule (or the active mode) says so.
+     *  With the screen off nothing is in front: every 30 s (and at once when it comes on, see [wake]). */
     private val tick = object : Runnable {
         override fun run() {
             runCatching { step() }
-            handler.postDelayed(this, TICK_MS)
+            stepDelay = Cadence.stepMs(screenOn())
+            handler.postDelayed(this, stepDelay)
         }
+    }
+
+    /** The screen changed: close out the time it was off (so the first step counts none of it), then run the loops
+     *  now - each sets its own next pace from the screen's state. */
+    private fun wake() {
+        val ms = SystemClock.elapsedRealtime()
+        runCatching { UsageStore.record(emptyList(), Enforce.ldt(TrustedTime.now(this))) }
+        lastHistMs = ms; lastRemindTick = ms
+        for (r in listOf(tick, bedtimeTick, remindTick, alertTick)) { handler.removeCallbacks(r); handler.post(r) }
+    }
+
+    /** The step loop is running at its stretched (screen off) pace but an app came up: run it again soon. */
+    private fun speedUpSteps() {
+        if (stepDelay <= Cadence.STEP_MS || !screenOn()) return
+        handler.removeCallbacks(tick); handler.postDelayed(tick, Cadence.STEP_MS)
     }
 
     private fun step() {
@@ -139,7 +171,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             // the helper can't grey the screen: main greys it while an Island app that greys is in front (not
             // Lockdown itself over it), or while one of main's that greys is still on screen (picture-in-picture)
             Grayscale.app(this, (island != null && Enforce.app(cfg, island, now, mode)?.grey == true && !ReminderRunner.appVisible) ||
-                Enforce.greyOnScreen(cfg, appsOnScreen(), now, mode))
+                greyOnScreen(cfg, now, mode))
             if (quietUp) removeOverlay()
             return
         }
@@ -168,7 +200,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         // Lockdown itself in front isn't the greyed app (its windows don't move currentPkg).
         val appVerdict = Enforce.app(cfg, pkg, now, mode, label)
         val grey = appVerdict?.grey == true
-        Grayscale.app(this, (grey && !ReminderRunner.appVisible) || Enforce.greyOnScreen(cfg, appsOnScreen(), now, mode))
+        Grayscale.app(this, (grey && !ReminderRunner.appVisible) || greyOnScreen(cfg, now, mode))
         var verdict = appVerdict?.takeUnless { grey }
             ?: (if (host != null) Enforce.site(cfg, host, now, mode) else null)
         // Protection lists block in the browser without the VPN. Never gated by the emergency unlock.
@@ -248,6 +280,11 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if (caught.isNotEmpty() && Media.playing(this)) Media.pause(this)
     }
 
+    /** An app that greys is on screen (any window). Nothing greys in most setups: then the windows aren't even listed
+     *  (that asks every visible app for its root, every step). */
+    private fun greyOnScreen(cfg: Config, now: LocalDateTime, mode: ModeState?): Boolean =
+        Enforce.greyPossible(cfg) && Enforce.greyOnScreen(cfg, appsOnScreen(), now, mode)
+
     /** The apps with a window on screen, picture-in-picture included (this profile's windows only; not Lockdown). */
     private fun appsOnScreen(): List<String> {
         val ws = runCatching { windows }.getOrNull() ?: return emptyList()
@@ -269,6 +306,11 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         return pm.isInteractive && !km.isKeyguardLocked
     }
 
+    /** The screen is on (locked or not): the loops keep their quick pace. Off: they stretch ([Cadence]). When it can't
+     *  be told it counts as on, so a failure never slows blocking (or ends a loop). */
+    private fun screenOn(): Boolean =
+        runCatching { (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive }.getOrDefault(true)
+
     private fun readBar(pkg: String) { browserBarText(pkg)?.let { lastUrl[pkg] = it } }
 
     // Everything here is wrapped: an uncaught exception in an accessibility callback makes Android DISABLE the
@@ -284,7 +326,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 currentPkg = pkg
                 IslandLink.islandFront = null                   // a main-profile window came to the front
                 if (isBrowser(pkg)) readBar(pkg)
-                handler.post { runCatching { step() }; runCatching { syncRemindHidden() } }   // react immediately
+                handler.post { runCatching { step() }; runCatching { syncRemindHidden() }; speedUpSteps() }   // react immediately
             }
             if (!isBrowser(pkg)) return@runCatching
 
@@ -292,7 +334,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             val ms = System.currentTimeMillis()
             if (ms - lastBarRead < 400) return@runCatching
             lastBarRead = ms
-            val text = browserBarText(pkg)
+            val root = rootInActiveWindow      // (one fetch for the address bar and the box being typed in)
+            val text = browserBarText(pkg, root)
             if (text != null) {
                 // a new site in the same tab (a link, back) isn't a window change: judge it now, not on the next tick
                 val newSite = Browsers.hostOf(pkg, text) != Browsers.hostOf(pkg, lastUrl[pkg])
@@ -303,7 +346,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             // Duck.ai box floats over its address bar) - and block on a match
             val cfg = Store.config
             if (cfg.keywords.enabled) {
-                val hit = Keywords.hit(cfg, text) ?: Keywords.hit(cfg, typedText(pkg))
+                val hit = Keywords.hit(cfg, text) ?: Keywords.hit(cfg, typedText(pkg, root))
                 if (hit != null) block(Verdict(hit, "Blocked search", "\"$hit\" is on your blocked words.", null, "back", null, site = true), pkg, "$pkg|kw")
             }
         }
@@ -323,8 +366,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         return pkg in keyboards
     }
 
-    private fun browserBarText(pkg: String): String? {
-        val root = rootInActiveWindow ?: return null
+    private fun browserBarText(pkg: String, root: AccessibilityNodeInfo? = rootInActiveWindow): String? {
+        root ?: return null
         for (id in Browsers.barIds(pkg)) {
             val node = runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()?.firstOrNull() ?: continue
             if (node.isShowingHintText) continue          // an empty box reads as its hint ("Search"): try the next
@@ -334,8 +377,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     }
 
     /** The text in [pkg]'s box being typed in, if it's [pkg]'s and not just its hint. */
-    private fun typedText(pkg: String): String? {
-        val node = runCatching { rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return null
+    private fun typedText(pkg: String, root: AccessibilityNodeInfo? = rootInActiveWindow): String? {
+        val node = runCatching { root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() ?: return null
         if (node.packageName?.toString() != pkg || node.isShowingHintText) return null
         return node.text?.toString()
     }
@@ -433,7 +476,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 ReminderRunner.tick(this@BlockService, (ms - lastInUse) / 1000.0, dt)
             }
             runCatching { syncRemindHidden() }
-            handler.postDelayed(this, RemindersEngine.TICK_SEC * 1000L)
+            handler.postDelayed(this, Cadence.remindMs(screenOn(), (SystemClock.elapsedRealtime() - lastInUse) / 1000.0))
         }
     }
 
@@ -446,17 +489,22 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         // screen comes up (also back after a call or the lock screen). Disable alerts and Emergency don't wait.
         var readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L
         var dismiss: Button? = null
+        var shownLeft = -1      // the number on the button now: it is only touched (and redrawn) when it changes
         val countdown = object : Runnable {
             override fun run() {
                 if (p.wait <= 0) return
-                val left = RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime())
-                dismiss?.apply { text = RemindersEngine.dismissLabel(left); isEnabled = left == 0; alpha = if (left == 0) 1f else 0.4f }
+                val now = SystemClock.elapsedRealtime()
+                val left = RemindersEngine.waitLeft(readyAt, now)
+                if (left != shownLeft) {
+                    shownLeft = left
+                    dismiss?.apply { text = RemindersEngine.dismissLabel(left); isEnabled = left == 0; alpha = if (left == 0) 1f else 0.4f }
+                }
                 handler.removeCallbacks(this)
-                if (left > 0) handler.postDelayed(this, 250)
+                if (left > 0) handler.postDelayed(this, Cadence.countdownMs(readyAt, now))
             }
         }
         col.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) { readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L; countdown.run() }
+            override fun onViewAttachedToWindow(v: View) { readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L; shownLeft = -1; countdown.run() }
             override fun onViewDetachedFromWindow(v: View) { handler.removeCallbacks(countdown) }
         })
         fun fill() {
@@ -480,6 +528,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                     }
                 }.also { if (b.action == "dismiss") dismiss = it })
             }
+            shownLeft = -1      // new buttons: draw the number on them
             countdown.run()
         }
         fill()
@@ -622,7 +671,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 warnPauseEnding(now)
             }
             runCatching { Grayscale.sync(this@BlockService) }
-            handler.postDelayed(this, 60_000)
+            handler.postDelayed(this, Cadence.bedtimeMs(screenOn()))
         }
     }
 
@@ -646,7 +695,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         override fun run() {
             runCatching { syncDnd() }
             runCatching { watchBlocks() }
-            handler.postDelayed(this, ALERT_MS)
+            handler.postDelayed(this, Cadence.alertMs(screenOn()))
         }
     }
 
@@ -700,6 +749,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun onUnbind(intent: Intent?): Boolean { connected = false; return super.onUnbind(intent) }
     override fun onDestroy() {
         connected = false; removeOverlay()
+        runCatching { unregisterReceiver(screenReceiver) }
         runCatching { syncDnd(release = true) }        // the service going away puts Do Not Disturb back if we set it
         runCatching { Grayscale.app(this, false) }     // nothing watches what's in front any more: colour back
         // The bedtime screen goes with the service: count it as dismissed, so it comes back on its escalation.
@@ -710,8 +760,6 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     }
 
     companion object {
-        private const val TICK_MS = 3000L
-        private const val ALERT_MS = 5000L          // warnings / "block started" checked this often (PC WATCH_MS)
         private const val ALERT_ID = 60
         private const val KEYBOARDS_MS = 60_000L    // the enabled keyboards are looked up again after this long
         private const val ACT_GAP_MS = 2000L        // act on the same block at most this often (Back / Home)

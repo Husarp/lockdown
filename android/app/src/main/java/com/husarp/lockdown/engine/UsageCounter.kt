@@ -19,6 +19,14 @@ class UsageCounter(
     val counters: MutableMap<String, Int> = HashMap(),
     var clock: LimitClock = LimitClock.DEFAULT,
 ) {
+    /** Goes up each time a counter changes (time or an opening counted, a bucket pruned, [touch]): the store writes
+     *  the file only when this moved since its last write - an idle phone used to rewrite it unchanged every 20 s. */
+    var changes = 0L
+        private set
+
+    /** The counters were changed from outside (the Island helper's time added). */
+    fun touch() { changes++ }
+
     private var lastTick: LocalDateTime? = null
     private var front: Set<String> = emptySet()               // item ids in the foreground last tick (switches)
     private val lastSeen = HashMap<String, LocalDateTime>()   // item id -> last in use (site visit gaps)
@@ -61,6 +69,7 @@ class UsageCounter(
         if (amount == 0) return
         val k = key(owner, bucket)
         counters[k] = (counters[k] ?: 0) + amount
+        changes++
     }
 
     private fun key(owner: String, bucket: String) = "$owner\u0000$bucket"
@@ -81,7 +90,7 @@ class UsageCounter(
                 }.getOrDefault(false)
                 else -> false
             }
-            if (stale) it.remove()
+            if (stale) { it.remove(); changes++ }
         }
     }
 

@@ -8,8 +8,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -39,14 +41,16 @@ import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.Active
+import com.husarp.lockdown.engine.Cadence
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.guard.TrustedTime
 import kotlin.concurrent.thread
 
 /**
- * The Island helper's foreground service. It syncs with main (every 5 s while the phone is in use, 60 s otherwise,
- * at once when the app in front changes), and finds the Island app in front from usage events. When this copy's
+ * The Island helper's foreground service. It syncs with main (every 5 s while an Island app is in front or something
+ * waits for main, 30 s with the screen on otherwise, 3 min with it off - [Cadence.linkSyncMs] - and at once when the
+ * app in front changes or the screen comes on), and finds the Island app in front from usage events. When this copy's
  * accessibility service can't run (the usual case in a work profile) it also counts and blocks Island apps itself,
  * with the same engine, behind a "Display over other apps" block screen.
  */
@@ -62,6 +66,18 @@ class LinkService : Service() {
     private var overlay: View? = null
     private var blockedPkg: String? = null
 
+    /** The screen went off / came on / was unlocked: look at what's in front now and sync, whatever pace the loops
+     *  were stretched to for the screen being off. */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) {
+            runCatching {
+                if (!running) return@runCatching
+                for (r in listOf(poll, tick)) { handler.removeCallbacks(r); handler.post(r) }
+                IslandLink.kick()
+            }
+        }
+    }
+
     override fun onBind(intent: Intent?) = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,12 +89,17 @@ class LinkService : Service() {
         if (!running) {
             running = true
             lastTs = System.currentTimeMillis() - 60 * 60_000L
+            runCatching {
+                ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
+                }, ContextCompat.RECEIVER_NOT_EXPORTED)
+            }
             handler.post(poll)
             handler.post(tick)
             thread(isDaemon = true, name = "lockdown-link-sync") {
                 while (running && IslandLink.isHelper) {
                     runCatching { IslandLink.syncOnce(this) }
-                    IslandLink.waitKick(if (interactive()) 5_000 else 60_000)
+                    IslandLink.waitKick(Cadence.linkSyncMs(interactive(), IslandLink.localFront != null, IslandLink.syncPending(), IslandLink.syncFailing()))
                 }
             }
         }
@@ -88,6 +109,7 @@ class LinkService : Service() {
 
     override fun onDestroy() {
         running = false
+        runCatching { unregisterReceiver(screenReceiver) }
         handler.removeCallbacksAndMessages(null)
         hideBlock()
         IslandLink.kick()
@@ -100,19 +122,20 @@ class LinkService : Service() {
     // work profile Android usually never binds it).
     private fun enforcing() = !BlockService.connected
 
-    /** Every second while in use (10 s otherwise): the app in front, from this profile's usage events. */
+    /** Every second with the screen on (every minute with it off, and at once when it comes on): the app in front,
+     *  from this profile's usage events. */
     private val poll = object : Runnable {
         override fun run() {
             runCatching { pollFront() }
-            if (running) handler.postDelayed(this, if (inUse()) 1000 else 10_000)
+            if (running) handler.postDelayed(this, Cadence.linkPollMs(interactive()))
         }
     }
 
-    /** Every 3 s: count and block (the fallback). */
+    /** Every 3 s with the screen on: count and block (the fallback). */
     private val tick = object : Runnable {
         override fun run() {
             runCatching { if (enforcing()) step() else hideBlock() }
-            if (running) handler.postDelayed(this, TICK_MS)
+            if (running) handler.postDelayed(this, Cadence.linkTickMs(interactive()))
         }
     }
 
@@ -236,7 +259,6 @@ class LinkService : Service() {
     companion object {
         private const val CHANNEL = "link"
         private const val NOTIF_ID = 43
-        private const val TICK_MS = 3000L
 
         fun start(ctx: Context) = ContextCompat.startForegroundService(ctx, Intent(ctx, LinkService::class.java))
         fun stop(ctx: Context) = ctx.stopService(Intent(ctx, LinkService::class.java))

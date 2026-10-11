@@ -20,6 +20,7 @@ object UsageStore {
     private lateinit var file: File
     private val json = Json { ignoreUnknownKeys = true }
     private var lastFlush = 0L
+    private var flushedChanges = -1L      // the counter's change count at the last write
 
     lateinit var counter: UsageCounter
         private set
@@ -56,15 +57,18 @@ object UsageStore {
     /** Main: add the Island helper's time (main looper only, like [record]). */
     fun addDeltas(d: Map<String, Int>) {
         for ((k, v) in d) counter.counters[k] = (counter.counters[k] ?: 0) + v
+        counter.touch()
     }
 
     private fun maybeFlush() {
         val now = System.currentTimeMillis()
-        if (now - lastFlush >= FLUSH_SEC * 1000L) flush()
+        // (nothing counted since the last write - the screen off, or nothing limited in front - is nothing to write)
+        if (now - lastFlush >= FLUSH_SEC * 1000L && counter.changes != flushedChanges) flush()
     }
 
     fun flush() {
         lastFlush = System.currentTimeMillis()
+        flushedChanges = counter.changes
         runCatching { file.writeText(json.encodeToString(counter.counters)) }
     }
 

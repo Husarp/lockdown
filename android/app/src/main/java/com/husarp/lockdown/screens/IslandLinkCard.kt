@@ -18,9 +18,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -33,12 +31,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.guard.rememberGuard
+import com.husarp.lockdown.guard.rememberNowMs
 import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.link.LinkCrypto
 import com.husarp.lockdown.link.PairWindow
 import com.husarp.lockdown.link.Role
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -69,8 +67,7 @@ private fun MainLinkCard() {
     val st by IslandLink.mainState.collectAsStateWithLifecycle()
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
+    val now = rememberNowMs(1000)
     val mine = remember { IslandLink.versionCode(ctx) }
 
     Card {

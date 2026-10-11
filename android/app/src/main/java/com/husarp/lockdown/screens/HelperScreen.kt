@@ -24,7 +24,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,12 +38,12 @@ import com.husarp.lockdown.engine.Pause
 import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.guard.TrustedTime
+import com.husarp.lockdown.guard.rememberNowMs
 import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.link.LinkService
 import com.husarp.lockdown.ui.Kinds
 import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.usage.Usage
-import kotlinx.coroutines.delay
 
 /** Lockdown in Island while linked: no editing here (main holds the rules), just status and what it needs. */
 @Composable
@@ -52,12 +51,11 @@ fun HelperScreen() {
     val ctx = LocalContext.current
     val st by IslandLink.status.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val now = rememberNowMs(1000)
     var newCode by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         runCatching { LinkService.start(ctx) }
         IslandLink.kick()
-        while (true) { now = System.currentTimeMillis(); delay(1000) }
     }
     val mine = remember { IslandLink.versionCode(ctx) }
 

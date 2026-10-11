@@ -463,6 +463,13 @@ object IslandLink {
     private val kickLock = Object()
     private var kicked = false
 
+    /** Helper: something waits for main (time it hasn't acknowledged, "Resume now"): the sync keeps its quick pace
+     *  until it is through ([com.husarp.lockdown.engine.Cadence.linkSyncMs]). */
+    fun syncPending(): Boolean = UsageStore.inflight != null || endPauseAsked != null
+
+    /** Helper: the last sync did not get through to main. */
+    fun syncFailing(): Boolean = _status.value.problem != null
+
     /** Sync now (front changed, linked). */
     fun kick() = synchronized(kickLock) { kicked = true; kickLock.notifyAll() }
 

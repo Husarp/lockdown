@@ -42,9 +42,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -90,7 +88,6 @@ import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.usage.DayUse
 import com.husarp.lockdown.usage.Usage
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.LocalDateTime
@@ -121,8 +118,7 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
 
     // Home refreshes every minute while it's shown: today's screen time (read off the main thread, shared by the
     // hero and "Time per app"), and what's blocked or running low.
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(60_000); tick++ } }
+    val tick = com.husarp.lockdown.guard.rememberTick(60_000)      // (only while the app is in front)
     val today by produceState<DayUse?>(null, tick) {
         value = withContext(Dispatchers.IO) { runCatching { val (s, e) = Usage.dayBounds(0); Usage.range(ctx, s, e) }.getOrNull() }
     }

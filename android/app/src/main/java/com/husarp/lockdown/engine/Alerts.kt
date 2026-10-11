@@ -127,12 +127,19 @@ class BlockWatcher {
               inUse: Set<String>, cfg: AlertsCfg, paused: Boolean = false, unlockOf: (String) -> LocalDateTime? = { null }): List<String> {
         val messages = ArrayList<String>()
         urgent.clear()
+        // Both off: there is nothing to say, so don't go through every item (this runs every few seconds). What was
+        // blocked is forgotten, so switching "block started" on again later doesn't announce every rule.
+        if (!cfg.warn && !cfg.started) { prevBlocked = null; return messages }
         warned.entries.removeIf { Duration.between(it.value, now).toHours() >= 48 }
         val warnSec = cfg.warnMin * 60L
         val repeatSec = cfg.repeatSeconds.toLong()
         val upcoming = LinkedHashMap<String, Upcoming>()
         val blocked = LinkedHashMap<String, Pair<Item, Block>>()
+        // An item with no rules of its own that is in no group has no rules at all: don't build its (empty) list.
+        val grouped = HashSet<String>()
+        for (g in groups) if (!g.disabled) grouped.addAll(g.memberIds)
         if (!paused) for (item in items) {
+            if (item.rules.isEmpty() && item.id !in grouped) continue
             val eff = Rules.effectiveRules(item, groups)
             if (eff.isEmpty()) continue
             val unlock = unlockOf(item.id)
