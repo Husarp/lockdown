@@ -54,6 +54,10 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   times / random) with snooze, "did you really do it?" check and quotes; they wait while you're in a full-screen game.
   At most one interruption every 20 minutes (what falls due in between arrives together), a reminder you keep
   dismissing asks half as often for the rest of the day, and reminders due around a break ride along in it.
+  A strict break minimises your windows; apps on your "Allowed during breaks" list (Lockdown + Settings by
+  default) stay usable.
+- **New window (preview, 0.85.0):** a faster window in a new look (`Lockdown.exe --new-ui`, or Settings > "Try the
+  new window"); the old window stays the default for now.
 - **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
   emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
   pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)

@@ -16,7 +16,8 @@ look (colours follow your wallpaper; dark/light follows the phone).
   Today, Yesterday, 7 days, 30 days or a chosen date.
 - **Modes** — focus / bedtime modes that switch groups of rules on together.
 - **Reminders** — bedtime (with the escalating alerts), breaks, and your own reminders; a reminder can
-  be marked *Important* so it can't be turned off without the challenge.
+  be marked *Important* so it can't be turned off without the challenge. A strict break covers the screen
+  (Dismiss sends you home); calls, Settings, alarms and your "Allowed during breaks" apps stay usable.
 - **Guardrails (anti-bypass)** — a challenge in front of anything that loosens a rule, uninstall
   protection via device admin, a foreground service that survives being killed and reboots, and
   warnings if the accessibility service or VPN is switched off. Strong, self-imposed friction — always
