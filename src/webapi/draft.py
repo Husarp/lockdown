@@ -22,7 +22,7 @@ import time
 
 import alerts
 from reminders import MIN_INTERVAL_SEC
-from gui.draft import Draft
+from gui.draft import Draft, _group_key, _item_key
 
 from . import core
 from .core import ApiError, ok
@@ -98,8 +98,24 @@ def _guard_for(ctx):
         return run
 
     def guard(changes, proceed, cancel):
-        _local.reply = ctx.guard.request(changes, locked(proceed), locked(cancel))
+        d = ctx.draft
+        asked = _revision(d)
+
+        def save():
+            with lock:
+                if _revision(d) != asked:
+                    # edited after the ticket was issued (Auto-save off): those edits weren't in the challenge, so the
+                    # draft is judged again - it saves because the pass just opened the unlock (R28)
+                    return d.save()
+                return proceed()
+        _local.reply = ctx.guard.request(changes, save, locked(cancel))
     return guard
+
+
+def _revision(d) -> tuple:
+    """Everything the draft holds, to tell whether it changed after a challenge ticket was issued."""
+    return (tuple(sorted((i, _item_key(it)) for i, it in d.items.items())),
+            tuple(sorted((g, _group_key(gr)) for g, gr in d.groups.items())), tuple(sorted(d.settings.items())))
 
 
 def _asks(reply) -> bool:
