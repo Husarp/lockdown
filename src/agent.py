@@ -77,6 +77,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
     server = AssetServer()
     base_url = server.start()
     win = windows.create(base_url, ui_theme.background_color())
+    windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)
 
     def ready():   # (runs once the GUI loop is up)
@@ -86,5 +87,6 @@ def main(argv: list[str], on_first_instance=None) -> int:
         if not any(a in argv for a in TRAY_ARGS):
             windows.show_main(win)
     windows.start(ready)
+    win.publisher.stop()
     server.stop()
     return 0

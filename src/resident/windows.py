@@ -17,6 +17,7 @@ class Windows:
     corner: object = None
     overlay: object = None
     quitting: bool = False   # True once the agent really exits: then closing the main window is allowed
+    publisher: object = None   # the main window's Publisher (R04); told when the window is shown / hidden
 
 
 def storage_dir() -> Path:
@@ -42,7 +43,24 @@ def create(base_url: str, background: str, js_api=None) -> Windows:
         "Lockdown overlay", f"{base_url}/overlay.html", js_api=js_api, frameless=True, on_top=True,
         fullscreen=True, hidden=True, easy_drag=False, shadow=False, background_color=OVERLAY_BG)
     win.main.events.closing += lambda: close_means_hide(win)
+    win.main.events.minimized += lambda: set_visible(win, False)
+    win.main.events.restored += lambda: set_visible(win, True)
     return win
+
+
+def attach_publisher(win: Windows, log=None):
+    """Give the main window its Publisher (starts hidden: only `dirty` flags until it is shown). Stop it with
+    `win.publisher.stop()` when the agent exits."""
+    from resident.publisher import Publisher
+    win.publisher = Publisher(win.main, visible=False, log=log)
+    return win.publisher
+
+
+def set_visible(win: Windows, visible: bool):
+    """The main window is now shown (True) or hidden / minimised (False): the publisher stops or resumes pushing.
+    pywebview has no "hidden" event, so show_main / close_means_hide call this themselves."""
+    if win.publisher is not None:
+        win.publisher.set_visible(visible)
 
 
 def close_means_hide(win: Windows) -> bool:
@@ -50,6 +68,7 @@ def close_means_hide(win: Windows) -> bool:
     if win.quitting:
         return True
     win.main.hide()
+    set_visible(win, False)
     return False
 
 
@@ -57,6 +76,7 @@ def show_main(win: Windows):
     """Bring the main window up (tray Open, a second launch)."""
     win.main.show()
     win.main.restore()
+    set_visible(win, True)
 
 
 def pump_open_events(events: queue.Queue, win: Windows):
