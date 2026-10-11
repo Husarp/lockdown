@@ -35,8 +35,9 @@ object Usage {
 
     fun accessIntent() = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
-    /** Foreground time and opens per app between [start] and [end], computed from raw events. */
-    fun range(ctx: Context, start: Long, end: Long): DayUse {
+    /** Foreground time and opens per app between [start] and [end], computed from raw events. A worker passes
+     *  [stopped] (its isStopped), so a job Android stops quits reading at once. */
+    fun range(ctx: Context, start: Long, end: Long, stopped: () -> Boolean = { false }): DayUse {
         val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val events = usm.queryEvents(start, end)
         val total = HashMap<String, Long>()
@@ -44,7 +45,7 @@ object Usage {
         val resumedAt = HashMap<String, Long>()
         val hourly = LongArray(24)
         val e = UsageEvents.Event()
-        while (events.hasNextEvent()) {
+        while (events.hasNextEvent() && !stopped()) {
             events.getNextEvent(e)
             val pkg = e.packageName ?: continue
             when (e.eventType) {
@@ -72,22 +73,8 @@ object Usage {
     private fun addSpan(from: Long, to: Long, pkg: String, total: HashMap<String, Long>, hourly: LongArray) {
         if (to <= from) return
         total[pkg] = (total[pkg] ?: 0) + (to - from)
-        // spread the span across the hour buckets it touches (approximate, good enough for a bar chart)
-        val dayStart = startOfDay(from)
-        var t = from
-        while (t < to) {
-            val h = (((t - dayStart) / 3_600_000L).toInt()).coerceIn(0, 23)
-            val hourEnd = dayStart + (h + 1) * 3_600_000L
-            val chunkEnd = minOf(to, hourEnd)
-            hourly[h] += chunkEnd - t
-            t = chunkEnd
-        }
+        spreadHours(from, to, hourly, java.time.ZoneId.systemDefault())
     }
-
-    private fun startOfDay(ms: Long): Long = Calendar.getInstance().apply {
-        timeInMillis = ms
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
 
     /** Start-of-day for a day [daysAgo] days back (0 = today), and the exclusive end. */
     fun dayBounds(daysAgo: Int): Pair<Long, Long> {
@@ -166,5 +153,18 @@ object Usage {
         val pm = ctx.packageManager
         return IslandUse.rows(totals) { pkg -> runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg) } to
             IslandUse.hourRows(hours)
+    }
+}
+
+/** Spreads [from]..[to] over the 24 hour-of-day buckets of [hourly] (summed across days), split at local hour
+ *  boundaries. Every step moves forward to the next local hour, so a span across midnight or a clock change ends
+ *  (the old loop kept the first day's start and stood still at midnight: a worker spun the CPU at 100% for hours). */
+internal fun spreadHours(from: Long, to: Long, hourly: LongArray, zone: java.time.ZoneId) {
+    var t = from
+    while (t < to) {
+        val z = java.time.Instant.ofEpochMilli(t).atZone(zone)
+        val end = minOf(to, z.truncatedTo(java.time.temporal.ChronoUnit.HOURS).plusHours(1).toInstant().toEpochMilli())
+        hourly[z.hour] += end - t
+        t = end
     }
 }

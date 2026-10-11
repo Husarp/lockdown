@@ -204,6 +204,7 @@ class ProtectionWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, par
     override fun doWork(): Result {
         val p = Store.config.protection
         for (key in p.enabled) {
+            if (isStopped) return Result.success()
             runCatching { com.husarp.lockdown.block.Protection.download(applicationContext, key) }
         }
         com.husarp.lockdown.block.Protection.load(applicationContext)
@@ -218,8 +219,9 @@ class DigestWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         val total = runCatching {
             com.husarp.lockdown.usage.Usage.range(
                 applicationContext, com.husarp.lockdown.usage.Usage.lastDaysStart(7), System.currentTimeMillis(),
-            ).totalMs
+            ) { isStopped }.totalMs
         }.getOrDefault(0)
+        if (isStopped) return Result.success()   // stopped by Android: no half-counted week
         val nm = applicationContext.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null)
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
@@ -259,7 +261,7 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         val budget = cfg.settings.dailyGoalMin
         if (budget > 0 && !silent) {
             val total = runCatching {
-                com.husarp.lockdown.usage.Usage.range(applicationContext, com.husarp.lockdown.usage.Usage.dayBounds(0).first, System.currentTimeMillis()).totalMs
+                com.husarp.lockdown.usage.Usage.range(applicationContext, com.husarp.lockdown.usage.Usage.dayBounds(0).first, System.currentTimeMillis()) { isStopped }.totalMs
             }.getOrDefault(0)
             if (total >= budget * 60_000L) {
                 val prefs = applicationContext.getSharedPreferences("goal", Context.MODE_PRIVATE)
