@@ -4,7 +4,7 @@
 // the Anti-Bypass challenge (removing "Important" or weakening an important reminder). Nothing here compares old
 // with new.
 import { ld } from "./bridge.js";
-import { guarded } from "./challenge.js";
+import { CANCELLED, guarded } from "./challenge.js";
 import { openDialog } from "./dialog.js";
 import { getRange, getTp } from "./pages/reminders.js";
 import { check, days, esc, seg, tp, tpRange } from "./ui.js";
@@ -103,7 +103,8 @@ export function openReminderEditor(reminder, packs, done) {
     busy = true;
     error.textContent = "";
     try {
-      await guarded(ld.call("reminder_save_custom", collect(body, r.id)));
+      const res = await guarded(ld.call("reminder_save_custom", collect(body, r.id)));
+      if (res === CANCELLED) return;             // challenge cancelled: keep the editor open with the edits
       h.close(true);
       done();
     } catch (err) {

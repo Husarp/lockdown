@@ -295,11 +295,13 @@ def test_removing_important_in_the_editor_while_locked_asks_for_the_challenge(sh
     page.wait_for_selector(".rem-ed")
     page.uncheck('.rem-ed [data-k="guarded"]')
     save_editor(page)
-    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    page.wait_for_selector("dialog[open] .ch-phrase", timeout=5000)
     assert customs(harness)[0]["guarded"] is True
     page.keyboard.press("Escape")
-    page.wait_for_function("!document.querySelector('#dlg').open")
-    assert customs(harness)[0]["guarded"] is True
+    page.wait_for_function("!document.querySelector('.ch-phrase')")
+    assert page.is_visible(".rem-ed")                          # the editor stays open with the edits
+    assert page.is_checked('.rem-ed [data-k="guarded"]') is False
+    assert customs(harness)[0]["guarded"] is True              # nothing saved
 
 
 # ---------------------------------------------------------------- speed
