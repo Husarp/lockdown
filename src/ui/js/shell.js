@@ -243,6 +243,9 @@ async function draftCall(name, ...args) {
   try {
     const data = await ld.call(name, ...args);
     if (data && data.needs_challenge) window.dispatchEvent(new CustomEvent("ld:needs-challenge", { detail: data }));
+    else if (data && typeof data === "object" && "dirty" in data && "autosave" in data) {   // R18: the reply says where the draft stands (the same `draft` event a push would send)
+      ld.push([["draft", { dirty: !!data.dirty, autosave: !!data.autosave, change_summary: data.change_summary || "" }]]);
+    }
     return data;
   } catch (err) {
     toast(err.message || "That didn't work.");

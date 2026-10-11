@@ -111,6 +111,9 @@ class UiHarness:
 
         self.assets = AssetServer()
         self.assets.add_route("/__t/", lambda rest, query: self._static(rest, Response))
+        # app / site icons: the agent serves the real ones (resident/icons.py); here any icon is a small square, so a page
+        # that shows icons doesn't make failed requests (which fail the test). A test can still route "**/icon/**" itself.
+        self.assets.add_route("/icon/", lambda rest, query: Response(ICON_STUB, "image/svg+xml"))
         handler = _handler_class()
         handler.owner = self
         self.httpd = _QuietServer(("127.0.0.1", 0), handler)
@@ -184,6 +187,8 @@ class UiHarness:
         self.httpd.server_close()
         paths.LOG_PATH = self._old_log
 
+
+ICON_STUB = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#888"/></svg>'
 
 # The page-side part. Order matters: counters first (so every timer made by the page is counted), then the visibility
 # switch, then window.pywebview.

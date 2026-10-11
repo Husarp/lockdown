@@ -19,6 +19,8 @@ PAGE_MODULES = [
     "about",
     "categories",
     "antibypass_page",
+    "draft",
+    "blocking",
 ]
 
 for _name in PAGE_MODULES:

@@ -87,12 +87,14 @@ def main(argv: list[str], on_first_instance=None) -> int:
     # window the program-file dialog belongs to
     from resident import catalog, icons
     ctx.main_window = win.main
+    ctx.publish = win.publisher.publish   # R18: the draft tells the page (draft / blocks_changed pushes)
     ctx.catalog = app_catalog = catalog.AppCatalog(on_ready=lambda: win.publisher.publish("apps_ready", {}), seed_games=True)
     server.add_icon_routes(icons.IconService(on_ready=lambda key: win.publisher.publish("icon_ready", {"key": key}),
                                              path_of=app_catalog.path_for))
 
     from resident import reminder_ui, workers
     hub = workers.Hub(log_sink=_log)
+    ctx.hub = hub                         # (Api methods poke hub.status_worker after a change of the blocks)
     # R07: the corner window (reminder popups + notices), the tray's handlers, hub.notify.show and hub.open_page
     ui, tray_actions, toaster, corner_publisher = reminder_ui.attach(win, hub, ctx, lambda: windows.show_main(win), _log)
     pool = workers.Workers(hub=hub, reminder_ui=ui, log_sink=_log)   # (the background jobs: only the process that owns the port runs them)

@@ -46,6 +46,7 @@ BUDGET = {
 
 VIEWS: list = []        # (label, page id, click selector, ready selector)
 SCROLLS: list = []      # (label, page id, scroll selector, probe selector)
+SCROLLS.append(("blocking overview", "blocking", "#bo-list", ".vl-row:not([hidden])"))     # R18: the Overview's virtual list
 
 # the databases: (label, days, rolled up by the retention job, counts against the budget)
 DATABASES = [("60d", 60, False, True), ("730d-raw", 730, False, False), ("730d-rolled", 730, True, True)]
