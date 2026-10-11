@@ -125,6 +125,15 @@ def test_clicking_done_sends_one_corner_answer(corner, harness):
     assert corner.corner.cards() == [] and corner.host.calls[-1] == ("hide",)
 
 
+def test_an_error_in_the_corner_page_reaches_the_log(corner, harness):
+    page = corner.open()
+    before = harness.rpc_count("log_client_error")
+    page.evaluate("""() => window.dispatchEvent(new ErrorEvent('error', { message: 'corner broke', filename: 'corner.js', lineno: 3 }))""")
+    page.wait_for_timeout(200)
+    assert harness.rpc_count("log_client_error") - before == 1                    # (the bridge reports it, as on every page)
+    assert any(c[1] == "log_client_error" and "corner broke" in str(c[2]) for c in harness.calls)
+
+
 def test_the_x_dismisses_through_python(corner, harness):
     page = corner.open()
     popup(corner, "custom:water")

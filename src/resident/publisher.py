@@ -23,7 +23,7 @@ ALWAYS = frozenset({"notice", "show_page", "challenge_open", "visible"})
 # While hidden, any other page-data event becomes a `dirty` flag for these pages.
 DIRTY_PAGES = {
     "draft": ("blocking",),
-    "mode_changed": ("dashboard", "modes"),
+    "mode_changed": ("dashboard", "modes", "reminders"),
     "blocks_changed": ("dashboard", "blocking"),
     "usage_tick": ("dashboard", "screentime"),
     "icon_ready": ("dashboard", "screentime", "blocking"),

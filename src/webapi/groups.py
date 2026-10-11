@@ -22,11 +22,11 @@ import rule_forms
 import search
 from blocker import hosts, site_block
 from blocker.apps import FLAGS as APP_FLAGS
-from blocker.apps import PROTECTED, exe_name, is_hosted, make_block_type
+from blocker.apps import exe_name, is_hosted, make_block_type
 from gui.draft import RULE_FIELDS
 from rules import TIME_FMT, block_end, blocked_text, item_block
 
-from . import blocking, categories, core, shared
+from . import blocking, blocking_edit, categories, core, shared
 from . import draft as drafts
 from .core import ApiError
 
@@ -38,7 +38,6 @@ MAX_PENDING = 100
 MAX_NAMES = 8                                   # member names on a list card, then "and N more" (the page adds it)
 MAX_FOUND = 30                                  # rows the member search gives back, per kind
 NEW_WAYS = {"app": "close", "site": "dns"}      # a new group starts as an item does (close the app / can't load the site)
-APP_DEFAULT = "close"                           # what a new app item (made by adding a member) does when blocked
 APP_WORDS = (("close", "closed"), ("background", "background processes"), ("minimize", "minimised"),
              ("internet", "internet cut"))
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -279,23 +278,35 @@ def _overrides(value, name: str, now, errors: list, saved: dict | None = None):
 
 
 def _pending_target(ctx, entry) -> dict:
-    """A new thing to put on the blocklist as a member: {kind, name (lower case), display, path}. Raises ApiError."""
+    """A new thing to put on the blocklist as a member, made the way the Add tab makes it (blocking_edit._new_target): a
+    popular site brings its other host names and its friendly name, an app is closed - with its background processes when it
+    is a Steam game - and a category must be one of yours. {kind, targets, name, source, block_type, app_path}. Raises ApiError.
+    The page's `display` is kept when it is a real name; the site's own address (all the page can show) is not one."""
     if not isinstance(entry, dict):
         raise ApiError("Bad request: no such app or site.")
-    kind, name = categories._target(entry.get("kind"), entry.get("name"))
-    if kind == "app" and name in PROTECTED:
-        raise ApiError(f"{name} can't be blocked (Lockdown needs it, or Windows does).")
+    kind, name = entry.get("kind"), entry.get("name")
+    if kind == "category":
+        if not isinstance(name, str) or len(name) > categories.MAX_TARGET:
+            raise ApiError("Bad request: no such category.")
+    else:
+        kind, name = categories._target(kind, name)
+    display = entry.get("display")
+    if display is not None and (not isinstance(display, str) or len(display) > 400 or _CONTROL.search(display)):
+        raise ApiError("Bad request: the name is not valid.")
+    display = " ".join(display.split())[:MAX_DISPLAY] if isinstance(display, str) else ""
     if kind == "site":
+        typed = name
         try:
             name = hosts.normalize_host(name)
         except ValueError:
             raise ApiError("That isn't a website address Lockdown can block.") from None
-    display = entry.get("display")
-    if display is not None and (not isinstance(display, str) or len(display) > 400 or _CONTROL.search(display)):
-        raise ApiError("Bad request: the name is not valid.")
-    display = " ".join(display.split())[:MAX_DISPLAY] if isinstance(display, str) and display.strip() else name
+        if display.lower() in (typed, name):
+            display = ""
     path = categories._known_path(ctx, entry.get("path")) if kind == "app" else None
-    return {"kind": kind, "name": name, "display": display, "path": path}
+    try:
+        return blocking_edit._new_target(ctx, {"kind": kind, "target": name, "name": display, "app_path": path, "picked": True})
+    except blocking_edit._Invalid as e:
+        raise ApiError(e.errors[0]["message"]) from None
 
 
 def _group_name(value) -> str:
@@ -313,8 +324,9 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
                        member's own extra rules on top of the group's (scheduled / time_limit / switch_limit / temporary),
                        `way` its own way of being blocked in this group (null = the group's)
       ways             {app_block, site_block}: how the group blocks its members; null = each as it was set
-      pending_targets  [{kind: app|site, name, display, path, overrides, way}] new members, put on the blocklist with the
-                       group (an existing item with that name is used instead; the same member twice is refused)
+      pending_targets  [{kind: app|site|category, name, display, path, overrides, way}] new members, put on the blocklist
+                       with the group the way the Add tab would (an existing item with that name is used instead; the same
+                       member twice is refused; a category must be one of yours)
     Everything is read again here (rule_forms for the blockers). A mistake comes back as result {saved: false, errors:
     [{rule_type, field, message, member?}]} and nothing changes. Otherwise the draft changes and result is {saved: true,
     added, name}; if the save would loosen a block (a raised shared limit, a member taken out, a member's extra rule
@@ -367,19 +379,20 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
         seen = set()
         for entry in pending:
             target = _pending_target(ctx, entry)
-            existing = d.find_item(target["name"])
-            key = existing["id"] if existing else target["name"]
+            existing = next((i for i in map(d.find_item, target["targets"]) if i), None)
+            key = existing["id"] if existing else target["targets"][0]
             if key in chosen or key in seen:
-                errors.append({"rule_type": None, "field": "members", "message": f"{target['display']} is already in this group.",
-                               "member": target["display"]})
+                errors.append({"rule_type": None, "field": "members", "message": f"{target['name']} is already in this group.",
+                               "member": target["name"]})
                 continue
             seen.add(key)
             if existing:                      # an existing item decides the kind and the hosted status, not the entry
                 kind = block_method.kind(existing)
                 hosted = existing["item_type"] == "app" and is_hosted(exe_name(existing.get("target") or ""))
-            else:
-                kind, hosted = target["kind"], target["kind"] == "app" and is_hosted(target["name"])
-            overrides, way = check_member(target["display"], kind, hosted, entry.get("overrides"), entry.get("way"),
+            else:                             # (a category is blocked like an app)
+                kind = "site" if target["kind"] == "site" else "app"
+                hosted = target["kind"] == "app" and is_hosted(target["targets"][0])
+            overrides, way = check_member(target["name"], kind, hosted, entry.get("overrides"), entry.get("way"),
                                           existing["id"] if existing else None)
             targets.append((target, existing, overrides, way))
         if errors:
@@ -388,8 +401,8 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
         # nothing is wrong: change the draft
         member_rules = dict(chosen)
         for target, existing, overrides, way in targets:
-            item = existing or d.add_item(target["display"], [target["name"]], "manual", target["kind"],
-                                          APP_DEFAULT if target["kind"] == "app" else None, target["path"])
+            item = existing or d.add_item(target["name"], target["targets"], target["source"], target["kind"],
+                                          target["block_type"], target["app_path"])
             member_rules[item["id"]] = overrides
             member_ways[item["id"]] = way
         new_ways = {"app_block": app_way, "site_block": site_way,

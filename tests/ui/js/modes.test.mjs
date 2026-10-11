@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 // the page modules only touch the DOM in mount() / createEditor(), so their pure helpers import fine in node.
 const { activeSig, modeIcon, normTime, nowView, phaseTitle, startView, untilArg } = await import("../../../src/ui/js/pages/modes.js");
-const { chipsOf, iconOfTarget, waysOf } = await import("../../../src/ui/js/pages/modes/editor.js");
+const { chipsOf, iconOfTarget } = await import("../../../src/ui/js/pages/modes/editor.js");
 
 const at = (iso) => Date.UTC(...iso.match(/\d+/g).map((n, i) => (i === 1 ? +n - 1 : +n)));
 const NOW = at("2026-10-11T15:42:17");
@@ -90,9 +90,8 @@ test("chipsOf: groups, items and extras; what is gone from the blocklist has no 
   assert.equal(chips[0].icon, null);
 });
 
-test("iconOfTarget and waysOf", () => {
+test("iconOfTarget", () => {
   assert.deepEqual(iconOfTarget("site", "a.com b.com"), ["site", "a.com"]);
   assert.equal(iconOfTarget("category", "games"), null);
   assert.equal(iconOfTarget("site", ""), null);
-  assert.deepEqual(waysOf([{ checked: true, dataset: { way: "dns" } }, { checked: false, dataset: { way: "close" } }]), ["dns"]);
 });

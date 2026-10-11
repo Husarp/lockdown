@@ -451,3 +451,11 @@ def test_modes_brief(api, ctx):
     import modes
     assert data(api.modes_brief()) == [{"id": m["id"], "name": m["name"]} for m in modes.load(ctx.db)]
     assert data(api.reminders_get())["modes"] == data(api.modes_brief())
+
+
+def test_the_20_20_20_text_is_saved_and_read_back(api, ctx):
+    data(api.reminder_save_break({**BREAK, "twenty": True, "twenty_text": "Look out of the window"}))
+    assert reminders.load(ctx.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)["twenty_text"] == "Look out of the window"
+    assert data(api.reminders_get())["break"]["twenty_text"] == "Look out of the window"
+    data(api.reminder_save_break({**BREAK, "twenty": True, "twenty_text": ""}))      # empty = back to the built-in words
+    assert data(api.reminders_get())["break"]["twenty_text"] == ""

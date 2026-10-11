@@ -77,7 +77,10 @@ def dialog_open(page):
 
 
 def dialog_closed(page, timeout=8000):
-    wait_for(page, "!document.getElementById('dlg').open", timeout)
+    """Wait until the dialog is closed AND its OK / close result has been handled. `open` turns false the moment dialog.close()
+    runs, but the page handles the result (onClose) in the dialog's 'close' event, a task later - and then empties the dialog.
+    Reading the page between those two (a busy machine) sees the old state, so wait for the emptied dialog."""
+    wait_for(page, "(() => { const d = document.getElementById('dlg'); return !d.open && d.childElementCount === 0; })()", timeout)
 
 
 def type_challenge(page):
@@ -130,6 +133,11 @@ def test_the_page_opens_on_overview_with_the_list(shell, page, harness):
     assert "Temporary" in row(page, "Discord").locator(".bo-chips").inner_text()
     assert "Edit" in row(page, "Discord").inner_text() and "Remove" in row(page, "Discord").inner_text()
     assert row(page, "Discord").locator(".name span").inner_text().startswith("app · discord.exe")
+    # each item says what kind it is (Site / App); a group box has no badge
+    assert row(page, "Discord").locator(".bo-type").inner_text() == "App"
+    assert row(page, "X").locator(".bo-type").inner_text() == "Site"
+    assert row(page, "Fun").locator(".bo-type").is_hidden()
+    assert page.locator('.vl-row[data-t="member"]:not([hidden]) .bo-type').all_inner_texts() == ["Site", "Site", "Site"]
     # statuses: a member that is blocked says so once
     assert status_of(page, "Twitch").startswith("Blocked (until 17:00")
     assert status_of(page, "Fun") == "1 of 3 blocked now"
@@ -156,17 +164,13 @@ def test_empty_state(shell, page, harness):
     page.wait_for_selector('[data-tab="add"][aria-selected="true"]')
 
 
-def test_the_other_tabs_are_coming_soon_and_overview_is_shown_again_on_return(shell, page, harness):
+def test_another_tab_replaces_overview_and_overview_is_shown_again_on_return(shell, page, harness):
     open_page(shell, page)
-    unbuilt = page.evaluate("""async () => {      // a tab with no module yet (tabs get built one ticket at a time)
-      const { tabs } = await import('/js/pages/blocking/index.js');
-      return ['groups', 'add', 'protect', 'calendar'].find((id) => !tabs[id]) || null; }""")
-    other = unbuilt or "groups"
-    page.click(f'[data-tab="{other}"]')
-    page.wait_for_selector(f'[data-pane="{other}"]:not([hidden])')
-    if unbuilt:
-        assert "Coming soon" in page.inner_text(f'[data-pane="{other}"]')
+    page.click('[data-tab="groups"]')
+    page.wait_for_selector('[data-pane="groups"]:not([hidden])')
     assert page.is_hidden('[data-pane="overview"]')
+    assert "Coming soon" not in page.inner_text('[data-pane="groups"]')                # (every tab is built now)
+    wait_for(page, "document.querySelector('[data-pane=\"groups\"]').textContent.includes('Fun')")        # the seeded group is listed
     page.click('#nav [data-nav="dashboard"]')
     page.click('#nav [data-nav="blocking"]')
     page.wait_for_selector('[data-pane="overview"]:not([hidden])')
@@ -303,6 +307,41 @@ def test_remove_while_locked_opens_the_challenge_and_the_row_stays(shell, page, 
     wait_for(page, "!" + listed("Steam"))
     assert "Steam" not in saved_names(harness)
     assert page.inner_text('[data-k="notice"]') == "✓ Steam removed"
+
+
+def _locked_with_a_waiting_removal(shell, page, harness):
+    """Anti-Bypass locked, auto-save off, and Steam's removal waiting in the draft (no challenge yet: it asks at Save)."""
+    autosave(harness, False)
+    lock(harness)
+    open_page(shell, page)
+    row(page, "Steam").locator(".confirm").click()
+    row(page, "Steam").locator(".confirm").click()
+    wait_for(page, "document.querySelector('#sb-save').textContent === 'Save changes'")
+    assert "Steam" in saved_names(harness) and not dialog_open(page)
+
+
+def test_the_save_bar_asks_the_challenge_and_saves_once_it_is_typed(shell, page, harness, pushes):
+    _locked_with_a_waiting_removal(shell, page, harness)
+    page.click("#sb-save")
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    assert "Steam" in saved_names(harness)                                             # nothing is saved while it asks
+    type_challenge(page)
+    drain(harness, page)                                                               # (the agent pushes "saved"; the bar follows)
+    wait_for(page, "document.querySelector('#sb-save').textContent === 'Saved'")
+    assert "Steam" not in saved_names(harness)
+    assert page.is_hidden("#sb-discard")
+
+
+def test_cancelling_the_save_bars_challenge_saves_nothing_and_keeps_the_draft(shell, page, harness):
+    _locked_with_a_waiting_removal(shell, page, harness)
+    page.click("#sb-save")
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    page.keyboard.press("Escape")
+    dialog_closed(page)
+    settle(page)
+    assert "Steam" in saved_names(harness)
+    assert page.inner_text("#sb-save") == "Save changes" and not page.is_disabled("#sb-save") and page.is_visible("#sb-discard")
+    assert page.inner_text("#sb-text") == "Unsaved changes · Removed Steam"             # the draft is still waiting
 
 
 def test_removing_a_group_and_disabling_it(shell, page, harness):

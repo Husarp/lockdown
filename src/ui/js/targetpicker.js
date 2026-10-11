@@ -4,8 +4,11 @@
 // "Category…" (block everything in a category). What is ticked is the *selection*: the Add tab shows it as pills, asks
 // for a display name when it is one thing, and gives every picked target the same blockers.
 //
-//   const picker = createPicker({ onChange, onEnter, notify });
+//   const picker = createPicker({ onChange, onEnter, notify, compact });
 //   picker.el  picker.selection() -> [target]   picker.add(target) / .remove(key) / .clear()   picker.refresh()   picker.reset(read = true)
+//   picker.commit() -> true (typed text, if any, is now in the selection) | false (it isn't an address: notify() said why)
+//   compact: no list and no filter - the search box with its suggestions and the three buttons only, the selection is shown by the
+//   page (the Modes editor's "+ Other site or app")
 //   target = {key, kind: "site" | "app" | "category", target: host | exe | category key, name, path, picked, steam, file, mine}
 //
 // The pure helpers (how typed text is read, hosts, rows) are exported for the node tests. They only decide what to show -
@@ -96,9 +99,21 @@ export function targetOf(row) {
 /** The words for a pill / the sentence: a category is "category · Name". */
 export const labelOf = (t) => (t.kind === "category" ? `category · ${t.name}` : t.name || t.target);
 
+/** The "Category…" chooser: a menu of the categories under `btn`; `onPick(category)` gets the one chosen ({key, name, ...}). The
+ *  Add tab's picker and the Groups editor's "Add member" menu both use it. `notify(text)` says when the list isn't available. */
+export async function chooseCategory(btn, onPick, notify = () => {}) {
+  let cats, colorOf;
+  try {
+    const mod = await categories();
+    colorOf = mod.colorOf;
+    cats = await mod.loadCategories();
+  } catch (err) { notify((err && err.message) || "The categories aren't available."); return; }
+  openMenu(btn, [{ heading: "Block a whole category" }, ...cats.map((c) => ({ label: c.name, swatch: colorOf(c), onClick: () => onPick(c) }))]);
+}
+
 // ---------------------------------------------------------------- the picker
 
-export function createPicker({ onChange = () => {}, onEnter = () => {}, notify = () => {} } = {}) {
+export function createPicker({ onChange = () => {}, onEnter = () => {}, notify = () => {}, compact = false } = {}) {
   const root = el(`<div class="card ad-pick">
     <div class="ad-pick-top">
       <div class="search search-lg ad-search">${ic("search")}<input class="input" type="text" placeholder="Search apps, or type a website like example.com" autocomplete="off" spellcheck="false" aria-label="Search apps and sites" aria-autocomplete="list"></div>
@@ -113,6 +128,10 @@ export function createPicker({ onChange = () => {}, onEnter = () => {}, notify =
     <div class="ad-foot small muted" role="status" aria-live="polite"></div>
   </div>`);
   const input = root.querySelector("input.input"), listEl = root.querySelector(".ad-list"), emptyEl = root.querySelector(".ad-empty"), foot = root.querySelector(".ad-foot");
+  if (compact) {
+    root.classList.add("compact");
+    for (const n of [listEl, emptyEl, foot, root.querySelector('[data-seg="adkind"]').parentNode]) n.hidden = true;
+  }
   const sel = new Map();                // key -> target
   const files = [];                     // program files picked or typed in this session (the "Program files" filter lists them)
   let kind = "all", query = "", rows = [], seq = 0, timer = 0, early = null;
@@ -121,7 +140,8 @@ export function createPicker({ onChange = () => {}, onEnter = () => {}, notify =
   input.parentNode.append(dropdown.el);
 
   // ---------------------------------------------------------------- the list
-  const vl = createVList(listEl, { rowVar: "--row-h-sm", rows: [], key: (r) => r.key, create: createRow, render: renderRow });
+  const vl = compact ? { setRows() {}, refresh() {}, destroy() {} }
+    : createVList(listEl, { rowVar: "--row-h-sm", rows: [], key: (r) => r.key, create: createRow, render: renderRow });
 
   function createRow() {
     const n = el(`<label class="row row-sm member-row check ad-row" role="option"><span class="check"><input type="checkbox"></span>` +
@@ -150,6 +170,7 @@ export function createPicker({ onChange = () => {}, onEnter = () => {}, notify =
 
   /** Read the list again for the filter and the text (one Api call). */
   async function refresh() {
+    if (compact) return;                              // (no list to fill)
     const my = ++seq;
     let list = [], note = "", loading = false;
     try {
@@ -239,18 +260,7 @@ export function createPicker({ onChange = () => {}, onEnter = () => {}, notify =
     choose({ key: keyOf("app", r.exe), kind: "app", target: r.exe, name: r.name || r.exe, path: r.path || null, picked: true, steam: false, steamKnown: true, file: r.kind !== "exe", mine: false });
   }
 
-  async function pickCategory(btn) {
-    let cats, colorOf;
-    try {
-      const mod = await categories();
-      colorOf = mod.colorOf;
-      cats = await mod.loadCategories();
-    } catch (err) { notify((err && err.message) || "The categories aren't available."); return; }
-    openMenu(btn, [{ heading: "Block a whole category" }, ...cats.map((c) => ({
-      label: c.name, swatch: colorOf(c),
-      onClick: () => choose({ key: keyOf("category", c.key), kind: "category", target: c.key, name: c.name, path: null, picked: false, steam: false, file: false, mine: false }),
-    }))]);
-  }
+  const pickCategory = (btn) => chooseCategory(btn, (c) => choose({ key: keyOf("category", c.key), kind: "category", target: c.key, name: c.name, path: null, picked: false, steam: false, file: false, mine: false }), notify);
 
   // ---------------------------------------------------------------- events
   input.addEventListener("input", later);
@@ -280,6 +290,7 @@ export function createPicker({ onChange = () => {}, onEnter = () => {}, notify =
     el: root,
     input,
     selection: () => [...sel.values()],
+    commit: commitTyped,
     has: (key) => sel.has(key),
     add(t) { choose(t); },
     remove(key) { if (sel.delete(key)) changed(); },

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 // the modules only touch the DOM in mount() / the dialogs, so their pure helpers import fine in node.
 const g = await import("../../../src/ui/js/pages/blocking/groups.js");
 const cm = await import("../../../src/ui/js/customize_member.js");
+const ways = await import("../../../src/ui/js/ways.js");
 
 const item = (id, name, over = {}) => ({ id, name, kind: "site", type: "site", icon: { k: "site", n: `${name.toLowerCase()}.com` }, sub: `site · ${name.toLowerCase()}.com`,
   targets: [`${name.toLowerCase()}.com`], hosted: false, item_way: "dns", ...over });
@@ -26,9 +27,9 @@ test("the way button and the extras button say what the member has", () => {
 });
 
 test("wayText names the flags in a steady order", () => {
-  assert.equal(cm.wayText("app", "internet,close"), "Close app + Block internet");
-  assert.equal(cm.wayText("site", "back"), "Go back");
-  assert.equal(cm.wayText("app", null), "");
+  assert.equal(ways.wayText("app", "internet,close"), "Close app + Block internet");
+  assert.equal(ways.wayText("site", "back"), "Go back");
+  assert.equal(ways.wayText("app", null), "");
 });
 
 test("program files are told apart by their extension (display only - Python checks again)", () => {
@@ -57,6 +58,17 @@ test("a member for something new keeps what Python needs to make it", () => {
   assert.deepEqual([site.name, site.kind, site.hosted, site.target.path], ["twitch.tv", "site", false, null]);
 });
 
+test("a whole category is a new member that is blocked like an app and sent to Python as a category", () => {
+  const m = g.memberOfTarget({ kind: "category", name: "games", display: "Games" });
+  assert.deepEqual([m.id, m.key, m.name, m.kind, m.type, m.hosted], [null, "n:category:games", "Games", "app", "category", false]);
+  assert.deepEqual(m.icon, { k: "category", n: "games" });
+  assert.deepEqual(m.targets, ["games"]);
+  const p = g.donePayload(new Map([[m.key, m]]));
+  assert.deepEqual(p.pending, [{ kind: "category", name: "games", display: "Games", path: null, overrides: {}, way: null }]);
+  const listed = tick(item(4, "Games", { kind: "app", type: "category", targets: ["games"] }));
+  assert.equal(g.duplicateOf(new Map([["i:4", listed]]), m.targets).name, "Games");     // (one that is a member already is refused)
+});
+
 test("the same thing twice is found by any of its names", () => {
   const members = new Map([["i:2", tick(item(2, "YouTube", { targets: ["youtube.com", "googlevideo.com"] }))]]);
   assert.equal(g.duplicateOf(members, "YouTube.com").name, "YouTube");
@@ -82,7 +94,8 @@ test("Done sends forms for the extra rules, ids for what is listed and targets f
 
 test("the group's own way boxes: closing excludes minimizing, and an app way of 'background' only is none", () => {
   // createWays builds DOM; the pure part is checked in the browser test. Here: the module exports what the page uses.
-  assert.equal(typeof cm.createWays, "function");
-  assert.deepEqual(cm.APP_WAYS.map((w) => w[0]), ["close", "background", "minimize", "internet"]);
-  assert.deepEqual(cm.SITE_WAYS.map((w) => w[0]), ["dns", "close", "back"]);
+  assert.equal(typeof ways.createWays, "function");
+  assert.equal(cm.createWays, undefined);                                       // (one implementation: js/ways.js)
+  assert.deepEqual(ways.APP_WAYS.map((w) => w[0]), ["close", "background", "minimize", "internet"]);
+  assert.deepEqual(ways.SITE_WAYS.map((w) => w[0]), ["dns", "close", "back"]);
 });

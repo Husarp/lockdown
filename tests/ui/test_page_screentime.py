@@ -502,9 +502,15 @@ def test_export_csv_asks_where_and_says_how_many_rows(shell, page, harness, tmp_
     assert re.fullmatch(r"\d+ rows saved to .*shot\.csv", page.inner_text("#toast span"))
     assert out.read_text(encoding="utf-8").startswith("date,app,site,minutes,active minutes,category")
     monkeypatch.setattr(st_api, "_ask_save_path", lambda window, name: None)
+    page.evaluate("() => { const t = document.getElementById('toast'); t.hidden = true; t.textContent = '';"
+                  " window.__csv = null; const a = window.pywebview.api, real = a.screentime_export_csv;"
+                  " a.screentime_export_csv = async (...x) => (window.__csv = await real.apply(a, x)); }")
     page.click('[data-k="csv"]')
+    page.wait_for_function("() => window.__csv !== null")
     page.wait_for_function("() => !document.querySelector('[data-k=\"csv\"]').disabled")
-    assert "rows saved" in page.inner_text("#toast span")                      # (nothing new: the old toast stays)
+    assert page.evaluate("window.__csv")["data"].get("cancelled") is True              # the second save was cancelled...
+    assert page.evaluate("document.getElementById('toast').hidden") is True     # ...and no new toast came up
+    assert "rows saved" not in page.inner_text("#toast")
 
 
 # ---------------------------------------------------------------- speed and hygiene

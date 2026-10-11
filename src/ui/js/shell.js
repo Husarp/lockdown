@@ -156,7 +156,7 @@ function renderBanners(st) {
       actions: [{ label: "Turn back on", primary: true, onClick: () => action("antibypass_switch_on") }],
     });
   } else banners.hide("off");
-  if (!st.running) {
+  if (!st.running && !st.off) {                 // (while Lockdown is switched off, "not enforced" is already said: only that banner)
     banners.show("service", {
       tone: "k-block", icon: "alert", order: 2, title: "Blocking isn't enforced right now.",
       text: "The Lockdown service stopped. Screen time is still recorded.",
@@ -166,10 +166,11 @@ function renderBanners(st) {
 }
 
 async function startService() {
-  if (await action("service_start")) {
-    toast("Starting the service – Windows may ask for permission.");
-    setTimeout(refreshStatus, 3000);            // (once, after a click - not a poll)
-  }
+  const reply = await action("service_start");
+  if (!reply) return;
+  if (reply.starting === false) { toast(reply.message || "The service is already running."); refreshStatus(); return; }   // (Python's own words: already running / just asked)
+  toast("Starting the service – Windows may ask for permission.");
+  setTimeout(refreshStatus, 3000);            // (once, after a click - not a poll)
 }
 
 function renderDraft(d) {
@@ -257,17 +258,8 @@ function syncHidden() {
   if (was && !hidden) refreshStatus();            // back from hidden / sleep: one fresh status (and the clock)
 }
 
-// ---------------------------------------------------------------- errors in our own code go to the log
-function reportErrors() {
-  let sent = 0;
-  const send = (msg) => { if (sent++ < 5) ld.call("log_client_error", String(msg).slice(0, 2000)).catch(() => {}); };
-  window.addEventListener("error", (e) => send(`${e.message} (${e.filename}:${e.lineno})`));
-  window.addEventListener("unhandledrejection", (e) => send(`unhandled: ${e.reason && e.reason.stack ? e.reason.stack : e.reason}`));
-}
-
 // ---------------------------------------------------------------- boot
 async function boot() {
-  reportErrors();
   installControls();
   wireSaveBar();
   injectSprite();

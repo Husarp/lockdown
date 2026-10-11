@@ -72,48 +72,86 @@ export function waysProblem(group, flags) {
 
 // ---------------------------------------------------------------- the boxes
 
-const section = (g) => `<section class="ways-g" data-g="${g}" hidden><div class="ways-h"><b class="cap">${esc(TITLES[g])}</b><span class="small muted">${esc(HINTS[g])}</span></div>` +
+/** Words for a way, "Close app + its background processes" / "Can't load + Close the tab". Pure. */
+export function wayText(kind, way) {
+  const flags = new Set(String(way || "").split(",").filter(Boolean));
+  const list = kind === "site" ? SITE_WAYS : APP_WAYS;
+  return list.filter(([f]) => flags.has(f))
+    .map(([f, label]) => (f === "background" ? "its background processes" : f === "dns" ? "Can't load" : label)).join(" + ");
+}
+
+/** The flags that can't be ticked while `flag` is ticked (closing covers minimizing and going back). */
+const CLASH = {
+  site: { close: ["back"], back: ["close"] },
+  apps: { close: ["minimize"], minimize: ["close", "background"] },
+};
+const clashes = (group, flag) => (CLASH[group === "site" ? "site" : "apps"][flag] || []);
+
+const section = (g, compact) => `<section class="ways-g" data-g="${g}" hidden>` +
+  (compact ? "" : `<div class="ways-h"><b class="cap">${esc(TITLES[g])}</b><span class="small muted">${esc(HINTS[g])}</span></div>`) +
   `<div class="way-list">${LISTS[g].map(([flag, label, help]) =>
-    `<label class="check way${flag === "background" ? " way-sub" : ""}" data-w="${flag}"><input type="checkbox" data-flag="${flag}"><span class="ellip">${esc(label)}</span>` +
+    `<label class="check way${flag === "background" ? " way-sub" : ""}" data-w="${flag}"><input type="checkbox" data-flag="${flag}" data-way="${flag}"><span class="ellip">${esc(label)}</span>` +
     `<span class="way-help" tabindex="0" role="img" aria-label="${esc(label)}: ${esc(help)}" title="${esc(help)}">${ic("info")}</span></label>`).join("")}</div>` +
-  (g === "file" ? `<p class="small muted ways-note">${esc(HOSTED_NOTE)}</p>` : "") + `</section>`;
+  (g === "file" && !compact ? `<p class="small muted ways-note">${esc(HOSTED_NOTE)}</p>` : "") + `</section>`;
 
 /**
- * createWays({onChange}) -> {el, show(groups), values(group), set(group, flags), problem(group)}
- *   show(["app", "site"])   only these groups are drawn
- *   values(group)           the ticked flags, in list order
- *   set(group, flags)       tick exactly these (no onChange)
+ * The one set of "When blocked" tick boxes (the Add / Edit tab, a group's "How members are blocked", a member's own way).
+ *   createWays({onChange, groups, locked, compact}) -> {el, section(group), show(groups), values(group), value(group), set(group, flags), problem(group)}
+ *   groups    which groups to draw at once (default: all four, hidden until show([...]) names the ones needed)
+ *   locked    {group: [flags]} ways that already apply (the group's, for a site member's own way): shown ticked and greyed,
+ *             and the ways they exclude can't be ticked; they are never part of values() / value()
+ *   compact   no heading and no program-file note (the page around it says it)
+ *   section(g)  the <section> of one group, for a page that lays the groups out itself (its change events still reach onChange)
+ *   values(g) the ticked flags, in list order      value(g) the same as "close,background", or null when none
+ *   set(g, flags)  tick exactly these (an array or "close,background"; no onChange)
  * onChange({group}) runs when the owner ticks something.
  */
-export function createWays({ onChange } = {}) {
-  const root = el(`<div class="ways">${GROUPS.map(section).join("")}</div>`);
-  const state = Object.fromEntries(GROUPS.map((g) => [g, defaultWays(g)]));
-  const secs = Object.fromEntries(GROUPS.map((g) => [g, root.querySelector(`[data-g="${g}"]`)]));
+export function createWays({ onChange, groups, locked = {}, compact = false } = {}) {
+  const drawn = groups || GROUPS;
+  const root = el(`<div class="ways">${drawn.map((g) => section(g, compact)).join("")}</div>`);
+  const state = Object.fromEntries(drawn.map((g) => [g, defaultWays(g)]));
+  const secs = Object.fromEntries(drawn.map((g) => [g, root.querySelector(`[data-g="${g}"]`)]));
+  const fixed = (g) => locked[g] || [];
+  const free = (g, flags) => flags.filter((f) => !fixed(g).includes(f) && !fixed(g).some((l) => clashes(g, l).includes(f)));
+  const effective = (g) => [...new Set([...fixed(g), ...state[g]])];
+  for (const g of drawn) state[g] = free(g, state[g]);
   const paint = (g) => {
+    const all = effective(g);
     for (const label of secs[g].querySelectorAll("[data-w]")) {
       const flag = label.dataset.w, input = label.firstElementChild;
-      input.checked = state[g].includes(flag);
-      input.disabled = !enabled(g, state[g], flag);
+      input.checked = all.includes(flag);
+      input.disabled = fixed(g).includes(flag) || !enabled(g, all, flag) || fixed(g).some((l) => clashes(g, l).includes(flag));
     }
   };
-  GROUPS.forEach(paint);
-  root.addEventListener("change", (e) => {
-    const input = e.target.closest("[data-flag]");
-    if (!input) return;
-    const g = input.closest("[data-g]").dataset.g;
-    state[g] = toggleWay(g, state[g], input.dataset.flag, input.checked);
-    paint(g);
-    if (onChange) onChange({ group: g });
-  });
+  drawn.forEach(paint);
+  for (const g of drawn) {
+    secs[g].addEventListener("change", (e) => {
+      const input = e.target.closest("[data-flag]");
+      if (!input) return;
+      state[g] = free(g, toggleWay(g, effective(g), input.dataset.flag, input.checked));
+      paint(g);
+      if (onChange) onChange({ group: g });
+    });
+  }
+  if (groups) for (const g of GROUPS) if (secs[g]) secs[g].hidden = false;
+  const own = (g) => LISTS[g].map((w) => w[0]).filter((f) => state[g].includes(f));
   return {
     el: root,
-    show(groups) { for (const g of GROUPS) secs[g].hidden = !groups.includes(g); root.hidden = !groups.length; },
-    values: (g) => [...state[g]],
+    section: (g) => secs[g],
+    show(shown) { for (const g of drawn) secs[g].hidden = !shown.includes(g); root.hidden = !shown.length; },
+    values: (g) => own(g),
+    value(g) {
+      const flags = own(g);
+      if (!flags.length) return null;
+      if (g !== "site" && !effective(g).includes("close") && flags.every((f) => f === "background")) return null;
+      return flags.join(",");
+    },
     set(g, flags) {
-      const ordered = LISTS[g].map((w) => w[0]).filter((f) => flags.includes(f));
-      state[g] = ordered.reduce((acc, f) => toggleWay(g, acc, f, true), []);
+      const wanted = Array.isArray(flags) ? flags : String(flags || "").split(",").filter(Boolean);
+      const ordered = LISTS[g].map((w) => w[0]).filter((f) => wanted.includes(f));
+      state[g] = free(g, ordered.reduce((acc, f) => toggleWay(g, acc, f, true), [...fixed(g)]));
       paint(g);
     },
-    problem: (g) => waysProblem(g, state[g]),
+    problem: (g) => waysProblem(g, effective(g)),
   };
 }

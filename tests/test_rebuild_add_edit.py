@@ -662,7 +662,8 @@ def test_an_edit_with_a_mistake_changes_nothing(reddit):
 
 
 def test_a_running_temporary_block_can_be_kept_as_it_is(env):
-    end = (NOW + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    from trusted_time import now_from_db      # the Draft judges "looser" against the real trusted clock, not NOW
+    end = (now_from_db(env.db) + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
     item = env.db.add_item("Run", ["run.example"], "site", "manual", [{"rule_type": "temporary", "temp_until": end}])
     lock(env)
     kept = edit(env, item, {"name": "Run!", "rules": [{"rule_type": "temporary", "choice": "keep", "keep_until": end}]})

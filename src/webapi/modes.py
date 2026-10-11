@@ -20,6 +20,7 @@ gets the ticket; no "confirmed" flag is ever read.
 The page learns about changes from the status push; every method that changes the mode also pokes the status worker,
 so the tray and the mute rule see it at once. Names: `modes_brief` (bedtime mode list) lives in webapi/reminders.py.
 """
+import itertools
 import json
 from datetime import datetime, timedelta
 
@@ -60,6 +61,21 @@ def _poke(ctx):
     worker = getattr(getattr(ctx, "hub", None), "status_worker", None)
     if worker is not None:
         worker.poke()
+
+
+_rev = itertools.count(1)
+
+
+def _changed(ctx):
+    """Tell the pages that show a list of modes (Dashboard, Modes, Reminders) that it changed. The rev keeps the push from
+    being dropped as "the same as before" by the Publisher. `ctx.publish` is only there in the agent."""
+    fn = getattr(ctx, "publish", None)
+    if fn is not None:
+        try:
+            fn("mode_changed", {"rev": next(_rev)})
+        except Exception:
+            import traceback
+            core.log_error(f"Publishing mode_changed failed: {traceback.format_exc()}")
 
 
 def _flag(value, label) -> bool:
@@ -402,16 +418,30 @@ def _ways(value, allowed, default) -> set:
     return set(value)
 
 
-def _build_extra(spec: dict) -> dict:
-    """One "also block" site or app from what the page typed / picked -> {kind, name, targets, block_type, app_path}.
-    The same rules as the old picker: a site is tidied to its address (a known site brings its other hostnames), an app
-    is its .exe (or a program file), Windows' own processes and Lockdown can't be blocked, and one way of blocking at
-    least must be ticked."""
+def _build_extra(spec: dict, cats: dict | None = None) -> dict:
+    """One "also block" site, app or category from what the page typed / picked -> {kind, name, targets, block_type,
+    app_path}. The same rules as the old picker: a site is tidied to its address (a known site brings its other hostnames),
+    an app is its .exe (or a program file), Windows' own processes and Lockdown can't be blocked, a category is one of
+    yours (`cats`: {key: name}; its apps are closed / minimised the way ticked), and one way of blocking at least must be
+    ticked."""
     kind = spec.get("kind")
     text = spec.get("text")
     if not isinstance(text, str) or not text.strip() or len(text) > 260:
         raise ApiError("Write a site (reddit.com) or pick an app.")
     name = _text(spec.get("name"), "Display name", MAX_EXTRA_NAME)
+    if kind == "category":
+        key = text.strip()
+        if not cats or key not in cats:
+            raise ApiError("Pick one of your categories.")
+        flags = _ways(spec.get("ways"), WAYS_APP, ("close",))
+        if not flags - {"background"}:
+            raise ApiError("Tick at least one of Close app / Minimize / Block internet.")
+        if {"close", "minimize"} <= flags:
+            raise ApiError("Close app and Minimize do the same thing: pick one.")
+        if "close" not in flags:
+            flags.discard("background")
+        return {"kind": "category", "name": name or cats[key], "targets": [key], "block_type": make_block_type(flags),
+                "app_path": None}
     if kind == "site":
         host = _site_target(text)
         flags = _ways(spec.get("ways"), WAYS_SITE, ("dns",))
@@ -450,11 +480,11 @@ def _build_extra(spec: dict) -> dict:
 @core.read
 def mode_extra_check(ctx, spec):
     """Check one "+ Other site or app" and return it ready to add: {kind, name, targets, block_type, app_path}.
-    `spec`: {kind: "site" | "app", text, name, ways: ["dns" | "close" | "back"] or ["close" | "background" | "minimize" |
-    "internet"], app_path}. Changes nothing; mode_save checks every extra again."""
+    `spec`: {kind: "site" | "app" | "category", text (a category: its key), name, ways: ["dns" | "close" | "back"] or
+    ["close" | "background" | "minimize" | "internet"], app_path}. Changes nothing; mode_save checks every extra again."""
     if not isinstance(spec, dict):
         raise ApiError("Bad request.")
-    return _build_extra(spec)
+    return _build_extra(spec, _category_names(ctx))
 
 
 def _site_targets(targets) -> list:
@@ -468,28 +498,32 @@ def _site_targets(targets) -> list:
     return out
 
 
-def _recheck_extra(e: dict) -> dict:
+def _category_names(ctx) -> dict:
+    return {c["key"]: c["name"] for c in categories.load(ctx.db)}
+
+
+def _recheck_extra(e: dict, cats: dict) -> dict:
     """A new or changed entry of the "also block" list, checked again as if it had just been typed."""
     kind, targets = e.get("kind"), e.get("targets")
-    if kind not in ("site", "app") or not isinstance(targets, list) or not targets or not isinstance(targets[0], str):
-        raise ApiError("Bad request: a site or an app.")
+    if kind not in ("site", "app", "category") or not isinstance(targets, list) or not targets or not isinstance(targets[0], str):
+        raise ApiError("Bad request: a site, an app or a category.")
     way = e.get("block_type") if isinstance(e.get("block_type"), str) or e.get("block_type") is None else None
-    ways = sorted(block_flags(way) if kind == "app" else site_flags(way))
+    ways = sorted(site_flags(way) if kind == "site" else block_flags(way))
     built = _build_extra({"kind": kind, "text": targets[0], "name": e.get("name"), "app_path": e.get("app_path"),
-                          "ways": ways})
+                          "ways": ways}, cats)
     if kind == "site" and len(targets) > 1:
         built["targets"] = _site_targets(targets)
     return built
 
 
-def _extras(value, old: dict | None) -> list:
+def _extras(value, old: dict | None, cats: dict) -> list:
     """The "also block" list. An entry exactly as already stored is kept as it is; a new or changed one is checked."""
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > MAX_EXTRAS or not all(isinstance(e, dict) for e in value):
         raise ApiError("Bad request: the extra sites and apps.")
     stored = {_extras_key(e) for e in (old or {}).get("extra", [])}
-    return [e if _extras_key(e) in stored else _recheck_extra(e) for e in value]
+    return [e if _extras_key(e) in stored else _recheck_extra(e, cats) for e in value]
 
 
 def _mode_from_page(ctx, sent: dict, old: dict | None, known_cats: set) -> dict:
@@ -513,7 +547,7 @@ def _mode_from_page(ctx, sent: dict, old: dict | None, known_cats: set) -> dict:
             "categories": [c for c in dict.fromkeys(cats) if c in known_cats],
             "items": _ids(sent.get("items"), {i["id"] for i in db.list_items()}, "the blocklist items", MAX_ITEMS),
             "groups": _ids(sent.get("groups"), {g["id"] for g in db.list_groups()}, "the groups", MAX_GROUPS),
-            "extra": _extras(sent.get("extra"), old), "mute": _flag(sent.get("mute", False), "Mute notifications"),
+            "extra": _extras(sent.get("extra"), old, _category_names(ctx)), "mute": _flag(sent.get("mute", False), "Mute notifications"),
             "pomodoro": _pomodoro(sent.get("pomodoro")), "schedule": _schedule(sent.get("windows"))}
 
 
@@ -547,6 +581,7 @@ def mode_save(ctx, mode):
             current = [new if m["id"] == new["id"] else m for m in current]
         modes.save(d, current)
         _poke(ctx)
+        _changed(ctx)
         page = _page(ctx)
         page["saved_id"] = new["id"]
         return page
@@ -585,6 +620,7 @@ def mode_delete(ctx, mode_id):
         if running and running.get("id") == old["id"]:       # (a new mode may get this id again: it must not start on)
             d.set_setting(modes.ACTIVE_KEY, "")
         _poke(ctx)
+        _changed(ctx)
         return _page(ctx)
 
     if not delete_loosens(old, held):

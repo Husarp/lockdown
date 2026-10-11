@@ -3,8 +3,8 @@
 //
 // Members: only the ticked ones are shown until you type; typing finds things already on your blocklist, installed apps and
 // a website address (a virtual list, real icons); ticking adds, un-ticking takes out. Each ticked member has "Group's way /
-// Its own way" (customize_member.js) and "Extra limits" (its own rules on top of the group's). "+ Add member" browses apps or
-// types a website. A new member that is not on the blocklist yet is created when the group is saved.
+// Its own way" (customize_member.js) and "Extra limits" (its own rules on top of the group's). "+ Add member" browses apps,
+// types a website or picks a whole category. A new member that is not on the blocklist yet is created when the group is saved.
 //
 // Done sends the rail's FORMS, the members and the ways to Python (`draft_set_group`) through the draft: Python reads the forms
 // again, checks everything and decides what loosens (a member taken out, a raised shared limit, a lighter way ...) - then the
@@ -13,7 +13,8 @@ import { openAppBrowser } from "../../appbrowser.js";
 import { iconKey, iconUrl, wireIconReady } from "../../appicon.js";
 import { ld } from "../../bridge.js";
 import { CANCELLED, parseNaive } from "../../challenge.js";
-import { createWays, openCustomizeMember, openMemberWay, wayText } from "../../customize_member.js";
+import { openCustomizeMember, openMemberWay } from "../../customize_member.js";
+import { createWays, wayText } from "../../ways.js";
 import { draftCall, FAILED } from "../../draft.js";
 import { openMenu } from "../../menu.js";
 import { createRail } from "../../rules/rail.js";
@@ -73,11 +74,12 @@ export function memberOfItem(item) {
     targets: item.targets || [], hosted: !!item.hosted, itemWay: item.item_way || null, way: null, overrides: {}, target: null };
 }
 
-/** The member for something new: {kind: "app"|"site", name (exe / host), display, path}. */
+/** The member for something new: {kind: "app"|"site"|"category", name (exe / host / category key), display, path}. A category
+ *  is blocked like an app (`kind` "app"), its `type` says what it is. */
 export function memberOfTarget(t) {
-  const site = t.kind === "site";
-  return { key: `n:${t.kind}:${t.name}`, id: null, name: t.display || t.name, kind: t.kind, type: t.kind, icon: { k: t.kind, n: t.name },
-    sub: `${t.kind} · ${t.name}`, targets: [t.name], hosted: !site && isHosted(t.name), itemWay: null, way: null, overrides: {},
+  const site = t.kind === "site", category = t.kind === "category";
+  return { key: `n:${t.kind}:${t.name}`, id: null, name: t.display || t.name, kind: category ? "app" : t.kind, type: t.kind, icon: { k: t.kind, n: t.name },
+    sub: category ? "category · everything in it" : `${t.kind} · ${t.name}`, targets: [t.name], hosted: !site && !category && isHosted(t.name), itemWay: null, way: null, overrides: {},
     target: { kind: t.kind, name: t.name, display: t.display || t.name, path: t.path || null } };
 }
 
@@ -261,8 +263,8 @@ async function openEditor(id) {
   els.remove.hidden = els.disable.hidden = g.new;
   setText(els.disable, g.disabled ? "Enable" : "Disable");
   rail.load(g.rules);
-  ways.app.set(g.ways.app);
-  ways.site.set(g.ways.site);
+  ways.set("app", g.ways.app);
+  ways.set("site", g.ways.site);
   noteWays();
   for (const m of g.members) {
     ed.members.set(`i:${m.id}`, { key: `i:${m.id}`, id: m.id, name: m.name, kind: m.kind, type: m.type, icon: m.icon, sub: m.sub,
@@ -292,8 +294,8 @@ function clearErrors() {
 
 function noteWays() {
   const unset = [];
-  if (!ways.app.value()) unset.push("apps");
-  if (!ways.site.value()) unset.push("sites");
+  if (!ways.value("app")) unset.push("apps");
+  if (!ways.value("site")) unset.push("sites");
   setText(els.wnote, unset.length ? `Nothing ticked for ${unset.join(" and ")}: each is blocked the way it was set when it was added.` : "");
 }
 
@@ -321,7 +323,7 @@ async function done() {
   const { id, isNew } = ed;
   try {
     const { members, pending } = donePayload(ed.members);
-    const r = await draftCall("draft_set_group", id, name, rail.forms(), members, { app_block: ways.app.value(), site_block: ways.site.value() }, pending);
+    const r = await draftCall("draft_set_group", id, name, rail.forms(), members, { app_block: ways.value("app"), site_block: ways.value("site") }, pending);
     if (r === FAILED || r === CANCELLED) return;                  // a toast said why / the challenge was cancelled: the editor stays
     if (r && r.result && r.result.saved === false) { showErrors(r.result.errors || []); return; }
     closeEditor();
@@ -472,7 +474,7 @@ function onTick(node, box) {
 }
 
 function groupWayFor(member) {
-  return (member.kind === "site" ? ways.site : ways.app).value();
+  return ways.value(member.kind === "site" ? "site" : "app");
 }
 
 function chooseWay(btn, member) {
@@ -512,7 +514,15 @@ function addMenu(btn) {
   openMenu(btn, [
     { label: "App or program file…", icon: "app", onClick: () => openAppBrowser({ mode: "pick", onPick: (app) => addTarget({ kind: "app", name: app.exe, display: app.name, path: app.path }) }) },
     { label: "Website…", icon: "globe", onClick: () => { els.search.focus(); els.mhint.textContent = "Type the website address, e.g. reddit.com, then tick it."; } },
+    { label: "Category…", icon: "folder", onClick: () => addCategory(btn) },
   ]);
+}
+
+/** "Category…": the same chooser as the Add tab's picker (loaded when it is needed); the one picked becomes a new member. */
+function addCategory(btn) {
+  import("../../targetpicker.js")
+    .then((m) => m.chooseCategory(btn, (c) => addTarget({ kind: "category", name: c.key, display: c.name }), toast))
+    .catch(() => toast("The categories aren't available."));
 }
 
 // ---------------------------------------------------------------- the tab contract
@@ -554,9 +564,9 @@ export function mount(host, t) {
   q("removeslot").replaceWith(els.remove);
   rail = createRail({ shared: true, types: S.RULE_TYPES, name: () => nameValue(), now: trustedNow, requireOne: true, compact: true });
   q("rail").replaceWith(rail.el);
-  ways = { app: createWays("app", { onChange: noteWays }), site: createWays("site", { onChange: noteWays }) };
-  q("wapp").append(ways.app.el);
-  q("wsite").append(ways.site.el);
+  ways = createWays({ groups: ["app", "site"], compact: true, onChange: noteWays });
+  q("wapp").append(ways.section("app"));
+  q("wsite").append(ways.section("site"));
   vl = createVList(els.mlist, { rowVar: "--row-h-sm", rows: [], key: (row) => row.key, create: createMemberRow, render: renderMemberRow });
   els.mlist.setAttribute("role", "list");
 

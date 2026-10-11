@@ -345,12 +345,15 @@ def test_status_pushes_from_the_real_snapshot_render_in_the_same_places(shell, p
     antibypass.switch_off(harness.db, now)
     harness.set_service(False)
     push("status", snapshot_public(harness))
-    assert page.is_visible('[data-banner="off"]') and page.is_visible('[data-banner="service"]')
+    assert page.is_visible('[data-banner="off"]') and page.is_hidden('[data-banner="service"]')       # (while off, only "off" is said)
     assert "since 15:42" in page.inner_text('[data-banner="off"]')
     assert page.inner_text("#svc-text") == "Service not running"
     assert page.is_visible("#tb-prot-off")
-    # everything back to normal: a delta with only what changed
+    # switched back on while the service is still stopped: now the service banner shows
     antibypass.switch_on(harness.db)
+    push("status", {"off": None})
+    assert page.is_hidden('[data-banner="off"]') and page.is_visible('[data-banner="service"]')
+    # everything back to normal: a delta with only what changed
     harness.set_service(True)
     push("status", {"off": None, "running": True})
     assert page.is_hidden('[data-banner="off"]') and page.is_hidden('[data-banner="service"]')
@@ -396,6 +399,19 @@ def test_service_stopped_banner_and_start_button(shell, page, harness, monkeypat
     page.wait_for_function("document.querySelector('[data-banner=service]').hidden")
     assert page.inner_text("#svc-text") == "Service running"
     assert page.evaluate("document.querySelector('#svc-dot').classList.contains('pulse')") is True
+
+
+def test_start_service_says_pythons_words_when_it_is_not_starting(shell, page, harness, monkeypatch):
+    import webapi.shell as shell_api
+    started = []
+    monkeypatch.setattr(shell_api, "_run_elevated", lambda program, params: started.append(program))
+    monkeypatch.setitem(shell_api._service_start, "last", time.monotonic())            # "just requested"
+    harness.set_service(False)
+    shell()
+    page.click('[data-banner="service"] button')
+    page.wait_for_selector("#toast:not([hidden])")
+    assert page.inner_text("#toast") == "Starting was just requested. Give it a moment."
+    assert started == []                                                              # (nothing was started again)
 
 
 def test_off_banner_and_turn_back_on(shell, page, harness):

@@ -560,7 +560,8 @@ def test_a_known_site_brings_its_other_hostnames(api):
     ({"text": "reddit.com", "ways": []}, "Tick at least one of Can't load it"),
     ({"text": "reddit.com", "ways": ["close", "back"]}, "pick one"),
     ({"text": "reddit.com", "ways": ["bogus"]}, "Bad request"),
-    ({"kind": "category", "text": "x"}, "site or an app"),
+    ({"kind": "category", "text": "x"}, "Pick one of your categories"),
+    ({"kind": "folder", "text": "x"}, "site or an app"),
 ])
 def test_a_bad_site_is_refused_with_words(api, spec, words):
     assert words in refused(check(api, **spec))
@@ -616,3 +617,63 @@ def test_a_changed_extra_is_checked_like_a_new_one(ctx, api):
     out = data(api.mode_save(edit(ctx, mid, extra=[{**good, "block_type": "dns,close"}])))
     assert out["saved_id"] == mid and stored(ctx, mid)["extra"][0]["block_type"] == "dns,close"
     assert refused(api.mode_save(edit(ctx, mid, extra=[{**good, "block_type": "dns,close,back"}])))
+
+
+# ---------------------------------------------------------------- telling the other pages
+
+@pytest.fixture
+def published(ctx):
+    """What the agent's Publisher would be handed: every ctx.publish(event, payload)."""
+    seen = []
+    ctx.publish = lambda event, payload=None, key=None: seen.append((event, payload))
+    return seen
+
+
+def mode_events(published):
+    return [p for e, p in published if e == "mode_changed"]
+
+
+def test_creating_and_deleting_a_mode_publishes_mode_changed(api, published):
+    mid = new_mode(api)
+    assert len(mode_events(published)) == 1
+    data(api.mode_delete(mid))
+    changed = mode_events(published)
+    assert len(changed) == 2 and changed[0] != changed[1]          # (the rev differs: the Publisher drops a repeated payload)
+
+
+def test_a_failed_save_or_a_free_look_publishes_nothing(api, published):
+    refused(api.mode_save({"id": "", "name": "  "}))
+    data(api.modes_get())
+    data(api.mode_delete("custom9"))                              # (already gone)
+    assert mode_events(published) == []
+
+
+def test_a_challenge_passed_save_publishes_mode_changed_only_once_it_is_made(ctx, api, published):
+    start_locked(ctx, "work")
+    reply = data(api.mode_save(edit(ctx, "work", categories=[])))
+    assert reply["needs_challenge"] and mode_events(published) == []          # nothing happened yet
+    pass_challenge(ctx, reply["ticket"], api)
+    assert len(mode_events(published)) == 1
+
+
+def test_a_challenge_passed_delete_publishes_mode_changed_once_it_is_made(locked, api, published):
+    mid = new_mode(api, windows=WEEKDAYS)                          # (a schedule: deleting it asks)
+    published.clear()
+    reply = data(api.mode_delete(mid))
+    assert reply["needs_challenge"] and mode_events(published) == []
+    pass_challenge(locked, reply["ticket"], api)
+    assert len(mode_events(published)) == 1
+
+
+def test_a_cancelled_challenge_publishes_nothing(ctx, api, published):
+    start_locked(ctx, "work")
+    ticket = data(api.mode_save(edit(ctx, "work", categories=[])))["ticket"]
+    api.challenge_cancel(ticket)
+    assert mode_events(published) == []
+
+
+def test_a_publisher_that_breaks_never_breaks_the_save(ctx, api):
+    def boom(event, payload=None, key=None):
+        raise RuntimeError("window gone")
+    ctx.publish = boom
+    assert new_mode(api) == "custom1"

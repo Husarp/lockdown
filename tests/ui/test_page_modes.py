@@ -52,7 +52,9 @@ def now_text(page):
 
 
 def dialog_closed(page, timeout=8000):
-    wait_for(page, "!document.getElementById('dlg').open", timeout)
+    """Closed AND its result handled: `open` turns false at dialog.close(), but the page handles the result in the dialog's
+    'close' event, a task later, and only then empties the dialog (see test_page_blocking_groups.dialog_closed)."""
+    wait_for(page, "(() => { const d = document.getElementById('dlg'); return !d.open && d.childElementCount === 0; })()", timeout)
 
 
 def type_challenge(page):
@@ -472,7 +474,7 @@ def test_also_block_from_the_blocklist_and_other_sites(shell, page, harness):
     open_editor(page, "relax")
     wait_for(page, "document.querySelectorAll('.md-editor [data-k=\"from-list\"] option').length > 2")
     page.select_option('.md-editor [data-k="from-list"]', f"i:{yt}")
-    assert page.locator(".md-editor .pill").count() == 1 and "YouTube" in page.inner_text(".md-editor .pills")
+    assert page.locator('.md-editor [data-k="chips"] .pill').count() == 1 and "YouTube" in page.inner_text(".md-editor .pills")
     assert page.is_hidden('.md-editor [data-k="nothing"]')
     # the item can't be added twice: its option is off now
     assert page.evaluate(f"document.querySelector('.md-editor [data-k=\"from-list\"] option[value=\"i:{yt}\"]').disabled")
@@ -483,20 +485,18 @@ def test_also_block_from_the_blocklist_and_other_sites(shell, page, harness):
     assert "Write a site like reddit.com" in page.inner_text('.md-editor [data-k="p-err"]')
     page.fill('.md-editor [data-k="p-text"]', "https://www.Example.org/x")
     page.click('.md-editor [data-act="pick-add"]')
-    wait_for(page, "document.querySelectorAll('.md-editor .pill').length === 2")
+    wait_for(page, "document.querySelectorAll('.md-editor [data-k=\"chips\"] .pill').length === 2")
     assert page.is_hidden('.md-editor [data-k="pick"]')
     page.click('.md-editor [data-act="other"]')
-    page.click('.md-editor .seg[data-seg="pkind"] [data-v="app"]')
-    assert page.is_visible('.md-editor [data-act="browse"]') and page.is_visible('.md-editor [data-k="ways-app"]')
-    page.fill('.md-editor [data-k="p-text"]', "explorer.exe")
+    page.fill('.md-editor [data-k="p-text"]', "explorer.exe")                       # (typed as an app: the app ways show)
     page.click('.md-editor [data-act="pick-add"]')
     wait_for(page, "document.querySelector('.md-editor [data-k=\"p-err\"]').textContent.length > 0")
     assert "can't be blocked" in page.inner_text('.md-editor [data-k="p-err"]')
     page.fill('.md-editor [data-k="p-text"]', "discord.exe")
     page.click('.md-editor [data-act="pick-add"]')
-    wait_for(page, "document.querySelectorAll('.md-editor .pill').length === 3")
-    page.click('.md-editor .pill:has-text("Example") [data-act="chip-x"]')
-    assert page.locator(".md-editor .pill").count() == 2
+    wait_for(page, "document.querySelectorAll('.md-editor [data-k=\"chips\"] .pill').length === 3")
+    page.click('.md-editor [data-k="chips"] .pill:has-text("Example") [data-act="chip-x"]')
+    assert page.locator('.md-editor [data-k="chips"] .pill').count() == 2
     page.click('.md-editor [data-act="done"]')
     wait_for(page, "document.querySelector('.md-editor').hidden")
     m = stored(harness, "relax")
@@ -506,18 +506,55 @@ def test_also_block_from_the_blocklist_and_other_sites(shell, page, harness):
     assert "2 more" in page.inner_text('.md-row[data-id="relax"]')
 
 
-def test_the_ways_exclude_each_other_like_the_old_picker(shell, page, harness):
+def test_the_ways_follow_what_is_typed_and_exclude_each_other_like_the_old_picker(shell, page, harness):
     open_page(shell, page)
     open_editor(page, "relax")
     page.click('.md-editor [data-act="other"]')
-    page.check('.md-editor [data-k="ways-site"] [data-way="close"]')
-    assert page.is_checked('.md-editor [data-k="ways-site"] [data-way="dns"]')
-    page.check('.md-editor [data-k="ways-site"] [data-way="back"]')
-    assert not page.is_checked('.md-editor [data-k="ways-site"] [data-way="close"]')
-    page.click('.md-editor .seg[data-seg="pkind"] [data-v="app"]')
-    page.check('.md-editor [data-k="ways-app"] [data-way="minimize"]')
-    assert not page.is_checked('.md-editor [data-k="ways-app"] [data-way="close"]')
-    assert page.is_disabled('.md-editor [data-k="ways-app"] [data-way="background"]')
+    page.wait_for_selector('.md-editor [data-k="p-text"]')
+    assert page.is_hidden('.md-editor [data-g="site"]') and page.is_hidden('.md-editor [data-g="app"]')       # (nothing typed yet)
+    page.fill('.md-editor [data-k="p-text"]', "reddit.com")                      # a site: the site ways, at once
+    assert page.is_visible('.md-editor [data-g="site"]') and page.is_hidden('.md-editor [data-g="app"]')
+    page.check('.md-editor [data-g="site"] [data-way="close"]')
+    assert page.is_checked('.md-editor [data-g="site"] [data-way="dns"]')
+    page.check('.md-editor [data-g="site"] [data-way="back"]')
+    assert not page.is_checked('.md-editor [data-g="site"] [data-way="close"]')
+    page.fill('.md-editor [data-k="p-text"]', "discord.exe")                     # an app: the app ways
+    assert page.is_visible('.md-editor [data-g="app"]') and page.is_hidden('.md-editor [data-g="site"]')
+    page.check('.md-editor [data-g="app"] [data-way="minimize"]')
+    assert not page.is_checked('.md-editor [data-g="app"] [data-way="close"]')
+    assert page.is_disabled('.md-editor [data-g="app"] [data-way="background"]')
+    page.fill('.md-editor [data-k="p-text"]', "tool.jar")                        # a program file: Close / Minimize and the note
+    assert page.is_visible('.md-editor [data-g="file"]') and "Java game or a script" in page.inner_text('.md-editor [data-g="file"]')
+    assert page.eval_on_selector_all('.md-editor [data-g="file"] [data-way]', "els => els.map(e => e.dataset.way)") == ["close", "minimize"]
+
+
+def test_the_picker_suggests_has_a_category_button_and_a_display_name(shell, page, harness):
+    open_page(shell, page)
+    open_editor(page, "relax")
+    page.click('.md-editor [data-act="other"]')
+    page.fill('.md-editor [data-k="p-text"]', "redd")
+    page.wait_for_selector('.md-editor .sg:not([hidden]) .sg-row', timeout=5000)                         # legacy's suggestions
+    assert "reddit" in page.inner_text('.md-editor .sg').lower()
+    page.click('.md-editor .sg-row:has-text("reddit")')                          # picking one selects it
+    wait_for(page, "document.querySelectorAll('.md-editor .pill[data-key]').length === 1")
+    assert page.is_visible('.md-editor [data-k="p-namewrap"]')
+    page.fill('.md-editor [data-k="p-name"]', "Time sink")
+    page.click('.md-editor [data-act="pick-add"]')
+    wait_for(page, "document.querySelectorAll('.md-editor [data-k=\"chips\"] .pill').length === 1")
+    assert "Time sink" in page.inner_text('.md-editor [data-k="chips"]')
+    # the Category... button blocks everything in a category, as the old picker did
+    page.click('.md-editor [data-act="other"]')
+    page.click('.md-editor button:has-text("Category")')
+    page.click('#menu [role="menuitem"]:has-text("Games")')
+    assert "category · Games" in page.inner_text('.md-editor [data-k="p-pills"]')
+    assert page.is_visible('.md-editor [data-g="category"]')
+    page.click('.md-editor [data-act="pick-add"]')
+    wait_for(page, "document.querySelectorAll('.md-editor [data-k=\"chips\"] .pill').length === 2")
+    page.click('.md-editor [data-act="done"]')
+    wait_for(page, "document.querySelector('.md-editor').hidden")
+    extra = stored(harness, "relax")["extra"]
+    assert [(e["kind"], e["targets"]) for e in extra][1] == ("category", ["games"]) and extra[1]["block_type"] == "close"
+    assert extra[0]["kind"] == "site" and extra[0]["name"] == "Time sink"
 
 
 def test_an_empty_blocklist_says_so(shell, page, harness):
@@ -554,12 +591,12 @@ def test_browse_apps_opens_the_shared_browser_and_leaves_the_picker_as_it_was(sh
     open_page(shell, page)
     open_editor(page, "relax")
     page.click('.md-editor [data-act="other"]')
-    page.click('.md-editor .seg[data-seg="pkind"] [data-v="app"]')
+    page.fill('.md-editor [data-k="p-text"]', "discord.exe")
     page.fill('.md-editor [data-k="p-name"]', "Typed name")
-    page.click('.md-editor [data-act="browse"]')
+    page.click('.md-editor [data-browse]')
     page.wait_for_selector("#dlg[open] .ab-pick", timeout=5000)
     assert page.inner_text("#dlg h2") == "Browse apps"
     page.click("#dlg .dlg-f .btn")                                                       # Cancel
     dialog_closed(page)
     assert page.is_visible('.md-editor [data-k="pick"]') and page.input_value('.md-editor [data-k="p-name"]') == "Typed name"
-    assert page.is_visible('.md-editor [data-k="ways-app"]')
+    assert page.is_visible('.md-editor [data-g="app"]')

@@ -4,12 +4,15 @@
 // It only collects what is typed and sends it: Python (webapi/modes.py) checks every field with the old window's messages,
 // checks every new site or app again, and decides whether saving or deleting weakens a locked mode (-> a challenge ticket
 // that `guarded()` turns into the challenge; Cancel keeps this editor open with the edits).
+// "+ Other site or app" is the same picker as Blocking > Add (js/targetpicker.js, compact: the search box with its suggestions,
+// Browse apps, Browse for a file, Category...), a display name, and the same "When blocked" boxes (js/ways.js, with the note
+// about program files); both are loaded the first time that button is pressed.
 import { iconImg, wireIconReady } from "../../appicon.js";
-import { openAppBrowser } from "../../appbrowser.js";
 import { ld } from "../../bridge.js";
 import { colorOf } from "../../categories.js";
 import { CANCELLED, guarded } from "../../challenge.js";
-import { confirmButton, days as dayChips, el, esc, field, ic, kic, seg, setText, stepper, sw, tpRange } from "../../ui.js";
+import { confirmButton, days as dayChips, el, esc, field, ic, kic, setText, stepper, sw, tpRange } from "../../ui.js";
+import { createWays, defaultWays, groupOf, GROUPS } from "../../ways.js";
 
 export const POMODORO_FIELDS = [["work", "Focus", "min"], ["break", "Break", "min"], ["rounds", "Rounds", ""], ["long", "Long break", "min"]];
 const CAT_HELP = "Categories are set on Screen Time > Apps / Websites; blocked sites and apps count as Distracting unless you chose otherwise.";
@@ -40,16 +43,10 @@ export function iconOfTarget(kind, target) {
   return kind === "app" ? ["app", first] : kind === "site" ? ["site", first] : null;
 }
 
-/** The "ways" a ticked set of boxes means, for mode_extra_check. */
-export function waysOf(boxes) {
-  return boxes.filter((b) => b.checked).map((b) => b.dataset.way);
-}
-
 // ---------------------------------------------------------------- the editor
 
 const win = (w) => `<div class="win-row" data-win role="group">${dayChips(Array.from({ length: 7 }, (_, i) => w.days.includes(i)))}${tpRange(w.start, w.end)}<span class="grow"></span>` +
   `<button class="icon-btn icon-btn-sm" type="button" data-act="win-x" aria-label="Remove this time window">${ic("trash")}</button></div>`;
-const way = (label, key, on, note) => `<label class="check" title="${esc(note)}"><input type="checkbox" data-way="${key}" ${on ? "checked" : ""}><span>${esc(label)}</span></label>`;
 
 const SKELETON = `<header class="card-h">${kic("k-mode", "pencil")}<h3 data-k="title">New mode</h3><span data-k="del"></span>
     <button class="btn" type="button" data-act="cancel">Cancel</button><button class="btn btn-primary" type="button" data-act="done">Done</button></header>
@@ -62,14 +59,11 @@ const SKELETON = `<header class="card-h">${kic("k-mode", "pencil")}<h3 data-k="t
       <div class="hstack wrap"><select class="select select-sm" data-k="from-list" aria-label="From your blocklist"></select>
         <button class="btn btn-sm" type="button" data-act="other">+ Other site or app</button></div>
       <div class="md-pick" data-k="pick" hidden>
-        <div class="hstack wrap">${seg("pkind", [["site", "Site"], ["app", "App"]], "site")}
-          <input class="input grow" data-k="p-text" placeholder="reddit.com" aria-label="Site or app" autocomplete="off" spellcheck="false" style="min-width:calc(160px * var(--s))">
-          <button class="btn btn-sm" type="button" data-act="browse" hidden>${ic("folder")}Browse apps…</button></div>
-        <input class="input" data-k="p-name" placeholder="Display name (optional)" maxlength="60" aria-label="Display name" autocomplete="off">
-        <div class="stack-sm" data-k="ways-site"><b class="small">When blocked</b>
-          ${way("Can't load it", "dns", true, "the address goes nowhere, in every browser")}${way("Close the tab", "close", false, "if you open it anyway, the tab is closed")}${way("Go back", "back", false, "the browser goes back instead")}</div>
-        <div class="stack-sm" data-k="ways-app" hidden><b class="small">When blocked</b>
-          ${way("Close app", "close", true, "asked to close first (10 s to save), then force-closed")}${way("Also close its background processes", "background", false, "once the app is closed: what it started and what runs from its install folder")}${way("Minimize", "minimize", false, "keeps it running but minimizes it whenever it's opened")}${way("Block internet", "internet", false, "it can't connect to the internet")}</div>
+        <div data-k="picker"></div>
+        <div class="pills" data-k="p-pills"></div>
+        <label class="stack-sm" data-k="p-namewrap" hidden><b class="small">Display name (optional)</b>
+          <input class="input" data-k="p-name" placeholder="Display name (optional)" maxlength="60" aria-label="Display name" autocomplete="off"></label>
+        <div data-k="ways"></div>
         <p class="md-err" data-k="p-err" role="alert"></p>
         <div class="hstack"><button class="btn btn-sm btn-primary" type="button" data-act="pick-add">Add</button><button class="btn btn-sm" type="button" data-act="pick-cancel">Cancel</button></div></div></div>
     <div class="card flush"><div class="card-b">
@@ -95,7 +89,9 @@ export function createEditor(host, hooks) {
   let cur = null;                  // {id, builtin, items, groups, extra}
   let isOpen = false, busy = false, seq = 0;
   let brief = null;                // blocklist_brief(), once it has arrived
-  let pickedPath = null;           // the app chosen with Browse apps (its path), until the box is edited
+  let picker = null, ways = null;  // the target picker and the "When blocked" boxes, built the first time "+ Other site or app" is pressed
+  let lastSingle = "", building = null, classify = null;
+  const touched = {};              // group -> the owner changed its ways (so a Steam game doesn't change them back)
 
   const err = (text) => { q("err").textContent = text || ""; };
 
@@ -197,79 +193,92 @@ export function createEditor(host, hooks) {
   }
 
   // ---------------- "+ Other site or app"
-  const kindOf = () => host.querySelector('.seg[data-seg="pkind"] [aria-pressed="true"]').dataset.v;
+  const perr = (text) => { q("p-err").textContent = text || ""; };
 
-  function showWays(kind) {
-    q("ways-site").hidden = kind !== "site";
-    q("ways-app").hidden = kind !== "app";
-    q("p-text").placeholder = kind === "site" ? "reddit.com" : "discord.exe";
-    host.querySelector('[data-act="browse"]').hidden = kind !== "app";
+  /** Build the picker and the ways boxes (once). */
+  function buildPicker() {
+    if (!building) {
+      building = import("../../targetpicker.js").then((mod) => {
+        classify = mod.classify;
+        picker = mod.createPicker({ compact: true, onChange: syncPick, onEnter: addPicked, notify: perr });
+        picker.input.dataset.k = "p-text";
+        q("picker").append(picker.el);
+        ways = createWays({ onChange: ({ group }) => { touched[group] = true; perr(""); } });
+        q("ways").append(ways.el);
+        ways.show([]);
+        picker.input.addEventListener("input", syncPick);
+      });
+    }
+    return building;
   }
 
-  function setKind(kind) {
-    for (const b of host.querySelectorAll('.seg[data-seg="pkind"] button')) b.setAttribute("aria-pressed", String(b.dataset.v === kind));
-    showWays(kind);
+  const pillLabel = (t) => (t.kind === "category" ? `category · ${t.name}` : t.name || t.target);
+
+  /** The selection or the typed text changed: its pills, the display name (one target only) and the "When blocked" boxes of
+   *  the kinds in it - the typed text counts at once (reddit.com shows the site ways, discord.exe the app ways). */
+  function syncPick() {
+    const sel = picker.selection();
+    const typed = classify(picker.input.value);
+    const hasTyped = !typed.error;
+    q("p-pills").replaceChildren(...sel.map((t) => el(`<span class="pill" data-key="${esc(t.key)}"><span>${esc(pillLabel(t))}</span>` +
+      `<button class="icon-btn icon-btn-sm x" type="button" data-act="p-x" aria-label="Remove ${esc(pillLabel(t))}">${ic("x")}</button></span>`)));
+    const single = sel.length === 1 && !hasTyped ? sel[0].key : "";
+    if (single !== lastSingle) {
+      lastSingle = single;
+      if (single || !sel.length) q("p-name").value = single ? sel[0].name || "" : "";
+    }
+    q("p-namewrap").hidden = sel.length + (hasTyped ? 1 : 0) !== 1;
+    const present = new Set(sel.map(groupOf));
+    if (hasTyped) present.add(groupOf(typed));
+    ways.show(GROUPS.filter((g) => present.has(g)));
+    const steam = sel.some((t) => t.kind === "app" && !t.file && t.steam);
+    if (!touched.app) ways.set("app", defaultWays("app", steam));
+    perr("");
   }
 
-  function openPick() {
+  async function openPick() {
     q("pick").hidden = false;
-    q("p-text").focus();
+    await buildPicker();
+    if (isOpen) picker.focus();
   }
 
   function closePick() {
     q("pick").hidden = true;
-    q("p-text").value = "";
     q("p-name").value = "";
-    q("p-err").textContent = "";
-    pickedPath = null;
-    setKind("site");
-    for (const b of host.querySelectorAll('[data-k="ways-site"] [data-way]')) b.checked = b.dataset.way === "dns";
-    for (const b of host.querySelectorAll('[data-k="ways-app"] [data-way]')) b.checked = b.dataset.way === "close";
-    syncWays();
-  }
-
-  /** Close and Minimize / Close the tab and Go back exclude each other; "background" only goes with Close app. */
-  function syncWays(changed) {
-    const box = (k) => host.querySelector(`[data-k="ways-app"] [data-way="${k}"]`);
-    const site = (k) => host.querySelector(`[data-k="ways-site"] [data-way="${k}"]`);
-    if (changed === box("close") && box("close").checked) box("minimize").checked = false;
-    if (changed === box("minimize") && box("minimize").checked) box("close").checked = false;
-    if (changed === site("close") && site("close").checked) site("back").checked = false;
-    if (changed === site("back") && site("back").checked) site("close").checked = false;
-    box("background").disabled = !box("close").checked;
-    if (!box("close").checked) box("background").checked = false;
-  }
-
-  async function addPicked() {
-    const kind = kindOf();
-    const area = host.querySelector(`[data-k="ways-${kind}"]`);
-    const perr = q("p-err");
-    perr.textContent = "";
-    try {
-      const extra = await ld.call("mode_extra_check", {
-        kind, text: q("p-text").value, name: q("p-name").value, ways: waysOf([...area.querySelectorAll("[data-way]")]), app_path: kind === "app" ? pickedPath : null,
-      });
-      if (!cur.extra.some((e) => e.kind === extra.kind && e.targets.join(" ") === extra.targets.join(" "))) cur.extra.push(extra);
-      closePick();
-      renderChips();
-    } catch (e) {
-      perr.textContent = e.message || "That didn't work.";
+    lastSingle = "";
+    perr("");
+    for (const g of GROUPS) touched[g] = false;
+    if (picker) {
+      picker.reset(false);
+      for (const g of GROUPS) ways.set(g, defaultWays(g));
+      ways.show([]);
     }
   }
 
-  function browse() {
-    openAppBrowser({
-      mode: "pick",
-      onPick: (app) => {
-        setKind("app");
-        q("p-text").value = app.exe;
-        q("p-name").value = app.name || "";
-        pickedPath = app.path || null;
-        q("p-err").textContent = "";
-        q("pick").hidden = false;
-        q("p-text").focus();
-      },
-    });
+  async function addPicked() {
+    perr("");
+    if (!picker || !picker.commit()) return;            // (typed text that is no address: the picker said why)
+    const sel = picker.selection();
+    if (!sel.length) return perr("Pick a site, an app or a category first.");
+    for (const t of sel) {
+      try {
+        const extra = await ld.call("mode_extra_check", {
+          kind: t.kind, text: t.target, name: sel.length === 1 ? q("p-name").value : t.name || "", ways: ways.values(groupOf(t)),
+          app_path: t.kind === "app" ? t.path || null : null,
+        });
+        if (!cur.extra.some((e) => e.kind === extra.kind && e.targets.join(" ") === extra.targets.join(" "))) cur.extra.push(extra);
+        picker.remove(t.key);
+      } catch (e) {
+        picker.remove(t.key);                          // (what was refused goes back into the box to be corrected, as it did before)
+        if (!picker.input.value.trim()) picker.input.value = t.path || t.target;
+        syncPick();
+        perr(e.message || "That didn't work.");
+        renderChips();
+        return;
+      }
+    }
+    closePick();
+    renderChips();
   }
 
   // ---------------- save / delete
@@ -319,7 +328,7 @@ export function createEditor(host, hooks) {
     } else if (act === "other") (q("pick").hidden ? openPick : closePick)();
     else if (act === "pick-cancel") closePick();
     else if (act === "pick-add") addPicked();
-    else if (act === "browse") browse();
+    else if (act === "p-x") picker.remove(b.closest("[data-key]").dataset.key);
     else if (act === "win-add") addWindow({ days: [0, 1, 2, 3, 4], start: "09:00", end: "17:00" });
     else if (act === "win-x") b.closest("[data-win]").remove();
     else if (act === "chip-x") {
@@ -340,12 +349,10 @@ export function createEditor(host, hooks) {
       if (kind === "g" && !cur.groups.includes(+id)) cur.groups.push(+id);
       else if (kind === "i" && !cur.items.includes(+id)) cur.items.push(+id);
       renderChips();
-    } else if (t.dataset.way) syncWays(t);
+    }
   });
-  host.addEventListener("seg", (e) => { if (e.detail.name === "pkind") showWays(e.detail.value); });
-  host.addEventListener("input", (e) => { if (e.target.dataset.k === "p-text") pickedPath = null; });
   host.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.dataset.k === "p-text") { e.preventDefault(); addPicked(); }
+    if (e.key === "Enter" && e.target.dataset.k === "p-name") { e.preventDefault(); addPicked(); }
   });
 
   return { open, close, isOpen: () => isOpen, openId: () => (isOpen && cur && cur.id) || null };

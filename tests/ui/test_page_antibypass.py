@@ -51,7 +51,10 @@ def dialog_open(page):
 
 
 def dialog_closed(page, timeout=8000):
-    wait_for(page, "!document.getElementById('dlg').open", timeout)
+    """Wait until the dialog is closed AND its OK / close result has been handled. `open` turns false the moment dialog.close()
+    runs, but the page handles the result (onClose) in the dialog's 'close' event, a task later - and then empties the dialog.
+    Reading the page between those two (a busy machine) sees the old state, so wait for the emptied dialog."""
+    wait_for(page, "(() => { const d = document.getElementById('dlg'); return !d.open && d.childElementCount === 0; })()", timeout)
 
 
 def type_challenge(page):

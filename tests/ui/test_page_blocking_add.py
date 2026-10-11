@@ -126,7 +126,9 @@ def on_overview(page, timeout=6000):
 
 
 def dialog_closed(page, timeout=8000):
-    page.wait_for_function("!document.getElementById('dlg').open", timeout=timeout)
+    """Closed AND its result handled: `open` turns false at dialog.close(), but the page handles the result in the dialog's
+    'close' event, a task later, and only then empties the dialog (see test_page_blocking_groups.dialog_closed)."""
+    page.wait_for_function("(() => { const d = document.getElementById('dlg'); return !d.open && d.childElementCount === 0; })()", timeout=timeout)
 
 
 def type_challenge(page):

@@ -37,6 +37,7 @@ export function setRange(node, range) {
 }
 
 export const freshMs = 10_000;
+export const events = ["mode_changed"];     // a mode was added / renamed / deleted: the "Turn on a mode" list is read again
 const DEBOUNCE_MS = 500;
 const WAITS = [[0, "Off"], [10, "10 s"], [30, "30 s"], [60, "60 s"]];
 const LENGTHS = [2, 5, 10, 15];
@@ -324,6 +325,10 @@ function fillRows(items) {
     if (!keep.has(id)) { row.node.remove(); rows.delete(id); }
   }
   q("empty").hidden = items.length > 0;
+}
+
+export function patch({ event }) {
+  if (event === "mode_changed") page.reload();
 }
 
 export async function load() {

@@ -53,6 +53,16 @@ export function createBridge(env = {}) {
     } catch (_) { /* reporting must never throw */ }
   }
 
+  // ------------------------------------------------------------ errors in our own code go to the log (every page that loads the bridge)
+  let sentErrors = 0;
+  const sendError = (msg) => {
+    if (sentErrors++ < 5) ld.call("log_client_error", String(msg).slice(0, 2000)).catch(() => {});      // (at most 5 per page)
+  };
+  if (root.addEventListener) {
+    root.addEventListener("error", (e) => sendError(`${e.message} (${e.filename}:${e.lineno})`));
+    root.addEventListener("unhandledrejection", (e) => sendError(`unhandled: ${e.reason && e.reason.stack ? e.reason.stack : e.reason}`));
+  }
+
   // ------------------------------------------------------------ pushes from Python
   ld.on = function on(event, fn) {
     let set = handlers.get(event);

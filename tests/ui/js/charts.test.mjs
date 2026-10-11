@@ -122,6 +122,20 @@ test("unlock marks: only days with an unlock get a mark and a tooltip line", () 
   assert.match(prims.filter((p) => p.a.class === "ch-hit")[0].a["data-tip"], /Emergency unlock used 1x/);
 });
 
+test("trend: a day with an emergency unlock gets a ring and the tip line, a day without gets none", () => {
+  const points = [
+    { label: "a", value: 3600, tip: "Mon", unlocks: 1 },
+    { label: "b", value: 7200, tip: "Tue", unlocks: 0 },
+    { label: "c", value: 1800, tip: "Wed" },
+  ];
+  const { prims } = layoutTrend({ points }, 300, 180, 1);
+  const rings = prims.filter((p) => p.a.class === "ch-ring");
+  assert.deepEqual(rings.map((p) => +p.a.r > 0), [true, false, false]);
+  const hits = prims.filter((p) => p.a.class === "ch-hit").map((p) => p.a["data-tip"]);
+  assert.match(hits[0], /Emergency unlock used 1x/);
+  assert.ok(!/Emergency/.test(hits[1]) && !/Emergency/.test(hits[2]));
+});
+
 test("trend: line points follow the values, the average skips days without one, the goal line is at its y", () => {
   const points = [{ label: "a", value: 0, avg: null }, { label: "b", value: 7200, avg: 3600 }, { label: "c", value: 3600, avg: 3600 }];
   const { prims, geom } = layoutTrend({ points, goal: 3600, minPeak: 7200 }, 300, 180, 1);

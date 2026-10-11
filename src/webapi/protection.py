@@ -21,6 +21,7 @@ Paths and addresses are restricted: a list address must be http(s); Connect only
 """
 import hashlib
 import json
+import logging
 import re
 import secrets
 import threading
@@ -34,6 +35,9 @@ from blocker.hosts import normalize_host
 
 from . import core
 from .core import ApiError
+
+log = logging.getLogger("lockdown.protection")
+WARM_DELAY_SEC = 10.0         # `start_warmup` waits this long: the window, the Network Log and Screen Time warm-ups come first
 
 GRACE_PROTECTION, GRACE_WORDS = "protection", "keywords"
 MAX_NAME = 60                 # a list name
@@ -376,6 +380,34 @@ def protection_check(ctx, host):
         if m["key"] in on and any(s in sites[m["key"]] for s in suffixes):
             found.append({"key": m["key"], "name": m["name"], "on": True, "mine": True})
     return {"host": host, "allowed_by": allowed_by, "lists": found}
+
+
+@core.internal
+def warm(ctx):
+    """(a background thread) Load the lists' tables now, so the first "Check a site" finds them ready instead of reading
+    every list file (about 1.5 s on a million sites). Cheap when they are loaded already; a list whose file is not there
+    (not downloaded yet) is skipped."""
+    folder = getattr(ctx, "protection_dir", None) or protection.LIST_DIR
+    _index(ctx).lists_with("example.com", list(_community(_shared(ctx.db))), folder)
+
+
+@core.internal
+def start_warmup(ctx, delay: float = WARM_DELAY_SEC):
+    """(the agent, once it is up) A daemon thread that runs `warm` `delay` seconds from now, once. A failure is logged and
+    changes nothing (the first check then loads the tables itself). `thread.stop_event.set()` ends it (tests)."""
+    stop = threading.Event()
+
+    def work():
+        if stop.wait(delay):
+            return
+        try:
+            warm(ctx)
+        except Exception:
+            log.exception("Site protection warm-up failed")
+    thread = threading.Thread(target=work, name="lockdown-protection-warm", daemon=True)
+    thread.stop_event = stop
+    thread.start()
+    return thread
 
 
 # ---------------------------------------------------------------- the always-on lists

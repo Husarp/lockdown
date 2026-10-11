@@ -35,7 +35,7 @@ class FakeCatalog:
         self.apps = apps
 
     def search(self, kind="all", query="", limit=60):
-        found = [a for a in self.apps if query.lower() in (a["name"] + a["exe"]).lower()]
+        found = [a for a in self.apps if query.lower() in (a["name"] + a["exe"]).lower() and (kind != "games" or a["steam"])]
         return {"apps": found[:limit], "total": len(found), "loading": False}
 
 
@@ -51,7 +51,9 @@ def env(tmp_path):
     ctx.catalog = FakeCatalog([
         {"name": "Notepad", "exe": "notepad.exe", "path": r"C:\Windows\notepad.exe", "running": False, "steam": False},
         {"name": "Game", "exe": "game.exe", "path": r"C:\Games\game.exe", "running": False, "steam": False},
-        {"name": "Spotify", "exe": "spotify.exe", "path": r"C:\Spotify\spotify.exe", "running": False, "steam": False}])
+        {"name": "Spotify", "exe": "spotify.exe", "path": r"C:\Spotify\spotify.exe", "running": False, "steam": False},
+        {"name": "Counter-Strike 2", "exe": "cs2.exe", "path": r"D:\Steam\steamapps\common\cs2\cs2.exe", "running": False,
+         "steam": True}])
     db = ctx.db
     db.set_setting("service_heartbeat", str(time.time()))              # the service is running
     ctx.reddit = db.add_item("Reddit", ["reddit.com"], "site", "manual", [], block_type="dns")
@@ -251,7 +253,7 @@ def test_a_new_group_with_pending_members_creates_the_items(env):
     assert sorted(items[i]["display_name"] for i in g["members"]) == ["Reddit", "Spotify", "Twitch"]
     twitch = next(i for i in items.values() if i["display_name"] == "Twitch")
     spotify = next(i for i in items.values() if i["display_name"] == "Spotify")
-    assert (twitch["target"], twitch["item_type"], twitch["rules"]) == ("twitch.tv", "site", [])
+    assert (twitch["target"], twitch["item_type"], twitch["rules"]) == ("twitch.tv m.twitch.tv ttvnw.net", "site", [])
     assert (spotify["target"], spotify["item_type"], spotify["block_type"], spotify["app_path"]) == \
         ("spotify.exe", "app", "close", r"C:\Spotify\spotify.exe")
     assert g["app_block"] == "close" and g["site_block"] is None
@@ -274,6 +276,107 @@ def test_a_pending_target_is_judged_by_the_item_it_resolves_to(env):
     ok = result(call(env, "draft_set_group", None, "More", [limit_form()], [],
                      {"app_block": None, "site_block": None}, [{"kind": "site", "name": "tool.jar"}]))
     assert ok["saved"]
+
+
+def pending_group(ctx, *entries, name="More"):
+    """Save a new group whose only members are these new things; -> {item display name: item}, as the database holds them."""
+    got = result(call(ctx, "draft_set_group", None, name, [limit_form()], [], {"app_block": None, "site_block": None},
+                      list(entries)))
+    assert got["saved"], got
+    g = next(g for g in ctx.db.list_groups() if g["name"] == name)
+    items = {i["id"]: i for i in ctx.db.list_items()}
+    return {items[i]["display_name"]: items[i] for i in g["members"]}
+
+
+def test_a_new_popular_site_brings_its_other_host_names_and_its_friendly_name(env):
+    """The page can only show the address, so that is what it sends as the name: Python gives the friendly one."""
+    got = pending_group(env, {"kind": "site", "name": "ttvnw.net", "display": "ttvnw.net"},
+                        {"kind": "site", "name": "https://www.TikTok.com/x", "display": ""})
+    twitch, tiktok = got["Twitch"], got["TikTok"]
+    assert (twitch["target"], twitch["source"]) == ("twitch.tv m.twitch.tv ttvnw.net", "popular")
+    assert tiktok["target"] == "tiktok.com tiktokcdn.com tiktokv.com" and tiktok["item_type"] == "site"
+
+
+def test_a_new_site_nobody_knows_gets_a_guessed_name_and_a_typed_name_is_kept(env):
+    got = pending_group(env, {"kind": "site", "name": "example.com", "display": "example.com"},
+                        {"kind": "site", "name": "another.org", "display": "  My   other site "})
+    assert sorted(got) == ["Example", "My other site"]                      # (a name the owner gave is not replaced)
+    assert (got["Example"]["target"], got["Example"]["source"]) == ("example.com", "manual")
+
+
+def test_a_site_with_a_listed_host_name_is_the_item_on_the_list_not_a_second_one(env):
+    """YouTube is on the list as youtube.com + googlevideo.com: typing one of its hosts finds that item."""
+    got = pending_group(env, {"kind": "site", "name": "googlevideo.com"})
+    assert list(got) == ["YouTube"] and len(env.db.list_items()) == 4
+
+
+def test_a_new_app_is_closed_and_a_new_steam_game_also_with_its_background_processes(env):
+    got = pending_group(env, {"kind": "app", "name": "spotify.exe", "display": "Spotify", "path": r"C:\Spotify\spotify.exe"},
+                        {"kind": "app", "name": "cs2.exe", "display": "Counter-Strike 2",
+                         "path": r"D:\Steam\steamapps\common\cs2\cs2.exe"},
+                        {"kind": "app", "name": "notepad.exe", "display": ""})
+    assert got["Spotify"]["block_type"] == "close" and got["Spotify"]["app_path"] == r"C:\Spotify\spotify.exe"
+    assert got["Counter-Strike 2"]["block_type"] == "close,background"
+    assert got["Notepad"]["block_type"] == "close" and got["Notepad"]["app_path"] is None      # (no path the catalog knows)
+
+
+def test_a_new_program_file_is_closed_without_the_background_processes(env):
+    got = pending_group(env, {"kind": "app", "name": "cs2.jar", "display": "My game"})
+    assert got["My game"]["block_type"] == "close"
+
+
+def test_a_new_category_member_is_a_category_item_closed_like_an_app(env):
+    got = pending_group(env, {"kind": "category", "name": "games", "display": "Games"})
+    games = got["Games"]
+    assert (games["item_type"], games["target"], games["source"], games["block_type"]) == ("category", "games", "category", "close")
+    assert games["rules"] == [] and games["app_path"] is None
+    shown = data(call(env, "group_get", next(g for g in env.db.list_groups() if g["name"] == "More")["id"]))["members"]
+    assert [(m["name"], m["type"], m["kind"], m["icon"]["k"]) for m in shown] == [("Games", "category", "app", "category")]
+
+
+def test_a_new_category_member_without_a_name_is_called_by_the_categories_name(env):
+    assert list(pending_group(env, {"kind": "category", "name": "distracting"})) == ["Distracting"]
+
+
+def test_a_category_that_is_on_the_list_already_is_used_not_added_twice(env):
+    cat = env.db.add_item("Games", ["games"], "category", "category", [{"rule_type": "permanent"}], None, "close")
+    got = result(call(env, "draft_set_group", None, "More", [limit_form()], [], {"app_block": None, "site_block": None},
+                      [{"kind": "category", "name": "games", "display": "Games"}]))
+    assert got["saved"]
+    assert list(next(g for g in env.db.list_groups() if g["name"] == "More")["members"]) == [cat]
+    assert len([i for i in env.db.list_items() if i["item_type"] == "category"]) == 1
+    twice = result(call(env, "draft_set_group", None, "Again", [limit_form()], [member(cat)], {"app_block": None, "site_block": None},
+                        [{"kind": "category", "name": "games"}]))
+    assert twice["saved"] is False and "already in this group" in twice["errors"][0]["message"]
+
+
+def test_a_new_category_member_takes_its_own_way_like_an_app_does(env):
+    ok = result(call(env, "draft_set_group", None, "More", [limit_form()], [], {"app_block": None, "site_block": None},
+                     [{"kind": "category", "name": "games", "way": "minimize"}]))
+    assert ok["saved"]
+    bad = call(env, "draft_set_group", None, "Other", [limit_form()], [], {"app_block": None, "site_block": None},
+               [{"kind": "category", "name": "games", "way": "dns"}])
+    assert bad["ok"] is False and "way" in bad["error"]
+
+
+def test_an_unknown_category_and_a_forged_kind_are_refused_with_words(env):
+    for entry, words in (({"kind": "category", "name": "no-such-category"}, "That category doesn't exist"),
+                         ({"kind": "category", "name": 5}, "no such category"),
+                         ({"kind": "category", "name": "x" * 500}, "no such category"),
+                         ({"kind": "category"}, "no such category"),
+                         ({"kind": "categories", "name": "games"}, "an app or a site"),
+                         ({"kind": "file", "name": "games"}, "an app or a site"),
+                         ({"name": "games"}, "an app or a site")):
+        bad = call(env, "draft_set_group", None, "More", [limit_form()], [], {"app_block": None, "site_block": None}, [entry])
+        assert bad["ok"] is False and words in bad["error"], (entry, bad)
+    assert all(g["name"] != "More" for g in env.db.list_groups()) and len(env.db.list_items()) == 4
+    assert data(call(env, "draft_get_state"))["dirty"] is False
+
+
+def test_adding_a_category_member_is_free_while_locked(env):
+    lock(env)
+    got = result(save(env, three(env), pending=[{"kind": "category", "name": "games", "display": "Games"}]))
+    assert got["saved"] and len(group(env)["members"]) == 4
 
 
 def test_duplicates_are_refused_and_nothing_changes(env):

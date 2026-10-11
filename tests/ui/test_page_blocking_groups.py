@@ -26,7 +26,7 @@ class FakeCatalog:
         self.apps = apps
 
     def search(self, kind="all", query="", limit=60):
-        found = [a for a in self.apps if query.lower() in (a["name"] + " " + a["exe"]).lower()]
+        found = [a for a in self.apps if query.lower() in (a["name"] + " " + a["exe"]).lower() and (kind != "games" or a["steam"])]
         return {"apps": found[:limit], "total": len(found), "loading": False}
 
 
@@ -103,7 +103,10 @@ def dialog_open(page):
 
 
 def dialog_closed(page, timeout=8000):
-    wait_for(page, "!document.getElementById('dlg').open", timeout)
+    """Wait until the dialog is closed AND its OK / close result has been handled. `open` turns false the moment dialog.close()
+    runs, but the page handles the result (onClose) in the dialog's 'close' event, a task later - and then empties the dialog.
+    Reading the page between those two (a busy machine) sees the old state, so wait for the emptied dialog."""
+    wait_for(page, "(() => { const d = document.getElementById('dlg'); return !d.open && d.childElementCount === 0; })()", timeout)
 
 
 def top_dialog(page):
@@ -233,14 +236,15 @@ def test_a_group_that_chose_its_ways_shows_them_ticked(shell, page, harness):
     ticked = page.eval_on_selector_all(".ge-wcols input[data-way]:checked", "els => els.map(e => e.dataset.way)")
     assert sorted(ticked) == ["background", "close", "close", "dns"]
     assert page.inner_text('[data-k="g-wnote"]') == ""
-    # closing excludes minimizing, "its background processes" goes with closing only
+    # (the one set of boxes, js/ways.js:) ticking Minimize unticks Close, "its background processes" goes with Close only
     apps = ".ge-wcols > div:first-child"
-    assert page.is_disabled(f'{apps} [data-way="minimize"]') and page.is_enabled(f'{apps} [data-way="background"]')
-    page.click(f'{apps} label:has([data-way="close"])')
-    assert page.is_enabled(f'{apps} [data-way="minimize"]') and page.is_disabled(f'{apps} [data-way="background"]')
-    assert not page.is_checked(f'{apps} [data-way="background"]')
+    assert page.is_enabled(f'{apps} [data-way="minimize"]') and page.is_enabled(f'{apps} [data-way="background"]')
     page.click(f'{apps} label:has([data-way="minimize"])')
-    assert page.is_checked(f'{apps} [data-way="minimize"]')
+    assert page.is_checked(f'{apps} [data-way="minimize"]') and not page.is_checked(f'{apps} [data-way="close"]')
+    assert page.is_disabled(f'{apps} [data-way="background"]') and not page.is_checked(f'{apps} [data-way="background"]')
+    page.click(f'{apps} label:has([data-way="close"])')
+    assert page.is_checked(f'{apps} [data-way="close"]') and not page.is_checked(f'{apps} [data-way="minimize"]')
+    assert page.is_enabled(f'{apps} [data-way="background"]')
 
 
 def test_typing_finds_listed_things_and_apps_with_icons_and_clearing_goes_back_to_the_ticked(shell, page, harness):
@@ -297,18 +301,22 @@ def test_a_website_typed_in_the_box_can_be_added_and_a_listed_one_cannot_be_adde
     assert notice(page) == "✓ Group Fun saved"
     sites = {i["target"]: i for i in harness.db.list_items()}
     assert "example.org" in sites and sites["example.org"]["item_type"] == "site"
-    assert item_id(harness, "example.org") in group(harness)["members"]
+    assert item_id(harness, "Example") in group(harness)["members"]               # (named the way the Add tab names it)
 
 
-def test_add_member_browses_the_apps(shell, page, harness):
-    open_fun(shell, page)
-    # Playwright scrolls the button into view when it clicks, and that scroll event arrives after the click: it would close the
-    # menu that just opened. So bring the button into view first and let the scroll settle, then click.
+def open_add_menu(page):
+    """Open "Add member". Playwright scrolls the button into view when it clicks, and that scroll event arrives after the click: it
+    would close the menu that just opened. So bring the button into view first and let the scroll settle, then click."""
     page.locator('[data-k="g-add"]').scroll_into_view_if_needed()
     page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 100))))")
     page.click('[data-k="g-add"]')
     page.wait_for_selector("#menu button:has-text('Website')", state="visible", timeout=5000)
-    assert [b.inner_text() for b in page.locator("#menu button").all()] == ["App or program file…", "Website…"]
+
+
+def test_add_member_browses_the_apps(shell, page, harness):
+    open_fun(shell, page)
+    open_add_menu(page)
+    assert [b.inner_text() for b in page.locator("#menu button").all()] == ["App or program file…", "Website…", "Category…"]
     page.click('#menu button:has-text("App or program file")')
     page.wait_for_selector("#dlg[open] .ab-row", timeout=5000)
     page.click('#dlg .ab-row:has-text("Notepad")')
@@ -320,6 +328,49 @@ def test_add_member_browses_the_apps(shell, page, harness):
     pad = next(i for i in harness.db.list_items() if i["display_name"] == "Notepad")
     assert (pad["item_type"], pad["target"], pad["block_type"], pad["app_path"]) == ("app", "notepad.exe", "close", NOTEPAD["path"])
     assert pad["id"] in group(harness)["members"]
+
+
+def test_add_member_picks_a_whole_category(shell, page, harness):
+    """"Category…" is the Add tab's chooser: the categories to pick from, and the pick becomes a new member that Done puts on the
+    blocklist as a category item (closed like an app). The same category twice is refused."""
+    open_fun(shell, page)
+    open_add_menu(page)
+    page.click('#menu button:has-text("Category")')
+    page.wait_for_selector("#menu button:has-text('Games')", state="visible", timeout=5000)
+    assert [b.inner_text() for b in page.locator("#menu button").all()] == ["Productive", "Neutral", "Games", "Distracting"]
+    page.click('#menu button:has-text("Games")')
+    wait_for(page, f"document.querySelectorAll('{LIST}').length === 4")
+    assert members(page) == ["Games", "Reddit", "Twitch", "YouTube"]
+    assert member_row(page, "Games").locator(".name span").inner_text() == "category · everything in it"
+    assert member_row(page, "Games").locator('[data-act="way"]').inner_text() == "Group's way"
+    open_add_menu(page)                                                       # (the same category again: refused)
+    page.click('#menu button:has-text("Category")')
+    page.wait_for_selector("#menu button:has-text('Games')", state="visible", timeout=5000)
+    page.click('#menu button:has-text("Games")')
+    wait_for(page, "document.getElementById('toast').textContent.includes('Games is already in this group')")
+    assert page.inner_text('[data-k="g-mcount"]') == "4 members"
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    games = next(i for i in harness.db.list_items() if i["display_name"] == "Games")
+    assert (games["item_type"], games["target"], games["block_type"], games["source"]) == ("category", "games", "close", "category")
+    assert games["id"] in group(harness)["members"] and len(group(harness)["members"]) == 4
+
+
+def test_a_new_site_and_a_new_steam_game_made_in_the_editor_are_made_like_the_add_tab_makes_them(shell, page, harness):
+    harness.ctx.catalog.apps.append({"name": "Counter-Strike 2", "exe": "cs2.exe", "path": r"D:\Steam\cs2\cs2.exe", "running": False,
+                                     "steam": True})
+    open_fun(shell, page)
+    page.fill('[data-k="g-search"]', "tiktok.com")
+    wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'tiktok.com')")
+    page.press('[data-k="g-search"]', "Enter")
+    page.fill('[data-k="g-search"]', "counter")
+    wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'Counter-Strike 2')")
+    member_row(page, "Counter-Strike 2").locator("label.check").click()
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    items = {i["display_name"]: i for i in harness.db.list_items()}
+    assert items["TikTok"]["target"] == "tiktok.com tiktokcdn.com tiktokv.com"
+    assert items["Counter-Strike 2"]["block_type"] == "close,background"
 
 
 def test_a_new_group_needs_a_name_and_a_blocker_then_is_added(shell, page, harness):
@@ -450,7 +501,8 @@ def test_a_program_file_member_can_only_be_closed_or_minimised(shell, page, harn
     open_fun(shell, page)
     pick_way(page, "Tool", "Its own way")
     page.wait_for_selector("#dlg[open]")
-    assert page.is_disabled('#dlg [data-way="internet"]') and page.is_disabled('#dlg [data-way="background"]')
+    # (the one set of boxes, js/ways.js: a program file gets the "file" group - Close / Minimize, nothing else to tick)
+    assert page.eval_on_selector_all("#dlg [data-way]", "els => els.map(e => e.dataset.way)") == ["close", "minimize"]
     assert "closed or minimised only" in page.inner_text("#dlg .dlg-b")
     page.click('#dlg button:has-text("Cancel")')
 

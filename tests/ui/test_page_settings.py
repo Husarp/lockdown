@@ -56,19 +56,26 @@ def css_var(page, name):
     return page.evaluate(f"getComputedStyle(document.documentElement).getPropertyValue('{name}').trim()")
 
 
+def dialog_closed(page, timeout=8000):
+    """Wait until the dialog is closed AND its OK / close result has been handled. `open` turns false the moment dialog.close()
+    runs, but the page handles the result (onClose) in the dialog's 'close' event, a task later - and then empties the dialog.
+    Reading the page between those two (a busy machine) sees the old state, so wait for the emptied dialog."""
+    wait_for(page, "(() => { const d = document.getElementById('dlg'); return !d.open && d.childElementCount === 0; })()", timeout)
+
+
 def type_challenge(page):
     page.wait_for_selector("#dlg[open] textarea.typed", timeout=5000)
     text = page.evaluate("document.querySelector('.ch-phrase').textContent")
     page.focus("#dlg textarea.typed")
     page.keyboard.type(text, delay=45)
     page.keyboard.press("Enter")
-    wait_for(page, "!document.getElementById('dlg').open", 8000)
+    dialog_closed(page)
 
 
 def cancel_challenge(page):
     page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
     page.keyboard.press("Escape")
-    wait_for(page, "!document.getElementById('dlg').open", 8000)
+    dialog_closed(page)
 
 
 def kinds(harness):
@@ -125,7 +132,8 @@ def test_accent_applies_live_without_a_reload_and_is_saved(shell, page, harness)
     mark(page)
     page.click('[data-color="#2F6FEB"]')
     wait_for(page, "getComputedStyle(document.documentElement).getPropertyValue('--brand').trim().toUpperCase() === '#2F6FEB'")
-    assert page.get_attribute('[data-color="#2F6FEB"]', "aria-pressed") == "true"
+    # the swatch is pressed only once the Api replied (paintAccent runs after setLook's await): wait for it
+    wait_for(page, "document.querySelector('[data-color=\"#2F6FEB\"]').getAttribute('aria-pressed') === 'true'")
     assert page.get_attribute('[data-color="#DB5126"]', "aria-pressed") == "false"
     assert eventually(lambda: saved(harness, "ui.accent") == "#2F6FEB")
     # a computed style on a real control follows it, and nothing says "restart"
@@ -276,7 +284,7 @@ def test_moving_it_back_asks_start_now_or_from_the_end_or_cancel(shell, page, ha
     assert labels[0] == "Cancel" and labels[1].startswith("From ") and labels[2] == "Start now"
     assert "Anti-Bypass asks first" in page.inner_text("#dlg")
     page.click("#dlg .dlg-f button:has-text('Cancel')")
-    wait_for(page, "!document.getElementById('dlg').open")
+    dialog_closed(page)
     assert json.loads(saved(harness, "limits.reset")) == {"time": "04:00"}
 
 
@@ -284,7 +292,7 @@ def test_from_the_end_of_the_day_is_free_even_while_locked(shell, page, harness)
     lock(harness)
     move_back_dialog(shell, page, harness)
     page.click("#dlg .dlg-f button:has-text('From ')")
-    wait_for(page, "!document.getElementById('dlg').open")
+    dialog_closed(page)
     assert eventually(lambda: json.loads(saved(harness, "limits.reset"))["time"] == "02:00")
     assert "day_start" in json.loads(saved(harness, "limits.reset"))
     wait_for(page, "!document.querySelector('[data-k=reset-note]').hidden")
@@ -490,7 +498,7 @@ def test_cancel_in_the_import_dialog_changes_nothing(shell, page, harness, tmp_p
     page.click('[data-act="import"]')
     page.wait_for_selector("#dlg[open] [data-k=import-lines]")
     page.click("#dlg .dlg-f button:has-text('Cancel')")
-    wait_for(page, "!document.getElementById('dlg').open")
+    dialog_closed(page)
     assert len(harness.db.list_items()) == before
     assert harness.rpc_count("backup_import_apply") == 0
 

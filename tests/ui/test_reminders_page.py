@@ -163,6 +163,17 @@ def test_break_seconds_boxes_and_options_are_saved(shell, page, harness):
     assert b["strict"] and b["twenty"] and b["text"] == "Rest {length}"
 
 
+def test_the_20_20_20_says_text_is_saved_and_shown_again(shell, page, harness):
+    open_page(shell, page)
+    page.fill('[data-k="b-twenty-text"]', "Look at the trees")
+    page.press('[data-k="b-twenty-text"]', "Enter")
+    page.wait_for_timeout(500)
+    assert break_saved(harness)["twenty_text"] == "Look at the trees"
+    shell(route="about")
+    open_page(shell, page)
+    assert page.input_value('[data-k="b-twenty-text"]') == "Look at the trees"
+
+
 def test_break_under_five_seconds_is_refused(shell, page, harness):
     open_page(shell, page)
     page.fill('[data-k="b-every"]', "4s")
@@ -321,3 +332,16 @@ def test_page_load_and_rows_are_reused(shell, page, harness, perf, capsys):
     assert harness.rpc_count("reminders_get") == 1
     with capsys.disabled():
         print(f"\n  reminders first visit (30 reminders): {ms:.0f} ms to the last row")
+
+
+def test_a_mode_added_elsewhere_shows_up_in_the_turn_on_a_mode_list_on_a_mode_changed_push(shell, page, harness, push):
+    import modes
+    open_page(shell, page)
+    options = lambda: page.eval_on_selector_all('[data-k="s-mode"] option', "els => els.map(e => e.textContent)")
+    assert "Night owl" not in options()
+    ms = modes.load(harness.db)
+    ms.append({**ms[0], "id": modes.new_id(ms), "name": "Night owl", "builtin": False})
+    modes.save(harness.db, ms)
+    push("mode_changed", {"rev": 1})
+    wait_for(page, "[...document.querySelectorAll('[data-k=\"s-mode\"] option')].some(o => o.textContent === 'Night owl')")
+    assert "Night owl" in options()

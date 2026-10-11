@@ -215,3 +215,67 @@ def test_ui_placeholders_exist_in_the_source_tree():
     ui = SRC / "ui"
     for name in ("index.html", "corner.html", "overlay.html"):
         assert (ui / name).is_file()
+
+
+# ---------------------------------------------------------------- R29: start duties of the agent
+
+def test_tray_and_watchdog_starts_stay_hidden_and_a_plain_start_shows_the_window():
+    import ast
+    import agent
+    assert set(agent.TRAY_ARGS) == {"--tray", "--watchdog"}
+    tree = ast.parse((SRC / "agent.py").read_text(encoding="utf-8"))
+    guards = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and "show_main(win)" in ast.unparse(ast.Module(body=node.body, type_ignores=[])):
+            guards.append(ast.unparse(node.test))
+    # the plain "show the window when the loop is up" call sits under "none of the tray flags was given"
+    assert any("TRAY_ARGS" in g and g.startswith("not any(") for g in guards), guards
+
+
+class _FakeDb:
+    def __init__(self, exited):
+        self.exited = exited
+
+    def get_setting(self, key, default=None):
+        return "1" if self.exited and key == "agent.exited" else default
+
+
+@pytest.mark.parametrize("running, exited, expected", [
+    (False, False, True),
+    (True, False, False),      # Lockdown is already running: the watchdog does nothing
+    (False, True, False),      # quit with tray Exit: stays off until the next login
+    (True, True, False),
+])
+def test_watchdog_starts_only_when_nothing_runs_and_exit_was_not_chosen(monkeypatch, running, exited, expected):
+    import db
+    monkeypatch.setattr(main.single_instance, "running", lambda: running)
+    monkeypatch.setattr(db, "Database", lambda: _FakeDb(exited))
+    monkeypatch.setattr(main, "_log", lambda *a, **k: None)
+    assert main.watchdog_should_start() is expected
+
+
+def test_watchdog_reads_the_exited_flag_from_a_real_db(tmp_path, monkeypatch):
+    import antibypass
+    import db
+    real = db.Database(tmp_path / "w.db")
+    monkeypatch.setattr(main.single_instance, "running", lambda: False)
+    monkeypatch.setattr(db, "Database", lambda: real)
+    monkeypatch.setattr(main, "_log", lambda *a, **k: None)
+    assert main.watchdog_should_start() is True
+    real.set_setting(antibypass.EXITED_KEY, "1")
+    assert main.watchdog_should_start() is False
+
+
+def test_a_second_launch_open_event_shows_the_main_window(monkeypatch):
+    import queue
+    import threading
+    from resident import windows
+    shown = []
+    done = threading.Event()
+    monkeypatch.setattr(windows, "show_main", lambda win: (shown.append(win), done.set()))
+    events, win = queue.Queue(), object()
+    windows.pump_open_events(events, win)
+    events.put("something else")             # ignored
+    events.put("open")
+    assert done.wait(3)
+    assert shown == [win]

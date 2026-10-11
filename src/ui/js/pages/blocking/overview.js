@@ -125,6 +125,10 @@ const STYLE = `<style>
 .bo-head { display: grid; align-items: center; gap: var(--sp-3); height: calc(34px * var(--s)); padding: 0 var(--sp-4); background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .bo-row { padding-right: var(--sp-3); }
 .bo-row .name { gap: 1px; }
+.bo-nl { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.bo-nl b { min-width: 0; }
+.bo-type { flex: none; font-style: normal; font-weight: var(--fw-regular); }
+.bo-type[hidden] { display: none; }
 .bo-chips { display: flex; flex-wrap: wrap; align-content: center; gap: 3px var(--sp-1); overflow: hidden; max-height: calc(var(--row-h) - 8px); min-width: 0; }
 .bchip { display: inline-flex; align-items: center; gap: 4px; height: calc(20px * var(--s)); max-width: 100%; padding: 0 var(--sp-2); border-radius: var(--r-pill);
   background: var(--k-soft); color: var(--text); font-size: var(--fs-sm); line-height: 1; white-space: nowrap; }
@@ -162,7 +166,7 @@ const STYLE = `<style>
 </style>`;
 
 const ROW_HTML = `<span class="bo-ic"><span class="aic"><img alt="" loading="lazy" decoding="async" draggable="false">${ic("layers", "bo-tile")}</span></span>
-  <div class="name"><b class="ellip"></b><span class="ellip"></span></div>
+  <div class="name"><div class="bo-nl"><b class="ellip"></b><em class="chip chip-soft chip-xs bo-type" hidden></em></div><span class="ellip"></span></div>
   <div class="bo-chips tags-col"></div>
   <div class="bo-st"><span class="chip">${ic("ban")}<span></span></span></div>
   <button class="btn btn-sm btn-ghost bo-alerts" type="button" data-act="alerts" title="Blocked-visit alerts for this item">${ic("bell")}<span></span></button>
@@ -176,7 +180,7 @@ function createRow() {
   node.querySelector(".bo-acts").append(remove);
   node._refs = {
     ic: node.querySelector(".bo-ic"), img: node.querySelector("img"), use: node.querySelector(".bo-tile use"),
-    b: node.querySelector(".name b"), sub: node.querySelector(".name span"), chips: node.querySelector(".bo-chips"),
+    b: node.querySelector(".name b"), type: node.querySelector(".bo-type"), sub: node.querySelector(".name > span"), chips: node.querySelector(".bo-chips"),
     chip: node.querySelector(".bo-st .chip"), chipUse: node.querySelector(".bo-st .chip use"), chipText: node.querySelector(".bo-st .chip span"),
     alerts: node.querySelector(".bo-alerts span"), edit: node.querySelector('[data-act="edit"] span'), remove,
   };
@@ -212,6 +216,15 @@ function setChips(node, chips) {
   }
 }
 
+const TYPE_WORDS = { site: "Site", app: "App", category: "Category" };
+
+/** The small "Site / App / Category" badge after a name (hidden for a group and for the Disabled heading). */
+function setType(r, type) {
+  const word = TYPE_WORDS[type] || "";
+  setText(r.type, word);
+  r.type.hidden = !word;
+}
+
 const ALERT_WORDS = { null: "Default", on: "On", off: "Off" };
 
 function renderRow(node, row) {
@@ -222,17 +235,20 @@ function renderRow(node, row) {
   const e = row.e;
   if (row.k === "dhead") {
     setText(r.b, `Disabled (${row.n})`);
+    setType(r, "");
     setText(r.sub, "Kept with their blockers, but nothing is enforced. Edit one to turn it back on.");
     return;
   }
   setIcon(r, e, row.k === "ghead" || (row.k === "drow" && e.t === "group"));
   if (row.k === "drow") {
     setText(r.b, e.t === "group" ? `${e.name} (group)` : e.name);
+    setType(r, e.t === "group" ? "" : e.type);
     setText(r.sub, "");
     setText(r.edit, "Edit");
     return;
   }
   setText(r.b, e.name);
+  setType(r, row.k === "ghead" ? "" : e.type);
   if (row.k === "ghead") setText(r.sub, `group · ${e.count} member${e.count === 1 ? "" : "s"}`);
   else if (row.k === "member") setText(r.sub, e.note || "");
   else setText(r.sub, e.sub);

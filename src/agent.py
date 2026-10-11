@@ -122,6 +122,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
         pool.start()
         app_catalog.start()   # (R11: reads the cached list, scans again if it is over a day old)
         webapi.screentime.start_warmup(ctx)   # (a few seconds on, in the background: the first visit of Screen Time finds its day sums ready)
+        webapi.protection.start_warmup(ctx)   # (R29: ten seconds on: "Check a site" finds the lists' tables loaded, not 1.5 s of file reading)
         if not any(a in argv for a in TRAY_ARGS):
             windows.show_main(win)
     windows.start(ready)
