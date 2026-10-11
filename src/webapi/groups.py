@@ -244,8 +244,24 @@ def _way(kind: str, value, who: str, own: bool = False, hosted: bool = False):
     return make_block_type(flags) or None
 
 
-def _overrides(value, name: str, now, errors: list):
-    """{rule_type: form} -> {rule_type: rule dict} for one member; what is wrong goes to `errors` (with the member)."""
+def _keep_stored(form, end):
+    """A temporary blocker's "keep" keeps the SAVED end of the running block (`end`, None when there is none): the
+    form's own keep_until is never read - an end a little short would shorten the block for free (R28, as
+    blocking_edit._stored_end)."""
+    if isinstance(form, dict) and form.get("rule_type") == "temporary" and form.get("choice") == "keep":
+        return {**form, "keep_until": end}
+    return form
+
+
+def _temp_end(rules) -> str | None:
+    """The saved end of the temporary rule among `rules` (a list of rule dicts), or None."""
+    rule = next((r for r in rules or () if r.get("rule_type") == "temporary"), None)
+    return rule.get("temp_until") if rule else None
+
+
+def _overrides(value, name: str, now, errors: list, saved: dict | None = None):
+    """{rule_type: form} -> {rule_type: rule dict} for one member; what is wrong goes to `errors` (with the member).
+    `saved`: the member's own rules as saved in this group ({rule_type: rule}), for "keep"."""
     if value is None:
         return {}
     if not isinstance(value, dict) or len(value) > len(CUSTOMIZABLE):
@@ -254,6 +270,7 @@ def _overrides(value, name: str, now, errors: list):
     for t, form in value.items():
         if t not in CUSTOMIZABLE or not isinstance(form, dict) or form.get("rule_type") != t:
             raise ApiError(f"Bad request: {name} can't be given an own {t}.")
+        form = _keep_stored(form, ((saved or {}).get("temporary") or {}).get("temp_until"))
         try:
             out[t] = rule_forms.rule_from_form(form, False, now)
         except rule_forms.RuleFormError as e:
@@ -321,14 +338,17 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
         if not name or len(name) > MAX_NAME:
             errors.append({"rule_type": None, "field": "name", "message": "Give the group a name." if not name
                            else f"The name can be at most {MAX_NAME} letters."})
-        group_rules, rule_errors = rule_forms.check_forms(rules, True, now, True)
+        before = d.saved_groups.get(gid) or {}            # (what is saved: "keep" keeps its running block's end)
+        end = _temp_end(before.get("rules"))
+        forms = [_keep_stored(f, end) for f in rules] if isinstance(rules, list) else rules
+        group_rules, rule_errors = rule_forms.check_forms(forms, True, now, True)
         errors += rule_errors
         app_way = _way("app", ways.get("app_block"), "How apps are blocked")
         site_way = _way("site", ways.get("site_block"), "How sites are blocked")
         chosen, targets, member_ways = {}, [], {}          # item id -> overrides; new ones; item id / key -> own way
 
-        def check_member(label, kind, hosted, entry_overrides, entry_way):
-            overrides = _overrides(entry_overrides, label, now, errors)
+        def check_member(label, kind, hosted, entry_overrides, entry_way, item_id=None):
+            overrides = _overrides(entry_overrides, label, now, errors, before.get("members", {}).get(item_id))
             return overrides, _way(kind, entry_way, label, own=True, hosted=hosted)
 
         for entry in members:
@@ -343,7 +363,7 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
                 continue
             hosted = item["item_type"] == "app" and is_hosted(exe_name(item.get("target") or ""))
             chosen[item["id"]], member_ways[item["id"]] = check_member(
-                item["display_name"], block_method.kind(item), hosted, entry.get("overrides"), entry.get("way"))
+                item["display_name"], block_method.kind(item), hosted, entry.get("overrides"), entry.get("way"), item["id"])
         seen = set()
         for entry in pending:
             target = _pending_target(ctx, entry)
@@ -359,7 +379,8 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
                 hosted = existing["item_type"] == "app" and is_hosted(exe_name(existing.get("target") or ""))
             else:
                 kind, hosted = target["kind"], target["kind"] == "app" and is_hosted(target["name"])
-            overrides, way = check_member(target["display"], kind, hosted, entry.get("overrides"), entry.get("way"))
+            overrides, way = check_member(target["display"], kind, hosted, entry.get("overrides"), entry.get("way"),
+                                          existing["id"] if existing else None)
             targets.append((target, existing, overrides, way))
         if errors:
             return {"saved": False, "errors": errors}

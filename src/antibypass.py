@@ -201,7 +201,9 @@ def rule_looser(old: dict, new: dict | None, now: datetime) -> bool:
         return True
     kind = old["rule_type"]
     if kind == "temporary":
-        return _temp_end(new, now) < _temp_end(old, now) - timedelta(minutes=1)
+        # Any earlier end is looser - no minute's grace: "keep" holds the saved end exactly, and a grace let a running
+        # block be cut by a minute per save, again and again, for free.
+        return _temp_end(new, now) < _temp_end(old, now)
     if kind == "scheduled":
         return (schedule_looser(old.get("schedule"), new.get("schedule"))
                 or (new.get("allowance_min") or 0) > (old.get("allowance_min") or 0)

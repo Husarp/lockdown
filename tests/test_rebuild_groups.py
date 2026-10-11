@@ -511,8 +511,9 @@ def test_a_group_s_first_choice_is_compared_with_the_way_each_member_had_before(
     assert got["saved"] and group(env)["app_block"] == "close,internet"
 
 
-def test_a_forged_keep_that_shortens_a_running_extra_block_asks(env):
-    """The page can only send a form: 'keep this end' with an earlier end is a shorter block, which loosens."""
+def test_a_forged_keep_that_shortens_a_running_extra_block_keeps_the_saved_end(env):
+    """The page can only send a form: 'keep' keeps the SAVED end of the running block (R28) - an earlier keep_until from
+    the page is not read, so nothing gets shorter."""
     left = (NOW + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S")
     sooner = (NOW + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     env.db.update_group(env.gid, "Fun", [dict(LIMIT_2H)],
@@ -520,4 +521,17 @@ def test_a_forged_keep_that_shortens_a_running_extra_block_asks(env):
     drafts.draft_of(env).reload()
     lock(env)
     forged = {"rule_type": "temporary", "choice": "keep", "keep_until": sooner}
-    asks(env, save(env, [member(env.reddit, {"temporary": forged}), member(env.yt), member(env.game)]), "Loosen group Fun")
+    assert result(save(env, [member(env.reddit, {"temporary": forged}), member(env.yt), member(env.game)]))["saved"]
+    assert group(env)["members"][env.reddit]["temporary"]["temp_until"] == left
+
+
+def test_a_group_keep_keeps_the_saved_end_of_its_own_running_block(env):
+    """The same for the group's own temporary blocker: 'keep' with a page end a minute short is the saved end."""
+    left = (NOW + timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S")
+    short = (NOW + timedelta(hours=5, minutes=-1)).strftime("%Y-%m-%d %H:%M:%S")
+    env.db.update_group(env.gid, "Fun", [{"rule_type": "temporary", "temp_until": left}], {env.reddit: {}, env.yt: {}, env.game: {}})
+    drafts.draft_of(env).reload()
+    lock(env)
+    keep = {"rule_type": "temporary", "choice": "keep", "keep_until": short}
+    assert result(save(env, three(env), rules=[keep]))["saved"]
+    assert [r["temp_until"] for r in group(env)["rules"]] == [left]
