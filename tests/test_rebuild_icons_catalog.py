@@ -154,6 +154,25 @@ def test_sites_get_their_favicon_and_a_failure_is_retried_only_later(made):
     assert s.queued == 1
 
 
+def test_the_queue_is_capped_and_old_failures_are_forgotten(made):
+    s = made.service
+    for i in range(icons.MAX_QUEUED + 20):
+        s.handle(f"site/h{i}.example.png", {})
+    assert s.queued == icons.MAX_QUEUED
+    s.run_pending()
+    assert len(made.fetched) == icons.MAX_QUEUED
+    made.now[0] += icons.RETRY_SEC + 1
+    s.handle("site/offline.example.png", {})
+    s.run_pending()
+    assert list(s._failed) == ["site:offline.example"]                      # the expired ones are gone
+    for i in range(icons.MAX_FAILED + 10):
+        s._failed[f"site:x{i}"] = made.now[0]
+    s._failed.pop("site:offline.example")
+    s.handle("site/offline.example.png", {})
+    s.run_pending()
+    assert len(s._failed) == icons.MAX_FAILED and "site:x0" not in s._failed and "site:offline.example" in s._failed
+
+
 def test_an_unknown_program_is_a_letter_and_nothing_is_read_from_a_path_the_page_names(made):
     s = made.service
     s.handle("app/unknown.exe.png", {})
@@ -530,6 +549,7 @@ def test_apps_list_through_the_api(api):
     assert reply["ok"] and reply["data"]["apps"][0] == {"name": "Discord", "exe": "discord.exe", "path": "C:\\d.exe",
                                                        "running": False, "steam": False}
     assert api.apps_list()["data"]["total"] == len(APPS)
+    assert api.apps_list("", "")["data"]["total"] == len(APPS)
     assert not api.apps_list("everything", "")["ok"] and not api.apps_list("all", 5)["ok"]
     assert api.apps_list("all", "x" * 5000)["ok"]                               # (an overlong search is cut, not refused)
 

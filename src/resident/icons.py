@@ -25,6 +25,8 @@ from resident.assets import Response
 
 PALETTE = ["#e5534b", "#c69026", "#57ab5a", "#539bf5", "#b083f0", "#dc6d1a", "#39c5cf", "#e275ad"]   # as gui/icons.py
 FAVICON_URL = "https://www.google.com/s2/favicons?domain={domain}&sz=64"
+MAX_QUEUED = 64          # more distinct icons than this waiting at once: the extra ones keep their letter tile
+MAX_FAILED = 2000        # remembered failures (the oldest go first)
 RETRY_SEC = 600          # an icon that could not be got (offline, no such program) is tried again after this long
 MAX_NAME = 100
 HOST_RE = re.compile(r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
@@ -135,6 +137,8 @@ class IconService:
             failed = self._failed.get(key)
             if key in self._pending or (failed is not None and self.clock() - failed < RETRY_SEC):
                 return
+            if len(self._pending) >= MAX_QUEUED:
+                return
             self._pending.add(key)
             self._jobs.put((kind, name))
             if self._start and self._thread is None:
@@ -168,7 +172,13 @@ class IconService:
         with self._lock:
             self._pending.discard(key)
             if not ok:
-                self._failed[key] = self.clock()
+                now = self.clock()
+                self._failed.pop(key, None)
+                self._failed[key] = now
+                for old in [k for k, t in self._failed.items() if now - t >= RETRY_SEC]:
+                    del self._failed[old]
+                while len(self._failed) > MAX_FAILED:
+                    del self._failed[next(iter(self._failed))]
         if ok:
             try:
                 self.on_ready(key)

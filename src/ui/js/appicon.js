@@ -19,8 +19,9 @@ export function parseKey(key) {
 export const iconKey = (kind, name) => `${kind}:${String(name).toLowerCase()}`;
 
 /** <img> markup for an app / site icon (a string, for a page's first mount). */
+const escAttr = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 export const iconImg = (kind, name, cls = "") =>
-  `<img class="${cls}" data-icon="${iconKey(kind, name).replace(/"/g, "&quot;")}" src="${iconUrl(kind, name)}" alt="" loading="lazy" decoding="async" draggable="false">`;
+  `<img class="${cls}" data-icon="${escAttr(iconKey(kind, name))}" src="${iconUrl(kind, name)}" alt="" loading="lazy" decoding="async" draggable="false">`;
 
 /** Subscribe (ld.on) so a finished icon replaces its letter tile. Returns the unsubscribe function. */
 export function wireIconReady(on, root = document, now = () => Date.now()) {

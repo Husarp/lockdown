@@ -26,6 +26,7 @@ def apps_list(ctx, filter="all", query=""):
     """The apps to pick from: {apps: [{name, exe, path, running, steam}] (best match first, at most 60), total,
     loading}. `filter`: "all" / "running" / "games". While the catalog is still loading `loading` is true and the page
     asks again when it gets the `apps_ready` push."""
+    filter = filter or "all"
     if filter not in app_catalog.FILTERS:
         raise ApiError("Unknown filter.")
     if not isinstance(query, str):

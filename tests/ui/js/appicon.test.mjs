@@ -30,3 +30,7 @@ test("icon_ready swaps the src of the matching images only", () => {
   handler(null);
   assert.equal(off(), "off");
 });
+
+test("the data-icon attribute is fully escaped", () => {
+  assert.match(iconImg("app", `a&b<c>"d'.exe`), /data-icon="app:a&amp;b&lt;c&gt;&quot;d&#39;\.exe"/);
+});
