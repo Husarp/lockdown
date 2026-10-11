@@ -91,6 +91,7 @@ private fun load(ctx: Context, cfg: Config, back: Int, len: Int): HistData {
     val sw = Stats.switchSummary(switches, now)
     // the usual visit length comes from the 30 days before the range's end
     val past = History.detail(to.minusDays(30), to).values.flatMap { it.switches }
+    val islandRows = runCatching { com.husarp.lockdown.link.IslandLink.islandRows(ctx) }.getOrDefault(emptyList())
     val totals = History.allTotals()
     val first = totals.filterValues { it.total > 0 }.keys.minOrNull()
     val streakDays = if (first == null) emptyList() else
@@ -110,7 +111,8 @@ private fun load(ctx: Context, cfg: Config, back: Int, len: Int): HistData {
         sites = Stats.perSite(rows).entries.sortedByDescending { it.value }.take(5).map { it.key to it.value },
         blocked = blocked.size,
         savedSec = Stats.timeSaved(blocked, cfg.items, past, now).toInt(),
-        goalStreak = goal?.let { g -> if (streakDays.isEmpty()) 0 else Stats.goalStreak(totals.mapValues { it.value.total }, streakDays, g * 60) },
+        goalStreak = goal?.let { g -> if (streakDays.isEmpty()) 0 else Stats.goalStreak(
+            com.husarp.lockdown.engine.IslandUse.fillTotals(totals.mapValues { it.value.seconds }, islandRows).mapValues { e -> e.value.values.sum() }, streakDays, g * 60) },
         noUnlock = Stats.noUnlockStreak(streakDays, unlockDays),
         heat = when { len == 7 -> Stats.heatmap(rows, days); len > 7 -> Stats.weekdayHeatmap(rows, days); else -> null },
         heatRows = if (len == 7) days.map { names[it.dayOfWeek.value - 1] } else names,
@@ -119,9 +121,10 @@ private fun load(ctx: Context, cfg: Config, back: Int, len: Int): HistData {
 }
 
 /** Screen time per day and app / site, the last 365 days, as CSV (PC: Screen Time > Export). */
-private fun csv(cfg: Config): String {
+private fun csv(ctx: Context, cfg: Config): String {
     val since = LocalDate.now().minusDays(365)
-    val days = History.allTotals().filterKeys { !it.isBefore(since) }.mapValues { it.value.seconds }
+    val days = com.husarp.lockdown.engine.IslandUse.fillTotals(History.allTotals().mapValues { it.value.seconds },
+        runCatching { com.husarp.lockdown.link.IslandLink.islandRows(ctx) }.getOrDefault(emptyList())).filterKeys { !it.isBefore(since) }
     return HistoryLog.csv(days) { app, site -> if (site.isNotEmpty()) cfg.categories["site:$site"] else cfg.categories["app:$app"] }
 }
 
@@ -136,7 +139,7 @@ fun InsightsHistory(back: Int, len: Int) {
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             exportMsg = withContext(Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(csv(Store.config).toByteArray()) } }
+                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(csv(ctx, Store.config).toByteArray()) } }
                     .fold({ "Saved." }, { "Couldn't save the file." })
             }
         }

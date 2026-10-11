@@ -373,6 +373,9 @@ object IslandLink {
     fun islandUse(ctx: Context, from: java.time.LocalDate, to: java.time.LocalDate): Map<String, AppTime> =
         if (!isMain) emptyMap() else IslandUse.total(readIslandUse(ctx), from, to)
 
+    /** Main: all of Island's per-day, per-app rows that came over the link (empty when not linked). */
+    fun islandRows(ctx: Context): List<IslandUseRow> = if (!isMain) emptyList() else readIslandUse(ctx)
+
     /** Main: apps installed only in Island, named "Label (Island)", for the app pickers. */
     fun islandOnly(ctx: Context, mine: Set<String>): List<InstalledApp> {
         if (!isMain) return emptyList()

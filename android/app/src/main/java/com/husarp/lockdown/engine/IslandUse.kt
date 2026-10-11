@@ -71,4 +71,35 @@ object IslandUse {
         val only = island.values.filter { it.pkg !in mine }.map { it.copy(label = "${it.label} (Island)") }
         return (both + only).sortedByDescending { it.ms }
     }
+
+    /** Island's milliseconds on each of [days] (all apps), for the Insights bars and the total. */
+    fun perDay(rows: List<IslandUseRow>, days: List<LocalDate>): List<Long> {
+        val by = HashMap<String, Long>()
+        for (r in rows) by.merge(r.day, r.sec * 1000L, Long::plus)
+        return days.map { by[it.toString()] ?: 0L }
+    }
+
+    /**
+     * Lockdown's history already counts an Island app while main sees it in front (accessibility), so adding the
+     * helper's usage on top would count that time twice. Per day and package the larger of the two wins: when the
+     * history has the app for that day, only what the helper saw beyond it is added (as a row with no site); an
+     * app or day the history lacks (accessibility was off, Island-only use) comes in whole. Input is not changed.
+     */
+    fun fillTotals(days: Map<LocalDate, Map<Pair<String, String>, Int>>, island: List<IslandUseRow>): Map<LocalDate, Map<Pair<String, String>, Int>> {
+        if (island.isEmpty()) return days
+        val out = HashMap<LocalDate, Map<Pair<String, String>, Int>>(days)
+        for ((day, rows) in island.groupBy { runCatching { LocalDate.parse(it.day) }.getOrNull() }) {
+            if (day == null) continue
+            val cur = days[day] ?: emptyMap()
+            val histApp = HashMap<String, Int>()
+            for ((k, v) in cur) histApp.merge(k.first, v, Int::plus)
+            val extra = HashMap<Pair<String, String>, Int>()
+            for ((pkg, rs) in rows.groupBy { it.pkg }) {
+                val more = rs.sumOf { it.sec } - (histApp[pkg] ?: 0)
+                if (more > 0) extra[pkg to ""] = (cur[pkg to ""] ?: 0) + more
+            }
+            if (extra.isNotEmpty()) out[day] = cur + extra
+        }
+        return out
+    }
 }

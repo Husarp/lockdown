@@ -55,4 +55,27 @@ class IslandUseTest {
         assertNull(LinkProtocol.json.decodeFromString(SyncBody.serializer(), """{"seq":1}""").use)
         assertEquals(1L, LinkProtocol.json.decodeFromString(SyncBody.serializer(), """{"seq":1,"use":[],"future":3}""").seq)
     }
+
+    private fun row(day: String, pkg: String, sec: Int) = IslandUseRow(day, pkg, pkg, sec)
+
+    @Test fun per_day_adds_all_apps_of_each_day() {
+        val rows = listOf(row("2026-10-09", "a", 60), row("2026-10-09", "b", 30), row("2026-10-10", "a", 5))
+        assertEquals(listOf(90_000L, 5_000L, 0L), IslandUse.perDay(rows, listOf(today.minusDays(1), today, today.plusDays(1))))
+    }
+
+    @Test fun history_that_already_has_the_island_app_is_not_counted_twice() {
+        val d = today
+        val hist = mapOf(d to mapOf(("a" to "") to 100, ("chrome" to "x.com") to 40, ("chrome" to "y.com") to 20))
+        val out = IslandUse.fillTotals(hist, listOf(row("2026-10-10", "a", 80), row("2026-10-10", "chrome", 50)))
+        assertEquals(hist, out)                                                     // history already has more
+    }
+
+    @Test fun only_the_part_history_missed_is_added_and_new_days_come_in_whole() {
+        val hist = mapOf(today to mapOf(("a" to "") to 60))
+        val out = IslandUse.fillTotals(hist, listOf(row("2026-10-10", "a", 100), row("2026-10-10", "b", 30), row("2026-10-08", "a", 20)))
+        assertEquals(mapOf(("a" to "") to 100, ("b" to "") to 30), out[today])
+        assertEquals(mapOf(("a" to "") to 20), out[LocalDate.of(2026, 10, 8)])
+        assertEquals(60, hist[today]!![("a" to "")])                                // input untouched
+        assertEquals(hist, IslandUse.fillTotals(hist, emptyList()))
+    }
 }

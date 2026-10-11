@@ -68,6 +68,9 @@ fun InsightsScreen() {
             val today = LocalDate.now()
             val island = runCatching { com.husarp.lockdown.link.IslandLink.islandUse(ctx, today.minusDays(back + len - 1L), today.minusDays(back.toLong())) }
                 .getOrDefault(emptyMap())
+            val islandDays = (0 until len).map { today.minusDays((back + len - 1 - it).toLong()) }
+            val islandPerDay = runCatching { com.husarp.lockdown.engine.IslandUse.perDay(com.husarp.lockdown.link.IslandLink.islandRows(ctx), islandDays) }
+                .getOrDefault(List(len) { 0L })
             val apps = com.husarp.lockdown.engine.IslandUse.topApps(
                 du?.apps?.map { com.husarp.lockdown.engine.AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island,
             ).take(6).map { AppRow(it.pkg, it.label, it.ms) }
@@ -75,7 +78,9 @@ fun InsightsScreen() {
             val bars: List<Bar> = if (hourly) {
                 (0..23).map { h -> Bar("%02d".format(h), du?.hourly?.getOrElse(h) { 0L } ?: 0L) }
             } else {
+                // dailyTotals counts back from today; Island's days for the shown range are the same days when back == 0
                 val totals = runCatching { Usage.dailyTotals(ctx, len) }.getOrDefault(List(len) { 0L })
+                    .mapIndexed { i, ms -> ms + islandPerDay[i] }
                 val wd = listOf("M", "T", "W", "T", "F", "S", "S")
                 totals.mapIndexed { i, ms ->
                     val date = LocalDate.now().minusDays((len - 1 - i).toLong())
@@ -83,7 +88,7 @@ fun InsightsScreen() {
                     Bar(label, ms)
                 }
             }
-            InsightData(du?.totalMs ?: 0L, len, apps, bars, hourly)
+            InsightData((du?.totalMs ?: 0L) + islandPerDay.sum(), len, apps, bars, hourly)
         }
     }
 
