@@ -91,12 +91,13 @@ function writeCache(win) {
   } catch (_) { /* a blocked storage only costs the first-paint colours next time */ }
 }
 
-/** Apply whatever of {theme, accent, scale} is given. Live: attributes and CSS variables only. */
+/** Apply whatever of {theme, accent, scale, motion} is given. Live: attributes and CSS variables only. */
 export function applyLook(look = {}, win = window) {
   const doc = win.document, root = doc.documentElement;
   if (look.theme !== undefined) state.pref = THEMES.includes(look.theme) ? look.theme : "dark";
   if (look.accent !== undefined && parseHex(look.accent)) state.accent = look.accent.toUpperCase();
   if (look.scale !== undefined) state.scale = String(look.scale).toLowerCase();
+  if (look.motion !== undefined) { if (look.motion) root.dataset.motion = "off"; else delete root.dataset.motion; }   // Reduce motion (css/app.css)
   const theme = resolveTheme(state.pref, systemDark(win));
   root.dataset.theme = theme;
   for (const [k, v] of Object.entries(deriveAccent(state.accent, theme))) root.style.setProperty(k, v);

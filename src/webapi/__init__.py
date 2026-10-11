@@ -30,6 +30,8 @@ PAGE_MODULES = [
     "groups",
     "screentime",
     "blocking_edit",
+    "notifications",
+    "settings",
 ]
 
 for _name in PAGE_MODULES:

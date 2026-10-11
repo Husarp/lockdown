@@ -58,6 +58,8 @@ VIEWS.append(("blocking/groups", "blocking", '[data-tab="groups"]', ".gp-card[da
 VIEWS.append(("blocking/protect", "blocking", '[data-tab="protect"]', '.pl-row[data-key="scam"]'))     # R23: Site protection, first visit
 VIEWS.append(("modes/editor", "modes", '[data-act="new"]', '.md-editor:not([hidden]) [data-k="name"]'))     # R25: the editor module, first open
 VIEWS.append(("netlog/graph", "netlog", '[data-seg="nlview"] [data-v="graph"]', ".nl-graph svg path.ch-bar"))     # R16: the Graph tab, first visit
+VIEWS.append(("notifications/messages", "notifications", '[data-act="messages"]', '[data-k="msgs"]:not([hidden]) .nt-msg'))     # R27: the Messages section opens
+VIEWS.append(("settings/new-kind", "settings", '[data-k="em-add"]', '[data-k="em-new"]:not([hidden])'))     # R27: the emergency card's "Add another kind" form opens
 SCROLLS.append(("netlog 20k rows", "netlog", "#nl-list", ".vl-row:not([hidden])"))     # R16: the log (the next batch is fetched near the end)
 
 # the databases: (label, days, rolled up by the retention job, counts against the budget)

@@ -69,7 +69,8 @@ def get_status(ctx):
 
 @core.read
 def get_theme(ctx):
-    """The saved look: theme (dark / amoled / light / system), accent (#RRGGBB), scale (auto / 100 / 90 / 80 / 70)."""
+    """The saved look: theme (dark / amoled / light / system), accent (#RRGGBB), scale (auto / 100 / 90 / 80 / 70),
+    motion (true = Reduce motion)."""
     db = ctx.db
     theme = db.get_setting(ui_theme.THEME_KEY, "") or ""
     if theme not in ui_theme.BACKGROUNDS and theme != "system":
@@ -77,7 +78,8 @@ def get_theme(ctx):
     accent = db.get_setting(ui_theme.ACCENT_KEY, "") or ""
     scale = db.get_setting(ui_theme.SIZE_KEY, "") or "auto"
     return {"theme": theme, "accent": accent.upper() if HEX_RE.fullmatch(accent) else ui_theme.ACCENTS["Orange"],
-            "scale": scale if scale in SCALES else "auto", "accents": ui_theme.ACCENTS}
+            "scale": scale if scale in SCALES else "auto", "accents": ui_theme.ACCENTS,
+            "motion": db.get_setting("ui.reduce_motion") == "1"}      # (Settings > Reduce motion: R27)
 
 
 # ---------------------------------------------------------------- the look (cosmetic)

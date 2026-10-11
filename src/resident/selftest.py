@@ -44,6 +44,7 @@ READ_ARGS: dict = {
     "manual_get": ["mine1"],                   # Blocking > Site protection: one of your own lists (null when it isn't there)
     "wordlist_get": ["adult_en"],              # Blocking > Site protection: a word-list dialog
     "host_normalize": ["https://www.Example.com/x"],     # Blocking > Site protection: the site address of a new entry
+    "reset_change_preview": lambda ctx: ["04:30" if f"{ctx.db.limit_clock().time:%H:%M}" != "04:30" else "05:30"],    # Settings > When limits reset: a time other than the saved one
     "mode_extra_check": [{"kind": "site", "text": "reddit.com", "name": "", "ways": ["dns"]}],   # Modes: "+ Other site or app"
     "network_get": [{}, 100],                  # Network Log: the table (the first 100 of the last hour)
     "network_graph": [{}],                     # Network Log: the Graph tab

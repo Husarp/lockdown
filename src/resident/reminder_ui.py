@@ -141,6 +141,7 @@ def attach(win, hub, ctx, show_main, log=None):
     hub.notify.show = notices.show
     ui = CornerReminderUI(hub, corner, toaster, notices)
     ctx.corner = corner
+    ctx.notices = notices         # R27: Notifications > "Show as" tells it to read the setting again (notices.refresh())
     actions = tray_actions.TrayActions(hub, ctx.guard, show_main, lambda event, payload=None: win.publisher.publish(event, payload))
     hub.open_page = actions.open_page
     actions.open_challenge = lambda data: windows.open_challenge(win, data)   # (on the overlay while it is up)

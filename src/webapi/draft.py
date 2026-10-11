@@ -186,6 +186,10 @@ def _changed(ctx, d, kind):
     """Draft listener: kind is "changed" / "saved" / "discarded". Runs with the lock held, on the thread that edited."""
     blocks = getattr(_local, "blocks", True)
     _publish(ctx, "draft", {**state_of(d), "what": kind, "rev": next(_rev), "blocks": blocks})
+    if kind == "saved":
+        notices = getattr(ctx, "notices", None)
+        if notices is not None:
+            notices.refresh()          # (R27: a new "Show as" counts from the next notice on)
     if kind == "saved" and blocks:
         _publish(ctx, "blocks_changed", {"rev": next(_rev)})
         _poke(ctx)
