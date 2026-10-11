@@ -5,10 +5,20 @@ import { esc, ic } from "./ui.js";
 
 let open = null;      // {opener, onClose, off}
 
-const node = () => document.getElementById("menu");
+let menuEl = null;
+const node = () => menuEl || (menuEl = document.getElementById("menu"));
+
+/** A modal <dialog> makes everything outside it inert, so a menu opened over a dialog (right-click in the App browser)
+ *  lives inside it while it is open, and goes back to <body> when it closes. */
+function host(m) {
+  const dlg = document.getElementById("dlg");
+  const to = dlg && dlg.open ? dlg : document.body;
+  if (m.parentNode !== to) to.append(m);
+  return dlg && dlg.open ? dlg : null;
+}
 
 /**
- * Items: {label, icon, onClick, danger, disabled, checked}, {sep: true}, {heading: "Text"}.
+ * Items: {label, icon, onClick, danger, disabled, checked, swatch: "#rrggbb"}, {sep: true}, {heading: "Text"}.
  * `anchor` is an element (menu opens under it), a MouseEvent / {x, y} (menu opens at the pointer).
  */
 export function openMenu(anchor, items, { onClose } = {}) {
@@ -19,8 +29,9 @@ export function openMenu(anchor, items, { onClose } = {}) {
     if (it.sep) return '<div class="sep" role="separator"></div>';
     if (it.heading) return `<div class="lbl">${esc(it.heading)}</div>`;
     return `<button type="button" role="menuitem" data-i="${i}" class="${it.danger ? "danger" : ""}" ${it.disabled ? "disabled" : ""}>` +
-      `${it.icon ? ic(it.icon) : ""}<span>${esc(it.label)}</span>${it.checked ? `<span class="mk">${ic("check")}</span>` : ""}</button>`;
+      `${it.icon ? ic(it.icon) : it.swatch ? `<i class="mn-sw" style="background:${esc(it.swatch)}"></i>` : ""}<span>${esc(it.label)}</span>${it.checked ? `<span class="mk">${ic("check")}</span>` : ""}</button>`;
   }).join("");
+  const inDialog = host(m);
   m.hidden = false;
   // place it: under the element or at the pointer, kept inside the window
   let x, y;
@@ -60,9 +71,11 @@ export function openMenu(anchor, items, { onClose } = {}) {
   window.addEventListener("resize", close);
   window.addEventListener("blur", close);
   m.addEventListener("click", onClick);
+  if (inDialog) inDialog.addEventListener("close", close);
   open = {
     opener, onClose,
     off() {
+      if (inDialog) inDialog.removeEventListener("close", close);
       document.removeEventListener("pointerdown", away, true);
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("scroll", close, true);
@@ -83,6 +96,7 @@ export function closeMenu(restoreFocus = false, callOnClose = true) {
   const m = node();
   m.hidden = true;
   m.innerHTML = "";
+  if (m.parentNode !== document.body) document.body.append(m);       // (back from inside a dialog)
   if (restoreFocus && cur.opener && cur.opener.isConnected) cur.opener.focus();
   if (callOnClose && cur.onClose) cur.onClose();
 }

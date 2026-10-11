@@ -1,0 +1,49 @@
+/* The category editor, the New category prompt and the App browser dialog (js/categories.js, js/appbrowser.js). Loaded by
+   those modules when first used; the menu's colour dot (.mn-sw) is here too. */
+.menu button .mn-sw { width: calc(12px * var(--s)); height: calc(12px * var(--s)); border-radius: 50%; flex: none;
+  margin: 0 calc(3px * var(--s)); box-shadow: inset 0 0 0 1px rgb(0 0 0 / .18); }
+
+/* ---------- category editor ---------- */
+.cat-ed { display: grid; gap: var(--sp-3); min-width: 0; }
+.cat-list { display: grid; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; max-height: calc(var(--row-h) * 6); overflow-y: auto; }
+.cat-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4); min-height: var(--row-h-sm); border-bottom: 1px solid var(--line); background: var(--surface); }
+.cat-row:last-child { border-bottom: 0; }
+.cat-sw { width: calc(26px * var(--s)); height: calc(26px * var(--s)); border-radius: var(--r-sm); border: 0; padding: 0; flex: none;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .18); cursor: pointer; }
+.cat-sw:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.cat-row .cat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
+.cat-pick { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-1) 0 var(--sp-1) calc(26px * var(--s) + var(--sp-3)); }
+.cat-pick[hidden] { display: none; }
+.cat-pick button[data-c] { width: calc(24px * var(--s)); height: calc(24px * var(--s)); border-radius: 50%; border: 0; padding: 0; background: var(--c);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .18); cursor: pointer; }
+.cat-pick button[data-c][aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+.cat-pick label { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
+.cat-pick input[type="color"], .cat-new input[type="color"] { width: calc(32px * var(--s)); height: calc(26px * var(--s)); padding: 0; border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm); background: transparent; cursor: pointer; }
+.cat-new { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.cat-new[hidden] { display: none; }
+.cat-new .cat-pick { padding-left: 0; }
+.cat-err { color: var(--k-block); font-size: var(--fs-sm); min-height: 1em; }
+.cat-err:empty { display: none; }
+
+/* ---------- App browser ---------- */
+.ab { display: grid; gap: var(--sp-3); min-width: 0; }
+.ab-top { display: flex; gap: var(--sp-2); align-items: center; }
+.ab-top .search { flex: 1; }
+.ab-line { display: flex; align-items: center; gap: var(--sp-3); min-height: calc(28px * var(--s)); }
+.ab-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-count.bad { color: var(--k-block); }
+.ab-list { height: calc(var(--row-h-sm) * 9); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); flex: none; }
+.ab-row { grid-template-columns: var(--app-icon) minmax(0, 1fr) auto; width: 100%; box-sizing: border-box; cursor: pointer; }
+.ab-browse .ab-row { cursor: default; }
+.ab-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.ab-row .name { display: flex; align-items: baseline; gap: var(--sp-2); }
+.ab-row .name b { flex: none; max-width: 60%; }
+.ab-row .name span { min-width: 0; }
+.ab-row .ab-run { color: var(--ok); font-weight: var(--fw-semibold); letter-spacing: .04em; font-size: var(--fs-cap); }
+.ab-row .ab-run[hidden] { display: none; }
+.ab-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); pointer-events: none; }
+.ab-empty[hidden] { display: none; }
+.ab-warn[hidden] { display: none; }
+.ab-warn .hstack { margin-top: var(--sp-2); }

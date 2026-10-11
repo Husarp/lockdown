@@ -17,6 +17,7 @@ PAGE_MODULES = [
     "shared",
     "rules",
     "about",
+    "categories",
 ]
 
 for _name in PAGE_MODULES:
