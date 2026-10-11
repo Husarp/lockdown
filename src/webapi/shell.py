@@ -7,6 +7,7 @@ pause only make blocking stricter, so they are free (tighten) - nothing here can
 """
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -153,6 +154,14 @@ def ui_ready(ctx):
     ctx.ui_ready_at = time.time()
 
 
+CLIENT_ERRORS_PER_MIN = 20
+CLIENT_ERRORS_PER_RUN = 500
+_client_errors = {"minute": -1e9, "count": 0, "total": 0, "dropped": 0}
+_client_lock = threading.Lock()
+SERVICE_START_COOLDOWN_SEC = 30
+_service_start = {"last": -1e9}
+
+
 @core.ui
 def log_client_error(ctx, msg):
     """An error in the page's own code goes to the Lockdown log. One line, cut short: the page is untrusted and
@@ -161,8 +170,22 @@ def log_client_error(ctx, msg):
         raise ApiError("Bad request: text expected.")
     text = " | ".join(part.strip() for part in msg.splitlines() if part.strip())
     text = "".join(c for c in text if c.isprintable())[:MAX_CLIENT_ERROR]
-    if text:
-        core.log_error(f"page error: {text}")
+    if not text:
+        return
+    now = time.monotonic()
+    with _client_lock:
+        st = _client_errors
+        if now - st["minute"] >= 60:
+            dropped = st["dropped"]
+            st.update(minute=now, count=0, dropped=0)
+            if dropped:
+                core.log_error(f"page error: {dropped} client errors dropped")
+        if st["count"] >= CLIENT_ERRORS_PER_MIN or st["total"] >= CLIENT_ERRORS_PER_RUN:
+            st["dropped"] += 1
+            return
+        st["count"] += 1
+        st["total"] += 1
+    core.log_error(f"page error: {text}")
 
 
 # ---------------------------------------------------------------- free actions (they only make blocking stricter)
@@ -180,6 +203,12 @@ def service_start(ctx):
     """(Re)start the enforcement service - the installed Windows service, or the scheduled task when run from
     source. A stuck copy is ended first (Windows ignores a start while one is still running)."""
     import os
+    if _service_running(ctx.db):
+        return {"starting": False, "running": True, "message": "The service is already running."}
+    now = time.monotonic()
+    if now - _service_start["last"] < SERVICE_START_COOLDOWN_SEC:
+        return {"starting": False, "running": False, "message": "Starting was just requested. Give it a moment."}
+    _service_start["last"] = now
     from paths import FROZEN, SERVICE_NAME, TASK_NAME
     if FROZEN:
         powershell = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),

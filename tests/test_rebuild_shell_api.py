@@ -34,6 +34,12 @@ def log(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture(autouse=True)
+def _fresh_limits(monkeypatch):
+    monkeypatch.setattr(shell, "_client_errors", {"minute": -1e9, "count": 0, "total": 0, "dropped": 0})
+    monkeypatch.setattr(shell, "_service_start", {"last": -1e9})
+
+
 def data(reply):
     assert reply["ok"], reply
     return reply["data"]
@@ -247,6 +253,22 @@ def test_log_client_error_ignores_blank_and_refuses_non_text(api, log):
     assert not api.log_client_error(None)["ok"]
 
 
+def test_log_client_error_is_capped_per_minute_and_per_run(api, log, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(shell.time, "monotonic", lambda: clock[0])
+    for i in range(30):
+        assert api.log_client_error(f"e{i}")["ok"]
+    assert len(log.read_text(encoding="utf-8").splitlines()) == 20
+    clock[0] += 61                       # next minute: one summary line, then logging resumes
+    api.log_client_error("again")
+    lines = log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 22 and "10 client errors dropped" in lines[20] and "again" in lines[21]
+    shell._client_errors["total"] = shell.CLIENT_ERRORS_PER_RUN
+    clock[0] += 61
+    api.log_client_error("over the run cap")
+    assert "over the run cap" not in log.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------- free actions
 
 def test_antibypass_switch_on_is_never_gated(ctx, api):
@@ -298,6 +320,20 @@ def test_service_start_is_ungated_by_antibypass(ctx, api, monkeypatch):
                      "windows": [{"days": [0], "start": "09:00", "end": "10:00"}]})
     monkeypatch.setattr(shell, "_run_elevated", lambda program, params: None)
     assert api.service_start()["ok"]
+
+
+def test_service_start_is_a_no_op_when_running_and_has_a_cooldown(ctx, api, monkeypatch):
+    calls = []
+    monkeypatch.setattr(shell, "_run_elevated", lambda program, params: calls.append(params))
+    ctx.db.set_setting(shell.HEARTBEAT_KEY, str(time.time()))
+    reply = data(api.service_start())
+    assert reply["starting"] is False and reply["running"] is True and calls == []
+    ctx.db.set_setting(shell.HEARTBEAT_KEY, "0")
+    assert data(api.service_start())["starting"] is True and len(calls) == 1
+    again = data(api.service_start())          # within 30 s: no second UAC prompt
+    assert again["starting"] is False and len(calls) == 1
+    shell._service_start["last"] -= 31
+    assert data(api.service_start())["starting"] is True and len(calls) == 2
 
 
 @pytest.mark.skipif(__import__("sys").platform == "win32", reason="Windows can really start it")

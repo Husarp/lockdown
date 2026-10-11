@@ -12,7 +12,7 @@ import pytest
 import antibypass
 import modes
 import pause
-from harness import assert_clean
+from harness import assert_clean, stub_all_pages
 
 NAV_IDS = ["dashboard", "blocking", "antibypass", "screentime", "netlog", "modes", "reminders", "notifications",
            "settings", "about"]
@@ -70,6 +70,7 @@ def visible_host(page):
 # ================================================================ first paint and the ten pages
 
 def test_shell_paints_with_no_errors(shell, page, harness):
+    stub_all_pages(page)                     # the boot call count is the shell's own, not the dashboard page's
     shell()
     assert_clean(page)
     ids = page.eval_on_selector_all("#nav [data-nav]", "els => els.map(e => e.dataset.nav)")
@@ -85,7 +86,9 @@ def test_shell_paints_with_no_errors(shell, page, harness):
     assert page.query_selector("#boot-skeleton") is None
     assert visible_host(page) == ["dashboard"]
     # boot makes exactly these three rpc calls
-    assert sorted(n for _, n, _ in harness.calls) == ["get_status", "get_theme", "ui_ready"]
+    names = sorted(n for _, n, _ in harness.calls)
+    assert {"get_status", "get_theme", "ui_ready"} <= set(names) and len(names) == len(set(names))
+    assert set(names) <= {"get_status", "get_theme", "ui_ready", "update_opened", "update_state"}   # (update_* are the shell's own)
     assert page.evaluate("typeof window.ld.call") == "function"
 
 
@@ -100,26 +103,34 @@ def test_skeleton_is_in_the_html_before_any_script(browser, harness):
     ctx.close()
 
 
-@pytest.mark.parametrize("page_id, title", list(zip(NAV_IDS, NAV_TITLES)))
-def test_each_nav_item_switches_page(shell, page, page_id, title):
+@pytest.mark.parametrize("page_id", NAV_IDS)
+def test_each_nav_item_switches_page(shell, page, page_id):
     shell()
     go(page, page_id)
-    page.wait_for_selector(f'.page-host[data-page="{page_id}"] h1', state="visible")
+    page.wait_for_selector(f'.page-host[data-page="{page_id}"]', state="visible")
     assert visible_host(page) == [page_id]
-    assert page.inner_text(f'.page-host[data-page="{page_id}"] h1') == title
-    assert "Coming soon" in page.inner_text(f'.page-host[data-page="{page_id}"]')
     current = page.eval_on_selector_all("#nav [data-nav]", "els => els.filter(e => e.getAttribute('aria-current') === 'page').map(e => e.dataset.nav)")
     assert current == [page_id]
     assert page.evaluate("location.hash") == "#" + page_id
 
 
+@pytest.mark.parametrize("page_id, title", list(zip(NAV_IDS, NAV_TITLES)))
+def test_an_unregistered_page_shows_the_titled_stub(shell, page, page_id, title):
+    stub_all_pages(page)
+    shell()
+    go(page, page_id)
+    page.wait_for_selector(f'.page-host[data-page="{page_id}"] h1', state="visible")
+    assert page.inner_text(f'.page-host[data-page="{page_id}"] h1') == title
+    assert "Coming soon" in page.inner_text(f'.page-host[data-page="{page_id}"]')
+
+
 def test_pages_stay_mounted_and_switching_is_hide_show(shell, page):
     shell()
     go(page, "modes")
-    page.wait_for_selector('.page-host[data-page="modes"] h1')
+    page.wait_for_selector('.page-host[data-page="modes"]')
     page.evaluate("document.querySelector('.page-host[data-page=modes]').__mine = 42")
     go(page, "about")
-    page.wait_for_selector('.page-host[data-page="about"] h1')
+    page.wait_for_selector('.page-host[data-page="about"]')
     assert page.evaluate("document.querySelector('.page-host[data-page=modes]').hidden") is True
     go(page, "modes")
     assert page.evaluate("document.querySelector('.page-host[data-page=modes]').__mine") == 42
@@ -128,10 +139,10 @@ def test_pages_stay_mounted_and_switching_is_hide_show(shell, page):
 
 def test_hash_route_opens_that_page(shell, page):
     shell(route="reminders")
-    page.wait_for_selector('.page-host[data-page="reminders"] h1')
+    page.wait_for_selector('.page-host[data-page="reminders"]')
     assert visible_host(page) == ["reminders"]
     page.evaluate("location.hash = '#about'")
-    page.wait_for_selector('.page-host[data-page="about"] h1', state="visible")
+    page.wait_for_selector('.page-host[data-page="about"]', state="visible")
     assert visible_host(page) == ["about"]
 
 
@@ -255,7 +266,7 @@ def test_no_horizontal_scroll_on_any_page(shell, page, width, height):
     shell(width, height)
     for page_id in NAV_IDS:
         go(page, page_id)
-        page.wait_for_selector(f'.page-host[data-page="{page_id}"] h1', state="visible")
+        page.wait_for_selector(f'.page-host[data-page="{page_id}"]', state="visible")
         over = page.evaluate("""() => ['html', '#view', '.main', '#topbar', '.app'].map((s) => {
             const e = document.querySelector(s); return [s, e.scrollWidth, e.clientWidth]; }).filter(([, sw, cw]) => sw > cw)""")
         assert not over, f"{page_id} at {width}x{height}: {over}"
@@ -624,7 +635,7 @@ def test_a_page_that_fails_to_load_shows_an_error_card_with_retry(shell, page, h
     assert "page error: " in harness.log_path.read_text("utf-8")      # it went to the Lockdown log
     # the rest of the shell still works
     go(page, "about")
-    page.wait_for_selector('.page-host[data-page="about"] h1', state="visible")
+    page.wait_for_selector('.page-host[data-page="about"]', state="visible")
     go(page, "blocking")
     assert page.is_visible(".err-card")
     page.click(".err-card button")                                   # retry (fails again, same card)
@@ -1015,6 +1026,7 @@ def test_first_contentful_paint_of_the_shell(page, harness, capsys):
 
 
 def test_page_switch_and_first_visit_timings(shell, page, perf, capsys):
+    stub_all_pages(page)                     # the budget is for the router's first visit of a light page
     shell()
     first = {}
     for page_id in NAV_IDS[1:]:

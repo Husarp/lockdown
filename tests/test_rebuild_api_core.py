@@ -272,6 +272,13 @@ def test_wrong_number_of_arguments_is_an_error_not_a_crash(ctx, log):
     assert core.build_api(ctx, reg).echo(1, 2, 3)["ok"] is False
 
 
+def test_wrong_arguments_give_a_plain_error_not_python_text(ctx, log):
+    reg, echo, *_ = fresh()
+    reply = core.build_api(ctx, reg).echo(1, 2, 3)
+    assert reply == {"ok": False, "error": "Bad arguments for echo"}
+    assert "positional" in log.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------- the database per thread
 
 def test_each_thread_has_its_own_database(ctx):

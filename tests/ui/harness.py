@@ -288,6 +288,16 @@ class Perf:
         self.page.evaluate("() => { const c = window.__ldCalls; c.timeout = c.interval = c.raf = 0; }")
 
 
+STUB_REGISTRY = "export const pages = {};\n"
+
+
+def stub_all_pages(page):
+    """Test-only: every page id shows the "Coming soon" stub, whatever other tickets have registered in
+    js/pages/index.js - for tests that measure the shell/router itself, not one page."""
+    page.route("**/js/pages/index.js", lambda route: route.fulfill(
+        status=200, content_type="text/javascript", body=STUB_REGISTRY))
+
+
 def open_shell(page, harness, width=None, height=None, route=None):
     """Open the app and wait until it is booted. The Playwright Page is returned."""
     if width and height:

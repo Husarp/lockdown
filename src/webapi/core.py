@@ -222,6 +222,12 @@ def dispatch(ctx: Context, fn, args) -> dict:
     """Run one call from the page: validate the arguments, run the method, wrap the outcome."""
     try:
         check_json(args)
+        try:
+            inspect.signature(fn).bind(ctx, *args)
+        except TypeError as e:
+            name = getattr(fn, "__name__", "?")
+            log_error(f"Api call {name}: bad arguments: {e}")
+            return {"ok": False, "error": f"Bad arguments for {name}"}
         data = fn(ctx, *args)
         if isinstance(data, Envelope):
             return jsonable(data)
