@@ -104,7 +104,7 @@ def test_bad_arguments_are_refused(fresh):
         reply = fresh.api.screentime_get(*args)
         assert not reply["ok"], args
     assert get(fresh.api, "Overview", "Today")["tab"] == "overview"        # (any case)
-    assert not fresh.api.screentime_get("switches", "Today")["ok"]             # R15 adds it
+    assert fresh.api.screentime_get("switches", "Today")["ok"]                   # (R15 added it)
 
 
 def test_a_fresh_database_says_empty(tmp_path):

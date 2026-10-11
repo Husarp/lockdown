@@ -23,3 +23,5 @@ export const tabs = {};
 tabs.overview = () => import("./overview.js");
 tabs.apps = () => import("./apps.js").then((m) => m.create("app"));
 tabs.websites = () => import("./apps.js").then((m) => m.create("site"));
+tabs.switches = () => import("./switches.js");
+tabs.calendar = () => import("./calendar.js");

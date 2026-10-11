@@ -1,5 +1,5 @@
-"""Api for Screen Time (BLUEPRINT 3.5): the page shell's start-up answer, the Overview, Apps and Websites tabs, and the CSV
-export. R15 adds Switches and Calendar by appending to BUILDERS (and `screentime_month` / `screentime_day` below it).
+"""Api for Screen Time (BLUEPRINT 3.5): the page shell's start-up answer, the Overview, Apps, Websites and Switches tabs, the
+Calendar's month and day, and the CSV export.
 
 `screentime_get(tab, range)` returns only that tab's data, and never reads more than the tab needs: Calendar reads no
 range activity at all. Every number comes from small pre-summed pieces:
@@ -591,12 +591,170 @@ def _websites(req) -> dict:
 
 
 def _calendar(req) -> dict:
-    """The Calendar has no range: it reads nothing here (R15 fills the month with screentime_month)."""
+    """The Calendar has no range: it reads nothing here (the page asks `screentime_month` / `screentime_day`)."""
     return {}
 
 
-# tab id -> the function that works out that tab's data from a _Req. R15 appends "switches" (and fills "calendar").
-BUILDERS = {"overview": _overview, "apps": _apps, "websites": _websites, "calendar": _calendar}
+# ---------------------------------------------------------------- Switches
+
+SWITCH_SQL = (
+    "WITH ev AS (SELECT timestamp AS ts, COALESCE(exe, '') AS exe, COALESCE(site, '') AS site,"
+    " strftime('%s', LEAD(timestamp) OVER (ORDER BY timestamp)) - strftime('%s', timestamp) AS dur"
+    " FROM switch_events WHERE timestamp >= ? AND timestamp < ?) "
+    "SELECT CAST(substr(ts, 12, 2) AS INTEGER), exe, site, dur IS NULL, COUNT(*), COALESCE(SUM(dur), 0), "
+    "COALESCE(SUM(dur < ?), 0), MIN(ts), MIN(CASE WHEN dur < ? THEN ts END) FROM ev GROUP BY 1, 2, 3, 4")
+VISIT_STYLES = {"checking": ("Short visits - often just checking", "warn"),
+                "focused": ("Long, focused stretches", "ok"),
+                "mixed": ("Mixed use", "muted")}
+
+
+def _switch_stats(db, start: date, end: date, now: datetime) -> dict:
+    """What stats.switch_summary(stats.switches(...), now) gives for [start, end), worked out by ONE grouped query (hour,
+    app, site): the visit lengths (until the next switch) are summed in SQL, so a month of switches is a few hundred
+    group rows, not thousands of events. The last visit runs until now, at most 30 minutes (done here)."""
+    hours, hour_first = [0] * 24, {}
+    targets: dict = {}              # (kind, name) -> [visits, seconds, short visits, first seen, first short]
+    for hour, exe, site, is_last, n, seconds, short, first, first_short in db.conn.execute(
+            SWITCH_SQL, (f"{start} 00:00:00", f"{end} 00:00:00", stats.SHORT_VISIT_SEC, stats.SHORT_VISIT_SEC)):
+        if is_last:                 # (the one visit with no next switch)
+            ts = stats._ts(first)
+            seconds = max(0.0, (min(now, ts + timedelta(minutes=30)) - ts).total_seconds())
+            short = int(seconds < stats.SHORT_VISIT_SEC)
+            first_short = first if short else None
+        hours[hour] += n
+        if hour not in hour_first or first < hour_first[hour]:
+            hour_first[hour] = first
+        t = targets.setdefault(("site", site) if site else ("app", exe), [0, 0, 0, first, None])
+        t[0] += n
+        t[1] += seconds
+        t[2] += short
+        t[3] = min(t[3], first)
+        if first_short is not None and (t[4] is None or first_short < t[4]):
+            t[4] = first_short
+    count = sum(t[0] for t in targets.values())
+    ranked = sorted(targets.items(), key=lambda kv: (-kv[1][0], kv[1][3]))
+    shorts = sorted((kv for kv in targets.items() if kv[1][2]), key=lambda kv: (-kv[1][2], kv[1][4]))
+    return {"count": count, "hours": hours, "hour_first": hour_first,
+            "short": sum(t[2] for t in targets.values()), "short_top": [k for k, _ in shorts[:2]],
+            "targets": [(k, t[0], t[1] / t[0]) for k, t in ranked],
+            "avg_visit": sum(t[1] for t in targets.values()) / count if count else 0}
+
+
+def _switches(req) -> dict:
+    """The Switches tab: three cards, switches per hour (+ the peak sentence), and the 5 most switched-to."""
+    sw = _switch_stats(req.db, req.start, req.end, req.now)
+    n = sw["count"]
+    label = "Switches today" if req.range == "Today" else "Switches yesterday" if req.range == "Yesterday" else f"Switches ({req.range})"
+    sub, tone = "", ""
+    if req.range == "Today":
+        usual = stats.average_daily_switches(req.db, req.today, until=req.now.time())
+        if usual is not None:
+            if abs(n - usual) < 1:
+                sub = "about usual for this time of day"
+            else:
+                sub = f"{abs(round(n - usual))} {'more' if n > usual else 'fewer'} than usual by this time"
+                tone = "bad" if n > usual else "ok"
+    top = [req.app_name(name) if kind == "app" else name for kind, name in sw["short_top"]]
+    cards = [{"key": "switches", "label": label, "value": str(n), "sub": sub, "tone": tone},
+             {"key": "visit", "label": "Average time per visit", "value": stats.ms(sw["avg_visit"]) if n else "-", "sub": "", "tone": ""},
+             {"key": "short", "label": f"Short visits (< {stats.SHORT_VISIT_SEC} s)", "value": str(sw["short"]),
+              "sub": f"mostly {' and '.join(top)}" if top else "", "tone": ""}]
+    hours = sw["hours"]
+    peak = ""
+    if n:
+        best = max(hours)           # (a tie goes to the hour that had its first switch earliest, as Counter.most_common does)
+        hour = min((h for h in range(24) if hours[h] == best), key=lambda h: sw["hour_first"][h])
+        peak = f"Peak between {hour:02d}:00 and {(hour + 1) % 24:02d}:00 - {best} switch{'es' * (best != 1)}."
+    rows = []
+    for (kind, name), count, avg in sw["targets"][:5]:
+        text, tone = VISIT_STYLES[stats.visit_style(count, avg)]
+        display, path = req.app_info(name) if kind == "app" else (name, None)
+        rows.append({"key": f"{kind}:{name}", "kind": kind, "name": name, "display": display, "path": path,
+                     "style": text, "tone": tone, "count": count, "avg": f"avg {stats.ms(avg)}"})
+    return {"cards": cards, "hours": {"counts": hours}, "peak": peak, "targets": rows}
+
+
+# tab id -> the function that works out that tab's data from a _Req.
+BUILDERS = {"overview": _overview, "apps": _apps, "websites": _websites, "switches": _switches, "calendar": _calendar}
+
+
+# ---------------------------------------------------------------- Calendar: a month, a day
+
+LEVEL_HOURS = (1, 2, 4, 6)          # a day's colour level: below 1 h = 0, then 1 / 2 / 4 / 6 h and more = 1 ... 4
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+               "November", "December"]
+DAY_TOP = 10                        # the day's details list this many apps
+
+
+def _month_of(year, month, today: date) -> date:
+    """The 1st of the month asked for; no year and no month = this month (the page's first ask, before it knows the date)."""
+    if year is None and month is None:
+        return today.replace(day=1)
+    for v in (year, month):
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ApiError("Bad request: pick a month.")
+    if not (2000 <= year <= 2200 and 1 <= month <= 12):
+        raise ApiError("Bad request: pick a month.")
+    return date(year, month, 1)
+
+
+@core.read
+def screentime_month(ctx, year=None, month=None):
+    """One month for the Calendar (no year and month = this month): {year, month, title, offset (blank cells before the 1st, Monday first), can_next, today,
+    goal (minutes, 0 = off), days: [{date, day, sec, text, level, future, over, tip}], stats: [{key, label, value, sub}]}.
+    Every number is a per-day total (`_daily_totals`: finished days are kept, the rest is one grouped query), never the
+    minute rows of the month. The page asks again for another month only (the day details are `screentime_day`)."""
+    req = _Req(ctx, "Today")
+    today, goal = req.today, req.goal
+    first = _month_of(year, month, today)
+    nxt = date(first.year + first.month // 12, first.month % 12 + 1, 1)
+    per_day = _daily_totals(req, first, min(nxt - timedelta(days=1), today)) if first <= today else {}      # (a future day is 0)
+    days = []
+    for i in range((nxt - first).days):
+        d = first + timedelta(days=i)
+        sec = per_day.get(d, 0)
+        future = d > today
+        over = bool(goal and sec > goal and not future)
+        days.append({"date": d.isoformat(), "day": d.day, "sec": sec, "future": future, "over": over,
+                     "text": stats.hm(sec) if sec >= 60 and not future else "",
+                     "level": 0 if future else sum(sec / 3600 >= t for t in LEVEL_HOURS),
+                     "tip": "" if future else _day_tip(d, sec) + ("  (over your goal)" if over else "")})
+    total = sum(d["sec"] for d in days)
+    past = max(1, min((today - first).days + 1, len(days)))
+    cards = [{"key": "month", "label": "This month", "value": stats.hm(total), "sub": ""},
+             {"key": "average", "label": "Average day", "value": stats.hm(total / past), "sub": f"over {_plural(past, 'day')}"}]
+    if goal:
+        within = sum(1 for d in days[:past] if d["sec"] <= goal)
+        cards.append({"key": "within", "label": "Within goal", "value": f"{within} / {past}", "sub": f"goal {stats.hm(goal)} a day"})
+    else:
+        cards.append({"key": "within", "label": "Within goal", "value": "-", "sub": "no daily goal set (Settings)"})
+    busy = max((d for d in days if not d["future"] and d["sec"] > 0), key=lambda d: d["sec"], default=None)
+    cards.append({"key": "busiest", "label": "Busiest day", "value": stats.hm(busy["sec"]) if busy else "-",
+                  "sub": _day_tip(date.fromisoformat(busy["date"]), 0).split("  ")[0] if busy else ""})
+    return {"year": first.year, "month": first.month, "title": f"{MONTH_NAMES[first.month - 1]} {first.year}",
+            "offset": first.weekday(), "can_next": nxt <= today, "today": today.isoformat(),
+            "goal": _minutes(goal) if goal else 0, "goal_label": f"{goal / 3600:g} h" if goal else "",
+            "days": days, "stats": cards}
+
+
+@core.read
+def screentime_day(ctx, day):
+    """The details of one day: {date, title, note ("X active" / "nothing recorded"), rows: [{key, name, path, sec, time}]} -
+    the top 10 apps with at least a minute, from one grouped query on that day (a day retention rolled up has its totals too)."""
+    try:
+        d = date.fromisoformat(day)
+    except (TypeError, ValueError):
+        raise ApiError("Bad request: pick a day.") from None
+    req = _Req(ctx, "Today")
+    apps = stats.app_totals(req.db, d, d + timedelta(days=1))
+    active = sum(apps.values())
+    rows = []
+    for exe, sec in apps.most_common(DAY_TOP):
+        if sec >= MIN_ROW_SEC:
+            name, path = req.app_info(exe)
+            rows.append({"key": exe, "name": name, "path": path, "sec": sec, "time": stats.hm(sec)})
+    return {"date": d.isoformat(), "title": f"{DAY_NAMES[d.weekday()]} {d.day:02d} {MONTHS[d.month - 1]} {d.year}",
+            "note": f"{stats.hm(active)} active" if active else "nothing recorded", "rows": rows}
 
 
 # ---------------------------------------------------------------- the Api

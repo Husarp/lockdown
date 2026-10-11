@@ -35,6 +35,8 @@ READ_ARGS: dict = {
     "item_get": [None, "reddit.com"],          # Blocking > Add / Edit: is this site on the list already (null when not)
     "suggest": ["redd"],                       # Blocking > Add: sites and apps for what is typed
     "screentime_get": ["overview", "30 days"],     # Screen Time: the heaviest answer (30 days of days to sum up)
+    "screentime_month": [2026, 10],            # Screen Time > Calendar: a month of per-day totals
+    "screentime_day": lambda ctx: [ctx.now().date().isoformat()],     # Calendar: a day's top apps (today)
     "group_get": lambda ctx: [(next(iter(ctx.db.list_groups()), None) or {}).get("id")],    # Blocking > Groups: the first group (or a new one)
     "group_member_search": ["you"],            # Blocking > Groups: typing in the Members box
     "calendar_get": [None, 7, "all"],           # Blocking > Calendar: the week, the busiest view
