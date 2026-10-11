@@ -6,6 +6,7 @@ import { applyLook, currentLook } from "./theme.js";
 import { injectSprite } from "./icons.js";
 import { router } from "./router.js";
 import { el, esc, ic, installControls, setText, toast, fmt } from "./ui.js";
+import "./challenge.js";   // R06: the challenge dialog (opens on a challenge_open push / needs-challenge event)
 
 const $ = (id) => document.getElementById(id);
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

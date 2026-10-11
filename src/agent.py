@@ -7,15 +7,16 @@ customtkinter."""
 import ctypes
 import queue
 import sys
+import threading
 import time
 
 TRAY_ARGS = ("--tray", "--watchdog")
-NOT_YET = ("--challenge", "--selftest")   # R06 / R09 take their names out of this list when they handle them
+NOT_YET = ("--selftest",)   # R09 takes its name out of this list when it handles it
 
 
 def handles(argv: list[str]) -> bool:
-    """Can the agent do everything argv asks for? (Until R06 / R09 it can't --challenge / --selftest, and main.py
-    then keeps using the old window for those, e.g. the uninstaller's challenge.)"""
+    """Can the agent do everything argv asks for? (Until R09 it can't --selftest, and main.py then keeps using the old
+    window for that.)"""
     return not any(a in argv for a in NOT_YET)
 
 
@@ -38,34 +39,32 @@ def set_dpi_awareness():
         pass
 
 
-def exit_allowed() -> bool:
-    """Placeholder until R06: tray Exit works only while Anti-Bypass says "free"."""
-    import antibypass
-    from db import Database
-    from trusted_time import now_from_db
-    db = Database()
-    return antibypass.status(antibypass.settings(db), now_from_db(db)) == "free"
+EXIT_TEXT = "Quit Lockdown (blocked-visit notices, time limits and reminders stop until you start it again)"
 
 
-def _tray_exit(win, tray):
-    from resident import windows
-    if exit_allowed():
+def _tray_exit(win, tray, ctx):
+    """Tray Exit: quits at once while Anti-Bypass says "free"; otherwise the main window comes up with the challenge
+    (GuardService keeps the quit under a ticket and runs it only when the challenge is passed in Python)."""
+    from resident import challenge_cli, windows
+
+    def quit_now():
         import antibypass
-        from db import Database
         _log("Tray Exit")
-        Database().set_setting(antibypass.EXITED_KEY, "1")
+        ctx.db.set_setting(antibypass.EXITED_KEY, "1")
         tray.stop()
-        windows.quit_agent(win)
-    else:
-        windows.show_main(win)   # (R06: the challenge opens here)
+        threading.Timer(0.2, windows.quit_agent, args=(win,)).start()   # (after the challenge's reply went back)
+    challenge_cli.ask_in_main(win, ctx, [EXIT_TEXT], quit_now)
 
 
 def main(argv: list[str], on_first_instance=None) -> int:
     """`on_first_instance`: called once this process is the running agent (main.py: register autostart + watchdog)."""
     if not handles(argv):
-        _log("The new UI does not handle --challenge / --selftest yet (R06 / R09)")
+        _log("The new UI does not handle --selftest yet (R09)")
         return 2
     set_dpi_awareness()
+    if "--challenge" in argv:   # the uninstaller's challenge: its own small window, no single-instance lock
+        from resident import challenge_cli
+        return challenge_cli.run(argv)
     from gui import single_instance
     events: queue.Queue = queue.Queue()
     if not single_instance.acquire(events):
@@ -77,7 +76,9 @@ def main(argv: list[str], on_first_instance=None) -> int:
     from resident.assets import AssetServer
     server = AssetServer()
     base_url = server.start()
-    win = windows.create(base_url, ui_theme.background_color())
+    import webapi
+    ctx = webapi.make_context()
+    win = windows.create(base_url, ui_theme.background_color(), js_api=webapi.build_api(ctx))
     windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)
 
@@ -86,7 +87,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
 
     def ready():   # (runs once the GUI loop is up)
         from gui.tray import Tray
-        tray = Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, tray))
+        tray = Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, tray, ctx))
         tray.start()
         pool.hub.listeners += [workers.tray_listener(tray), workers.publisher_listener(win)]
         pool.start()

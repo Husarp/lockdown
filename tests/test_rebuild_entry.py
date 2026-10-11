@@ -82,7 +82,7 @@ def test_missing_or_corrupt_db_means_the_old_window(tmp_path, monkeypatch):
 def test_agent_hands_unfinished_flags_back_to_the_old_window():
     import agent
     assert agent.handles(["--tray"]) and agent.handles([])
-    assert not agent.handles(["--challenge", "x"]) and not agent.handles(["--selftest", "r"])
+    assert agent.handles(["--challenge", "x"]) and not agent.handles(["--selftest", "r"])
 
 
 # ---------------------------------------------------------------- theme constants
