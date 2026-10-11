@@ -222,6 +222,31 @@ def test_the_repeat_box_is_parsed_by_python(shell, page, harness):
     assert eventually(lambda: saved(harness, "notify.warn.repeat_sec") == "0")
 
 
+def test_a_slow_answer_never_overwrites_what_is_typed_next(shell, page, harness):
+    """The first answer comes back late (after the owner already typed the next value): the box keeps what is typed, and a
+    bad value afterwards goes back to the value that really is saved."""
+    real = harness.rpc
+    state = {"slow": True}
+
+    def slow_rpc(name, args):
+        reply = real(name, args)
+        if name == "notify_repeat_set" and state["slow"]:
+            state["slow"] = False
+            time.sleep(0.8)                                  # (saved, but the page hears it late)
+        return reply
+
+    harness.rpc = slow_rpc
+    open_page(shell, page)
+    page.fill('[data-k="repeat"]', "2 min")
+    page.press('[data-k="repeat"]', "Tab")
+    assert eventually(lambda: saved(harness, "notify.warn.repeat_sec") == "120")
+    page.fill('[data-k="repeat"]', "Off")                    # (the answer for "2 min" is still on its way)
+    page.wait_for_timeout(1000)                              # (it arrives while the box is being typed in)
+    assert page.input_value('[data-k="repeat"]') == "Off"
+    page.press('[data-k="repeat"]', "Tab")
+    assert eventually(lambda: saved(harness, "notify.warn.repeat_sec") == "0")
+
+
 def test_a_bad_repeat_goes_back_to_the_last_value_with_pythons_words(shell, page, harness):
     open_page(shell, page)
     page.fill('[data-k="repeat"]', "30s")

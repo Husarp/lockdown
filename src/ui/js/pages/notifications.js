@@ -206,6 +206,7 @@ async function saveDigest() {
 }
 
 let repeatSeq = 0;                                  // only the newest answer may change the box (answers can overtake each other)
+let repeatDone = 0, repeatFailed = 0;               // the newest call whose answer was taken as "saved", and the newest that failed
 
 async function commitRepeat() {
   const box = q("repeat");
@@ -215,14 +216,18 @@ async function commitRepeat() {
   try {
     const r = await ld.call("notify_repeat_set", text);
     applyState(r);
-    if (mine !== repeatSeq) return;
-    lastRepeat = r.text;
-    box.value = r.text;
+    if (mine > repeatDone) { repeatDone = mine; lastRepeat = r.text; }       // (an older answer still says what is saved)
+    if (mine !== repeatSeq) {
+      if (repeatFailed === repeatSeq && !focused(box)) box.value = lastRepeat;   // (the newer one failed before this answer came)
+      return;
+    }
+    if (!focused(box)) box.value = r.text;                                   // (never over something being typed right now)
     q("repeat-err").textContent = "";
   } catch (err) {
     if (mine !== repeatSeq) return;
+    repeatFailed = mine;
     q("repeat-err").textContent = (err && err.message) || "Write a time like 30s or 2 min, or Off.";
-    box.value = lastRepeat;
+    if (!focused(box)) box.value = lastRepeat;
   }
 }
 

@@ -911,6 +911,7 @@ def test_attach_wires_the_cover_the_wait_the_clock_and_the_answers(tmp_path):
     try:
         assert ctx.overlay is ui.overlay_handler is win.overlay_ctl and win.overlay_publisher is publisher
         ctx.overlay.host = None                                                          # (no real window here)
+        ctx.overlay._clock = lambda: 1000.0                                              # (a frozen clock: no real seconds pass)
         ctx.overlay.show("sleep", "Time for bed", "x", None, [("Dismiss", "dismiss")])
         p = ctx.overlay.payload()
         assert p["wait_ms"] == 40_000 and p["clock_sec"] == 5 * 60                      # 23:05 + the 1 h offset = 00:05
