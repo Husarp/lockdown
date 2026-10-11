@@ -65,6 +65,12 @@ def banner(page):
     return page.locator('#banners [data-banner="update"]:not([hidden])')
 
 
+def called(page, name):
+    """Wait (with `with`) until the page got the Api answer for `name`: the click's call has reached Python and run -
+    page.wait_for_function("true") does not wait for that, so an assertion or a relay after it can run too early."""
+    return page.expect_response(lambda r: r.url.endswith("/rpc/" + name))
+
+
 def bar_width(page, selector):
     return page.evaluate("(s) => document.querySelector(s).style.width", selector)
 
@@ -98,24 +104,25 @@ def test_without_a_repository_the_page_says_so(shell, page, monkeypatch):
 def test_open_buttons_ask_for_data_and_app_only(rig, shell, page):
     import paths
     shell(route="about")
-    page.click('[data-a="open-data"]')
-    page.click('[data-a="open-app"]')
-    page.wait_for_function("true")
+    with called(page, "open_path"):
+        page.click('[data-a="open-data"]')
+    with called(page, "open_path"):
+        page.click('[data-a="open-app"]')
     assert rig.opened == [paths.DATA_DIR, paths.APP_DIR]
     assert page.locator('[data-a="open-log"]').count() == 0          # the log has no Open button
-    page.click('[data-a="github"]')
-    page.wait_for_function("true")
+    with called(page, "open_url"):
+        page.click('[data-a="github"]')
     assert rig.urls == [f"https://github.com/{REPO}/releases"]
 
 
 def test_the_two_switches_are_saved(rig, shell, page, harness):
     shell(route="about")
     page.wait_for_selector('[data-pref="auto"]')
-    page.locator('[data-pref="auto"]').locator("xpath=..").click()
-    page.wait_for_function("true")
+    with called(page, "update_set_prefs"):
+        page.locator('[data-pref="auto"]').locator("xpath=..").click()
     assert updates.auto_on(harness.db) is False and updates.notify_on(harness.db) is True
-    page.locator('[data-pref="notify"]').locator("xpath=..").click()
-    page.wait_for_function("true")
+    with called(page, "update_set_prefs"):
+        page.locator('[data-pref="notify"]').locator("xpath=..").click()
     assert updates.notify_on(harness.db) is False
     page.reload()
     page.wait_for_function("document.documentElement.dataset.ready === '1'")
@@ -133,8 +140,8 @@ def test_check_now_shows_each_outcome(rig, shell, page, found, kind, text):
     rig.found = found
     shell(route="about")
     page.wait_for_selector('[data-a="check"]')
-    page.click('[data-a="check"]')
-    page.wait_for_function("true")
+    with called(page, "update_check"):
+        page.click('[data-a="check"]')
     rig.relay()
     page.wait_for_function("(t) => document.querySelector('[data-a=note]').textContent.includes(t)", arg=text)
     can = kind == "installable"
@@ -146,14 +153,16 @@ def test_check_now_shows_each_outcome(rig, shell, page, found, kind, text):
 def test_download_and_install_moves_the_bar_and_quits_without_the_exited_flag(rig, shell, page, harness):
     rig.found = release()
     shell(route="about")
-    page.click('[data-a="check"]')
-    page.wait_for_function("true")
+    with called(page, "update_check"):
+        page.click('[data-a="check"]')
     rig.relay()
     page.wait_for_selector('[data-a="install"]:not([hidden])')
-    page.click('[data-a="install"]')
-    page.wait_for_function("true")
+    with called(page, "update_install"):
+        page.click('[data-a="install"]')
     rig.relay()
-    page.wait_for_function("document.querySelector('[data-a=prog-bar]').style.width === '100%'")
+    # polled by time, not by animation frame: those stop while the page is in the background (the run's earlier
+    # tests can leave it so), and the wait then never sees the bar that is already full
+    page.wait_for_function("document.querySelector('[data-a=prog-bar]').style.width === '100%'", polling=100)
     assert rig.runs and rig.quits == [1]
     assert "Starting the installer" in page.inner_text('[data-a="note"]')
     assert harness.db.get_setting(antibypass.EXITED_KEY, "") in ("", "0")
@@ -212,8 +221,8 @@ def test_a_release_without_an_installer_offers_the_page(rig, shell, page, push):
     push("update", {"seq": 1, "found": {"version": "9.9.9", "size": 0, "installable": False}})
     banner(page).wait_for()
     assert banner(page).locator("button", has_text="Open the page").count() == 1
-    banner(page).locator("button", has_text="Open the page").click()
-    page.wait_for_function("true")
+    with called(page, "open_url"):
+        banner(page).locator("button", has_text="Open the page").click()
     assert rig.urls == [f"https://github.com/{REPO}/releases"]
 
 
@@ -232,7 +241,8 @@ def open_dialog(rig, shell, page, harness, route="dashboard"):
     updates.remember(harness.db, release())
     shell(route=route)
     banner(page).wait_for()
-    banner(page).locator("button", has_text="Update").click()
+    with called(page, "update_download"):
+        banner(page).locator("button", has_text="Update").click()
     page.wait_for_selector("#dlg[open]")
 
 
@@ -246,8 +256,8 @@ def test_the_dialog_downloads_then_restarts_only_when_asked(rig, shell, page, ha
     assert "Ready to install" in page.inner_text("#dlg")
     go = page.locator("#dlg .dlg-f button", has_text="Restart & update")
     assert go.is_enabled() and rig.runs == [] and rig.quits == []
-    go.click()
-    page.wait_for_function("true")
+    with called(page, "update_install"):
+        go.click()
     rig.relay()
     assert len(rig.runs) == 1 and rig.quits == [1]
     assert "Starting the installer" in page.inner_text("#dlg")
