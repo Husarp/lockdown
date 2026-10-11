@@ -24,6 +24,7 @@ const CSS = `
 .ch .ch-bar{fill:var(--cat-neutral)}
 .ch .ch-bar.over{fill:var(--k-limit)}
 .ch .ch-bar.now{fill:var(--brand)}
+.ch .ch-bar.block{fill:var(--k-block)}
 .ch .ch-goal{stroke:var(--text-3);stroke-width:1.5;stroke-dasharray:4 3}
 .ch .ch-mark{fill:var(--k-mode)}
 .ch .ch-ring{fill:var(--surface);stroke:var(--k-mode);stroke-width:1.5}
@@ -222,7 +223,8 @@ const hh = (h) => String(h).padStart(2, "0");
 
 // ---------------------------------------------------------------- bar chart (a value per day)
 /**
- * data = {bars: [{label, value, tip, today?, unlocks?}], goal?: number, goalLabel?: string, minPeak?: number}
+ * data = {bars: [{label, value, tip, today?, unlocks?, tone?: "block" | "over" | "now", show?: bool}], goal?: number,
+ *         goalLabel?: string, minPeak?: number}      (tone: the bar's colour class; show: draw its label - default every 5th)
  * Elements: 1 + 3n + 2 + n  (n = bars).
  */
 export function layoutBars(data, W, H, s) {
@@ -239,12 +241,12 @@ export function layoutBars(data, W, H, s) {
   bars.forEach((b, i) => {
     const x = slot * i + (slot - bw) / 2;
     const v = Math.max(0, b.value || 0);
-    const tone = b.today ? "now" : goal && v > goal ? "over" : "";
+    const tone = b.tone || (b.today ? "now" : goal && v > goal ? "over" : "");
     prims.push(P("path", { d: barPath(x, y(v), bw, bottom, 3 * s), class: "ch-bar" + (tone ? " " + tone : "") }));
     const cy = Math.max(4.5 * s, y(v) - 7 * s);
     marks.push(P("circle", { cx: n2(x + bw / 2), cy: n2(cy), r: b.unlocks ? n2(3.5 * s) : 0, class: "ch-mark" }));
     labels.push(P("text", { x: n2(x + bw / 2), y: n2(bottom + 14 * s), "text-anchor": "middle" },
-      { text: n <= 10 || i % 5 === 0 || b.today ? String(b.label ?? "") : "" }));
+      { text: (b.show ?? (n <= 10 || i % 5 === 0 || b.today)) ? String(b.label ?? "") : "" }));
     hits.push(P("rect", { x: n2(slot * i), y: 0, width: n2(slot), height: n2(H), class: "ch-hit",
       "data-tip": (b.tip || "") + (b.unlocks ? `\nEmergency unlock used ${b.unlocks}x` : "") }));
   });

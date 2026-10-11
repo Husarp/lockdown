@@ -24,6 +24,7 @@ PAGE_MODULES = [
     "dashboard",
     "calendar",
     "modes",
+    "network",
 ]
 
 for _name in PAGE_MODULES:

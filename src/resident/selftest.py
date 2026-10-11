@@ -34,6 +34,9 @@ READ_ARGS: dict = {
     "blocking_overview_get": ["Next block"],   # Blocking > Overview, in the order that works out the most
     "calendar_get": [None, 7, "all"],           # Blocking > Calendar: the week, the busiest view
     "mode_extra_check": [{"kind": "site", "text": "reddit.com", "name": "", "ways": ["dns"]}],   # Modes: "+ Other site or app"
+    "network_get": [{}, 100],                  # Network Log: the table (the first 100 of the last hour)
+    "network_graph": [{}],                     # Network Log: the Graph tab
+    "network_block_target": ["site", "rr3.googlevideo.com"],    # Network Log: "Block site..." / "Block app..." from a row
 }
 
 # `read` methods that must NOT be called by the self-test or the timing run, with the reason (they open a native

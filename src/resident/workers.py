@@ -57,6 +57,8 @@ BREAK_NOTICE_SEC = 12      # "Break in progress" at most this often
 ERROR_REPEAT_SEC = 60      # the same worker error in a row is logged once per this long
 MIN_GAP_SEC = 0.05         # a tick never starts sooner than this after the last one began (no busy loop)
 STOP_WAIT_SEC = 1.0        # Workers.stop() waits this long for the workers to wind up
+NETLOG_SEC = 3.0            # R16: how often the Network Log's live feed looks for new rows
+NETLOG_IDLE_SEC = 60.0      # (and how often it wakes when nobody asked for it)
 GOAL_KEY, DEFAULT_GOAL_HOURS = "stats.goal_hours", "5"   # the daily screen-time goal (the weekly summary names it)
 
 log = logging.getLogger("lockdown.workers")
@@ -198,6 +200,8 @@ class Hub:
         self.in_use = lambda: frozenset()          # item ids in use right now (the usage tracker's set)
         self.status_worker = None                  # set by Workers (poke() = "build a snapshot now")
         self.engine = None                         # the reminder engine (set by the ReminderWorker)
+        self.netlog_feed = None                    # R16: the Network Log page's live feed (webapi/network.py), set by the Api
+        self.netlog_worker = None                  # (set by Workers; the Api pokes it when a page starts a feed)
         self._errors: dict = {}
         self._errors_lock = threading.Lock()
 
@@ -788,6 +792,24 @@ class UpdateWorker(Worker):
         self.submit(lambda: updates.snooze(self.db, self.hub.clock.now(self.db)))
 
 
+# ---------------------------------------------------------------- Network Log live feed
+
+class NetLogWorker(Worker):
+    """Every NETLOG_SEC, while the Network Log page is shown and Live is on: tell the page the rows that are new
+    (webapi/network.py _Feed.tick). Asleep (one wake-up a minute, doing nothing) when no page asked for it; the Api pokes
+    it when one does, and the feed switches itself off when the window is hidden."""
+    label = "netlog"
+    interval = NETLOG_SEC
+    uses_db = False
+
+    def tick(self):
+        feed = self.hub.netlog_feed
+        if feed is None or not feed.on:
+            return NETLOG_IDLE_SEC
+        feed.tick()
+        return None
+
+
 # ---------------------------------------------------------------- bad-word notices
 
 class WordNotices:
@@ -856,14 +878,17 @@ class Workers:
         self.reminder_ui = reminder_ui or RecordingReminderUI()
         self.reminders = ReminderWorker(self.hub, self.reminder_ui)
         self.updates = UpdateWorker(self.hub)
+        self.netlog = NetLogWorker(self.hub)
         self.word_notices = WordNotices(self.hub)
         self.tracker, self.word_guard, self.retention = tracker, word_guard, retention
         self._startup = None
         self._stopping = False
-        self.workers = [self.status, self.block_events, self.watcher, self.minimize, self.reminders, self.updates]
+        self.workers = [self.status, self.block_events, self.watcher, self.minimize, self.reminders, self.updates,
+                        self.netlog]
 
     def start(self):
         self.hub.status_worker = self.status
+        self.hub.netlog_worker = self.netlog
         for worker in self.workers:
             worker.start()
         self._startup = threading.Thread(target=self._start_desktop_jobs, name="lockdown-startup", daemon=True)
