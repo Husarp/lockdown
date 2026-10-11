@@ -382,89 +382,27 @@ def test_several_buttons_on_a_notice_make_the_first_the_main_one(env):
 
 @pytest.fixture
 def locked(env):
-    """Anti-Bypass on (a phrase), the guard real; the reminder 'water' is Important."""
+    """Anti-Bypass on (a phrase), the guard real; the reminder 'water' is Important. Dismissing its popup is still free."""
     ab.save(env.db, {**ab.settings(env.db), "phrase": True, "length": 30})
     reminders.save(env.db, reminders.CUSTOM_KEY, [custom(guarded=True)])
-    clock = SimpleNamespace(now=NOW, mono=1000.0)
-    ctx = webapi.make_context(env.path, clock=lambda db: clock.now)
-    ctx.guard = GuardService(lambda: ctx.db, lambda db: clock.now, monotonic=lambda: clock.mono, rng=random.Random(3))
-    env.clock, env.ctx, env.guard = clock, ctx, ctx.guard
-    env.challenges = []
-    env.corner.on_challenge = env.challenges.append
     return env
 
 
-def test_dismissing_an_important_reminder_needs_the_challenge(locked):
+def test_dismissing_an_important_reminder_answers_at_once_with_no_ticket(locked):
     env = locked
     env.tick(1)
     assert env.card("custom:water") is not None
-    reply = env.corner.answer("custom:water", "dismiss", env.guard)
-    assert reply["data"]["needs_challenge"] is True and reply["data"]["ticket"]
-    assert env.worker.answers == []                              # NOT answered
-    assert env.card("custom:water") is None and env.log.kinds()[-1] == "hide"   # but out of the way of the challenge
-    assert env.challenges == [reply["data"]]                     # opened in the main window
-    assert 'important reminder "Drink water"' in reply["data"]["changes"][0]
-
-
-def test_passing_the_challenge_answers_the_dismiss(locked):
-    env = locked
-    env.tick(1)
-    ticket = env.corner.answer("custom:water", "dismiss", env.guard)["data"]["ticket"]
-    phrase = env.guard.begin(ticket)["data"]["phrase"]
-    env.clock.mono += len(phrase) * 0.05 + 1
-    assert env.guard.submit(ticket, phrase)["data"]["passed"] is True
-    assert env.worker.answers == [("custom:water", "dismiss")]
-    assert env.card("custom:water") is None
-
-
-def test_cancelling_the_challenge_brings_the_popup_back(locked):
-    env = locked
-    env.tick(1)
-    ticket = env.corner.answer("custom:water", "dismiss", env.guard)["data"]["ticket"]
-    assert env.card("custom:water") is None
-    env.guard.cancel(ticket)
-    card = env.card("custom:water")
-    assert card is not None and [b["action"] for b in card["buttons"]] == ["done", "snooze", "dismiss"]
-    assert env.worker.answers == []                              # nothing was answered
-    assert env.corner._meta["custom:water"]["guarded"] is True   # and it is still Important
-
-
-def test_a_cancelled_challenge_does_not_bring_back_a_popup_the_engine_dropped(locked):
-    env = locked
-    env.tick(1)
-    ticket = env.corner.answer("custom:water", "dismiss", env.guard)["data"]["ticket"]
-    env.engine.open.discard("custom:water")                       # (no longer due)
-    env.guard.cancel(ticket)
-    assert env.card("custom:water") is None
-
-
-def test_important_dismiss_is_free_when_anti_bypass_is_off(locked):
-    env = locked
-    ab.save(env.db, {**ab.settings(env.db), "phrase": False})
-    env.tick(1)
-    reply = env.corner.answer("custom:water", "dismiss", env.guard)
-    assert reply["ok"] is True and env.worker.answers == [("custom:water", "dismiss")]
+    reply = env.corner.answer("custom:water", "dismiss")
+    assert reply is None                                         # no ticket, no challenge
+    assert env.worker.answers == [("custom:water", "dismiss")]   # answered right away
+    assert env.card("custom:water") is None and env.log.kinds().index("hide") < env.log.kinds().index("answer")
 
 
 def test_other_answers_to_an_important_reminder_are_free(locked):
     env = locked
     env.tick(1)
-    assert env.corner.answer("custom:water", "done", env.guard) is None
+    assert env.corner.answer("custom:water", "done") is None
     assert env.worker.answers == [("custom:water", "done")]
-
-
-def test_important_break_and_group_are_found(locked):
-    env = locked
-    reminders.save(env.db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "guarded": True})
-    env.ui.popup("break", "Time for a break", "x", [("Start break", "start"), ("✕", "dismiss")])
-    assert env.corner._meta["break"]["guarded"] is True
-    reminders.save(env.db, reminders.CUSTOM_KEY, [custom(id="a", guarded=False), custom(id="b", guarded=True)])
-    env.engine.grouped["custom:a"] = ["a", "b"]
-    env.ui.popup("custom:a", "Reminders", "• a\n• b", [("Done", "done"), ("✕", "dismiss")])
-    assert env.corner._meta["custom:a"]["guarded"] is True       # one Important reminder in the group is enough
-    env.engine.grouped["custom:c"] = ["a"]
-    env.ui.popup("custom:c", "Reminder", "a", [("Done", "done"), ("✕", "dismiss")])
-    assert env.corner._meta["custom:c"]["guarded"] is False
 
 
 # ---------------------------------------------------------------- the rest of the adapter
@@ -653,7 +591,7 @@ def api_env(env):
 
 def test_the_corner_methods_are_classified_and_registered():
     kinds = dict(core.api_methods())
-    assert kinds["corner_answer"] == "loosen" and kinds["corner_ready"] == "ui" and kinds["corner_size"] == "ui"
+    assert kinds["corner_answer"] == "ui" and kinds["corner_ready"] == "ui" and kinds["corner_size"] == "ui"
 
 
 def test_corner_ready_gives_the_look_and_the_cards(api_env):
@@ -679,13 +617,12 @@ def test_corner_answer_refuses_what_is_not_on_screen(api_env):
     assert env.worker.answers == []
 
 
-def test_important_dismiss_through_the_api_returns_the_ticket(api_env):
+def test_important_dismiss_through_the_api_is_free(api_env):
     env = api_env
     ab.save(env.db, {**ab.settings(env.db), "phrase": True, "length": 30})
-    env.corner.popup("custom:water", "Reminder", "Drink", [("Done", "done"), ("✕", "dismiss")], guarded=True)
-    got = env.api.corner_answer("custom:water", "dismiss")
-    assert got["ok"] and got["data"]["needs_challenge"] and got["data"]["ticket"]
-    assert env.worker.answers == []
+    env.corner.popup("custom:water", "Reminder", "Drink", [("Done", "done"), ("✕", "dismiss")])
+    assert env.api.corner_answer("custom:water", "dismiss") == {"ok": True, "data": {"done": True}}
+    assert env.worker.answers == [("custom:water", "dismiss")]
 
 
 def test_corner_size_checks_its_numbers(api_env):
@@ -828,7 +765,7 @@ def test_attach_wires_everything(env):
     ui, actions, toaster, publisher = reminder_ui.attach(win, hub, ctx, lambda: None)
     try:
         assert ctx.corner is not None and isinstance(ui, reminder_ui.CornerReminderUI)
-        assert hub.open_page == actions.open_page and ctx.corner.on_challenge == actions.open_challenge
+        assert hub.open_page == actions.open_page
         hub.notify.show("Hello", sticky=False)                      # default format "toast": the (fake) notification path
         ctx.corner.popup("a", "t", "x", [("OK", "ok")])
         publisher.flush()

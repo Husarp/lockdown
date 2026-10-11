@@ -26,12 +26,11 @@ class CornerReminderUI:
         self.held_notices: dict = {}      # key -> the Windows notification standing in for a held popup
         self.overlay_keys: set = set()
         corner.popup_sink = self._answer
-        corner.is_open = lambda key: self.engine is not None and key in getattr(self.engine, "open", ())
 
     # ------------------------------------------------------------------ the engine's calls
     def popup(self, key, title, text, buttons):
         self.close(key)
-        self.corner.popup(key, title, text, buttons, guarded=self._important(key))
+        self.corner.popup(key, title, text, buttons)
 
     def overlay(self, key, title, text, until, buttons):
         self.close(key)
@@ -100,19 +99,6 @@ class CornerReminderUI:
         elif self.toaster is not None:
             self.toaster.remove(notice)
 
-    def _important(self, key) -> bool:
-        """Is this popup an Important reminder (dismissing it needs the challenge)? Read on the worker's thread."""
-        try:
-            db = self.worker.db
-            if key == "break":
-                return bool(reminders.load(db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK).get("guarded"))
-            if key.startswith("custom:"):
-                ids = self.engine.grouped.get(key, [key.split(":", 1)[1]])
-                return any(r.get("guarded") for r in reminders.custom_list(db) if r["id"] in ids)
-        except Exception:
-            return False
-        return False
-
 
 CORNER_PUSH_SEC = 0.03      # the corner window's pushes go out this soon (a card is up within a frame or two)
 
@@ -138,6 +124,5 @@ def attach(win, hub, ctx, show_main, log=None):
     ui = CornerReminderUI(hub, corner, toaster, notices)
     ctx.corner = corner
     actions = tray_actions.TrayActions(hub, ctx.guard, show_main, lambda event, payload=None: win.publisher.publish(event, payload))
-    corner.on_challenge = actions.open_challenge
     hub.open_page = actions.open_page
     return ui, actions, toaster, publisher

@@ -54,24 +54,21 @@ class Corner:
         self._lock = threading.RLock()
         self._host_lock = threading.Lock()
         self._cards: list[dict] = []        # what the page shows, oldest first
-        self._meta: dict[str, dict] = {}    # key -> {"guarded", "callbacks"} (never sent to the page)
+        self._meta: dict[str, dict] = {}    # key -> {"callbacks"} (never sent to the page)
         self._ids = itertools.count(1)
         self._seq = 0                       # counts the changes: the page ignores a list older than the one it has
         self._shown = False
         self.height = 0
         self.popup_sink = None              # fn(key, action): the reminder engine hears the answer (on its worker)
-        self.is_open = lambda key: True     # is the engine still waiting on this popup? (set by the reminder UI)
-        self.on_challenge = None            # fn(data): open the challenge in the main window (data = the guard's needs_challenge reply)
 
     # ------------------------------------------------------------------ adding and removing (any thread)
-    def popup(self, key: str, title: str, text: str, buttons, guarded: bool = False):
+    def popup(self, key: str, title: str, text: str, buttons):
         """A reminder popup under `key` (a popup already there with that key goes first; this one is the newest)."""
         card = {"key": key, "id": next(self._ids), "kind": "popup", "title": str(title), "text": str(text),
                 "buttons": _clean_buttons(buttons)}
         with self._lock:
             self._drop(key)
             self._cards.append(card)
-            self._meta[key] = {"guarded": bool(guarded)}
         self._changed()
 
     def notice(self, message: str, actions=(), sticky: bool = False) -> str:
@@ -158,7 +155,7 @@ class Corner:
                 self._guard(self.host.place, height, dpr)
 
     # ------------------------------------------------------------------ answers from the page
-    def answer(self, key: str, action: str, guard=None):
+    def answer(self, key: str, action: str):
         """A button on a card (or its ✕). The card is taken down FIRST (and the window hidden if it was the last), then
         the answer is acted on. Raises ValueError for a key that isn't up or a button the card doesn't have."""
         with self._lock:
@@ -172,7 +169,7 @@ class Corner:
                 raise ValueError("That button is not on this card.")
             meta = self._meta.get(key, {})
             self._drop(key)
-        self._changed()                    # <- the card and the window are gone before anything below can show a challenge
+        self._changed()                    # <- the card and the window are gone before anything below can show a challenge or question
         if card["kind"] == "notice":
             if action.startswith("act:"):
                 callbacks = meta.get("callbacks", [])
@@ -180,38 +177,12 @@ class Corner:
                 if index < len(callbacks):
                     self.spawn(callbacks[index])
             return None
-        if action == "dismiss" and meta.get("guarded") and guard is not None:
-            return self._guarded_dismiss(card, guard)
         self._answer(key, action)
         return None
 
     def _answer(self, key: str, action: str):
         if self.popup_sink is not None:
             self.popup_sink(key, action)
-
-    def _guarded_dismiss(self, card: dict, guard):
-        """Waving away an Important reminder needs the Anti-Bypass challenge (when one is on): the card stays down, the
-        challenge opens in the main window, passing it answers; cancelling it brings the popup back."""
-        key = card["key"]
-        what = " ".join(card["text"].split("\n")[0].split())[:60] or card.get("title", "")
-        reply = guard.request([f'Dismiss the important reminder "{what}"'],
-                              lambda: self._answer(key, "dismiss"), lambda: self._reshow(card))
-        data = reply.get("data") if reply.get("ok") else None
-        if isinstance(data, dict) and data.get("needs_challenge") and self.on_challenge is not None:
-            self._guard(self.on_challenge, data)
-        return reply
-
-    def _reshow(self, card: dict):
-        """The challenge was cancelled / ran out: the popup is back (if the engine still waits for an answer)."""
-        if not self.is_open(card["key"]):
-            return
-        again = dict(card, id=next(self._ids))
-        with self._lock:
-            if any(c["key"] == card["key"] for c in self._cards):
-                return
-            self._cards.append(again)
-            self._meta[card["key"]] = {"guarded": True}
-        self._changed()
 
 
 def _spawn(fn):

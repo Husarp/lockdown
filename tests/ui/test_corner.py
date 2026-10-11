@@ -147,7 +147,7 @@ def test_a_stale_push_does_not_bring_back_a_card_that_was_pressed(corner):
     assert corner.keys() == []
 
 
-def test_a_popup_that_comes_back_after_a_cancelled_challenge_is_shown_again(corner):
+def test_a_popup_that_comes_back_after_being_dismissed_is_shown_again(corner):
     page = corner.open()
     popup(corner, "custom:water")
     corner.sync()
