@@ -22,6 +22,7 @@ PAGE_MODULES = [
     "draft",
     "blocking",
     "dashboard",
+    "calendar",
 ]
 
 for _name in PAGE_MODULES:

@@ -24,3 +24,4 @@
 //     export function hide() {}
 export const tabs = {};
 tabs.overview = () => import("./overview.js");
+tabs.calendar = () => import("./calendar.js");
