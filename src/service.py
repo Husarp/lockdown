@@ -601,7 +601,14 @@ class Enforcer:
                     continue
                 cached = self.cmd_cache[pid] = (name, tuple(apps.hosted_files(name, cmd)))
             for path in cached[1]:
+                module = path.startswith("-m:")   # (python -m: tool.py by its name, but pkg\\sub.py / tool\\__main__.py by the listed path)
+                path = path[3:] if module else path
                 file = apps.exe_name(path)
+                if module and "\\" in path:
+                    item = self.app_items.get(file) or {}
+                    listed = (apps.typed_path(item.get("target")) or item.get("app_path") or "").lower().replace("/", "\\")
+                    if not listed.endswith("\\" + path.lower()):
+                        continue
                 if file in files and not apps.in_folder(path, own) and not apps.in_folder(self._path(pid, name), own):
                     out[pid] = file
                     break

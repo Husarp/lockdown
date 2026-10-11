@@ -386,13 +386,13 @@ def test_a_java_game_open_when_its_block_begins_is_asked_to_close_and_says_so(jw
     ("java.exe", r"java -Xmx1G -classpath C:/g/game.jar;lib/* Main arg", [r"C:\g\game.jar", "Main.class"]),
     ("java.exe", "java -cp . Main", ["Main.class"]),
     ("java.exe", "java -jar game.jar", ["game.jar"]),
-    ("python.exe", "python -m http.server 8000", ["http.server.py", "server.py"]),
-    ("pythonw.exe", "pythonw -u -mgame", ["game.py", "game.py"]),
-    ("python.exe", "python -W ignore -m tool", ["tool.py", "tool.py"]),
+    ("python.exe", "python -m http.server 8000", [r"-m:http\server.py", r"-m:http\server\__main__.py"]),
+    ("pythonw.exe", "pythonw -u -mgame", ["-m:game.py", r"-m:game\__main__.py"]),
+    ("python.exe", "python -W ignore -m tool", ["-m:tool.py", r"-m:tool\__main__.py"]),
     ("python.exe", "python -c print(1)", []),
     ("python.exe", "python tool.py -m x", ["tool.py"]),
     ("cmd.exe", r'cmd /c "cd /d C:\Games\X && x.bat"', [r"cd /d C:\Games\X && x.bat", "x.bat"]),
-    ("cmd.exe", r'cmd /c "cd /d "C:\My Games" && "C:\My Games\run it.cmd" arg"', [r"C:\My Games\run it.cmd"]),
+    ("cmd.exe", r'cmd /c "cd /d "C:\My Games" && "C:\My Games\run it.cmd" arg"', [r"C:\My Games\run it.cmd", "it.cmd"]),   # (+ the last word: quote pairing is ambiguous)
     ("cmd.exe", r"cmd /c echo hi & call sub.BAT", ["echo", "sub.BAT"]),
     ("cmd.exe", r"cmd /c dir", ["dir"]),
     ("notepad.exe", r"notepad -m x.bat", []),
@@ -429,3 +429,35 @@ def test_a_module_in_lockdowns_own_folder_is_never_closed(monkeypatch):
                       paths={1: own + r"\.venv\Scripts\python.exe"})
     e.enforce_apps()
     assert e.killed == []
+
+
+def test_a_pathological_cmd_line_is_scanned_fast():
+    import time
+    for cmd in ("cmd /c " + "a." * 16000, 'cmd /c "' + "a.b " * 8000, "cmd /c " + "&" * 32000):
+        start = time.perf_counter()
+        apps.hosted_files("cmd.exe", cmd)
+        assert time.perf_counter() - start < 0.5
+    assert "late.bat" not in apps.hosted_files("cmd.exe", "cmd /c " + "x " * 20000 + "late.bat")   # (past the 8 K scanned)
+
+
+def test_dotted_modules_match_by_path_not_last_segment(monkeypatch):
+    procs = [(1, "python.exe"), (2, "python.exe"), (3, "python.exe")]
+    cmds = {1: "python -m http.server 8000", 2: "python -m pkg.sub", 3: "python -m tool"}
+    e = make_enforcer(monkeypatch, procs, cmds, target="server.py")
+    e.enforce_apps()
+    assert e.killed == []                         # python -m http.server is not a listed server.py
+    e = make_enforcer(monkeypatch, procs, cmds, target="sub.py")
+    e.app_items["sub.py"]["app_path"] = r"C:\Dev\pkg\sub.py"
+    e.enforce_apps()
+    assert e.killed == [2]                        # ... but is pkg\sub.py
+    e = make_enforcer(monkeypatch, procs, cmds, target="sub.py")
+    e.app_items["sub.py"]["app_path"] = r"C:\Dev\other\sub.py"
+    e.enforce_apps()
+    assert e.killed == []
+    e = make_enforcer(monkeypatch, procs, cmds, target="__main__.py")
+    e.app_items["__main__.py"]["app_path"] = r"C:\Dev\tool\__main__.py"
+    e.enforce_apps()
+    assert e.killed == [3]                        # a single module also finds its package's __main__.py
+    e = make_enforcer(monkeypatch, procs, cmds, target="tool.py")
+    e.enforce_apps()
+    assert e.killed == [3]                        # ... and tool.py by name
