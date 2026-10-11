@@ -15,6 +15,7 @@ PAGE_MODULES = [
     "reminders",
     "corner",
     "shared",
+    "rules",
 ]
 
 for _name in PAGE_MODULES:

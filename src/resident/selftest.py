@@ -29,6 +29,7 @@ import traceback
 # adds such a method adds ONE line here (the self-test and scripts/perf_ui.py then time it with these arguments).
 READ_ARGS: dict = {
     "update_notes": ["0.0.0"],     # About: the changelog lines of a waiting release
+    "rules_validate": [[{"rule_type": "permanent"}, {"rule_type": "time_limit", "same": True, "day": "1h"}]],   # rule editors: two forms
 }
 
 # `read` methods that must NOT be called by the self-test or the timing run, with the reason (they open a native
