@@ -25,3 +25,4 @@
 export const tabs = {};
 tabs.overview = () => import("./overview.js");
 tabs.calendar = () => import("./calendar.js");
+tabs.protect = () => import("./protection.js");

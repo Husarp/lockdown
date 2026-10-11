@@ -28,6 +28,7 @@ DIRTY_PAGES = {
     "usage_tick": ("dashboard", "screentime"),
     "icon_ready": ("dashboard", "screentime", "blocking"),
     "download_progress": ("about",),
+    "protection_progress": ("blocking",),
 }
 
 
@@ -72,6 +73,11 @@ class Publisher:
         if start:
             self._thread = threading.Thread(target=self._run, name="lockdown-publisher", daemon=True)
             self._thread.start()
+
+    @property
+    def visible(self) -> bool:
+        """Is the window shown right now? (jobs that only feed the page can sleep while it is not)"""
+        return self._visible
 
     # ------------------------------------------------------------------ queueing (any thread)
     def publish(self, event: str, payload=None, key=None):

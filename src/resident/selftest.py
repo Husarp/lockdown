@@ -33,6 +33,10 @@ READ_ARGS: dict = {
     "appmenu_info": ["app", "chrome.exe"],     # right-click menu of an app: category, protected, groups
     "blocking_overview_get": ["Next block"],   # Blocking > Overview, in the order that works out the most
     "calendar_get": [None, 7, "all"],           # Blocking > Calendar: the week, the busiest view
+    "protection_check": ["example.com"],       # Blocking > Site protection: "Check a site" (loads the list tables the first time)
+    "manual_get": ["mine1"],                   # Blocking > Site protection: one of your own lists (null when it isn't there)
+    "wordlist_get": ["adult_en"],              # Blocking > Site protection: a word-list dialog
+    "host_normalize": ["https://www.Example.com/x"],     # Blocking > Site protection: the site address of a new entry
     "mode_extra_check": [{"kind": "site", "text": "reddit.com", "name": "", "ways": ["dns"]}],   # Modes: "+ Other site or app"
     "network_get": [{}, 100],                  # Network Log: the table (the first 100 of the last hour)
     "network_graph": [{}],                     # Network Log: the Graph tab

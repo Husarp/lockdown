@@ -116,6 +116,8 @@ def main(argv: list[str], on_first_instance=None) -> int:
         ctx.update_flow = update_flow.attach(pool.hub, pool.updates, win.publisher.publish,
                                              show=lambda: windows.show_main(win),
                                              quit_app=lambda: (tray.stop(), windows.quit_agent(win)))
+        from resident import protection_watch   # R23: list download progress -> the Site protection tab
+        protection_watch.attach(pool, win.publisher.publish, lambda: win.publisher.visible)
         pool.start()
         app_catalog.start()   # (R11: reads the cached list, scans again if it is over a day old)
         if not any(a in argv for a in TRAY_ARGS):
