@@ -256,7 +256,7 @@ def _clean_path(path: str | None) -> str | None:
         raise _bad("Write the program's full path, like C:\\Games\\Foo\\Foo.exe - or just its file name.")
     if any(c in '<>"|?*:' or ord(c) < 32 for c in rest):
         raise _bad("That path has a character a file name can't have.")
-    return drive + rest
+    return shared.long_path(drive + rest)
 
 
 def _new_target(ctx, spec: dict) -> dict:

@@ -45,7 +45,7 @@ MAX_WORDS, MAX_WORD = 5000, 80
 PREVIEW_TTL_SEC = 600         # a good preview can be connected for this long
 MAX_PREVIEWS = 2              # downloads running at once
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-_KEY = re.compile(r"^[a-z0-9]{1,30}$")
+_KEY = re.compile(r"[a-z0-9]{1,30}")              # (fullmatch: "$" would let a trailing line break in)
 OWN_LISTS = {"words": ("Your words", "a word or a few words"),
              "exceptions": ("Exceptions", "site (e.g. wikipedia.org) or word to ignore")}
 WORD_FLAGS = ("enabled", "safesearch", "youtube", "words_on", "exceptions_on")
@@ -140,7 +140,7 @@ def _flag(value) -> bool:
 
 
 def _key(value) -> str:
-    if not isinstance(value, str) or not _KEY.match(value):
+    if not isinstance(value, str) or not _KEY.fullmatch(value):
         raise ApiError("Bad request: no such list.")
     return value
 
@@ -683,7 +683,7 @@ def _words_patch(partial) -> dict:
         if key in partial:
             patch[key] = _flag(partial[key])
     if "action" in partial:
-        if partial["action"] not in keywords.ACTIONS:
+        if not isinstance(partial["action"], str) or partial["action"] not in keywords.ACTIONS:
             raise ApiError("Bad request: close the tab or go back.")
         patch["action"] = partial["action"]
     if "lists" in partial:

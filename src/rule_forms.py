@@ -157,8 +157,8 @@ def _read_scheduled(form: dict, shared: bool) -> dict:
     windows = []
     for i, w in enumerate(_list(form, "windows", MAX_WINDOWS)):
         days = w.get("days") if isinstance(w, dict) else None
-        if not isinstance(days, list) or any(isinstance(d, bool) or not isinstance(d, int) or not 0 <= d <= 6
-                                             for d in days):
+        if not isinstance(days, list) or len(days) > 7 or any(isinstance(d, bool) or not isinstance(d, int)
+                                                               or not 0 <= d <= 6 for d in days):
             raise RuleFormError("Pick days from Monday to Sunday.", f"windows.{i}")
         if not days:
             continue                        # a window with no days is ignored

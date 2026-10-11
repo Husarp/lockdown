@@ -90,7 +90,7 @@ def _remove(db, key: str):
 # ---------------------------------------------------------------- checking what the page sends
 
 def _color(value) -> str:
-    if not isinstance(value, str) or not _HEX.match(value):
+    if not isinstance(value, str) or not _HEX.fullmatch(value):
         raise ApiError("Pick a colour as #rrggbb.")
     return value.lower()
 

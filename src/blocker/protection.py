@@ -7,11 +7,13 @@ Standard library only (runs in the service)."""
 import json
 import re
 import time
+import urllib.error
 import urllib.request
 from array import array
 from bisect import bisect_left
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from paths import DATA_DIR
 
@@ -132,6 +134,25 @@ def list_path(key: str, folder: Path = LIST_DIR) -> Path:
     return folder / f"{key}.txt"
 
 
+class _WebRedirectsOnly(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to another http(s) address (urllib's default also follows one to ftp://)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl).scheme.lower() not in ("http", "https"):
+            raise urllib.error.HTTPError(newurl, code, "redirected away from the web", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_WebRedirectsOnly)
+
+
+def _open(url: str, timeout: int):
+    """A list address is fetched only over http(s), and redirects only lead to http(s) (R28)."""
+    if urlsplit(url).scheme.lower() not in ("http", "https"):
+        raise ValueError("Only http(s) list addresses can be downloaded.")
+    return _opener.open(urllib.request.Request(url, headers={"User-Agent": "Lockdown/1.0"}), timeout=timeout)
+
+
 def download(key: str, folder: Path = LIST_DIR, progress=None, lists: dict = LISTS) -> int:
     """Fetch a list's sources into folder/<key>.txt, streamed line by line (the big ones are ~50 MB).
     progress(part, parts, done_bytes, total_bytes) is called as it goes. Returns how many domains."""
@@ -141,8 +162,7 @@ def download(key: str, folder: Path = LIST_DIR, progress=None, lists: dict = LIS
     count = 0
     with open(tmp, "w", encoding="utf-8") as out:
         for part, (url, wildcard) in enumerate(sources, 1):
-            request = urllib.request.Request(url, headers={"User-Agent": "Lockdown/1.0"})
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with _open(url, 60) as response:
                 total, done = int(response.headers.get("Content-Length") or 0), 0
                 for raw in response:
                     done += len(raw)
@@ -184,9 +204,8 @@ def sources(key: str, lists: dict = LISTS) -> str:
 
 def preview(url: str, limit: int = MAX_DOWNLOAD) -> tuple[int, list[str]]:
     """A list at `url` before adding it: (how many domains, a few of them). Raises on network / format errors."""
-    request = urllib.request.Request(url, headers={"User-Agent": "Lockdown/1.0"})
     count, sample, done = 0, [], 0
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with _open(url, 30) as response:
         for raw in response:
             done += len(raw)
             if done > limit:

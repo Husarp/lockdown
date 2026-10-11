@@ -12,6 +12,7 @@ from . import core
 from .core import ApiError
 
 MAX_FORMS = 20
+MAX_NAME = 200                  # what the sentence calls the item (a name is at most 80-100 letters elsewhere)
 
 
 def _context(context) -> dict:
@@ -23,6 +24,8 @@ def _context(context) -> dict:
     for key, kind in (("shared", bool), ("name", str), ("require_one", bool)):
         if key in context and not isinstance(context[key], kind):
             raise ApiError(f"Bad request: {key} has the wrong kind of value.")
+    if len(context.get("name", "")) > MAX_NAME:
+        raise ApiError("Bad request: the name is too long.")
     return context
 
 

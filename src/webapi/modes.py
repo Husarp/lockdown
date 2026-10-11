@@ -33,7 +33,7 @@ from paths import APP_DIR
 from resident.tray_actions import locked_by_hand
 from rules import days_text, load_schedule, make_schedule, parse_hhmm, schedule_until
 
-from . import categories, core
+from . import categories, core, shared
 from .core import ApiError
 
 MAX_NAME = 40
@@ -427,7 +427,7 @@ def _build_extra(spec: dict) -> dict:
     path = spec.get("app_path")
     if path is not None and (not isinstance(path, str) or len(path) > 400):
         raise ApiError("Bad request: the app's path.")
-    path = path or typed_path(text) or None
+    path = shared.long_path(path or typed_path(text) or None)      # (8.3 short names spelled out for the check below)
     exe = exe_name(text)
     hosted = is_hosted(exe)
     if not exe or not (exe.endswith(".exe") or hosted):

@@ -23,6 +23,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import updates
 from version import REPO, VERSION
@@ -38,9 +39,20 @@ current: "UpdateFlow | None" = None
 
 
 def asset_ok(url) -> bool:
-    """Is this the installer address of a release of OUR repository?"""
-    return bool(REPO and isinstance(url, str) and len(url) < 600
-                and url.startswith(f"https://github.com/{REPO}/releases/download/"))
+    """Is this the installer address of a release of OUR repository? Read as an address, not as text: https, github.com
+    itself (no user, no port), our repository's release downloads, and no "." / ".." / escaped segment, query or
+    fragment that could lead somewhere else (R28)."""
+    if not (REPO and isinstance(url, str) and len(url) < 600) or "\\" in url or "%" in url:
+        return False
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    segments = parts.path.split("/")
+    return (parts.scheme == "https" and parts.netloc == "github.com" and not parts.query and not parts.fragment
+            and parts.path.startswith(f"/{REPO}/releases/download/") and not parts.path.endswith("/")
+            and not any(s in (".", "..") for s in segments[1:])
+            and not any(ord(c) < 33 for c in url))
 
 
 def public(found: dict | None) -> dict | None:

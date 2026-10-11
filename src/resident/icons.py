@@ -47,7 +47,7 @@ def clean_exe(name: str) -> str | None:
 
 def clean_host(name: str) -> str | None:
     name = name.lower()
-    return name if HOST_RE.match(name) else None
+    return name if HOST_RE.fullmatch(name) else None
 
 
 def letter_svg(text: str) -> bytes:

@@ -293,7 +293,7 @@ def allow_ui_settings(*patterns: str):
 
 
 def ui_setting_allowed(key) -> bool:
-    return (isinstance(key, str) and 0 < len(key) <= MAX_SETTING_KEY and bool(_KEY_RE.match(key))
+    return (isinstance(key, str) and 0 < len(key) <= MAX_SETTING_KEY and bool(_KEY_RE.fullmatch(key))
             and any(fnmatchcase(key, p) for p in UI_SETTING_PATTERNS))
 
 

@@ -21,6 +21,26 @@ def _catalog(ctx):
     return getattr(ctx, "catalog", None) or app_catalog.shared()
 
 
+def _windows_long_name(path: str) -> str | None:
+    """Windows' own long form of a path (GetLongPathNameW), or None (thin glue: only Windows has it)."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    buffer = ctypes.create_unicode_buffer(1024)
+    n = ctypes.windll.kernel32.GetLongPathNameW(path, buffer, len(buffer))
+    return buffer.value if 0 < n < len(buffer) else None
+
+
+@core.internal
+def long_path(path: str | None) -> str | None:
+    """A path with its 8.3 short names spelled out (C:\\PROGRA~1\\Lockdown -> C:\\Program Files\\Lockdown), so a check
+    on which folder it is in (Lockdown's own) reads the real folder (R28). Unchanged when it has no "~" or can't be
+    read."""
+    if not path or "~" not in path:
+        return path
+    return _windows_long_name(path) or path
+
+
 @read
 def apps_list(ctx, filter="all", query=""):
     """The apps to pick from: {apps: [{name, exe, path, running, steam}] (best match first, at most 60), total,
