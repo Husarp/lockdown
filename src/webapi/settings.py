@@ -313,17 +313,43 @@ def _is_text_map(value) -> bool:
     return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
 
 
+def _scalar(value) -> bool:
+    """A value a database column takes as it is (what a rule field or a way is stored as)."""
+    return value is None or (isinstance(value, (str, int, float)) and not isinstance(value, bool))
+
+
+def _text_or_none(value) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _rules_ok(rules) -> bool:
+    return isinstance(rules, list) and all(isinstance(r, dict) and isinstance(r.get("rule_type"), str)
+                                           and all(_scalar(v) for v in r.values()) for r in rules)
+
+
+def _group_ok(g) -> bool:
+    if not isinstance(g, dict):
+        return False
+    members, ways = g.get("members", {}), g.get("member_blocks") or {}
+    return (isinstance(g.get("name"), str) and _rules_ok(g.get("rules", []))
+            and isinstance(members, dict) and all(o is None or isinstance(o, dict) for o in members.values())
+            and isinstance(ways, dict) and all(_text_or_none(w) for w in ways.values())
+            and _text_or_none(g.get("app_block")) and _text_or_none(g.get("site_block")))
+
+
 def _check_shape(data: dict):
-    """A backup that would stop half-way (and leave the blocks emptied) is refused before anything is touched."""
+    """A backup that would stop half-way is refused before anything is touched - every field restore() reads, of the
+    kind it needs (backup.restore is also one transaction, so a file that still fails changes nothing)."""
     items, groups, cats, sets = data.get("items"), data.get("groups", []), data.get("categories", []), data.get("settings", {})
-    ok = (isinstance(groups, list) and isinstance(cats, list) and _is_text_map(sets)
+    ok = (isinstance(items, list) and isinstance(groups, list) and isinstance(cats, list) and _is_text_map(sets)
           and all(isinstance(i, dict) and isinstance(i.get("display_name"), str) and isinstance(i.get("target"), str)
-                  and isinstance(i.get("item_type"), str) and "id" in i and isinstance(i.get("rules", []), list)
+                  and isinstance(i.get("item_type"), str) and "id" in i and _scalar(i["id"])
+                  and _rules_ok(i.get("rules", [])) and all(_text_or_none(i.get(k)) for k in
+                                                           ("source", "notify", "block_type", "app_path"))
                   for i in items)
-          and all(isinstance(g, dict) and isinstance(g.get("name"), str) and isinstance(g.get("rules", []), list)
-                  and isinstance(g.get("members", {}), dict) for g in groups)
           and all(isinstance(c, dict) and all(isinstance(c.get(k), str) for k in ("kind", "name", "category"))
                   for c in cats))
+    ok = ok and all(_group_ok(g) for g in groups)
     if not ok:
         raise ApiError("That backup file is damaged, so it can't be imported.")
 

@@ -4,6 +4,7 @@ download progress, the mode that's on, an Anti-Bypass unlock) isn't included. Pl
 Importing replaces your blocks and settings (the GUI asks for the Anti-Bypass challenge first)."""
 import csv
 import json
+import sqlite3
 from datetime import date, timedelta
 
 import block_method
@@ -15,8 +16,10 @@ RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "cloc
                 "firewall_rules", "agent.exited", "protection.progress", "modes.active", "digest.last",
                 "retention.last_day",   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
                 "usage.counted_until", "firewall_quic", "firewall_video", "apps.members",
-                "pause.blocks"}   # (a running "Pause my blocks" - an import neither carries one in nor ends one)
-# (monitor.usage.COUNTED_KEY, service.QUIC_KEY, service.VIDEO_KEY, monitor.usage.MEMBERS_KEY, pause.KEY)
+                "pause.blocks",   # (a running "Pause my blocks" - an import neither carries one in nor ends one)
+                "app.off"}        # (Lockdown switched off: switching off has its own challenge, even with none set)
+# (monitor.usage.COUNTED_KEY, service.QUIC_KEY, service.VIDEO_KEY, monitor.usage.MEMBERS_KEY, pause.KEY,
+#  antibypass.OFF_KEY)
 
 
 def export(db) -> dict:
@@ -118,8 +121,50 @@ def diff(db, data: dict) -> list[str]:
     return lines or ["No differences - it matches your current setup."]
 
 
+class _NoCommit:
+    """db.conn while a restore runs: the Database's own `with conn:` blocks commit nothing, so every write of the
+    restore lands in ONE transaction (restore commits it, or rolls it all back)."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 def restore(db, data: dict):
-    """Replace blocks, groups, categories and settings with the backup's."""
+    """Replace blocks, groups, categories and settings with the backup's - all of it or nothing: a file that fails
+    half-way (a damaged entry) leaves the blocks as they were instead of emptied (R28)."""
+    import time
+    from db import WRITE_RETRY_SEC, _locked
+    conn = db.conn
+    deadline = time.monotonic() + WRITE_RETRY_SEC
+    while True:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            break
+        except sqlite3.OperationalError as e:      # (the service is writing: wait for it, as every write does)
+            if not _locked(e) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+    db.conn = _NoCommit(conn)
+    try:
+        _restore(db, data)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        db.conn = conn
+
+
+def _restore(db, data: dict):
     for item_id in db.item_ids():
         db.remove_item(item_id)
     for group_id in db.group_ids():
