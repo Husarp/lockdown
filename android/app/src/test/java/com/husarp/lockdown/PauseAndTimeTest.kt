@@ -111,6 +111,18 @@ class PauseAndTimeTest {
         assertTrue(bed.tick(LocalDateTime.of(2026, 9, 28, 23, 11), 999.0, s, BreakCfg(on = false), emptyList()).show.any { it.key == "sleep" })
     }
 
+    @Test fun a_muting_mode_holds_only_your_own_reminders() {
+        val e = RemindersEngine()
+        val water = CustomCfg(id = "w", text = "Drink water", kind = "interval", every = 1)
+        val held = e.tick(LocalDateTime.of(2026, 9, 28, 12, 1), 0.0, SleepCfg(), BreakCfg(on = false), listOf(water), dt = 120.0, holdCustoms = true)
+        assertTrue(held.show.none { it.key == "custom:w" })
+        val s = SleepCfg(on = true, bedtime = "23:00", wake = "07:00")
+        val bed = RemindersEngine().tick(LocalDateTime.of(2026, 9, 28, 23, 10), 999.0, s, BreakCfg(on = false), emptyList(), holdCustoms = true)
+        assertTrue(bed.show.any { it.key == "sleep" })
+        val brk = RemindersEngine().tick(LocalDateTime.of(2026, 9, 28, 12, 1), 0.0, SleepCfg(), BreakCfg(on = true, every = 1), emptyList(), dt = 120.0, holdCustoms = true)
+        assertTrue(brk.show.any { it.key == "break" })
+    }
+
     // ---------- the emergency unlock frees sites too ----------
 
     @Test fun an_emergency_unlocks_a_site_but_never_a_permanent_one() {

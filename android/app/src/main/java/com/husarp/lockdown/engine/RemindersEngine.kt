@@ -185,21 +185,21 @@ class RemindersEngine(private val rng: Random = Random.Default) {
     /** One tick. [idleSec] = seconds since the last input; [quiet] = Do-not-disturb / a muting mode (things wait);
      *  [paused] = an emergency paused the bedtime and break alerts; [emergencyLeft] = uses left, offered on the
      *  bedtime screen as "Emergency (N left)"; [silent] = "Pause my blocks" silenced every alert (PC 0.84.8): as
-     *  [paused], and your own reminders hold too (one on screen goes) until it ends. */
+     *  [paused], and your own reminders hold too (one on screen goes) until it ends; [holdCustoms] = only your own
+     *  reminders hold, the same way (a muting mode): bedtime and breaks are untouched. */
     fun tick(now: LocalDateTime, idleSec: Double, sleep: SleepCfg, brk: BreakCfg, customs: List<CustomCfg>,
              dt: Double = TICK_SEC.toDouble(), quiet: Boolean = false, paused: Boolean = false,
-             emergencyLeft: Int = 0, silent: Boolean = false): TickResult {
+             emergencyLeft: Int = 0, silent: Boolean = false, holdCustoms: Boolean = false): TickResult {
         val out = Out(now)
         val using = idleSec < USING_IDLE_SEC
         val held = paused || silent
         val breakDue: BreakCfg? = breaks(now, idleSec, using, dt, brk, held, out)
         this.sleep(now, sleep, quiet, held, emergencyLeft, out)
-        if (silent) {
+        if (silent || holdCustoms) {
             for (key in open.filter { it.startsWith("custom:") || it.startsWith("check:") }) { grouped.remove(key); close(key, out) }
             pending.clear(); folded.clear()
-            return out.build()
-        }
-        custom(now, using, dt, customs, quiet, out)
+            if (silent) return out.build()
+        } else custom(now, using, dt, customs, quiet, out)
         if (breakDue != null && !quiet) {
             absorb(customs, out)
             showBreak(breakDue, customs, out)
