@@ -82,12 +82,18 @@ def main(argv: list[str], on_first_instance=None) -> int:
     windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)
 
-    from resident import workers
-    pool = workers.Workers(log_sink=_log)   # (the background jobs: only the process that owns the port runs them)
+    from resident import reminder_ui, workers
+    hub = workers.Hub(log_sink=_log)
+    # R07: the corner window (reminder popups + notices), the tray's handlers, hub.notify.show and hub.open_page
+    ui, tray_actions, toaster, corner_publisher = reminder_ui.attach(win, hub, ctx, lambda: windows.show_main(win), _log)
+    pool = workers.Workers(hub=hub, reminder_ui=ui, log_sink=_log)   # (the background jobs: only the process that owns the port runs them)
 
     def ready():   # (runs once the GUI loop is up)
         from gui.tray import Tray
-        tray = Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, tray, ctx))
+        tray = Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, tray, ctx),
+                    on_mode=tray_actions.mode, on_update=tray_actions.update, on_pause=tray_actions.pause,
+                    on_resume=tray_actions.resume)
+        toaster.fallback = tray.notify      # (a Windows notification that can't be had: the tray's balloon says it)
         tray.start()
         pool.hub.listeners += [workers.tray_listener(tray), workers.publisher_listener(win)]
         pool.start()
@@ -96,5 +102,6 @@ def main(argv: list[str], on_first_instance=None) -> int:
     windows.start(ready)
     pool.stop()
     win.publisher.stop()
+    corner_publisher.stop()
     server.stop()
     return 0

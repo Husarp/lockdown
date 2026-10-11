@@ -13,6 +13,7 @@ PAGE_MODULES = [
     "guard",
     "shell",
     "reminders",
+    "corner",
 ]
 
 for _name in PAGE_MODULES:

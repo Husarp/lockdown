@@ -1,0 +1,42 @@
+/* The corner window: reminder popups and notices as cards (the designer's card / toast / button styles, nothing new).
+   Animations are transform / opacity only. The window is as tall as #stack: js/corner.js reports the height. */
+html, body { height: auto; }
+body { overflow-x: hidden; overflow-y: auto; }
+#stack { display: flex; flex-direction: column; gap: var(--sp-2); width: calc(360px); max-width: 100vw; padding: var(--sp-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong); }
+#stack:empty { display: none; }
+
+.cc { position: relative; flex: none; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); overflow-wrap: anywhere;
+  transition: transform var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+.cc-popup { border-color: var(--brand); }
+.cc-notice { border-left: 3px solid var(--brand); padding-left: var(--sp-3); cursor: pointer; }
+.cc-notice.sticky { cursor: default; }
+.cc.enter { animation: cc-in 160ms var(--ease) both; }
+.cc.leaving { opacity: 0; transform: translateY(8px); pointer-events: none; }
+@keyframes cc-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .cc.enter { animation: none; } .cc { transition: none; } }
+
+.cc-h { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.cc-h .ic { color: var(--brand); }
+.cc-h b { flex: 1; min-width: 0; font-size: var(--fs-body); }
+.cc-h .cc-when { color: var(--text-3); font-size: var(--fs-cap); }
+.cc-close { width: calc(22px * var(--s)); height: calc(22px * var(--s)); border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--text-3); display: inline-grid; place-items: center; padding: 0; }
+.cc-close:hover { background: var(--surface-3); color: var(--text); }
+.cc-close .ic { width: calc(13px * var(--s)); height: calc(13px * var(--s)); }
+
+.cc-body { display: grid; gap: var(--sp-1); font-size: var(--fs-body); color: var(--text); }
+.cc-body p { margin: 0; white-space: pre-wrap; }
+.cc-body p.lead { color: var(--text-2); font-weight: var(--fw-semibold); font-size: var(--fs-sm); margin-top: var(--sp-1); }
+.cc-body ul { margin: 0; padding-left: calc(18px * var(--s)); display: grid; gap: 2px; }
+.cc-msg { margin: 0; font-size: var(--fs-body); }
+
+.cc-btns { display: flex; justify-content: flex-end; gap: var(--sp-2); flex-wrap: wrap; padding-top: var(--sp-1); }
+.cc-notice .cc-btns { justify-content: flex-start; }
+.cc-btns .btn { min-width: calc(76px * var(--s)); }
+/* the ✕ of a popup: small and dark on purpose - a way out, not an answer */
+.cc-btns .btn-dismiss { min-width: 0; width: calc(34px * var(--s)); padding: 0; background: var(--bg); border-color: var(--line);
+  color: var(--text-3); }
+.cc-btns .btn-dismiss:hover { background: var(--surface-3); color: var(--text-2); }
+.cc.busy .btn { pointer-events: none; opacity: .6; }
