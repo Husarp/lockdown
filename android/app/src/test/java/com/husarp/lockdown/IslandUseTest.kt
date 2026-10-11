@@ -1,6 +1,7 @@
 package com.husarp.lockdown
 
 import com.husarp.lockdown.engine.AppTime
+import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
 import com.husarp.lockdown.link.LinkProtocol
@@ -77,5 +78,45 @@ class IslandUseTest {
         assertEquals(mapOf(("a" to "") to 20), out[LocalDate.of(2026, 10, 8)])
         assertEquals(60, hist[today]!![("a" to "")])                                // input untouched
         assertEquals(hist, IslandUse.fillTotals(hist, emptyList()))
+    }
+
+    @Test fun hour_spans_split_at_hour_and_midnight_and_skip_before_since() {
+        val out = HashMap<Pair<String, Int>, Long>()
+        IslandUse.addHourSpan(out, ms("2026-10-09", 23, 50), ms("2026-10-10", 1, 10), 0, zone)
+        assertEquals(10 * 60_000L, out["2026-10-09" to 23])
+        assertEquals(60 * 60_000L, out["2026-10-10" to 0])
+        assertEquals(10 * 60_000L, out["2026-10-10" to 1])
+        val late = HashMap<Pair<String, Int>, Long>()
+        IslandUse.addHourSpan(late, ms("2026-10-09", 23, 50), ms("2026-10-10", 0, 20), ms("2026-10-10", 0), zone)
+        assertEquals(mapOf("2026-10-10" to 0 to 20 * 60_000L), late)
+        IslandUse.addHourSpan(late, ms("2026-10-10", 5), ms("2026-10-10", 5), 0, zone)    // empty span adds nothing
+        assertEquals(1, late.size)
+    }
+
+    @Test fun hour_rows_are_capped_at_an_hour_and_tiny_ones_dropped() {
+        val rows = IslandUse.hourRows(mapOf(("2026-10-10" to 3) to 5_000_000L, ("2026-10-10" to 2) to 1500L, ("2026-10-10" to 1) to 900L))
+        assertEquals(listOf(IslandHourRow("2026-10-10", 2, 1), IslandHourRow("2026-10-10", 3, 3600)), rows)
+    }
+
+    @Test fun nonsense_hour_rows_are_dropped_and_count_is_capped() {
+        val rows = listOf(IslandHourRow("x", 1, 5), IslandHourRow("2026-10-10", 24, 5), IslandHourRow("2026-10-10", -1, 5),
+            IslandHourRow("2026-10-10", 3, 0), IslandHourRow("2026-10-10", 3, 3601), IslandHourRow("2026-10-10", 3, 60))
+        assertEquals(listOf(3), IslandUse.cleanHours(rows).map { it.hour })
+        assertEquals(IslandUse.MAX_HOUR_ROWS, IslandUse.cleanHours(List(500) { IslandHourRow("2026-10-10", it % 24, 5) }).size)
+    }
+
+    @Test fun hour_merge_replaces_sent_days_and_hour_ms_reads_one_day() {
+        val old = listOf(IslandHourRow("2026-10-09", 8, 100), IslandHourRow("2026-10-10", 8, 50), IslandHourRow("2024-01-01", 1, 5))
+        val m = IslandUse.mergeHours(old, listOf(IslandHourRow("2026-10-10", 9, 30)), today)
+        assertEquals(listOf(8 to 100, 9 to 30), m.map { it.hour to it.sec })
+        val h = IslandUse.hourMs(m, today)!!
+        assertEquals(24, h.size); assertEquals(30_000L, h[9]); assertEquals(0L, h[8])
+        assertNull(IslandUse.hourMs(m, LocalDate.of(2026, 10, 1)))
+    }
+
+    @Test fun sync_body_with_hours_reads_both_ways() {
+        val b = LinkProtocol.json.encodeToString(SyncBody.serializer(), SyncBody(useHours = listOf(IslandHourRow("2026-10-10", 1, 5))))
+        assertEquals(1, LinkProtocol.json.decodeFromString(SyncBody.serializer(), b).useHours!!.size)
+        assertNull(LinkProtocol.json.decodeFromString(SyncBody.serializer(), """{"seq":1}""").useHours)
     }
 }

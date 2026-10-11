@@ -9,6 +9,10 @@ import java.time.ZoneId
 @Serializable
 data class IslandUseRow(val day: String, val pkg: String, val label: String, val sec: Int)
 
+/** Island's foreground seconds in one hour of one day (all apps added), for the Today/Yesterday hourly bars. */
+@Serializable
+data class IslandHourRow(val day: String, val hour: Int, val sec: Int)
+
 /** An app's use over a range, for the Insights "Top apps". */
 data class AppTime(val pkg: String, val label: String, val ms: Long)
 
@@ -21,6 +25,8 @@ object IslandUse {
     const val DAYS = 31                    // how many days back the helper sends
     const val KEEP_DAYS = 400L             // how long main keeps them
     const val MAX_ROWS = 6000
+    const val HOUR_DAYS = 2                // today and yesterday get hourly rows
+    const val MAX_HOUR_ROWS = 24 * 4
     private const val MAX_SEC = 86_400
 
     /** Adds the span [fromMs]..[toMs] of [pkg] to [out] (day, pkg -> ms), split at local midnight. */
@@ -32,6 +38,44 @@ object IslandUse {
             out.merge(day.toString() to pkg, end - t, Long::plus)
             t = end
         }
+    }
+
+    /** Adds the part of [fromMs]..[toMs] at or after [sinceMs] to [out] (day, hour -> ms), split at local hour boundaries. */
+    fun addHourSpan(out: MutableMap<Pair<String, Int>, Long>, fromMs: Long, toMs: Long, sinceMs: Long, zone: ZoneId) {
+        var t = maxOf(fromMs, sinceMs)
+        while (t < toMs) {
+            val z = Instant.ofEpochMilli(t).atZone(zone)
+            val end = minOf(toMs, z.truncatedTo(java.time.temporal.ChronoUnit.HOURS).plusHours(1).toInstant().toEpochMilli())
+            out.merge(z.toLocalDate().toString() to z.hour, end - t, Long::plus)
+            t = end
+        }
+    }
+
+    /** Hour rows from day/hour totals; under a second is left out, an hour is at most 3600 s. */
+    fun hourRows(totals: Map<Pair<String, Int>, Long>): List<IslandHourRow> =
+        totals.mapNotNull { (k, ms) -> if (ms >= 1000) IslandHourRow(k.first, k.second, minOf(3600L, ms / 1000).toInt()) else null }
+            .sortedWith(compareBy({ it.day }, { it.hour }))
+
+    /** What main accepts for the hourly rows: real day, hour 0..23, 1..3600 s, at most [MAX_HOUR_ROWS]. */
+    fun cleanHours(rows: List<IslandHourRow>): List<IslandHourRow> = rows.filter {
+        it.hour in 0..23 && it.sec in 1..3600 && runCatching { LocalDate.parse(it.day) }.isSuccess
+    }.take(MAX_HOUR_ROWS)
+
+    /** Same rule as [merge]: incoming days replace, other days stay, old days go. */
+    fun mergeHours(old: List<IslandHourRow>, incoming: List<IslandHourRow>, today: LocalDate): List<IslandHourRow> {
+        val days = incoming.map { it.day }.toSet()
+        val from = today.minusDays(KEEP_DAYS).toString()
+        return (old.filter { it.day !in days } + incoming).filter { it.day >= from }
+    }
+
+    /** Island's milliseconds in each hour 0..23 of [day]; null when no hourly rows came for that day. */
+    fun hourMs(rows: List<IslandHourRow>, day: LocalDate): List<Long>? {
+        val d = day.toString()
+        val mine = rows.filter { it.day == d }
+        if (mine.isEmpty()) return null
+        val out = LongArray(24)
+        for (r in mine) out[r.hour] += r.sec * 1000L
+        return out.toList()
     }
 
     /** Rows from day/app totals; apps under a second are left out. */

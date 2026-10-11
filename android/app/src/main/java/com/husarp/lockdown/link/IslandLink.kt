@@ -22,6 +22,7 @@ import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.AppTime
+import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
 import com.husarp.lockdown.guard.TrustedTime
@@ -299,6 +300,7 @@ object IslandLink {
         islandFrontAt = SystemClock.elapsedRealtime()
         body.apps?.let { saveIslandApps(it) }
         body.use?.let { saveIslandUse(it) }
+        body.useHours?.let { saveIslandHours(it) }
         // "Resume now" in Island: ends only the pause it names (a tightening, no challenge); never starts or lengthens one.
         body.endPause?.let { asked ->
             val before = Store.config.pause
@@ -369,6 +371,21 @@ object IslandLink {
         islandUseFile(app).writeText(json.encodeToString(merged))
     }
 
+    private fun islandHoursFile(ctx: Context) = File(ctx.filesDir, "island_hours.json")
+
+    private fun readIslandHours(ctx: Context): List<IslandHourRow> = islandHoursFile(ctx).takeIf { it.exists() }?.let { f ->
+        runCatching { json.decodeFromString<List<IslandHourRow>>(f.readText()) }.getOrNull()
+    } ?: emptyList()
+
+    @Synchronized private fun saveIslandHours(rows: List<IslandHourRow>) = runCatching {
+        val merged = IslandUse.mergeHours(readIslandHours(app), IslandUse.cleanHours(rows), java.time.LocalDate.now())
+        islandHoursFile(app).writeText(json.encodeToString(merged))
+    }
+
+    /** Main: Island's time per hour of [day] (24 values), or null when the helper sent none for that day. */
+    fun islandHours(ctx: Context, day: java.time.LocalDate): List<Long>? =
+        if (!isMain) null else IslandUse.hourMs(readIslandHours(ctx), day)
+
     /** Main: Island's time per app in [from]..[to] (for Insights); empty when not linked or nothing came yet. */
     fun islandUse(ctx: Context, from: java.time.LocalDate, to: java.time.LocalDate): Map<String, AppTime> =
         if (!isMain) emptyMap() else IslandUse.total(readIslandUse(ctx), from, to)
@@ -398,6 +415,7 @@ object IslandLink {
         val base: Map<String, Int> = emptyMap(),
         val appsHash: String = "",
         val useHash: String = "",
+        val hoursHash: String = "",
         val lastOk: Long = 0,
         val mainApp: Long = 0,
         val linkedAt: Long = 0,               // wall ms this copy was linked (0: by an older version)
@@ -421,7 +439,7 @@ object IslandLink {
     @Volatile private var cfgHash = ""
     @Volatile private var modesHash = ""
     @Volatile private var cfgFailed: String? = null
-    @Volatile private var useCache: Pair<Long, List<IslandUseRow>>? = null
+    @Volatile private var useCache: Pair<Long, Pair<List<IslandUseRow>, List<IslandHourRow>>>? = null
     @Volatile private var appsCache: Pair<Long, List<IslandApp>>? = null
     /** "Resume now" tapped here: the pause to end, sent to main until it answers. */
     @Volatile private var endPauseAsked: com.husarp.lockdown.engine.BlockPause? = null
@@ -561,13 +579,15 @@ object IslandLink {
         var asked: com.husarp.lockdown.engine.BlockPause? = null
         val apps = islandApps(ctx)
         val appsHash = LinkCrypto.sha256(apps.joinToString("\n") { it.pkg + "\t" + it.label })
-        val use = islandUseRows(ctx)
+        val (use, hours) = islandUseRows(ctx)
+        val hoursHash = LinkCrypto.sha256(hours.joinToString("\n") { "${it.day}\t${it.hour}\t${it.sec}" })
         val useHash = LinkCrypto.sha256(use.joinToString("\n") { "${it.day}\t${it.pkg}\t${it.sec}" })
         val body = json.encodeToString(SyncBody(
             seq = batch?.seq ?: 0, deltas = batch?.deltas ?: emptyMap(),
             cfg = cfgFailed ?: cfgHash, modes = modesHash, front = localFront, app = versionCode(ctx),
             cfgError = cfgFailed != null, apps = apps.takeIf { appsHash != st.appsHash }, canBlock = canBlock(ctx),
             use = use.takeIf { it.isNotEmpty() && useHash != st.useHash },
+            useHours = hours.takeIf { it.isNotEmpty() && hoursHash != st.hoursHash },
             endPause = endPauseAsked.also { asked = it },
         ))
         val (reply, problem) = exchange(st.port,
@@ -601,7 +621,7 @@ object IslandLink {
             UsageStore.inflight = LinkUsage.acked(UsageStore.inflight, sb.ack)
             UsageStore.base = sb.usage          // already holds every acked batch: nothing counts twice
             val cur = helperState ?: return@onMain
-            helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash)
+            helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash, hoursHash = hoursHash)
             saveHelper()
         }
         _status.value = HelperStatus(lastOk = now, mainApp = sb.app, cfgError = cfgFailed != null)
@@ -613,11 +633,11 @@ object IslandLink {
         (Usage.hasAccess(ctx) && android.provider.Settings.canDrawOverlays(ctx))
 
     /** The helper's per-day app time, read at most every 5 minutes (needs usage access; none without it). */
-    private fun islandUseRows(ctx: Context): List<IslandUseRow> {
+    private fun islandUseRows(ctx: Context): Pair<List<IslandUseRow>, List<IslandHourRow>> {
         val c = useCache
         if (c != null && SystemClock.elapsedRealtime() - c.first < 5 * 60_000L) return c.second
-        val list = runCatching { if (com.husarp.lockdown.usage.Usage.hasAccess(ctx)) com.husarp.lockdown.usage.Usage.islandRows(ctx) else emptyList() }
-            .getOrDefault(emptyList())
+        val list = runCatching { if (com.husarp.lockdown.usage.Usage.hasAccess(ctx)) com.husarp.lockdown.usage.Usage.islandRows(ctx) else emptyList<IslandUseRow>() to emptyList<IslandHourRow>() }
+            .getOrDefault(emptyList<IslandUseRow>() to emptyList<IslandHourRow>())
         useCache = SystemClock.elapsedRealtime() to list
         return list
     }

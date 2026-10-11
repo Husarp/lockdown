@@ -45,6 +45,7 @@ data class SyncBody(
     val canBlock: Boolean = true,                       // the helper can see and block Island apps (permissions)
     val bye: Boolean = false,                           // the helper took the unlink: main may drop the link
     val use: List<com.husarp.lockdown.engine.IslandUseRow>? = null,   // per-day app time in Island, only when it changed (Insights)
+    val useHours: List<com.husarp.lockdown.engine.IslandHourRow>? = null,   // Island seconds per hour, today and yesterday, only when changed
     val endPause: com.husarp.lockdown.engine.BlockPause? = null,   // "Resume now" in Island: main ends this pause only (Pause.endEarly)
 )
 

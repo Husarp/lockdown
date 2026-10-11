@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
 import java.util.Calendar
@@ -134,15 +135,23 @@ object Usage {
         return totals.toList()
     }
 
-    /** Helper: this profile's foreground seconds per app and day over the last [IslandUse.DAYS] days (one query). */
-    fun islandRows(ctx: Context): List<IslandUseRow> {
+    /** Helper: this profile's foreground seconds per app and day over the last [IslandUse.DAYS] days, and per hour
+     *  for today and yesterday (one query). */
+    fun islandRows(ctx: Context): Pair<List<IslandUseRow>, List<IslandHourRow>> {
         val zone = java.time.ZoneId.systemDefault()
-        val start = java.time.LocalDate.now().minusDays(IslandUse.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
+        val today = java.time.LocalDate.now()
+        val start = today.minusDays(IslandUse.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
+        val hourFrom = today.minusDays(IslandUse.HOUR_DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
         val end = System.currentTimeMillis()
         val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val events = usm.queryEvents(start, end)
         val totals = HashMap<Pair<String, String>, Long>()
+        val hours = HashMap<Pair<String, Int>, Long>()
         val resumedAt = HashMap<String, Long>()
+        fun span(pkg: String, from: Long, to: Long) {
+            IslandUse.addSpan(totals, pkg, from, to, zone)
+            IslandUse.addHourSpan(hours, from, to, hourFrom, zone)
+        }
         val e = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
@@ -150,11 +159,12 @@ object Usage {
             when (e.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = e.timeStamp
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->
-                    resumedAt.remove(pkg)?.let { IslandUse.addSpan(totals, pkg, it, e.timeStamp, zone) }
+                    resumedAt.remove(pkg)?.let { span(pkg, it, e.timeStamp) }
             }
         }
-        for ((pkg, from) in resumedAt) IslandUse.addSpan(totals, pkg, from, end, zone)
+        for ((pkg, from) in resumedAt) span(pkg, from, end)
         val pm = ctx.packageManager
-        return IslandUse.rows(totals) { pkg -> runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg) }
+        return IslandUse.rows(totals) { pkg -> runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg) } to
+            IslandUse.hourRows(hours)
     }
 }
