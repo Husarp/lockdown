@@ -165,7 +165,7 @@ def test_serves_index_and_assets_with_the_right_types(server):
     assert get(server, "/")[0] == 200
     status, r, _ = get(server, "/js/a.js")
     assert status == 200 and r.getheader("Content-Type").startswith("text/javascript")
-    assert "max-age" in r.getheader("Cache-Control")
+    assert r.getheader("Cache-Control") == "no-cache" and r.getheader("ETag")     # (R11: never cached for a year)
     assert get(server, "/app.css")[1].getheader("Content-Type").startswith("text/css")
     assert get(server, "/logo.svg")[1].getheader("Content-Type") == "image/svg+xml"
     assert get(server, "/f.woff2")[1].getheader("Content-Type") == "font/woff2"

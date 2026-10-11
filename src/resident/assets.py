@@ -17,8 +17,10 @@ MIME = {
     ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf",
     ".png": "image/png", ".ico": "image/x-icon", ".jpg": "image/jpeg", ".webp": "image/webp",
 }
+# Every file is "no-cache": the browser keeps its copy but asks before using it, and gets a body-less 304 while the
+# file is unchanged (ETag = the file's time + size). A year-long cache would keep showing the OLD page after an app
+# update, because the WebView2 profile is kept between runs.
 NO_CACHE = "no-cache"
-LONG_CACHE = "public, max-age=31536000"
 
 
 def ui_dir() -> Path:
@@ -28,9 +30,10 @@ def ui_dir() -> Path:
 
 
 class Response:
-    """What a route returns: status, content type, body bytes, optional Cache-Control."""
-    def __init__(self, body: bytes, content_type: str, status: int = 200, cache: str = NO_CACHE):
-        self.body, self.content_type, self.status, self.cache = body, content_type, status, cache
+    """What a route returns: status, content type, body bytes, optional Cache-Control and ETag. (A 200 that carries
+    an ETag the browser already has is sent as a 304.)"""
+    def __init__(self, body: bytes, content_type: str, status: int = 200, cache: str = NO_CACHE, etag: str | None = None):
+        self.body, self.content_type, self.status, self.cache, self.etag = body, content_type, status, cache, etag
 
 
 class AssetServer:
@@ -76,6 +79,11 @@ class AssetServer:
             return None
         return path
 
+    def add_icon_routes(self, icons):
+        """Serve /icon/app/<exe>.png, /icon/site/<host>.png and /icon/letter/<text>.svg from an
+        resident.icons.IconService (known names only - see there)."""
+        self.add_route("/icon/", icons.handle)
+
     def respond(self, url_path: str, query: dict) -> Response | None:
         for prefix, handler in self.routes.items():
             if url_path.startswith(prefix):
@@ -86,8 +94,8 @@ class AssetServer:
         ctype = MIME.get(path.suffix.lower())
         if ctype is None:
             return None
-        cache = NO_CACHE if path.suffix.lower() == ".html" else LONG_CACHE
-        return Response(path.read_bytes(), ctype, 200, cache)
+        info = path.stat()   # (before reading: the body is then at least as new as its ETag)
+        return Response(path.read_bytes(), ctype, 200, NO_CACHE, f'"{info.st_mtime_ns:x}-{info.st_size:x}"')
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -106,6 +114,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", response.content_type)
         self.send_header("Content-Length", str(len(response.body)))
         self.send_header("Cache-Control", response.cache)
+        if response.etag:
+            self.send_header("ETag", response.etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         if not head:
@@ -119,7 +129,14 @@ class _Handler(BaseHTTPRequestHandler):
             response = self.owner.respond(parsed.path, parse_qs(parsed.query))
         except Exception:   # a broken route must not take the server down
             response = Response(b"error", "text/plain", HTTPStatus.INTERNAL_SERVER_ERROR)
-        self._send(response or Response(b"not found", "text/plain", HTTPStatus.NOT_FOUND), head)
+        response = response or Response(b"not found", "text/plain", HTTPStatus.NOT_FOUND)
+        if response.etag and response.status == 200 and response.etag in self._client_etags():
+            response = Response(b"", response.content_type, HTTPStatus.NOT_MODIFIED, response.cache, response.etag)
+        self._send(response, head)
+
+    def _client_etags(self) -> set:
+        """The ETags the browser already holds (If-None-Match)."""
+        return {t.strip().removeprefix("W/") for t in (self.headers.get("If-None-Match") or "").split(",")}
 
     def do_GET(self):
         self._serve(False)

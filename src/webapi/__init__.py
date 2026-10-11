@@ -14,6 +14,7 @@ PAGE_MODULES = [
     "shell",
     "reminders",
     "corner",
+    "shared",
 ]
 
 for _name in PAGE_MODULES:

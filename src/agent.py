@@ -81,6 +81,13 @@ def main(argv: list[str], on_first_instance=None) -> int:
     win = windows.create(base_url, ui_theme.background_color(), js_api=webapi.build_api(ctx))
     windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)
+    # R11: app icons (/icon/...), the installed-apps catalog (loads in the background after the window is up) and the
+    # window the program-file dialog belongs to
+    from resident import catalog, icons
+    ctx.main_window = win.main
+    ctx.catalog = app_catalog = catalog.AppCatalog(on_ready=lambda: win.publisher.publish("apps_ready", {}), seed_games=True)
+    server.add_icon_routes(icons.IconService(on_ready=lambda key: win.publisher.publish("icon_ready", {"key": key}),
+                                             path_of=app_catalog.path_for))
 
     from resident import reminder_ui, workers
     hub = workers.Hub(log_sink=_log)
@@ -97,6 +104,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
         tray.start()
         pool.hub.listeners += [workers.tray_listener(tray), workers.publisher_listener(win)]
         pool.start()
+        app_catalog.start()   # (R11: reads the cached list, scans again if it is over a day old)
         if not any(a in argv for a in TRAY_ARGS):
             windows.show_main(win)
     windows.start(ready)
