@@ -329,6 +329,38 @@ def test_a_script_in_lockdowns_own_folder_is_refused(env, monkeypatch):
     assert elsewhere["result"] == "added"
 
 
+def test_no_program_inside_lockdowns_folder_can_be_blocked_however_the_path_is_written(env, monkeypatch):
+    """Not only script files: any exe whose path is in the install folder (the service closes / counts everything that
+    runs from an app's folder, so a forged path there would reach Lockdown's own processes)."""
+    from pathlib import PureWindowsPath
+    from webapi import blocking_edit
+    monkeypatch.setattr(blocking_edit, "APP_DIR", PureWindowsPath("C:\\Program Files\\Lockdown"))
+    for path in ("C:\\Program Files\\Lockdown\\foo.exe", "c:/program files/lockdown/tools/foo.exe",
+                 "C:\\Games\\..\\Program Files\\Lockdown\\foo.exe", "C:\\Program Files\\Lockdown\\..\\Lockdown\\foo.exe",
+                 "C:\\Program Files\\.\\Lockdown\\\\foo.exe", "C:\\PROGRAM FILES\\LOCKDOWN\\Foo.EXE"):
+        for spec in ({"target": "foo.exe", "app_path": path}, {"target": path}):
+            got = new(env, {"kind": "app", "rules": [PERMANENT], **spec})
+            assert got["result"] == "invalid" and "part of Windows (or Lockdown)" in got["errors"][0]["message"], (path, spec)
+    assert env.db.list_items() == []
+    beside = new(env, {"kind": "app", "target": "foo.exe", "app_path": "C:\\Program Files\\Lockdown Fan\\foo.exe", "rules": [PERMANENT]})
+    assert beside["result"] == "added"                                  # (a folder that only starts the same way is fine)
+
+
+def test_a_program_path_is_tidied_and_one_that_is_not_a_full_path_is_refused(env):
+    new(env, {"kind": "app", "target": "foo.exe", "app_path": "C:/Games/Old/../Foo//Foo.exe", "rules": [PERMANENT]})
+    assert items(env)["Foo"]["app_path"] == "C:\\Games\\Foo\\Foo.exe"
+    new(env, {"kind": "app", "target": "\\\\nas\\games\\Bar\\Bar.exe", "rules": [PERMANENT]})    # (a network share, as before)
+    assert items(env)["Bar"]["app_path"] == "\\\\nas\\games\\Bar\\Bar.exe"
+    for path in ("..\\..\\Windows\\foo.exe", "Games\\foo.exe", "\\\\?\\C:\\Games\\baz.exe", "\\\\.\\C:\\Games\\baz.exe",
+                 "C:baz.exe", "C:\\Games\\ba|z.exe", "C:\\Games\\baz.exe\x00", "C:\\Games\\baz.exe:stream"):
+        for spec in ({"target": "baz.exe", "app_path": path}, {"target": path}):
+            if spec["target"] == "C:baz.exe":
+                continue                                        # (no slash: it is only the file name, no path to keep)
+            got = new(env, {"kind": "app", "rules": [PERMANENT], **spec})
+            assert got["result"] == "invalid", (path, spec)
+    assert sorted(items(env)) == ["Bar", "Foo"]
+
+
 def test_a_target_that_cannot_be_blocked_is_refused(env):
     for spec, text in (({"kind": "site", "target": "not a site"}, "Write a site like reddit.com"),
                        ({"kind": "site", "target": "localhost"}, "Write a site like reddit.com"),
@@ -639,6 +671,72 @@ def test_a_running_temporary_block_can_be_kept_as_it_is(env):
     assert shorter["needs_challenge"] is True
     longer = edit(env, item, {"rules": [{"rule_type": "temporary", "choice": "1440"}]})       # a day: stricter, free
     assert longer["result"] == "saved"
+
+
+def test_a_categorys_way_cannot_be_made_lighter_without_the_challenge(env):
+    cat = new(env, {"kind": "category", "target": "games", "ways": ["close", "background", "internet"], "rules": [PERMANENT]})["id"]
+    lock(env)
+    for ways in (["minimize", "internet"], ["minimize"], ["close"], ["close", "background"], ["internet"]):
+        got = edit(env, cat, {"ways": ways, "rules": [PERMANENT]})
+        assert got["needs_challenge"] is True and got["changes"] == ["Loosen Games"], ways
+        data(env.api.challenge_cancel(got["ticket"]))
+        assert items(env)["Games"]["block_type"] == "close,background,internet", ways
+    got = edit(env, cat, {"ways": ["minimize"], "rules": [PERMANENT]})
+    data(pass_challenge(env, got["ticket"]))                                           # (with the challenge it goes through)
+    assert items(env)["Games"]["block_type"] == "minimize"
+
+
+def test_a_categorys_way_may_be_made_stricter_or_stay_free(env):
+    cat = new(env, {"kind": "category", "target": "games", "ways": ["minimize"], "rules": [PERMANENT]})["id"]
+    lock(env)
+    assert edit(env, cat, {"ways": ["minimize"], "name": "Games!", "rules": [PERMANENT]})["result"] == "saved"
+    for ways, stored in ((["minimize", "internet"], "minimize,internet"), (["close", "internet"], "close,internet"),
+                         (["close", "background", "internet"], "close,background,internet")):
+        assert edit(env, cat, {"ways": ways, "rules": [PERMANENT]})["result"] == "saved", ways
+        assert items(env)["Games!"]["block_type"] == stored
+
+
+def test_keep_takes_the_end_from_the_saved_block_not_from_the_page(env):
+    end = (NOW + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    item = env.db.add_item("Run", ["run.example"], "site", "manual", [{"rule_type": "temporary", "temp_until": end}])
+    lock(env)
+    for shift in (59, 1, 3600, 10_000):                                    # an end a little short, and long ones
+        forged = (NOW + timedelta(hours=3) - timedelta(seconds=shift)).strftime("%Y-%m-%d %H:%M:%S")
+        got = edit(env, item, {"rules": [{"rule_type": "temporary", "choice": "keep", "keep_until": forged}]})
+        assert got["result"] == "saved" and rules_of(env, "Run")["temporary"]["temp_until"] == end, shift
+    later = (NOW + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")      # (a later end isn't taken either)
+    edit(env, item, {"rules": [{"rule_type": "temporary", "choice": "keep", "keep_until": later}]})
+    assert rules_of(env, "Run")["temporary"]["temp_until"] == end
+    edit(env, item, {"rules": [{"rule_type": "temporary", "choice": "keep"}]})            # (nor does it need one)
+    assert rules_of(env, "Run")["temporary"]["temp_until"] == end
+
+
+def test_forged_keeps_repeated_do_not_wear_a_running_block_down(env):
+    end = (NOW + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    item = env.db.add_item("Run", ["run.example"], "site", "manual", [{"rule_type": "temporary", "temp_until": end}])
+    lock(env)
+    for _ in range(30):
+        current = datetime.strptime(rules_of(env, "Run")["temporary"]["temp_until"], "%Y-%m-%d %H:%M:%S")
+        forged = (current - timedelta(seconds=59)).strftime("%Y-%m-%d %H:%M:%S")      # the page's idea of "the end"
+        edit(env, item, {"rules": [{"rule_type": "temporary", "choice": "keep", "keep_until": forged}]})
+    assert rules_of(env, "Run")["temporary"]["temp_until"] == end
+    assert data(call(env, "draft_get_state"))["dirty"] is False
+
+
+def test_keep_needs_a_running_block_that_is_saved(env):
+    new_keep = new(env, {"kind": "site", "target": "example.org", "rules": [
+        {"rule_type": "temporary", "choice": "keep", "keep_until": (NOW + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")}]})
+    assert new_keep["result"] == "invalid" and new_keep["errors"][0]["field"] == "choice"      # (adding: nothing to keep)
+    assert env.db.list_items() == []
+    forever = env.db.add_item("Forever", ["forever.example"], "site", "manual", [PERMANENT])
+    got = edit(env, forever, {"rules": [{"rule_type": "temporary", "choice": "keep",
+                                          "keep_until": (NOW + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")}]})
+    assert got["result"] == "invalid" and got["errors"][0]["rule_type"] == "temporary"        # (editing: it has none)
+    assert [r["rule_type"] for r in items(env)["Forever"]["rules"]] == ["permanent"]
+    gone = (NOW - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    over = env.db.add_item("Over", ["over.example"], "site", "manual", [{"rule_type": "temporary", "temp_until": gone}])
+    ended = edit(env, over, {"rules": [{"rule_type": "temporary", "choice": "keep"}]})
+    assert ended["result"] == "invalid" and "already ended" in ended["errors"][0]["message"]
 
 
 # ---------------------------------------------------------------- Auto-save off, and what the page is told

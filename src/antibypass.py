@@ -247,7 +247,8 @@ def item_looser(old: dict, new: dict | None, now: datetime) -> bool:
         return True
     return (newly_disabled(old, new)
             or not set(old["target"].split()) <= set(new["target"].split())
-            or (old["item_type"] == "app" and not _strength(old.get("block_type")) <= _strength(new.get("block_type")))
+            or (old["item_type"] != "site"      # (an app or a category: a category's way is an app way)
+                and not _strength(old.get("block_type")) <= _strength(new.get("block_type")))
             or (old["item_type"] == "site"
                 and not site_flags(old.get("block_type")) <= site_flags(new.get("block_type")))
             or rules_looser(old["rules"], new["rules"], now))

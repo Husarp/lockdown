@@ -12,6 +12,8 @@ the rule FORMS are read again by `rule_forms` (the same code as `rules_validate`
 (a program file can only be closed or minimised, Close and Minimize exclude each other ...), the address is tidied, a
 known site brings its other host names and Windows' own programs (and Lockdown) are refused.
 """
+import ntpath
+
 import block_method
 import rule_forms
 import search
@@ -241,6 +243,22 @@ def _default_app_ways(ctx, exe: str) -> set:
     return {"close", "background"} if any(a["exe"] == exe for a in games) else {"close"}
 
 
+def _clean_path(path: str | None) -> str | None:
+    """Where a program is, tidied so a path can't hide where it points (the check on Lockdown's own folder reads this):
+    slashes turned round, "." and ".." resolved. It has to be a full path on a drive or on a network share (the old window
+    took those too); a relative path, a "device" path or a character a file name can't have is refused."""
+    if not path:
+        return None
+    drive, rest = ntpath.splitdrive(ntpath.normpath(path.strip().strip('"').strip().replace("/", "\\")))
+    on_drive = len(drive) == 2 and drive[1] == ":" and drive[0].isascii() and drive[0].isalpha()
+    on_share = drive.startswith("\\\\") and drive.count("\\") == 3 and drive[2] not in "?."
+    if not (on_drive or on_share) or not rest.startswith("\\"):
+        raise _bad("Write the program's full path, like C:\\Games\\Foo\\Foo.exe - or just its file name.")
+    if any(c in '<>"|?*:' or ord(c) < 32 for c in rest):
+        raise _bad("That path has a character a file name can't have.")
+    return drive + rest
+
+
 def _new_target(ctx, spec: dict) -> dict:
     """The thing to add, checked: {kind, targets, name, source, block_type, app_path}. Raises _Invalid."""
     kind = spec.get("kind")
@@ -273,13 +291,13 @@ def _new_target(ctx, spec: dict) -> dict:
     if path is not None and (not isinstance(path, str) or len(path) > MAX_TARGET):
         raise ApiError("Bad request: the app's path.")
     exe = exe_name(text)
-    path = path or typed_path(text) or None
+    path = _clean_path(path or typed_path(text))
     if path and exe_name(path) != exe:
         path = None                          # (a path of some other file says nothing about this one)
     hosted = is_hosted(exe)
     if not exe or not (exe.endswith(".exe") or hosted):
         raise _bad("Write the program's file name, like discord.exe - or use Browse apps.")
-    if exe in PROTECTED or (hosted and in_folder(path, str(APP_DIR).lower())):
+    if exe in PROTECTED or in_folder(path, str(APP_DIR).lower()):
         raise _bad(f"{exe} is part of Windows (or Lockdown) and can't be blocked.")
     return {"kind": "app", "targets": [exe], "name": name or exe.rsplit(".", 1)[0].title(),
             "source": "app-browser" if spec.get("picked") is True else "manual",
@@ -287,11 +305,24 @@ def _new_target(ctx, spec: dict) -> dict:
             "app_path": path}
 
 
-def _rules(ctx, spec: dict) -> list[dict]:
-    """The rule dicts for the forms the page sent (rule_forms is the authority). Raises _Invalid."""
+def _stored_end(d, item_id) -> str | None:
+    """When the item's running temporary block ends, as saved - what "keep" means. Only the saved end counts: the page's
+    own idea of it (the form's keep_until) could be any time, and "keep" with an end a minute short would shorten the
+    block for free (rule_looser lets a minute through) again and again."""
+    saved = d.saved_items.get(_id(item_id))
+    rule = next((r for r in (saved or {}).get("rules", ()) if r["rule_type"] == "temporary"), None)
+    return rule.get("temp_until") if rule else None
+
+
+def _rules(ctx, spec: dict, d=None) -> list[dict]:
+    """The rule dicts for the forms the page sent (rule_forms is the authority). Raises _Invalid. `d`: the draft, when an
+    item is being edited - its "keep" takes the end from the saved block; adding something new has none to keep."""
     forms = spec.get("rules", [])
     if not isinstance(forms, list) or len(forms) > MAX_FORMS:
         raise ApiError("Bad request: rules must be a list of forms.")
+    end = _stored_end(d, spec.get("id")) if d is not None else None
+    forms = [{**f, "keep_until": end} if isinstance(f, dict) and f.get("rule_type") == "temporary"
+             and f.get("choice") == "keep" else f for f in forms]
     found, errors = rule_forms.check_forms(forms, False, ctx.now(), False)
     if errors:
         raise _Invalid(errors)
@@ -359,16 +390,17 @@ def draft_submit_item(ctx, spec):
        id, name, notice | errors: [{rule_type, field, message}]}}. A mistake the owner can fix is `invalid` with its errors
     (rule_type null: the target, ways or "rules" as a whole), not an error. Something already on the list gets the new
     blockers merged into it; what loosens it while Anti-Bypass is locked comes back as {needs_challenge, ticket} and the
-    old blockers stay until the challenge is passed. Python re-checks everything - nothing the page says is trusted."""
+    old blockers stay until the challenge is passed. Python re-checks everything - nothing the page says is trusted: a
+    temporary blocker's "keep" keeps the SAVED end of the running block (the form's keep_until is not read; adding has none)."""
     if not isinstance(spec, dict) or spec.get("mode") not in ("new", "edit"):
         raise ApiError("Bad request: new or edit.")
     try:
-        rules = _rules(ctx, spec)
+        rules = _rules(ctx, spec) if spec["mode"] == "new" else None
         target = _new_target(ctx, spec) if spec["mode"] == "new" else None
 
         def mutate(d):
             d.refresh_if_clean()
-            return _add(d, spec, target, rules) if target else _edit(d, spec, rules)
+            return _add(d, spec, target, rules) if target else _edit(d, spec, _rules(ctx, spec, d))
         return drafts.run_edit(ctx, mutate)
     except _Invalid as e:
         d = drafts.draft_of(ctx)
