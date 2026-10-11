@@ -245,10 +245,13 @@ class Perf:
             return performance.now() - t0; }""", selector)
 
     def click_until(self, click: str, ready: str, timeout_ms: int = 3000) -> float:
-        """From click() on `click` until an element matching `ready` exists (e.g. the first visit of a page)."""
+        """From click() on `click` until an element matching `ready` exists (e.g. the first visit of a page).
+        -1: `ready` never appeared; -2: `click` matches nothing."""
         return self.page.evaluate("""async ({click, ready, timeout}) => {
             const t0 = performance.now();
-            document.querySelector(click).click();
+            const target = document.querySelector(click);
+            if (!target) return -2;                             // (the click selector matches nothing)
+            target.click();
             while (!document.querySelector(ready)) {
               if (performance.now() - t0 > timeout) return -1;
               await new Promise((r) => requestAnimationFrame(() => r()));
@@ -258,9 +261,10 @@ class Perf:
     def scroll_frames(self, selector: str, seconds: float = 3.0, steps_per_sec: int = 60, probe: str | None = None) -> dict:
         """Scroll `selector` from top to bottom over `seconds` (one programmatic step per frame, about `steps_per_sec`)
         and record every animation-frame gap. `probe` = a CSS selector whose matches are counted each frame.
-        -> {frames, max_ms, p95_ms, mean_ms, live_max}"""
+        -> {frames, max_ms, p95_ms, mean_ms, live_max}, or {missing: True} when `selector` matches nothing"""
         return self.page.evaluate("""async ({sel, seconds, hz, probe}) => {
             const el = document.querySelector(sel);
+            if (!el) return { missing: true };                  // (the selector matches nothing: the caller flags it)
             const total = el.scrollHeight - el.clientHeight;
             const deltas = []; let live = 0;
             return await new Promise((resolve) => {

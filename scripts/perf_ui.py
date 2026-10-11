@@ -13,7 +13,9 @@ What it does
   3. when Playwright and Chrome are there (tests/ui/harness.py): serves the real page over the real Api on the 730-day
      database and measures the shell's first paint, every page's first load and re-show, tabs/lists registered in
      tests/ui/perfkit.py (VIEWS / SCROLLS), the 10 000-row virtual list, JS heap growth over 10 page switches and that a
-     hidden window runs no timers and makes no Api calls.
+     hidden window runs no timers and makes no Api calls. First visits are taken twice: cold (the window opened right
+     after the agent started) and warm (after the agent's own warm-ups: Network Log, Screen Time, Site protection).
+  3b. runs the real StatusWorker + Publisher for 12 s in front of a counting window: pushes per second while shown, idle.
   4. prints the table + which numbers are over their target, writes perf-report.json. Exit code 1 if anything is over
      its hard limit (so a script can gate on it).
 New pages need nothing here: see the top of tests/ui/perfkit.py. The Windows window itself is measured by
@@ -45,6 +47,7 @@ def main(argv=None) -> int:
 
     report = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "python": platform.python_version(),
               "platform": platform.platform(), "runs": args.runs, "databases": {}, "api": {}}
+    lists = perfkit.build_lists(work / "lists")      # (synthetic protection lists: "Check a site" loads real tables)
     for label, days, rolled, budgeted in perfkit.DATABASES:
         days = args.days if days == 730 else days
         path = work / f"{label}.db"
@@ -53,9 +56,12 @@ def main(argv=None) -> int:
         info["budgeted"] = budgeted
         report["databases"][label] = info
         print(f"timing the Api on {label} ...", flush=True)
-        api = perfkit.time_api(path, args.runs)
+        api = perfkit.time_api(path, args.runs, lists)
         api["budgeted"] = budgeted
         report["api"][label] = api
+
+    print("counting the pushes to a shown window ...", flush=True)
+    report["pushes"] = perfkit.measure_pushes(work / "730d-rolled.db")
 
     why = "--no-browser" if args.no_browser else perfkit.chrome_missing()
     if why:

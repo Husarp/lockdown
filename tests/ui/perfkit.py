@@ -20,7 +20,15 @@ line to the lists below:
     SCROLLS.append(("netlog 20k rows", "netlog", "#nl-list", ".vl-row:not([hidden])"))
               # label,                 page id,  the scrolling element,  rows to count (live rows must stay small)
 and for a `read` Api method that takes arguments add a line to READ_ARGS in src/resident/selftest.py.
+A VIEWS / SCROLLS line whose selector matches nothing is NOT a crash and NOT silently ignored: it is listed under
+`skipped` in the report ("NOT MEASURED - selector matched nothing") and test_perf_budget fails on it.
+
+R29: the agent warms things up a few seconds after it starts (Network Log, Screen Time, Site protection tables - see
+`warm_up`). The page first-visit numbers are therefore taken twice on the same database: `page_first_cold_ms` = the first
+visit before any warm-up (the window opened in the first seconds), `page_first_ms` = after `warm_up` (what the owner
+normally gets). Both count against the budget.
 """
+import re
 import statistics
 import sys
 import tempfile
@@ -42,6 +50,7 @@ BUDGET = {
     "hidden_timers": (0, 0),
     "hidden_rpc": (0, 0),
     "fcp_ms": (300, 600),
+    "push_per_s": (1, 2),
 }
 
 VIEWS: list = []        # (label, page id, click selector, ready selector)
@@ -77,6 +86,36 @@ def setup_paths():
             sys.path.insert(0, str(p))
     if sys.platform != "win32":
         import conftest  # noqa: F401
+
+
+LIST_KEYS = ("scam", "phishing", "malware", "adult")      # built-in lists the synthetic files stand in for
+LIST_HOSTS = 600_000                                      # sites over all of them (the real lists hold about a million)
+
+
+def build_lists(folder: Path, hosts: int = LIST_HOSTS) -> Path:
+    """Synthetic list files (one site per line, some "*." lines, like the downloaded ones) so that "Check a site" has real
+    tables to load: `hosts` sites over LIST_KEYS. -> the folder (set it as ctx.protection_dir)."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    each = max(1, hosts // len(LIST_KEYS))
+    for n, key in enumerate(LIST_KEYS):
+        with open(folder / f"{key}.txt", "w", encoding="utf-8") as f:
+            f.writelines((f"*.w{n}x{i}.example\n" if i % 50 == 0 else f"w{n}x{i}.example\n") for i in range(each))
+    return folder
+
+
+def warm_up(ctx) -> dict:
+    """What the agent does by itself a few seconds after it started: the Network Log reads the last hour ahead (workers
+    NetLogWorker.setup -> network.prewarm), Screen Time works out its day sums (agent.py -> screentime.start_warmup) and
+    Site protection loads the lists' tables (-> protection.start_warmup). -> {what: ms}."""
+    setup_paths()
+    from webapi import network, protection, screentime
+    took = {}
+    for name, fn in (("network", network.prewarm), ("screentime", screentime.warm), ("protection", protection.warm)):
+        t = time.perf_counter()
+        fn(ctx)
+        took[name] = round((time.perf_counter() - t) * 1000, 1)
+    return took
 
 
 # ---------------------------------------------------------------- numbers
@@ -121,7 +160,7 @@ def build_db(path: Path, days: int, rolled: bool = False) -> dict:
 
 # ---------------------------------------------------------------- Python: the Api
 
-def time_api(db_path: Path, runs: int = RUNS) -> dict:
+def time_api(db_path: Path, runs: int = RUNS, lists_dir: Path | None = None) -> dict:
     """Every registered `read` method through the real exposed Api object (validation + JSON conversion included), on
     the database at `db_path`. -> {"methods": {name: {first, n, p50, p95, max}}, "not_measured": {name: why}, "skipped_on_purpose": {...}}"""
     setup_paths()
@@ -129,6 +168,8 @@ def time_api(db_path: Path, runs: int = RUNS) -> dict:
     from resident import selftest
     from webapi import core
     ctx = webapi.make_context(db_path, clock=lambda db: NOW)
+    if lists_dir is not None:
+        ctx.protection_dir = lists_dir          # ("Check a site" then loads real tables: its first call is the cold one)
     api = core.build_api(ctx)
     methods, skipped, intended = {}, {}, {}
     for name, kind in core.api_methods():
@@ -156,6 +197,44 @@ def time_api(db_path: Path, runs: int = RUNS) -> dict:
             samples.append((time.perf_counter() - t) * 1000)
         methods[name] = {"first": round(first, 2), **summarize(samples)}
     return {"methods": methods, "not_measured": skipped, "skipped_on_purpose": intended}
+
+
+# ---------------------------------------------------------------- Python: pushes while the window is shown
+
+def measure_pushes(db_path: Path, seconds: float = 12.0) -> dict:
+    """"Push frequency while visible <= 1 per second normally" (BLUEPRINT 2): the real StatusWorker (one snapshot a second)
+    and the real Publisher (window shown) in front of a window that only counts `evaluate_js` calls, over `seconds` of
+    an idle database - the agent without any page doing anything. The first call (the whole status, sent once when the
+    page connects) is counted apart. -> {seconds, sends, first_at_s, per_second, busiest_second, events}"""
+    setup_paths()
+    from resident import publisher, workers
+    sent = []
+
+    class Window:
+        def evaluate_js(self, script):
+            sent.append((time.monotonic(), script))
+
+    class Win:
+        pass
+    win = Win()
+    win.publisher = pub = publisher.Publisher(Window(), visible=True)
+    hub = workers.Hub(db_path)
+    hub.listeners.append(workers.publisher_listener(win))
+    worker = workers.StatusWorker(hub)
+    t0 = time.monotonic()
+    worker.start()
+    time.sleep(seconds)
+    worker.stop(3)
+    pub.stop()
+    first = sent[0][0] - t0 if sent else None
+    later = [t for t, _ in sent[1:]]
+    events = {}
+    for _, script in sent:
+        for name in re.findall(r'\["([a-z_]+)",', script):
+            events[name] = events.get(name, 0) + 1
+    busiest = max((sum(1 for u in later if t <= u < t + 1) for t in later), default=0)
+    return {"seconds": seconds, "sends": len(sent), "first_at_s": None if first is None else round(first, 2),
+            "per_second": round(len(later) / seconds, 3), "busiest_second": busiest, "events": events}
 
 
 # ---------------------------------------------------------------- the browser
@@ -222,14 +301,21 @@ def measure_browser(browser, harness, fcp_runs: int = 5, scroll_seconds: float =
     log("pages done")
 
     # -- tabs / sub-views and long lists registered by the page tickets
-    views, scrolls = {}, {}
+    views, scrolls, skipped = {}, {}, {}
     for label, page_id, click, ready_sel in VIEWS:
         go_page(page, page_id)
-        views[label] = round(perf.click_until(click, ready_sel), 1)
+        ms = perf.click_until(click, ready_sel)
+        if ms == -2:
+            skipped[label] = f"the click selector matched nothing: {click}"
+        else:
+            views[label] = round(ms, 1)
     for label, page_id, selector, probe in SCROLLS:
         go_page(page, page_id)
         r = perf.scroll_frames(selector, seconds=scroll_seconds, probe=probe)
-        scrolls[label] = {k: round(v, 1) for k, v in r.items()}
+        if r.get("missing"):
+            skipped[label] = f"the scrolling element matched nothing: {selector}"
+        else:
+            scrolls[label] = {k: round(v, 1) for k, v in r.items()}
 
     # -- heap growth over 10 page switches (everything visited once first, so lazy loading isn't counted)
     cdp = ctx.new_cdp_session(page)
@@ -275,10 +361,25 @@ def measure_browser(browser, harness, fcp_runs: int = 5, scroll_seconds: float =
     out["errors"] += page.errors
     ctx.close()
 
-    out["page_first_ms"] = {k: round(v, 1) for k, v in first.items()}
+    # -- the same first visits once more, after the agent's own warm-ups (R29): cold = the window opened right after the
+    #    agent started, warm = what the owner normally gets
+    out["warmed_ms"] = warm_up(harness.ctx)
+    ctx, page = open_page(browser, harness)
+    boot(page, "about")
+    warm_first = dict(page.evaluate(PAGE_TIMING_JS)["first"])
+    boot(page, "dashboard")
+    timing = page.evaluate(PAGE_TIMING_JS)
+    if "about" in timing["first"]:
+        warm_first["about"] = timing["first"]["about"]
+    out["errors"] += page.errors
+    ctx.close()
+
+    out["page_first_cold_ms"] = {k: round(v, 1) for k, v in first.items()}
+    out["page_first_ms"] = {k: round(v, 1) for k, v in warm_first.items()}
     out["page_reshow_ms"] = {k: round(v, 1) for k, v in reshow.items()}
     out["views_first_ms"] = views
     out["scrolls"] = scrolls
+    out["skipped"] = skipped
     return out
 
 
@@ -303,11 +404,15 @@ def budget_rows(report: dict) -> list:
             continue
         for method, s in sorted(info["methods"].items()):
             add("api_read_p95_ms", f"Api {method} p95 [{label}]", s["p95"])
+    if report.get("pushes"):
+        add("push_per_s", f"pushes per second while shown, idle ({report['pushes']['seconds']:g} s)", report["pushes"]["per_second"], "/s")
     b = report.get("browser")
     if b:
         add("fcp_ms", "shell first contentful paint (worst of runs)", max(b["fcp_ms"]))
+        for page, v in sorted(b.get("page_first_cold_ms", {}).items()):
+            add("page_first_ms", f"page first visit, cold: {page}", v)
         for page, v in sorted(b["page_first_ms"].items()):
-            add("page_first_ms", f"page first visit: {page}", v)
+            add("page_first_ms", f"page first visit, warm: {page}", v)
         for page, v in sorted(b["page_reshow_ms"].items()):
             add("page_reshow_ms", f"page re-show: {page}", v)
         for label, v in sorted(b["views_first_ms"].items()):
@@ -336,12 +441,21 @@ def format_report(report: dict) -> str:
             lines.append(f"  {name:<28}NOT MEASURED - {why}")
         for name, why in sorted(info.get("skipped_on_purpose", {}).items()):
             lines.append(f"  {name:<28}skipped on purpose - {why}")
+    if report.get("pushes"):
+        p = report["pushes"]
+        lines += ["", f"Pushes to a shown window, idle, {p['seconds']:g} s: {p['sends']} evaluate_js calls (the first, the whole status, at "
+                      f"{p['first_at_s']} s), then {p['per_second']}/s, busiest second {p['busiest_second']}; events {p['events']}"]
     b = report.get("browser")
     if b:
         lines += ["", "Headless Chrome:", f"  shell first contentful paint: {b['fcp_ms']} ms; booted (data in) at {b['shell_ready_ms']} ms",
-                  f"  {'page':<16}{'first visit':>13}{'re-show':>10}"]
+                  f"  {'page':<16}{'cold':>10}{'warm':>10}{'re-show':>10}   (first visit before / after the agent's warm-ups)"]
         for page in b["pages"]:
-            lines.append(f"  {page:<16}{b['page_first_ms'].get(page, float('nan')):>13.1f}{b['page_reshow_ms'].get(page, float('nan')):>10.1f}")
+            lines.append(f"  {page:<16}{b.get('page_first_cold_ms', {}).get(page, float('nan')):>10.1f}"
+                         f"{b['page_first_ms'].get(page, float('nan')):>10.1f}{b['page_reshow_ms'].get(page, float('nan')):>10.1f}")
+        if b.get("warmed_ms"):
+            lines.append(f"  warm-ups took (ms): {b['warmed_ms']}")
+        for label, why in sorted(b.get("skipped", {}).items()):
+            lines.append(f"  {label}: NOT MEASURED - {why}")
         for label, v in b["views_first_ms"].items():
             lines.append(f"  view {label}: {v} ms")
         for label, s in b["scrolls"].items():
@@ -387,4 +501,5 @@ def make_harness(tmp_path: Path, days: int = 730, rolled: bool = True):
     import harness as H
     h = H.UiHarness(tmp_path, days=0)
     info = build_db(h.db_path, days, rolled)
+    h.ctx.protection_dir = build_lists(tmp_path / "lists")
     return h, info

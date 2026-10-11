@@ -27,8 +27,9 @@ def measured(browser, tmp_path_factory):
     try:
         short_db = short_dir / "config.db"
         perfkit.build_db(short_db, 60)
-        api = {"60d": perfkit.time_api(short_db), "730d-rolled": perfkit.time_api(harness.db_path)}
-        report = {"databases": {"730d-rolled": info}, "api": api,
+        lists = harness.ctx.protection_dir
+        api = {"60d": perfkit.time_api(short_db, lists_dir=lists), "730d-rolled": perfkit.time_api(harness.db_path, lists_dir=lists)}
+        report = {"databases": {"730d-rolled": info}, "api": api, "pushes": perfkit.measure_pushes(harness.db_path, seconds=6),
                   "browser": perfkit.measure_browser(browser, harness)}
     finally:
         harness.stop()
@@ -66,6 +67,12 @@ def test_api_read_p95_is_within_budget_on_a_two_year_database(measured):
     assert BUDGET["api_read_p95_ms"] == (50, 100)
 
 
+def test_a_shown_window_gets_at_most_one_push_a_second_when_idle(measured):
+    rows = check(measured, "push_per_s")
+    assert len(rows) == 1 and measured["pushes"]["busiest_second"] <= 2
+    assert measured["pushes"]["events"].get("status", 0) >= 1          # (the whole status, once, when the page connects)
+
+
 # ---------------------------------------------------------------- the pages
 
 def test_all_ten_sidebar_pages_were_measured(measured):
@@ -77,7 +84,30 @@ def test_all_ten_sidebar_pages_were_measured(measured):
 
 
 def test_first_page_load_is_within_budget(measured):
-    check(measured, "page_first_ms")
+    rows = check(measured, "page_first_ms")
+    assert len([r for r in rows if "cold" in r["what"]]) == len(SIDEBAR) == len([r for r in rows if "warm" in r["what"]])
+
+
+def test_the_agents_warm_ups_ran_and_are_reported(measured):
+    assert set(measured["browser"]["warmed_ms"]) == {"network", "screentime", "protection"}
+
+
+def test_every_registered_view_and_list_matched_something(measured):
+    """A VIEWS / SCROLLS line whose selector matches nothing is flagged here (the run itself carries on)."""
+    assert measured["browser"]["skipped"] == {}, f"these matched nothing: {measured['browser']['skipped']}"
+
+
+def test_a_selector_that_matches_nothing_is_flagged_not_a_crash(browser, tmp_path, monkeypatch):
+    harness, _ = perfkit.make_harness(tmp_path, days=14, rolled=False)
+    monkeypatch.setattr(perfkit, "VIEWS", [("ghost tab", "dashboard", "#nope-click", "#nope-ready")])
+    monkeypatch.setattr(perfkit, "SCROLLS", [("ghost list", "dashboard", "#nope-list", ".vl-row")])
+    try:
+        b = perfkit.measure_browser(browser, harness, fcp_runs=1, scroll_seconds=1, hidden_seconds=1)
+    finally:
+        harness.stop()
+    assert sorted(b["skipped"]) == ["ghost list", "ghost tab"]
+    assert "ghost tab" not in b["views_first_ms"] and "ghost list" not in b["scrolls"]
+    assert "ghost list: NOT MEASURED" in perfkit.format_report({"databases": {}, "api": {}, "browser": b})
 
 
 def test_page_reshow_is_within_budget(measured):
@@ -142,7 +172,7 @@ def test_budget_rows_flag_what_is_over(measured):
     with pytest.raises(AssertionError, match="page re-show: modes: 150"):
         check(bad, "page_reshow_ms")
     rows = check(bad, "page_first_ms")                        # 200 is over the target (150) but within the limit (300)
-    assert [r["status"] for r in rows if r["what"].endswith("about")] == ["WARN"]
+    assert [r["status"] for r in rows if r["what"].endswith("warm: about")] == ["WARN"]
 
 
 def test_registered_views_and_lists_are_measured(browser, tmp_path, monkeypatch):
