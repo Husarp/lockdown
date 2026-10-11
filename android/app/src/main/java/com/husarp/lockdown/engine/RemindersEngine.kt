@@ -111,6 +111,7 @@ data class BreakCfg(
     val guarded: Boolean = false,
     val everySec: Int? = null,                  // seconds of use between breaks
     val snoozeSec: Int? = null,                 // a snooze, in seconds
+    val allowed: List<String> = emptyList(),    // apps a strict break leaves usable ("Allowed during breaks", engine/BreakAllow.kt)
 ) {
     val everySeconds: Int get() = everySec ?: (every * 60)
     val snoozeSeconds: Int get() = snoozeSec ?: (snooze * 60)
@@ -671,8 +672,10 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         fun bedtimeLooser(old: SleepCfg, new: SleepCfg): Boolean =
             loosensReminder(old.on, old.guarded, old.on, new.guarded) || loosensDismissWait(old.dismissWait, new.dismissWait)
 
-        /** A breaks editor draft that weakens breaks: only dropping its guard. */
-        fun breaksLooser(old: BreakCfg, new: BreakCfg): Boolean = loosensReminder(old.on, old.guarded, old.on, new.guarded)
+        /** A breaks editor draft that weakens breaks: dropping its guard, or an app added to "Allowed during breaks"
+         *  (removing one is free). */
+        fun breaksLooser(old: BreakCfg, new: BreakCfg): Boolean =
+            loosensReminder(old.on, old.guarded, old.on, new.guarded) || AntiBypass.breakAppsLooser(old.allowed, new.allowed)
 
         /** "Wait before Dismiss" choices in seconds (0 = off), and the range a typed one may take. */
         val DISMISS_WAITS = listOf(0, 10, 30, 60)

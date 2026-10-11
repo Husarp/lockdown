@@ -249,4 +249,8 @@ object AntiBypass {
             old.lists.any { (k, on) -> on && new.lists[k] != true } ||
             !old.off.toSet().containsAll(new.off) || !new.words.toSet().containsAll(old.words) ||
             !old.exceptions.toSet().containsAll(new.exceptions)
+
+    /** "Allowed during breaks" weakened: an app added to the list (strict breaks leave it usable). Removing one is free. */
+    fun breakAppsLooser(old: List<String>, new: List<String>): Boolean =
+        !old.toSet().containsAll(BreakAllow.clean(new))
 }

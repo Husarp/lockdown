@@ -31,6 +31,7 @@ import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
+import com.husarp.lockdown.engine.BreakAllow
 import com.husarp.lockdown.engine.Browsers
 import com.husarp.lockdown.engine.Cadence
 import com.husarp.lockdown.engine.Emergency
@@ -69,6 +70,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private var lastPauseAt = 0L
     private val remindViews = HashMap<String, View>() // full-screen reminder prompts on screen: "sleep", "strict-break"
     private var remindHidden = false                  // they're out of the way: a call, the dialer, the lock screen
+    private val onScreenKeys = HashSet<String>()      // the reminder views now added to the window manager
+    private var breakDismissed = false                // the strict break's cover was dismissed: it comes back for a not-allowed app only
+    private var breakCovered = false                  // the strict break's cover is wanted on screen now (call / lock screen aside)
+    private var breakFront = ""                       // what is in front since the dismiss ("" = not known yet: counts as allowed)
     private var dialing = false                       // "Phone" was tapped on a strict break
     private var dialUntil = 0L                        // ... and the dialer has until then to come up
     private var lastInUse = 0L                        // the screen was last on and unlocked (elapsed ms)
@@ -98,6 +103,11 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         override fun onReceive(c: Context, intent: Intent) { runCatching { wake(Cadence.closesUsageGap(intent.action)) } }
     }
 
+    /** An app was installed, removed or changed: the apps a break leaves usable are looked up again (BreakApps). */
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) { BreakApps.invalidate() }
+    }
+
     override fun onServiceConnected() {
         connected = true
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -107,6 +117,13 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         runCatching {
             androidx.core.content.ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
+            }, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        }
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(this, packageReceiver, IntentFilter().apply {
+                addAction(Intent.ACTION_PACKAGE_ADDED); addAction(Intent.ACTION_PACKAGE_REMOVED)
+                addAction(Intent.ACTION_PACKAGE_REPLACED); addAction(Intent.ACTION_PACKAGE_CHANGED)
+                addDataScheme("package")
             }, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         }
         handler.post(tick)
@@ -327,6 +344,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         runCatching {
             val pkg = event.packageName?.toString() ?: return@runCatching
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && breakDismissed) trackBreakFront(pkg)
             if (pkg == packageName || pkg == "com.android.systemui" || isKeyboard(pkg)) return@runCatching
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 val at = SystemClock.elapsedRealtime()
@@ -484,6 +502,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 lastRemindTick = ms
                 ReminderRunner.tick(this@BlockService, (ms - lastInUse) / 1000.0, dt)
             }
+            runCatching { if (breakDismissed) refreshBreakFront() }
             runCatching { syncRemindHidden() }
             handler.postDelayed(this, Cadence.remindMs(screenOn(), (SystemClock.elapsedRealtime() - lastInUse) / 1000.0))
         }
@@ -572,13 +591,16 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
     override fun close(key: String) = closeRemind(key)
 
-    /** A strict break: the screen is covered until it's over (the PC minimises every window). Phone opens the
-     *  dialer (calls always get through); an emergency use ends it, as on the PC. */
+    /** A strict break: the screen is covered with "Break time" (the PC minimises every window). Dismiss is free: the
+     *  cover goes and the phone goes home; it comes back only when an app that isn't allowed comes to the front
+     *  (engine/BreakAllow.kt: the built-in set, the "Allowed during breaks" list, calls). Phone opens the dialer
+     *  (calls always get through); an emergency use ends the break, as on the PC. */
     override fun startBreak(until: LocalDateTime) {
         val col = remindColumn("Break time", "Step away from the screen. Back at %02d:%02d.".format(until.hour, until.minute))
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fill() {
             buttons.removeAllViews()
+            buttons.addView(remindButton("Dismiss", primary = true) { dismissBreak() })
             buttons.addView(remindButton("Phone", primary = false) { dial() })
             val left = ReminderRunner.emergencyLeft(Store.config, ReminderRunner.now(this))
             if (left > 0) buttons.addView(remindButton("Emergency ($left left)", primary = false) {
@@ -590,6 +612,32 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         fill()
         col.addView(buttons)
         addRemind(STRICT_BREAK, col)
+    }
+
+    /** Dismiss on a strict break: the cover goes (the break keeps running) and the phone goes to the home screen. */
+    private fun dismissBreak() {
+        breakDismissed = true; breakCovered = false; breakFront = ""
+        applyRemind()
+        performGlobalAction(GLOBAL_ACTION_HOME)
+    }
+
+    /** After a dismiss: [pkg] came to the front (a window change). Lockdown's own overlay events, the status bar and the
+     *  keyboard aren't an app in front, and a late event from the app that was just left isn't either (the active
+     *  window says what really is). */
+    private fun trackBreakFront(pkg: String) {
+        if (pkg == "com.android.systemui" || isKeyboard(pkg)) return
+        val active = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        if (pkg == packageName) { if (active != packageName) return }
+        else if (active != null && active != pkg && active != "com.android.systemui" && !isKeyboard(active)) return
+        breakFront = pkg
+        handler.post { runCatching { syncRemindHidden() } }
+    }
+
+    /** After a dismiss, on the slow tick: what the active window is now (a missed window event can't leave the break
+     *  uncovered for a not-allowed app). */
+    private fun refreshBreakFront() {
+        val active = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull() ?: return
+        if (active != "com.android.systemui" && !isKeyboard(active)) breakFront = active
     }
 
     /** "Phone": the dialer, with the reminder screens out of its way while it's in front. */
@@ -609,15 +657,25 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         val ms = SystemClock.elapsedRealtime()
         if (dialing && ms >= dialUntil && !isDialer(currentPkg)) dialing = false
         val locked = (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked
-        val hide = call || dialing || locked
-        if (hide == remindHidden) return
-        remindHidden = hide
-        for (v in remindViews.values) runCatching { if (hide) wm?.removeView(v) else wm?.addView(v, remindParams()) }
+        remindHidden = call || dialing || locked
+        // a dismissed break covers again only for an app that isn't allowed (a call is always allowed)
+        if (breakDismissed && STRICT_BREAK in remindViews)
+            breakCovered = BreakAllow.covered(true, breakFront, BreakApps.builtIn(this), Store.config.breaks.allowed, call)
+        applyRemind()
+    }
+
+    /** Adds or removes each reminder view to match what it should do now ([remindHidden], the break's cover). */
+    private fun applyRemind() {
+        for ((key, v) in remindViews.entries.toList()) {
+            val want = !remindHidden && (key != STRICT_BREAK || breakCovered)
+            if (want && key !in onScreenKeys) { if (runCatching { wm?.addView(v, remindParams()) }.isSuccess) onScreenKeys.add(key) }
+            else if (!want && onScreenKeys.remove(key)) runCatching { wm?.removeView(v) }
+        }
     }
 
     private fun isDialer(pkg: String): Boolean {
         val dialer = runCatching { (getSystemService(TELECOM_SERVICE) as android.telecom.TelecomManager).defaultDialerPackage }.getOrNull()
-        return pkg == dialer || pkg in CALL_PKGS
+        return pkg == dialer || pkg in BreakAllow.CALL_PKGS
     }
 
     override fun endBreak() = closeRemind(STRICT_BREAK)
@@ -655,7 +713,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         }
         root.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         remindViews[key] = root
-        if (!remindHidden) runCatching { wm?.addView(root, remindParams()) }.onFailure { remindViews.remove(key) }
+        if (key == STRICT_BREAK) { breakDismissed = false; breakCovered = true }
+        applyRemind()
+        if (key !in onScreenKeys && !remindHidden && (key != STRICT_BREAK || breakCovered)) remindViews.remove(key)   // couldn't be added
     }
 
     private fun remindParams() = WindowManager.LayoutParams(
@@ -664,8 +724,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     )
 
     private fun closeRemind(key: String) {
-        // (not on screen while hidden: removing it then just fails, harmlessly)
-        remindViews.remove(key)?.let { runCatching { wm?.removeView(it) } }
+        onScreenKeys.remove(key)
+        remindViews.remove(key)?.let { runCatching { wm?.removeView(it) } }   // (not on screen while hidden: fails, harmlessly)
+        if (key == STRICT_BREAK) { breakDismissed = false; breakCovered = false; breakFront = "" }
     }
 
     // ---------- bedtime grayscale ----------
@@ -761,6 +822,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun onDestroy() {
         connected = false; removeOverlay()
         runCatching { unregisterReceiver(screenReceiver) }
+        runCatching { unregisterReceiver(packageReceiver) }
         runCatching { syncDnd(release = true) }        // the service going away puts Do Not Disturb back if we set it
         runCatching { Grayscale.app(this, false) }     // nothing watches what's in front any more: colour back
         // The bedtime screen goes with the service: count it as dismissed, so it comes back on its escalation.
@@ -777,9 +839,6 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         private const val PIP_CATCH_MS = 15_000L    // a PiP window this soon after its app's block is the blocked video
         private const val STRICT_BREAK = "strict-break"
         private const val DIAL_GRACE_MS = 10_000L   // after "Phone", the dialer has this long to come to the front
-        // in-call screens and the emergency dialer, besides the default dialer app
-        private val CALL_PKGS = setOf("com.android.phone", "com.android.incallui", "com.samsung.android.incallui",
-            "com.android.server.telecom")
 
         /** The service really runs (bound by Android), not just ticked in Settings. Same process as its readers. */
         @Volatile var connected = false

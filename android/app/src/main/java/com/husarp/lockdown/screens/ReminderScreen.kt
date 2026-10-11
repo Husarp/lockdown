@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -403,19 +404,24 @@ private fun BreakEditor(onClose: () -> Unit) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
-    // A draft, saved with Save; only un-flagging Important asks for the challenge (on/off stays on the list).
+    // A draft, saved with Save; un-flagging Important or adding an app to "Allowed during breaks" asks for the challenge (on/off stays on the list).
     val d = rememberDraft(cfg.breaks)
     val b = d.value
     fun set(block: (com.husarp.lockdown.engine.BreakCfg) -> com.husarp.lockdown.engine.BreakCfg) = d.update(block)
     fun save(then: () -> Unit) {
         val new = d.value
         guard(RemindersEngine.breaksLooser(Store.config.breaks, new)) {
-            Store.update { c -> c.copy(breaks = new.copy(on = c.breaks.on)) }
+            Store.update { c -> c.copy(breaks = new.copy(on = c.breaks.on, allowed = com.husarp.lockdown.engine.BreakAllow.clean(new.allowed))) }
             d.clear()
             then()
         }
     }
     UnsavedChanges(d.dirty, onClose, ::save, d::clear)
+    var picking by remember { mutableStateOf(false) }
+    if (picking) {
+        BreakAppsPicker(b.allowed, { list -> set { c -> c.copy(allowed = list) } }) { picking = false }
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         EditorHeader("Breaks", onBack = { com.husarp.lockdown.ui.Unsaved.leave(onClose) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -432,6 +438,7 @@ private fun BreakEditor(onClose: () -> Unit) {
                 SwitchRowInline("Important (need the challenge to turn off)", b.guarded) { on -> set { it.copy(guarded = on) } }
             }
             if (b.strict) StepperRow("Snoozes first", b.maxSnooze, "then it starts on its own", 1, min = 1) { set { c -> c.copy(maxSnooze = it) } }
+            if (b.strict) AllowedDuringBreaks(b.allowed, { list -> set { c -> c.copy(allowed = list) } }) { picking = true }
             Card(color = cs.surfaceContainerLow) {
                 OutlinedTextField(b.text, { v -> set { it.copy(text = v) } }, label = { Text("It says") },
                     placeholder = { Text(RemindersEngine.BREAK_TEXT) }, modifier = Modifier.fillMaxWidth())
@@ -446,6 +453,51 @@ private fun BreakEditor(onClose: () -> Unit) {
             }
         }
         SaveBar(d.dirty, onDiscard = d::clear) { save {} }
+    }
+}
+
+/** "Allowed during breaks": the apps a strict break leaves usable, on top of the built-in ones (Lockdown, the home
+ *  screen, Settings, phone, clock, keyboard, emergency apps). Removing one is free; adding needs the challenge on Save. */
+@Composable
+private fun AllowedDuringBreaks(allowed: List<String>, onChange: (List<String>) -> Unit, onAdd: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val pm = LocalContext.current.packageManager
+    Card(color = cs.surfaceContainerLow) {
+        Text("Allowed during breaks", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(4.dp))
+        Text("Dismiss on the break screen goes home, and these apps stay usable. Always allowed: Lockdown, the home screen, " +
+            "Settings, phone calls, the clock, the keyboard and emergency apps. Adding an app needs the challenge when you save.",
+            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        for (pkg in allowed) {
+            val label = remember(pkg) { com.husarp.lockdown.block.Apps.label(pm, pkg) }
+            com.husarp.lockdown.ui.ListRow(title = label, subtitle = pkg, leading = { com.husarp.lockdown.ui.AppIcon(pkg, label) },
+                trailing = { IconButton(onClick = { onChange(allowed - pkg) }) { Icon(Icons.Filled.Close, "Remove $label") } })
+        }
+        TextButton(onClick = onAdd) { Text("Add apps") }
+    }
+}
+
+/** The installed apps with a tick for each one allowed during breaks (search at the top). Edits the draft only. */
+@Composable
+private fun BreakAppsPicker(allowed: List<String>, onChange: (List<String>) -> Unit, onDone: () -> Unit) {
+    androidx.activity.compose.BackHandler(onBack = onDone)
+    val apps = rememberInstalledApps()
+    var q by remember { mutableStateOf("") }
+    val shown = apps.filter { it.label.contains(q, true) || it.pkg.contains(q, true) }
+    Column(Modifier.fillMaxSize()) {
+        EditorHeader("Allowed during breaks", onBack = onDone, action = "Done", onAction = onDone)
+        OutlinedTextField(q, { q = it }, placeholder = { Text("Search apps") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
+            items(shown, key = { it.pkg }) { a ->
+                val on = a.pkg in allowed
+                fun toggle() = onChange(if (on) allowed - a.pkg else allowed + a.pkg)
+                com.husarp.lockdown.ui.ListRow(title = a.label, subtitle = a.pkg,
+                    leading = { com.husarp.lockdown.ui.AppIcon(a.pkg, a.label) },
+                    trailing = { androidx.compose.material3.Checkbox(checked = on, onCheckedChange = { toggle() }) },
+                    onClick = { toggle() })
+            }
+        }
     }
 }
 
