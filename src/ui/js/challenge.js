@@ -65,12 +65,12 @@ export function countdownText(sec) {
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-/** "14:00" on the same day as `nowIso`, else "Mon 12 Oct 14:00". */
-export function whenText(iso, nowIso) {
+/** "14:00" on the same day as `nowMs`, else "Mon 12 Oct 14:00". */
+export function whenText(iso, nowMs) {
   const t = parseNaive(iso);
   if (Number.isNaN(t)) return "";
   const hm = clockOf(iso);
-  if (String(iso).slice(0, 10) === String(nowIso || "").slice(0, 10)) return hm;
+  if (String(iso).slice(0, 10) === String(nowMs || "").slice(0, 10)) return hm;
   const d = new Date(t);
   return `${DAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]} ${hm}`;
 }
@@ -79,11 +79,17 @@ export function whenText(iso, nowIso) {
 
 let active = null;      // {ticket, promise}
 
-/** Open the challenge for a ticket. Asking again for the ticket that is already open returns the same promise. */
+/** Open the challenge for a ticket. Asking again for the ticket that is already open returns the same promise; a
+ *  different ticket (Python only keeps the newest) first closes the old challenge, then takes its place. */
 export function openChallenge(input) {
   const info = typeof input === "string" ? { ticket: input } : (input || {});
   if (typeof info.ticket !== "string" || !info.ticket) return Promise.resolve(CANCELLED);
   if (active && active.ticket === info.ticket) return active.promise;
+  if (active) {
+    const prev = active;
+    prev.close();
+    return prev.promise.then(() => openChallenge(info));
+  }
   return run(info);
 }
 
@@ -107,19 +113,27 @@ function run(info) {
   let outcome = CANCELLED;
   let untick = null;
   let raf = 0;
-  let begun = { now: "", at: 0 };    // Python's "now" at challenge_begin and our clock then (to count down from)
+  let begun = { now: "", at: 0 };    // Python's "now" at challenge_begin and our clock then (the fallback to count down from)
+  let closed = false;           // the dialog is gone: answers that arrive later are dropped
+  let inflight = false;         // challenge_submit is out: Python may pass it any moment, so Esc / Cancel / X wait for the reply
 
-  const handle = openDialog({
-    key: "challenge:" + ticket, title: "This loosens your blocks", wide: true, dismissable: true,
+  const handle = openDialog({     // stack: its own layer, so an editor dialog underneath is left exactly as it was
+    key: "challenge:" + ticket, title: "This loosens your blocks", wide: true, dismissable: () => !inflight, stack: true,
     body: changesHtml(info) + '<p class="small muted">One moment\u2026</p>', onClose,
   });
-  if (!handle) {                // an undismissable dialog is up: nothing to show on, the change does not happen
+  if (!handle) {                // (no dialog could be opened: the change does not happen)
     ld.call("challenge_cancel", ticket).catch(() => {});
     return Promise.resolve(CANCELLED);
   }
   active = me;
+  me.close = () => { if (!inflight) handle.close(); };
   const dlg = handle.el, body = handle.body;
   const q = (sel) => body.querySelector(sel);
+
+  // Esc does nothing while a submit is out (the dialog's cancel event is also refused; this keeps the browser's own
+  // "second Esc closes it anyway" rule from firing)
+  const holdEsc = (e) => { if (e.key === "Escape" && inflight) e.preventDefault(); };
+  dlg.addEventListener("keydown", holdEsc, true);
 
   // paste, drop and the context menu are off for anything typed here
   body.addEventListener("paste", (e) => e.preventDefault(), true);
@@ -135,8 +149,13 @@ function run(info) {
   }, true);
 
   function onClose() {
+    closed = true;
     if (untick) { untick(); untick = null; }
     cancelAnimationFrame(raf);
+    if (!inflight) conclude();      // (shut by force while Python is checking: the reply decides, see submit)
+  }
+  function conclude() {
+    dlg.removeEventListener("keydown", holdEsc, true);
     const result = settled ? outcome : CANCELLED;
     const done = () => { if (active === me) active = null; finish(result); };
     if (settled) return done();
@@ -145,6 +164,7 @@ function run(info) {
   }
 
   function view(title, html, buttons) {
+    if (closed) return null;
     dlg.querySelector(".dlg-h h2").textContent = title;
     body.innerHTML = changesHtml(begun.info || info) + html;
     let foot = dlg.querySelector(".dlg-f");
@@ -172,7 +192,7 @@ function run(info) {
     foot.append(btn);
   };
   const closeBtn = (label = "OK") => ({ label, primary: true, onClick: () => handle.close() });
-  const cancelBtn = { label: "Cancel", onClick: () => handle.close() };
+  const cancelBtn = { label: "Cancel", onClick: () => { if (!inflight) handle.close(); } };
 
   // ---- what comes back from Python ------------------------------------------------------
   async function begin() {
@@ -183,6 +203,7 @@ function run(info) {
       view("This loosens your blocks", `<p class="ch-err">${esc(err.message || "That didn't work.")}</p>`, [closeBtn()]);
       return;
     }
+    if (closed) return;
     begun = { now: data.now, at: performance.now(), info: data };
     if (data.mode === "phrase") showPhrase(data);
     else if (data.mode === "grid") showGrid(data);
@@ -193,18 +214,22 @@ function run(info) {
   /** The typing went to Python. Resolves true when the challenge is over (passed or waiting), false to keep typing. */
   async function submit(typed, onError) {
     let res;
+    inflight = true;
     try {
       res = await ld.call("challenge_submit", ticket, typed);
     } catch (err) {
+      inflight = false;
+      if (closed) return conclude();
       const msg = err.message || "That didn't work.";
       if (/aren't possible right now|nothing to type/.test(msg)) return begin();     // the state changed: show the right view
       onError(msg, /expired/.test(msg));
       return;
     }
+    inflight = false;
     settled = true;                                     // the ticket is used up, whatever follows
-    if (res && res.waiting_until) return showWaiting(res.waiting_until, true);
+    if (res && res.waiting_until) return closed ? conclude() : showWaiting(res.waiting_until, true);
     outcome = res ? res.result : undefined;
-    handle.close();
+    if (closed) conclude(); else handle.close();
   }
 
   // ---- phrase ---------------------------------------------------------------------------
@@ -332,14 +357,17 @@ function run(info) {
 
   // ---- waiting / closed -----------------------------------------------------------------
   async function showWaiting(waitingUntil, justPassed) {
-    const left0 = Math.max(0, (parseNaive(waitingUntil) - (parseNaive(begun.now) + (performance.now() - begun.at))) / 1000);
-    let total = left0;
-    if (!justPassed) {                                       // opened again later: the whole wait is a setting
-      try {
-        const s = await ld.call("antibypass_status");
-        if (s && s.wait_min) total = Math.max(total, s.wait_min * 60);
-      } catch (_) { /* the bar then starts from now */ }
-    }
+    // Python's own "now" (antibypass_status) is what the wait counts down from - never our clock plus the typing time
+    let nowMs = parseNaive(begun.now) + (performance.now() - begun.at), total = 0;
+    try {
+      const s = await ld.call("antibypass_status");
+      if (s && s.now && !Number.isNaN(parseNaive(s.now))) nowMs = parseNaive(s.now);
+      if (!justPassed && s && s.wait_min) total = s.wait_min * 60;     // opened again later: the whole wait is a setting
+    } catch (_) { /* the bar then starts from now */ }
+    if (closed) return;
+    let left0 = (parseNaive(waitingUntil) - nowMs) / 1000;
+    left0 = Number.isNaN(left0) ? 0 : Math.max(0, left0);
+    total = Math.max(total, left0);
     const at = performance.now();
     const minutes = Math.max(1, Math.ceil(left0 / 60));
     const unlock = begun.info && begun.info.unlock_min ? begun.info.unlock_min : 5;

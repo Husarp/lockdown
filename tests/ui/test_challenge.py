@@ -372,7 +372,7 @@ def test_a_wait_after_passing_shows_the_countdown_and_changes_nothing(shell, pag
     open_in_page(page, data)
     wait_ready(page)
     P = phrase_text(page)
-    type_it(page, P)
+    type_it(page, P, per_char_ms=75)                          # slow typing: the countdown must start from Python's time, not ours
     page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_selector("#dlg .ch-cd")
     assert page.inner_text("#dlg h2") == "Passed - now the wait"
@@ -470,7 +470,7 @@ def test_a_new_request_replaces_the_one_that_is_open(shell, page, harness):
     assert req1.cancelled == 1
     page.evaluate("""async (d) => { const m = await import('/js/challenge.js');
         m.openChallenge(d).then((r) => { window.__second = r === m.CANCELLED ? 'CANCELLED' : r; }); }""", data2)
-    page.wait_for_function("document.querySelector('#dlg .ch-chg').textContent.includes('Second')")
+    page.wait_for_function("(document.querySelector('#dlg .ch-chg')?.textContent || '').includes('Second')")
     assert result(page) == "CANCELLED"                        # the first one's promise ended
     wait_ready(page)
     type_it(page, phrase_text(page))
@@ -491,6 +491,143 @@ def test_an_expired_ticket_says_so(shell, page, harness):
     page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.includes('expired')")
     assert page.inner_text("#dlg .dlg-f .btn") == "OK"
     page.click("#dlg .dlg-f .btn")
+    assert result(page) == "CANCELLED"
+
+
+# ================================================================ review fixes: closing early, stacking, the submit race
+
+def open_editor(page):
+    """A stand-in for an open editor dialog: a text box with unsaved text, and a record of how it was closed."""
+    page.evaluate("""async () => {
+        const d = await import('/js/dialog.js');
+        window.__editorClosed = [];
+        d.openDialog({ key: 'editor', title: 'Editor', body: '<textarea id="ed-text" class="textarea"></textarea>',
+                       buttons: [{ label: 'Save', kind: 'primary', value: 'saved' }], onClose: (r) => window.__editorClosed.push(r) });
+        const t = document.getElementById('ed-text'); t.value = 'my unsaved edits'; t.focus();
+    }""")
+
+
+def editor_state(page):
+    return page.evaluate("""() => ({ text: document.getElementById('ed-text')?.value ?? null,
+        focused: document.activeElement?.id ?? null, closed: window.__editorClosed,
+        open: [...document.querySelectorAll('dialog[open]')].map((d) => d.id || d.querySelector('h2')?.textContent) })""")
+
+
+def test_esc_before_the_first_answer_closes_quietly(shell, page, harness):
+    configure(harness)
+    shell()
+    req, data = ask(harness)
+    harness.delays["challenge_begin"] = 0.6
+    open_in_page(page, data)
+    page.wait_for_selector("#dlg .dlg-b")
+    page.keyboard.press("Escape")                             # before challenge_begin returns
+    assert result(page) == "CANCELLED"
+    page.wait_for_timeout(900)                                # the late answer arrives into a closed dialog
+    assert page.inner_text("#dlg") == "" and not page.evaluate("document.getElementById('dlg').open")
+    assert eventually(lambda: req.cancelled == 1) and req.ran == 0
+    assert_clean(page)                                        # no TypeError from the emptied dialog
+
+
+def test_the_challenge_stacks_over_an_open_editor_and_leaves_it_alone(shell, page, harness):
+    configure(harness)
+    shell()
+    open_editor(page)
+    req, data = ask(harness)
+    open_in_page(page, data)
+    page.wait_for_selector("dialog[open] textarea.typed")
+    st = editor_state(page)
+    assert st["open"] == ["dlg", TITLE] or len(st["open"]) == 2          # two layers
+    assert st["closed"] == [] and st["text"] == "my unsaved edits"      # the editor was not replaced
+    assert page.evaluate("document.activeElement.classList.contains('typed')")
+    assert page.evaluate("document.querySelector('dialog[open] textarea.typed').closest('dialog') !== document.getElementById('dlg')")
+    page.keyboard.press("Escape")                             # Esc closes the challenge only
+    assert result(page) == "CANCELLED"
+    page.wait_for_function("document.querySelectorAll('dialog[open]').length === 1")
+    st = editor_state(page)
+    assert st["closed"] == [] and st["text"] == "my unsaved edits" and st["focused"] == "ed-text"
+    assert eventually(lambda: req.cancelled == 1) and not applied(harness)
+    page.keyboard.press("Escape")                             # and a second Esc is the editor's own
+    page.wait_for_function("window.__editorClosed.length === 1")
+    assert page.evaluate("document.querySelectorAll('dialog[open]').length") == 0
+    assert page.evaluate("document.querySelectorAll('body > dialog').length") == 1       # (the temporary layer is gone)
+
+
+def test_the_editor_survives_a_pass_and_cancel_button(shell, page, harness):
+    configure(harness)
+    shell()
+    open_editor(page)
+    req, data = ask(harness)
+    open_in_page(page, data)
+    page.wait_for_selector("dialog[open] textarea.typed")
+    page.click("dialog.wide[open] .dlg-f .btn:not(.btn-primary)")          # Cancel (the top layer's own button)
+    assert result(page) == "CANCELLED"
+    page.wait_for_function("document.querySelectorAll('dialog[open]').length === 1")
+    assert editor_state(page)["text"] == "my unsaved edits"
+    req2, data2 = ask(harness)
+    open_in_page(page, data2)
+    page.wait_for_selector("dialog[open] textarea.typed")
+    P = phrase_text(page)
+    page.focus("dialog[open] textarea.typed")
+    page.keyboard.type(P, delay=45)
+    page.click("dialog.wide[open] .dlg-f .btn-primary")
+    assert result(page) == {"saved": 1} and applied(harness) and req2.ran == 1
+    page.wait_for_function("document.querySelectorAll('dialog[open]').length === 1")
+    st = editor_state(page)
+    assert st["closed"] == [] and st["text"] == "my unsaved edits" and st["focused"] == "ed-text"
+
+
+def test_esc_and_cancel_wait_while_the_answer_is_out(shell, page, harness):
+    configure(harness)
+    shell()
+    req, data = ask(harness)
+    open_in_page(page, data)
+    wait_ready(page)
+    type_it(page, phrase_text(page))
+    harness.delays["challenge_submit"] = 1.5
+    page.click("#dlg .dlg-f .btn-primary")                    # Continue: the answer is on its way
+    page.wait_for_timeout(150)
+    page.keyboard.press("Escape")                             # (a second Esc would be closed by the browser itself: next test)
+    page.evaluate("document.querySelector('#dlg .dlg-f .btn:not(.btn-primary)').click()")     # Cancel
+    page.evaluate("document.querySelector('#dlg [data-close]').click()")                        # the X
+    assert page.evaluate("document.getElementById('dlg').open")
+    assert page.evaluate("window.__res") is None
+    assert result(page, 5000) == {"saved": 1}                 # Python passed: the caller gets the real result
+    assert applied(harness) and req.ran == 1 and req.cancelled == 0
+    assert harness.rpc_count("challenge_cancel") == 0
+    page.wait_for_function("!document.getElementById('dlg').open")
+
+
+def test_even_a_forced_close_while_the_answer_is_out_gets_the_real_result(shell, page, harness):
+    configure(harness)
+    shell()
+    req, data = ask(harness)
+    open_in_page(page, data)
+    wait_ready(page)
+    type_it(page, phrase_text(page))
+    harness.delays["challenge_submit"] = 0.9
+    page.click("#dlg .dlg-f .btn-primary")
+    page.wait_for_timeout(100)
+    for _ in range(5):                                        # (the browser closes a dialog on repeated Esc whatever the page says)
+        page.keyboard.press("Escape")
+    assert result(page, 5000) == {"saved": 1}                 # still the real result, never CANCELLED
+    assert applied(harness) and req.ran == 1 and req.cancelled == 0
+    assert harness.rpc_count("challenge_cancel") == 0
+
+
+def test_a_slow_answer_that_is_a_wait_still_ends_cleanly(shell, page, harness):
+    configure(harness, wait_min=10)
+    shell()
+    req, data = ask(harness)
+    open_in_page(page, data)
+    wait_ready(page)
+    type_it(page, phrase_text(page))
+    harness.delays["challenge_submit"] = 0.6
+    page.click("#dlg .dlg-f .btn-primary")
+    page.wait_for_timeout(100)
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#dlg .ch-cd")                     # the reply decides: the waiting view
+    assert not applied(harness) and req.ran == 0
+    page.keyboard.press("Escape")
     assert result(page) == "CANCELLED"
 
 
