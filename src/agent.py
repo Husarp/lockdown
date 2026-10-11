@@ -97,6 +97,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
     from resident import reminder_ui, workers
     hub = workers.Hub(log_sink=_log)
     ctx.hub = hub                         # (Api methods poke hub.status_worker after a change of the blocks)
+    hub.netlog_ctx = ctx                  # R16: the Network Log's worker reads the last hour ahead
     ctx.window_visible = lambda: win.publisher.visible    # R16: the Network Log's live feed sleeps while the window is hidden
     # R07: the corner window (reminder popups + notices), the tray's handlers, hub.notify.show and hub.open_page
     ui, tray_actions, toaster, corner_publisher = reminder_ui.attach(win, hub, ctx, lambda: windows.show_main(win), _log)

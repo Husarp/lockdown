@@ -148,7 +148,7 @@ def test_the_search_forgives_typos_and_finds_the_app_name(harness, shell, page):
 
 def test_the_graph_has_60_bars_and_the_top_lists(harness, shell, page):
     fill(harness, 300)
-    block_event(harness, "reddit.com")
+    block_event(harness, "reddit.com", seconds_ago=400)
     open_log(shell, page)
     page.click('[data-seg="nlview"] [data-v="graph"]')
     page.wait_for_selector(".nl-graph svg path.ch-bar", state="attached", timeout=8000)
@@ -166,11 +166,30 @@ def test_the_graph_has_60_bars_and_the_top_lists(harness, shell, page):
     assert page.locator('[data-seg="nlview"] [data-v="table"]').get_attribute("aria-pressed") == "true"
 
 
+def test_the_bar_of_this_minute_stays_the_accent_colour_even_with_a_blocked_visit(harness, shell, page):
+    fill(harness, 60)
+    block_event(harness, "reddit.com", seconds_ago=10)                   # (this very minute)
+    block_event(harness, "youtube.com", seconds_ago=600)                 # (ten minutes ago)
+    open_log(shell, page)
+    page.click('[data-seg="nlview"] [data-v="graph"]')
+    page.wait_for_selector(".nl-graph svg path.ch-bar", state="attached", timeout=8000)
+    bars = page.locator(".nl-graph svg path.ch-bar")
+    assert bars.count() == 60 and "now" in bars.nth(59).get_attribute("class").split()
+    assert "block" not in bars.nth(59).get_attribute("class").split()    # today wins over the red
+    assert page.locator(".nl-graph svg path.ch-bar.block").count() == 1 and page.locator(".nl-graph svg path.ch-bar.now").count() == 1
+
+
 # ---------------------------------------------------------------- the row menu
 
 def click_row(page, text, right=False):
-    page.locator(f'{LIVE}:has-text("{text}")').first.click(button="right" if right else "left")
-    page.wait_for_selector("#menu:not([hidden])")
+    """Click the topmost row that says `text` (from the top of the list: a click that has to scroll first would have its menu
+    closed by the scroll event that follows)."""
+    page.eval_on_selector("#nl-list", "e => { e.scrollTop = 0; }")
+    settle(page, 200)
+    row = page.evaluate_handle(f"""(() => [...document.querySelectorAll({LIVE!r})]
+        .filter((e) => e.innerText.includes({text!r})).sort((a, b) => a._i - b._i)[0])()""").as_element()
+    row.click(button="right" if right else "left")
+    page.wait_for_selector("#menu:not([hidden]) button")
 
 
 def menu_items(page):
@@ -185,10 +204,13 @@ def test_the_row_menu_has_the_old_items(harness, shell, page):
     assert "Block site googlevideo.com…" in items and "Block app Discord…" in items
     assert "Copy site" in items and "Copy app name" in items and "Show only Discord" in items
     page.keyboard.press("Escape")
+    page.wait_for_selector("#menu", state="hidden")
     page.locator('[data-k="windows"]').check(force=True)
     page.wait_for_function("[...document.querySelectorAll('[data-k=\"app\"] option')].some(o => o.textContent === 'Svchost')")
-    page.fill('[data-k="search"]', "svchost")
-    settle(page, 500)
+    page.fill('[data-k="search"]', "svchost youtube")                     # (rows that have a site name: some have only an address)
+    page.wait_for_function(f"""(() => {{ const rows = [...document.querySelectorAll({LIVE!r})];
+        return rows.length > 0 && rows.every((r) => r.innerText.includes('Svchost') && r.innerText.includes('youtube.com')); }})()""")
+    settle(page, 300)                                                    # (the list's own scroll events - they close a menu - have passed)
     click_row(page, "Svchost")
     assert not any(i.startswith("Block app") for i in menu_items(page))   # Windows' own can't be blocked from here
     assert any(i.startswith("Block site") for i in menu_items(page))
@@ -254,7 +276,7 @@ def test_export_csv_writes_the_filtered_rows(harness, shell, page, tmp_path, mon
     page.wait_for_function("[...document.querySelectorAll('body *')].some(e => e.children.length === 0 && e.textContent.startsWith('Saving 1 rows'))")
     rows = list(csv.reader(open(target, encoding="utf-8", newline="")))
     assert rows[0] == ["time", "app", "exe", "site", "ip", "port", "connections", "status"]
-    assert len(rows) == 2 and rows[1][1:] == ["Blocked visit", "", "reddit.com", "", "", "1", "blocked"]
+    assert len(rows) == 2 and rows[1][1:] == ["Browser", "", "reddit.com", "", "", "1", "blocked"]
     assert [e for e, _ in sent] == ["net_export"] and sent[0][1]["ok"] and sent[0][1]["rows"] == 1
 
 

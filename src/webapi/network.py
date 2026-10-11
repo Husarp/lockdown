@@ -18,10 +18,13 @@ Windows' own Save dialog (the page never says where) and is classified `ui`.
 """
 import csv
 import functools
+import re
 import threading
 import time
 from collections import Counter
 from datetime import timedelta
+from itertools import groupby
+from operator import itemgetter
 from typing import NamedTuple
 
 import alerts
@@ -40,7 +43,9 @@ MAX_LIMIT = 20000
 MAX_QUERY = 100
 MAX_CHANGES = 3000                  # the log of changed rows a feed catches up from (older: the page reloads)
 VIEWS_KEPT = 6
-WORD_CACHE_MAX = 40000
+WORD_CACHE_MAX = 400                # words whose matching groups are kept
+GROUPS_MAX = 30000                  # kinds of rows remembered before the ones that are gone are forgotten
+RESTART_AFTER = timedelta(minutes=15)   # not looked at for this long: read the hour again from scratch
 STATUSES = ("all", "allowed", "blocked")
 CSV_HEAD = ["time", "app", "exe", "site", "ip", "port", "connections", "status"]
 SECOND_LEVEL = {"co", "com", "org", "net", "ac", "gov", "edu"}      # example.co.uk -> three labels
@@ -111,11 +116,11 @@ def guess_name(domain: str) -> str:
 
 
 @core.internal
-def rule_text(row: dict) -> str:
+def rule_text(row: tuple) -> str:
     """The Rule column: which rule blocked the visit; allowed rows show a dash."""
-    if not row["blocked"]:
+    if not row[BLK]:
         return "–"
-    reason = row.get("reason") or ""
+    reason = row[REASON] or ""
     base = alerts.base_reason(reason)
     return alerts.REASONS[base][0] if base in alerts.REASONS else (base or reason).replace("_", " ").capitalize()
 
@@ -127,30 +132,50 @@ def readable(exe: str) -> str:
 
 
 # ---------------------------------------------------------------- the cached last hour
+#
+# A row is a plain tuple (cheap to build 20 000 of at once, and to keep): K the key the page knows it by, MIN the minute,
+# EXE, IP, PORT, DOM the host name, CNT how many connections, WIN / LOC Windows' own / local network, BLK a blocked visit,
+# REASON, ID the block event's id, GRP = (host name, exe) - ONE shared tuple per kind of row, which is what the search
+# works on (it looks at the few thousand different groups, never at every row).
+
+K, MIN, EXE, IP, PORT, DOM, CNT, WIN, LOC, BLK, REASON, ID, GRP = range(13)
+NET_SQL = ("SELECT minute, exe, ip, port, domain, count, windows, local FROM network_log WHERE minute >= ? "
+           "ORDER BY minute DESC, count DESC")
+_HEX = re.compile(r"[0-9a-f]+\Z")      # (the only words that can be part of an address)
+
+
+def _mask(word: str) -> int:
+    """The letters / digits of a word as bits: a word can only be a typo of a token that has nearly all of them."""
+    bits = 0
+    for c in word:
+        bits |= 1 << (ord(c) - 97 if c >= "a" else 26 + ord(c) - 48)
+    return bits
+
 
 class _View:
-    """The rows that pass a set of filters (newest first) and the numbers worked out over them."""
+    """The rows that pass a set of filters (newest first) and the numbers worked out over them. `blocked` = the blocked
+    visits among them."""
 
-    def __init__(self, rows: list, log: "_Log"):
-        conns = blocked = 0
-        sites = set()
-        per_app, per_site, per_min, bmin = Counter(), Counter(), {}, set()
+    def __init__(self, rows: list, blocked: list, log: "_Log"):
+        per_group, per_min, ips = {}, {}, set()
+        get_group, get_min = per_group.get, per_min.get
         for r in rows:
-            c = r["count"]
-            conns += c
-            d, e, m = r["domain"], r["exe"], r["minute"]
-            sites.add(d or r["ip"])
+            c, g, m = r[CNT], r[GRP], r[MIN]
+            per_group[g] = get_group(g, 0) + c
+            per_min[m] = get_min(m, 0) + c
+            if not g[0]:
+                ips.add(r[IP])
+        per_app, per_site, sites = Counter(), Counter(), set(ips)
+        for (d, e), c in per_group.items():
             if e:
                 per_app[e] += c
             if d:
                 per_site[d] += c
-            per_min[m] = per_min.get(m, 0) + c
-            if r["blocked"]:
-                blocked += 1
-                bmin.add(m)
+                sites.add(d)
         self.rows = rows
-        self.connections, self.blocked, self.sites = conns, blocked, len(sites)
-        self.per_app, self.per_site, self.per_min, self.blocked_minutes = per_app, per_site, per_min, bmin
+        self.connections, self.blocked, self.sites = sum(per_min.values()), len(blocked), len(sites)
+        self.per_app, self.per_site, self.per_min = per_app, per_site, per_min
+        self.blocked_minutes = {r[MIN] for r in blocked}
         top = per_app.most_common(1)
         self.top = log.app_name(top[0][0]) if top else ""
 
@@ -172,16 +197,19 @@ class _Log:
         self.cutoff = ""                    # the oldest minute kept
         self.net: dict = {}                 # minute -> [row] (the order SQL gave: busiest first)
         self.blk: dict = {}                 # minute -> [row] (newest first)
-        self.keys: dict = {}                # key -> row, for both kinds
         self.bkeys: dict = {}               # key -> row, blocked visits only
         self.rows: list = []
-        self.exes_all: set = set()          # apps seen, with and without Windows' own
-        self.exes_user: set = set()
+        self.blocked_rows: list = []        # (the blocked visits among `rows`)
+        self._keys = None                   # (rows, {their keys}) - only the live feed needs it
         self.version = 0
         self.changes: list = []             # (version, row, is_new)
         self.dropped_upto = 0               # changes of versions up to this were forgotten
         self.views: dict = {}
-        self.word_cache: dict = {}
+        self.bases: dict = {}               # (windows, local) -> rows with those switches applied
+        self.gi: dict = {}                  # (host, exe) -> THE group tuple
+        self.glist: list = []               # the groups in the order they came
+        self.word_sets: dict = {}           # word -> [groups it matches, how many of glist were looked at]
+        self.gtext: dict = {}               # group -> (normalised text, [(token, mask)]) the typo check reads
         self.blocklist: dict = {}           # exe -> the blocklist's name for it
         self.catalog: dict = {}
         self.catalog_at = -1e9
@@ -195,21 +223,36 @@ class _Log:
             return "Lockdown"
         return self.blocklist.get(exe) or self.catalog.get(exe) or readable(exe)
 
+    def _names_changed(self):
+        self.word_sets.clear()
+        self.gtext.clear()
+        self.views.clear()
+        self.apps_cache.clear()
+
     def _names(self, ctx):
-        """The blocklist's names win; then the app catalog's (once it has loaded); else the file name made readable."""
+        """The blocklist's names win; then the app catalog's (`catalog_names`); else the file name made readable."""
         blocklist = {i["target"].lower(): i["display_name"] for i in ctx.db.list_items() if i["item_type"] == "app"}
-        catalog = getattr(ctx, "catalog", None)
-        mono = time.monotonic()
-        if catalog is not None and mono - self.catalog_at >= NAMES_SEC and catalog.loaded.is_set():
-            self.catalog_at = mono
-            self.catalog = {}
-            for app in catalog.search("all", "", limit=10 ** 6)["apps"]:
-                self.catalog.setdefault(app["exe"], app["name"])
         if blocklist != self.blocklist:
             self.blocklist = blocklist
-            self.word_cache.clear()
-            self.views.clear()
-            self.apps_cache.clear()
+            self._names_changed()
+
+    def catalog_names(self, ctx) -> bool:
+        """(a worker's thread, never a page's call: the catalog's list is long and asking it looks at the open windows)
+        Take the app catalog's names, at most once a NAMES_SEC. False while the catalog has not loaded yet."""
+        catalog = getattr(ctx, "catalog", None)
+        if catalog is None or not catalog.loaded.is_set():
+            return False
+        mono = time.monotonic()
+        if mono - self.catalog_at >= NAMES_SEC:
+            names = {}
+            for app in catalog.search("all", "", limit=10 ** 6)["apps"]:
+                names.setdefault(app["exe"], app["name"])
+            with self.lock:
+                self.catalog_at = mono
+                if names != self.catalog:
+                    self.catalog = names
+                    self._names_changed()
+        return True
 
     # ------------------------------------------------------------ reading the database
     def refresh(self, ctx, force: bool = False) -> int:
@@ -223,36 +266,53 @@ class _Log:
             self.fetched = time.monotonic()
             return self.version
 
+    def _group(self, domain, exe):
+        key = (domain, exe)
+        g = self.gi.get(key)
+        if g is None:
+            g = self.gi[key] = key
+            self.glist.append(key)
+        return g
+
     def _read(self, ctx, force: bool):
         db = ctx.db
         now = ctx.now()
         cutoff = (now - KEEP).strftime(MIN_FMT)
-        full = force or not self.loaded or self.last_now is None or now < self.last_now - timedelta(minutes=2)
+        # a first read, or one after a long pause, starts over: no comparing with what was cached, no log of changes
+        # (a live feed that was behind simply asks the page to reload)
+        start_over = (not self.loaded or self.last_now is None or now - self.last_now > RESTART_AFTER)
+        full = force or start_over or now < self.last_now - timedelta(minutes=2)
         since = cutoff if full else max(cutoff, (self.last_now - timedelta(minutes=RECENT_MIN)).strftime(MIN_FMT))
         self._names(ctx)
         changes = []                          # (row, is_new)
-        changed = full and not self.loaded
+        changed = start_over
 
         # connections: replace every minute from `since` on
-        fresh: dict = {}
-        old = {r["k"]: r for m, rows in self.net.items() if m >= since for r in rows}
-        for minute, exe, ip, port, domain, count, windows, local in db.conn.execute(
-                "SELECT minute, exe, ip, port, domain, count, windows, local FROM network_log WHERE minute >= ? "
-                "ORDER BY minute DESC, count DESC", (since,)):
-            key = f"{minute}|{exe}|{ip}|{port}"
-            before = old.pop(key, None)
-            if before is not None and before["count"] == count and before["domain"] == domain:
-                row = before
-            else:
-                row = {"k": key, "minute": minute, "exe": exe, "ip": ip, "port": port, "domain": domain,
-                       "count": count, "windows": windows, "local": local, "blocked": False, "reason": "", "i": 0}
+        old = {} if start_over else {r[K]: r for m, rows in self.net.items() if m >= since for r in rows}
+        group, made, found = self._group, [], db.conn.execute(NET_SQL, (since,))
+        if start_over:
+            known = self.gi.get
+            made = [(f"{m}|{e}|{ip}|{p}", m, e, ip, p, d, c, w, l, False, "", 0, known((d, e)) or group(d, e))
+                    for m, e, ip, p, d, c, w, l in found]
+        else:
+            for minute, exe, ip, port, domain, count, windows, local in found:
+                key = f"{minute}|{exe}|{ip}|{port}"
+                before = old.pop(key, None)
+                if before is not None and before[CNT] == count and before[DOM] == domain:
+                    made.append(before)
+                    continue
+                row = (key, minute, exe, ip, port, domain, count, windows, local, False, "", 0, group(domain, exe))
+                made.append(row)
                 changes.append((row, before is None))
-            fresh.setdefault(minute, []).append(row)
+        fresh = {minute: list(rows) for minute, rows in groupby(made, itemgetter(MIN))}
         if old or changes:
             changed = True
-        for minute in [m for m in self.net if m >= since]:
-            del self.net[minute]
-        self.net.update(fresh)
+        if start_over:
+            self.net = fresh
+        else:
+            for minute in [m for m in self.net if m >= since]:
+                del self.net[minute]
+            self.net.update(fresh)
 
         # blocked visits (a few rows: read them all)
         blk, bkeys = {}, {}
@@ -262,11 +322,12 @@ class _Log:
             key = f"b{e['id']}"
             row = self.bkeys.get(key)
             if row is None:
-                row = {"k": key, "minute": e["timestamp"][:16], "exe": "", "ip": "", "port": "", "domain": e["hostname"],
-                       "count": 1, "windows": 0, "local": 0, "blocked": True, "reason": e["reason"] or "", "i": e["id"]}
-                changes.append((row, True))
+                host = e["hostname"]
+                row = (key, e["timestamp"][:16], "", "", "", host, 1, 0, 0, True, e["reason"] or "", e["id"], group(host, ""))
+                if not start_over:
+                    changes.append((row, True))
                 changed = True
-            blk.setdefault(row["minute"], []).append(row)
+            blk.setdefault(row[MIN], []).append(row)
             bkeys[key] = row
         if bkeys.keys() != self.bkeys.keys():
             changed = True                    # (a new visit, or one that has aged out)
@@ -281,27 +342,33 @@ class _Log:
         if not changed:
             return
         self.version += 1
-        self.changes.extend((self.version, row, is_new) for row, is_new in changes)
-        if len(self.changes) > MAX_CHANGES:
-            cut = len(self.changes) - MAX_CHANGES // 2
-            self.dropped_upto = self.changes[cut - 1][0]
-            del self.changes[:cut]
-        rows, keys, user, every = [], {}, set(), set()
-        for minute in sorted(set(self.net) | set(self.blk), reverse=True):
-            for r in self.net.get(minute, ()):
-                rows.append(r)
-                keys[r["k"]] = r
-                e = r["exe"]
-                if e:
-                    every.add(e)
-                    if not r["windows"]:
-                        user.add(e)
-            for r in self.blk.get(minute, ()):
-                rows.append(r)
-                keys[r["k"]] = r
-        self.rows, self.keys, self.exes_all, self.exes_user = rows, keys, every, user
+        if start_over:
+            self.changes.clear()
+            self.dropped_upto = self.version
+        else:
+            self.changes.extend((self.version, row, is_new) for row, is_new in changes)
+            if len(self.changes) > MAX_CHANGES:
+                cut = len(self.changes) - MAX_CHANGES // 2
+                self.dropped_upto = self.changes[cut - 1][0]
+                del self.changes[:cut]
+        rows, net, blk = [], self.net, self.blk
+        for minute in sorted(net.keys() | blk.keys(), reverse=True):
+            rows += net.get(minute, ())
+            rows += blk.get(minute, ())
+        self.rows = rows
+        self.blocked_rows = [r for minute in sorted(blk, reverse=True) for r in blk[minute]]
         self.views.clear()
+        self.bases.clear()
         self.apps_cache.clear()
+        if len(self.glist) > GROUPS_MAX:
+            self._forget_groups()
+
+    def _forget_groups(self):
+        """Groups of rows that are long gone are dropped (the rows keep theirs)."""
+        live = {r[GRP]: r[GRP] for r in self.rows}
+        self.gi, self.glist = live, list(live)
+        self.word_sets.clear()
+        self.gtext.clear()
 
     def changes_since(self, version: int):
         """[(row, is_new)] changed after `version` (a row once, its latest state), or None if that is too long ago."""
@@ -310,55 +377,111 @@ class _Log:
         latest = {}
         for v, row, is_new in self.changes:
             if v > version:
-                latest[row["k"]] = (row, is_new or latest.get(row["k"], (None, False))[1])
-        return [latest[k] for k in latest if k in self.keys]
+                latest[row[K]] = (row, is_new or latest.get(row[K], (None, False))[1])
+        rows = self.rows
+        found = self._keys
+        if found is None or found[0] is not rows:
+            found = self._keys = (rows, {r[K] for r in rows})
+        return [latest[k] for k in latest if k in found[1]]
 
     # ------------------------------------------------------------ filtering
-    def match(self, rows: list, f: Filters) -> list:
-        if not f.windows and not f.local:
-            rows = [r for r in rows if not (r["windows"] or r["local"])]
-        else:
-            if not f.windows:
-                rows = [r for r in rows if not r["windows"]]
-            if not f.local:
-                rows = [r for r in rows if not r["local"]]
+    def base(self, windows: bool, local: bool) -> list:
+        """The rows with Windows' own / the local network's left out unless their switch is on."""
+        key = (windows, local)
+        found = self.bases.get(key)
+        if found is None:
+            rows = self.rows
+            if windows and local:
+                found = rows
+            elif windows:
+                found = [r for r in rows if not r[LOC]]
+            elif local:
+                found = [r for r in rows if not r[WIN]]
+            else:
+                found = [r for r in rows if not (r[WIN] or r[LOC])]
+            self.bases[key] = found
+        return found
+
+    def match(self, rows: list, f: Filters, switches: bool = True) -> list:
+        """The rows that pass the filters (`switches`=False: the Windows / local switches were applied already)."""
+        if switches and not (f.windows and f.local):
+            if not f.windows and not f.local:
+                rows = [r for r in rows if not (r[WIN] or r[LOC])]
+            elif not f.windows:
+                rows = [r for r in rows if not r[WIN]]
+            else:
+                rows = [r for r in rows if not r[LOC]]
         if f.app:
-            rows = [r for r in rows if r["exe"] == f.app]
+            rows = [r for r in rows if r[EXE] == f.app]
         if f.status == "allowed":
-            rows = [r for r in rows if not r["blocked"]]
+            rows = [r for r in rows if not r[BLK]]
         elif f.status == "blocked":
-            rows = [r for r in rows if r["blocked"]]
+            rows = [r for r in rows if r[BLK]]
         if f.query:
             rows = self._search(rows, f.query)
         return rows
 
+    def _word_ok(self, word: str, group: tuple) -> bool:
+        """search.score(word, "<site> <exe> <app name>") is not None, with the text worked out once per group."""
+        found = self.gtext.get(group)
+        if found is None:
+            text = search.normalize(f"{group[0]} {group[1]} {self.app_name(group[1])}")
+            found = self.gtext[group] = (text, [(t, _mask(t)) for t in search._WORD.findall(text)])
+        text, tokens = found
+        if word in text:
+            return True
+        allowed = search.typos_allowed(word)
+        if not allowed:
+            return False
+        n, mq = len(word), _mask(word)
+        for token, mt in tokens:
+            if (mq & ~mt).bit_count() > allowed:
+                continue
+            for cand in {token, token[:n], token[:n + 1], token[:max(n - 1, 1)]}:
+                if search.distance(word, cand, allowed) <= allowed:
+                    return True
+        return False
+
+    def _groups_with(self, word: str) -> set:
+        """The groups that have the word (exactly or with a small typo), worked out once per word and group."""
+        if len(self.word_sets) > WORD_CACHE_MAX:
+            self.word_sets.clear()
+        entry = self.word_sets.get(word)
+        if entry is None:
+            entry = self.word_sets[word] = [set(), 0]
+        found, done = entry
+        glist = self.glist
+        if done < len(glist):
+            upto = len(glist)
+            for g in glist[done:upto]:
+                if self._word_ok(word, g):
+                    found.add(g)
+            entry[1] = upto
+        return found
+
     def _search(self, rows: list, query: str) -> list:
         """Every word must be found in domain / exe / app name - exactly or with a small typo (search.score) - or
-        exactly in the address. The typo check runs once per (site, app), not once per row."""
+        exactly in the address (only words that could be part of one are tried there)."""
         words = search._WORD.findall(search.normalize(query))
         if not words:
             return rows
-        cache, wc, out = {}, self.word_cache, []
-        if len(wc) > WORD_CACHE_MAX:
-            wc.clear()
+        sets = [(w, self._groups_with(w)) for w in words]
+        text_sets = [s for w, s in sets if not _HEX.match(w)]
+        addr_sets = [(w, s) for w, s in sets if _HEX.match(w)]
+        strict = set.intersection(*text_sets) if text_sets else None
+        if not addr_sets:
+            return [r for r in rows if r[GRP] in strict]
+        out = []
         for r in rows:
-            group = (r["domain"], r["exe"])
-            flags = cache.get(group)
-            if flags is None:
-                text = f"{group[0]} {group[1]} {self.app_name(group[1])}"
-                flags = []
-                for w in words:
-                    ok = wc.get((w, group))
-                    if ok is None:
-                        ok = wc[(w, group)] = search.score(w, text) is not None
-                    flags.append(ok)
-                flags = cache[group] = tuple(flags)
-            if all(flags):
-                out.append(r)
+            g = r[GRP]
+            if strict is not None and g not in strict:
+                continue
+            ip = r[IP]
+            for w, s in addr_sets:
+                if g not in s and w not in ip:
+                    break
             else:
-                ip = r["ip"]
-                if ip and all(ok or w in ip for ok, w in zip(flags, words)):
-                    out.append(r)
+                out.append(r)
         return out
 
     def view(self, f: Filters) -> _View:
@@ -370,25 +493,27 @@ class _Log:
                 if v is None:
                     if len(self.views) >= VIEWS_KEPT:
                         self.views.pop(next(iter(self.views)))
-                    v = self.views[key] = _View(self.match(self.rows, f), self)
+                    v = self.views[key] = _View(self.match(self.base(f.windows, f.local), f, False),
+                                                self.match(self.blocked_rows, f), self)
         return v
 
     def apps(self, windows: bool) -> list:
         """The app menu: [{exe, name}] sorted by name (Windows' own only when that switch is on)."""
         found = self.apps_cache.get(windows)
         if found is None:
-            exes = self.exes_all if windows else self.exes_user
+            rows = self.rows
+            exes = {r[EXE] for r in rows if r[EXE]} if windows else {r[EXE] for r in rows if r[EXE] and not r[WIN]}
             found = self.apps_cache[windows] = sorted(({"exe": e, "name": self.app_name(e)} for e in exes),
                                                       key=lambda a: (a["name"].lower(), a["exe"]))
         return found
 
     # ------------------------------------------------------------ what the page gets
-    def row_json(self, r: dict) -> dict:
-        host = r["domain"]
-        return {"k": r["k"], "m": r["minute"], "t": r["minute"][11:], "exe": r["exe"],
-                "app": "Blocked visit" if r["blocked"] else self.app_name(r["exe"]), "host": host,
-                "site": host or r["ip"], "n": r["count"], "rule": rule_text(r), "port": r["port"],
-                "b": 1 if r["blocked"] else 0, "w": r["windows"], "l": r["local"], "i": r["i"],
+    def row_json(self, r: tuple) -> dict:
+        host = r[DOM]
+        return {"k": r[K], "m": r[MIN], "t": r[MIN][11:], "exe": r[EXE],
+                "app": "Blocked visit" if r[BLK] else self.app_name(r[EXE]), "host": host,
+                "site": host or r[IP], "n": r[CNT], "rule": rule_text(r), "port": r[PORT],
+                "b": 1 if r[BLK] else 0, "w": r[WIN], "l": r[LOC], "i": r[ID],
                 "reg": site_to_block(host) if host else ""}
 
 
@@ -445,7 +570,7 @@ class _Feed:
             payload = {"epoch": epoch, "resync": True}
         else:
             wanted = log.match([row for row, _ in changed], f)
-            wanted.sort(key=lambda r: (r["minute"], -r["blocked"], r["count"], r["i"]), reverse=True)
+            wanted.sort(key=lambda r: (r[MIN], -r[BLK], r[CNT], r[ID]), reverse=True)
             v = log.view(f)
             payload = {"epoch": epoch, "seq": version, "rows": [log.row_json(r) for r in wanted], "total": len(v.rows),
                        "summary": v.summary(), "apps": log.apps(f.windows), "cutoff": log.cutoff}
@@ -478,6 +603,32 @@ def _feed(ctx) -> _Feed:
             if found is None:
                 found = ctx._netfeed = _Feed(ctx, _log(ctx))
     return found
+
+
+@core.internal
+def prewarm(ctx):
+    """(a worker's thread, once, a few seconds after the agent started) Read the last hour and work out the first thing the
+    page asks for, so the first click on the Network Log finds it ready instead of reading 20 000 rows."""
+    log = _log(ctx)
+    log.refresh(ctx)
+    log.view(Filters())
+    log.apps(False)
+    log.catalog_names(ctx)
+
+
+@core.internal
+def maintain(ctx) -> bool:
+    """(a worker's thread, about once a minute while nobody uses the page) While the window is shown, keep the cache a
+    minute old at most and the app catalog's names up to date; a hidden window costs nothing. False: the catalog has
+    not loaded yet, look again soon."""
+    log = _log(ctx)
+    if getattr(ctx, "catalog", None) is None:
+        return True
+    visible = getattr(ctx, "window_visible", None)
+    if visible is not None and not visible():
+        return log.catalog_names(ctx) if log.catalog_at < 0 else True      # (the names: once, even hidden)
+    log.refresh(ctx)
+    return log.catalog_names(ctx)
 
 
 # ---------------------------------------------------------------- the Api
@@ -561,17 +712,17 @@ def network_block_target(ctx, kind, value):
 # ---------------------------------------------------------------- Export CSV
 
 def _cell(text) -> str:
-    """A text cell that a spreadsheet will not take for a formula."""
+    """A text cell that a spreadsheet will not take for a formula (also one that starts with a tab or a line break)."""
     text = str(text)
-    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
 
 
 @core.internal
 def csv_rows(rows: list, log: _Log):
     yield CSV_HEAD
     for r in rows:
-        yield [r["minute"], "Blocked visit" if r["blocked"] else log.app_name(r["exe"]), _cell(r["exe"]),
-               _cell(r["domain"]), _cell(r["ip"]), r["port"], r["count"], "blocked" if r["blocked"] else "allowed"]
+        yield [r[MIN], _cell(log.app_name(r[EXE])), _cell(r[EXE]), _cell(r[DOM]), _cell(r[IP]), r[PORT], r[CNT],
+               "blocked" if r[BLK] else "allowed"]
 
 
 @core.internal

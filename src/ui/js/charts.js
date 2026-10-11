@@ -224,7 +224,7 @@ const hh = (h) => String(h).padStart(2, "0");
 // ---------------------------------------------------------------- bar chart (a value per day)
 /**
  * data = {bars: [{label, value, tip, today?, unlocks?, tone?: "block" | "over" | "now", show?: bool}], goal?: number,
- *         goalLabel?: string, minPeak?: number}      (tone: the bar's colour class; show: draw its label - default every 5th)
+ *         goalLabel?: string, minPeak?: number}      (tone: the bar's colour class, but today's bar is always "now"; show: draw its label - default every 5th)
  * Elements: 1 + 3n + 2 + n  (n = bars).
  */
 export function layoutBars(data, W, H, s) {
@@ -241,7 +241,7 @@ export function layoutBars(data, W, H, s) {
   bars.forEach((b, i) => {
     const x = slot * i + (slot - bw) / 2;
     const v = Math.max(0, b.value || 0);
-    const tone = b.tone || (b.today ? "now" : goal && v > goal ? "over" : "");
+    const tone = b.today ? "now" : b.tone || (goal && v > goal ? "over" : "");
     prims.push(P("path", { d: barPath(x, y(v), bw, bottom, 3 * s), class: "ch-bar" + (tone ? " " + tone : "") }));
     const cy = Math.max(4.5 * s, y(v) - 7 * s);
     marks.push(P("circle", { cx: n2(x + bw / 2), cy: n2(cy), r: b.unlocks ? n2(3.5 * s) : 0, class: "ch-mark" }));

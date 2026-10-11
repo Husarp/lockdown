@@ -3,11 +3,13 @@ and graph numbers, blocked visits merged in, the live feed's deltas, Export CSV,
 The page is tested in tests/ui/test_page_netlog.py."""
 import csv
 import statistics
+import threading
 import time
 from datetime import datetime, timedelta
 
 import pytest
 
+import search
 import webapi
 from db import Database
 from resident import workers
@@ -334,7 +336,7 @@ def test_a_feed_that_fell_behind_asks_the_page_to_reload(env):
     log = network._log(env)
     for i in range(network.MAX_CHANGES + 100):                               # more changes than the feed keeps
         log.version += 1
-        log.changes.append((log.version, {"k": f"z{i}"}, True))
+        log.changes.append((log.version, (f"z{i}",), True))
     log.dropped_upto = log.version - 10
     log.version += 1
     assert network._feed(env).tick() is True
@@ -407,10 +409,23 @@ def test_export_csv_writes_all_filtered_rows_on_a_worker(env, tmp_path, monkeypa
     assert rows[0] == ["time", "app", "exe", "site", "ip", "port", "connections", "status"]
     body = {r[3]: r for r in rows[1:]}
     assert body["a.com"] == [minute(0), "Chrome", "chrome.exe", "a.com", "1.1.1.1", "443", "3", "allowed"]
-    assert body["reddit.com"][1:] == ["Blocked visit", "", "reddit.com", "", "", "1", "blocked"]
+    assert body["reddit.com"][1:] == ["Browser", "", "reddit.com", "", "", "1", "blocked"]          # (the old window's word for it)
     assert body["'=cmd|'/c calc'!A1"][5] == "80"                              # (a spreadsheet won't run it)
     assert "w.com" not in body                                               # Windows' own: off, as on the page
     assert env.sent[-1] == ("net_export", {"ok": True, "path": str(target) + ".csv", "rows": 3})
+
+
+def test_csv_cells_never_start_a_formula(env, tmp_path, monkeypatch):
+    env.db.add_item("=SUM(A1)", ["evil.exe"], "app", "manual", [{"rule_type": "permanent"}])
+    env.db.add_network([row(0, exe="evil.exe", ip="1.1.1.1", domain="+a.com"), row(1, exe="b.exe", ip="2.2.2.2", domain="\tb.com"),
+                        row(2, exe="c.exe", ip="3.3.3.3", domain="\rc.com"), row(3, exe="d.exe", ip="4.4.4.4", domain="@d.com"),
+                        row(4, exe="e.exe", ip="5.5.5.5", domain="-e.com"), row(5, exe="f.exe", ip="6.6.6.6", domain="fine.com")])
+    monkeypatch.setattr(network, "_ask_save_path", lambda ctx: str(tmp_path / "x.csv"))
+    monkeypatch.setattr(network, "_spawn", lambda fn: fn())
+    assert env.api.network_export_csv({})["data"]["saved"] is True
+    rows = list(csv.reader(open(tmp_path / "x.csv", encoding="utf-8", newline="")))[1:]
+    assert sorted(r[3] for r in rows) == sorted(["'+a.com", "'-e.com", "'@d.com", "'\rc.com", "'\tb.com", "fine.com"])
+    assert [r[1] for r in rows if r[2] == "evil.exe"] == ["'=SUM(A1)"]                  # the app's name too
 
 
 def test_export_csv_cancelled_and_failing(env, tmp_path, monkeypatch):
@@ -467,6 +482,7 @@ def test_network_get_p95_on_20000_rows(big, capsys):
     cold = []
     for filters in FILTER_SETS:
         log.views.clear()
+        log.word_sets.clear()                      # (a word nobody typed before is scored against every kind of row)
         t = time.perf_counter()
         get(big, filters)
         cold.append((time.perf_counter() - t) * 1000)
@@ -476,7 +492,7 @@ def test_network_get_p95_on_20000_rows(big, capsys):
     with capsys.disabled():
         print(f"\nnetwork_get on 20 000 rows: new filters p50 {statistics.median(cold):.1f} ms, p95 {p95:.1f} ms, max {cold[-1]:.1f} ms; "
               f"same filters p50 {warm_p50:.2f} ms, p95 {warm_p95:.2f} ms")
-    assert p95 <= 100 and warm_p95 <= 50
+    assert p95 <= 50 and warm_p95 <= 50
 
 
 def test_the_first_read_of_20000_rows_and_the_graph(tmp_path_factory, capsys):
@@ -493,6 +509,106 @@ def test_the_first_read_of_20000_rows_and_the_graph(tmp_path_factory, capsys):
     with capsys.disabled():
         print(f"\nnetwork_get first read of 20 000 rows (database + cache): {first:.0f} ms; network_graph p50 {graph_p50:.1f} ms, p95 {graph_p95:.1f} ms")
     assert first <= 3000 and graph_p95 <= 300          # (the real numbers are printed; this box runs many jobs at once)
+
+
+def reference_hits(log, query):
+    """The old way, row by row: every word must pass search.score on 'site exe app name', or be inside the address."""
+    words = search._WORD.findall(search.normalize(query))
+    hits = set()
+    for r in log.rows:
+        text = f"{r[network.DOM]} {r[network.EXE]} {log.app_name(r[network.EXE])}"
+        flags = [search.score(w, text) is not None for w in words]
+        ip = r[network.IP]
+        if all(flags) or (ip and all(ok or w in ip for ok, w in zip(flags, words))):
+            hits.add(r[network.K])
+    return hits
+
+
+@pytest.mark.parametrize("query", ["youtube", "yotube", "chrome git", "10.0.5", "10 0 5", "redd", "cod", "zzzzqqqq", "browser", "face", "git 10"])
+def test_the_group_search_finds_what_a_row_by_row_search_finds(big, query):
+    log = network._log(big)
+    f = network.Filters(windows=True, local=True, query=query)
+    got = {r[network.K] for r in log.view(f).rows}
+    assert got == reference_hits(log, query)
+
+
+def test_a_first_read_keeps_no_change_log_and_a_long_pause_starts_over(env):
+    env.db.add_network([row(0, domain="a.com")])
+    get(env, live=True)
+    log, feed = network._log(env), network._feed(env)
+    assert log.changes == [] and log.dropped_upto == log.version          # nobody can have asked for older changes
+    env.db.add_network([row(0, ip="2.2.2.2", domain="b.com")])
+    fresh(env)
+    assert feed.tick() is True and len(log.changes) == 1                  # a later read does log what changed
+    env.sent.clear()
+    env._clock = lambda db: NOW + network.RESTART_AFTER + timedelta(minutes=1)
+    fresh(env)
+    assert feed.tick() is True
+    assert env.sent[-1][1] == {"epoch": feed.epoch, "resync": True} and log.changes == []       # (the page reloads)
+
+
+class FakeCatalog:
+    def __init__(self, loaded=True):
+        self.loaded = threading.Event()
+        if loaded:
+            self.loaded.set()
+        self.asked = 0
+
+    def search(self, kind="all", query="", limit=0):
+        self.asked += 1
+        return {"apps": [{"exe": "chrome.exe", "name": "Google Chrome"}, {"exe": "tool.exe", "name": "Tool Box"}]}
+
+
+def test_the_catalogs_names_are_taken_by_the_worker_not_by_a_page_call(env):
+    env.catalog = FakeCatalog()
+    env.db.add_network([row(0, domain="a.com"), row(1, exe="tool.exe", ip="2.2.2.2", domain="b.com")])
+    d = get(env)
+    assert env.catalog.asked == 0 and d["rows"][0]["app"] == "Chrome"      # (the page's call never asks the catalog)
+    assert network.maintain(env) is True and env.catalog.asked == 1
+    fresh(env)
+    d = get(env)
+    assert [r["app"] for r in d["rows"]] == ["Google Chrome", "Tool Box"] and d["summary"]["top"] == "Google Chrome"
+    assert [r["site"] for r in get(env, {"query": "google"})["rows"]] == ["a.com"]       # and the search knows the new name
+    assert network.maintain(env) is True and env.catalog.asked == 1        # (once a minute at most)
+
+
+def test_maintain_waits_for_the_catalog_and_leaves_a_hidden_window_alone(env):
+    env.catalog = FakeCatalog(loaded=False)
+    env.db.add_network([row(0)])
+    env.window_visible = lambda: False
+    log = network._log(env)
+    assert network.maintain(env) is False and env.catalog.asked == 0       # (look again soon)
+    env.catalog.loaded.set()
+    assert network.maintain(env) is True and env.catalog.asked == 1        # (the names: once, even hidden)
+    assert not log.loaded                                                  # ... but the database is not read while hidden
+    env.window_visible = lambda: True
+    assert network.maintain(env) is True and log.loaded
+
+
+def test_prewarm_reads_the_hour_and_the_first_click_reads_nothing(env, monkeypatch):
+    env.db.add_network([row(i % 30, ip=f"3.3.3.{i}", domain=f"s{i}.com") for i in range(50)])
+    network.prewarm(env)
+    log = network._log(env)
+    assert log.loaded and network.Filters() in log.views and False in log.apps_cache
+    reads = []
+    monkeypatch.setattr(network._Log, "_read", lambda self, ctx, force: reads.append(1))
+    assert get(env)["total"] == 50 and reads == []
+
+
+def test_the_worker_reads_ahead_and_keeps_the_names(env, monkeypatch):
+    monkeypatch.setattr(workers, "NETLOG_PREWARM_SEC", 0.0)
+    env.catalog = FakeCatalog(loaded=False)
+    env.db.add_network([row(0)])
+    hub = workers.Hub(db_path=None)
+    worker = workers.NetLogWorker(hub)
+    worker.setup()                                                          # (no context: nothing to read)
+    assert not hasattr(env, "_netlog")
+    hub.netlog_ctx = env
+    worker.setup()
+    assert network._log(env).loaded
+    assert worker.tick() == workers.NETLOG_WAIT_SEC                         # the catalog has not loaded: look again soon
+    env.catalog.loaded.set()
+    assert worker.tick() == workers.NETLOG_IDLE_SEC and env.catalog.asked == 1
 
 
 def test_a_live_tick_on_20000_rows_is_cheap(big, capsys):

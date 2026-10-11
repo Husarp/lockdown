@@ -61,6 +61,8 @@ STOP_WAIT_SEC = 1.0        # Workers.stop() waits this long for the workers to w
 USAGE_TICK_SEC = 5.0       # R13: how often a shown window is told today's active seconds (`usage_tick`)
 NETLOG_SEC = 3.0            # R16: how often the Network Log's live feed looks for new rows
 NETLOG_IDLE_SEC = 60.0      # (and how often it wakes when nobody asked for it)
+NETLOG_PREWARM_SEC = 3.0    # the Network Log's last hour is read this long after the agent started (the window comes first)
+NETLOG_WAIT_SEC = 5.0       # (and until the app catalog has loaded, its app names are looked for this often)
 GOAL_KEY, DEFAULT_GOAL_HOURS = "stats.goal_hours", "5"   # the daily screen-time goal (the weekly summary names it)
 
 log = logging.getLogger("lockdown.workers")
@@ -204,6 +206,7 @@ class Hub:
         self.engine = None                         # the reminder engine (set by the ReminderWorker)
         self.netlog_feed = None                    # R16: the Network Log page's live feed (webapi/network.py), set by the Api
         self.netlog_worker = None                  # (set by Workers; the Api pokes it when a page starts a feed)
+        self.netlog_ctx = None                     # the Api's context: the worker reads the last hour ahead and keeps its names
         self._errors: dict = {}
         self._errors_lock = threading.Lock()
 
@@ -841,17 +844,34 @@ class UpdateWorker(Worker):
 class NetLogWorker(Worker):
     """Every NETLOG_SEC, while the Network Log page is shown and Live is on: tell the page the rows that are new
     (webapi/network.py _Feed.tick). Asleep (one wake-up a minute, doing nothing) when no page asked for it; the Api pokes
-    it when one does, and the feed switches itself off when the window is hidden."""
+    it when one does, and the feed switches itself off when the window is hidden.
+
+    Also keeps the page's first visit fast: a few seconds after the agent started it reads the last hour ahead
+    (`network.prewarm`), and while it waits it keeps that copy and the app catalog's names fresh (`network.maintain`,
+    only while the window is shown) - so a click on the Network Log never has to read 20 000 rows."""
     label = "netlog"
     interval = NETLOG_SEC
     uses_db = False
 
+    def setup(self):
+        ctx = self.hub.netlog_ctx
+        if ctx is not None and not self.stop_event.wait(NETLOG_PREWARM_SEC):
+            from webapi import network
+            network.prewarm(ctx)
+
     def tick(self):
         feed = self.hub.netlog_feed
         if feed is None or not feed.on:
-            return NETLOG_IDLE_SEC
+            return self._idle()
         feed.tick()
         return None
+
+    def _idle(self):
+        ctx = self.hub.netlog_ctx
+        if ctx is None:
+            return NETLOG_IDLE_SEC
+        from webapi import network
+        return NETLOG_IDLE_SEC if network.maintain(ctx) else NETLOG_WAIT_SEC
 
 
 # ---------------------------------------------------------------- bad-word notices
