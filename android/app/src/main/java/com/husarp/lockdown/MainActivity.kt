@@ -149,7 +149,7 @@ fun App(askOff: MutableState<Boolean>) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(here.label) },
+                title = { Text(if (route == "blockcal") "Block calendar" else here.label) },
                 actions = {
                     for (d in listOf(Dest.GUARDRAILS, Dest.SETTINGS)) {
                         IconButton(onClick = { nav.go(d) }) { Icon(d.icon, d.label) }
@@ -162,7 +162,7 @@ fun App(askOff: MutableState<Boolean>) {
                 for (d in Dest.entries.filter { it.inBottomBar }) {
                     val t = tone(d.hue)
                     NavigationBarItem(
-                        selected = here == d,
+                        selected = (if (route == "blockcal") Dest.BLOCKING else here) == d,
                         onClick = { nav.go(d) },
                         icon = { Icon(d.icon, d.label) },
                         label = { Text(d.label) },

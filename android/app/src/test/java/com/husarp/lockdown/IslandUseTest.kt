@@ -119,4 +119,9 @@ class IslandUseTest {
         assertEquals(1, LinkProtocol.json.decodeFromString(SyncBody.serializer(), b).useHours!!.size)
         assertNull(LinkProtocol.json.decodeFromString(SyncBody.serializer(), """{"seq":1}""").useHours)
     }
+
+    @Test fun duplicate_hour_rows_are_clamped_to_an_hour() {
+        val h = IslandUse.hourMs(listOf(IslandHourRow("2026-10-10", 5, 3000), IslandHourRow("2026-10-10", 5, 3000)), LocalDate.of(2026, 10, 10))!!
+        assertEquals(3_600_000L, h[5])
+    }
 }

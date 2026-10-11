@@ -55,4 +55,10 @@ class MuteDndTest {
         assertNull(MuteDnd.decode(MuteDnd.encode(null))); assertNull(MuteDnd.decode("x"))
         assertEquals(Saved(2, 4, true), MuteDnd.decode(MuteDnd.encode(Saved(2, 4, true))))
     }
+    @Test fun unreadableFilterIsNotTheUserChangingIt() {
+        val s = MuteDnd.decide(true, true, MuteDnd.UNKNOWN, ours)
+        assertNull(s.filter); assertEquals(ours, s.saved)
+        val after = MuteDnd.decide(true, true, ALARMS, s.saved)   // later reads fine: still ours, no yield
+        assertEquals(ours, after.saved)
+    }
 }

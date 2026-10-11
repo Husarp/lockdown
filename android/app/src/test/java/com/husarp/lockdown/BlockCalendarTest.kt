@@ -23,7 +23,7 @@ class BlockCalendarTest {
     private fun hours(mode: SchedMode, vararg w: Window) = Rule(RuleType.SCHEDULED, schedule = Schedule(mode, w.toList()))
     private val weekdays = listOf(0, 1, 2, 3, 4)
     private fun build(items: List<Item> = emptyList(), groups: List<Group> = emptyList(), modes: List<Mode> = emptyList(),
-                      sleep: SleepCfg = SleepCfg()) = BlockCalendar.build(items, groups, modes, sleep)
+                      sleep: SleepCfg = SleepCfg()) = BlockCalendar.build(items, groups, modes, sleep, java.time.LocalDateTime.of(2026, 10, 11, 12, 0))
 
     @Test fun empty_config_has_seven_empty_days() {
         val w = build()
@@ -60,8 +60,8 @@ class BlockCalendarTest {
 
     @Test fun equal_start_and_end_is_24_hours_starting_that_day() {
         val w = build(listOf(item("a", hours(SchedMode.BLOCK, Window(listOf(2), "08:00", "08:00")))))
-        assertEquals(listOf(Span(0, 1440, Kind.HOURS, listOf("A"))), w.days[2].spans)
-        assertEquals(listOf(Span(0, 1440, Kind.HOURS, listOf("A"))), w.days[3].spans)   // the spill day, as the PC
+        assertEquals(listOf(Span(480, 1440, Kind.HOURS, listOf("A"))), w.days[2].spans)
+        assertEquals(listOf(Span(0, 480, Kind.HOURS, listOf("A"))), w.days[3].spans)   // 24 h from Wed 08:00 to Thu 08:00
         assertTrue(w.days[1].spans.isEmpty())
     }
 
@@ -140,6 +140,16 @@ class BlockCalendarTest {
         val w = build(sleep = SleepCfg(on = true, bedtime = "23:00", wake = "07:00"))
         assertEquals(listOf(Span(0, 420, Kind.BEDTIME, listOf("Bedtime")), Span(1380, 1440, Kind.BEDTIME, listOf("Bedtime"))), w.days[3].spans)
         assertEquals(420, w.days[0].spans.first().end)   // Sunday night's spill
+    }
+
+    @Test fun bedtime_equal_to_wake_is_24_hours() {
+        val w = build(sleep = SleepCfg(on = true, bedtime = "22:00", wake = "22:00"))
+        assertEquals(listOf(Span(0, 1440, Kind.BEDTIME, listOf("Bedtime"))), w.days[3].spans)
+    }
+
+    @Test fun temporary_blocks_that_ran_out_or_have_no_end_are_not_listed() {
+        val w = build(listOf(item("a", Rule(RuleType.TEMPORARY, tempUntil = "2026-10-01T10:00:00")), item("b", Rule(RuleType.TEMPORARY))))
+        assertTrue(w.noClock.isEmpty())
     }
 
     @Test fun bedtime_after_midnight_stays_one_stretch() {

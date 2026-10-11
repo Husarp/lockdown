@@ -225,4 +225,21 @@ class ModesExtrasTest {
     @Test fun a_scheduled_mode_without_pomodoro_has_no_phase() {
         assertNull(Modes.active(mon9, listOf(mode(sched(Window((0..4).toList(), "09:00", "17:00")))), null)!!.phase)
     }
+
+    @Test fun adding_a_pomodoro_to_a_scheduled_mode_asks_even_when_not_running() {
+        val s = sched(Window(listOf(0), "09:00", "17:00"))
+        assertTrue(Modes.modeLooser(mode(s), mode(s, Pomodoro(25, 5, 4, 15)), false))
+        assertFalse(Modes.modeLooser(mode(), mode(null, Pomodoro(25, 5, 4, 15)), false))   // unscheduled: still free
+    }
+
+    @Test fun any_pomodoro_change_in_a_held_scheduled_window_asks() {
+        val s = sched(Window(listOf(0), "09:00", "17:00"))
+        val p = Pomodoro(25, 5, 4, 15)
+        assertTrue(Modes.modeLooser(mode(s, p), mode(s, p.copy(work = 30)), true))     // longer work re-times the cycle
+        assertTrue(Modes.modeLooser(mode(s, p), mode(s, p.copy(rounds = 6)), true))
+        assertTrue(Modes.modeLooser(mode(s, p), mode(s, p.copy(brk = 3)), true))
+        assertFalse(Modes.modeLooser(mode(s, p), mode(s, p), true))
+        assertFalse(Modes.modeLooser(mode(s, p), mode(s, p.copy(work = 30)), false))   // outside the window tightening is free
+        assertTrue(Modes.modeLooser(mode(s, p), mode(s, p.copy(work = 20)), false))    // loosening still asks
+    }
 }

@@ -204,6 +204,10 @@ object Modes {
         if (!lockedNow && old.schedule == null) return false
         val op = old.pomodoro
         val np = new.pomodoro
+        // A scheduled mode cycles, and breaks don't block: adding a Pomodoro opens breaks in the window; and while
+        // the window is held any change re-times the cycle (anchored to the window start), so "now" can land in a break.
+        if (old.schedule != null && op == null && np != null) return true
+        if (old.schedule != null && lockedNow && op != null && np != null && np != op) return true
         if (op != null && (np == null || np.work < op.work || np.rounds < op.rounds || np.brk > op.brk || np.long > op.long)) return true
         if (!lockedNow) return false
         return !new.categories.containsAll(old.categories) || !new.items.containsAll(old.items) ||

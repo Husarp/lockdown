@@ -27,10 +27,9 @@ object BlockCalendar {
         val end = mins(win.end)
         val days = win.days.filter { it in 0..6 }
         if (start < end) return if (weekday in days) listOf(start to end) else emptyList()
-        if (start == end) return if (weekday in days || (weekday + 6) % 7 in days) listOf(0 to DAY) else emptyList()
         val out = ArrayList<Pair<Int, Int>>()
         if (weekday in days) out.add(start to DAY)
-        if ((weekday + 6) % 7 in days && end > 0) out.add(0 to end)
+        if ((weekday + 6) % 7 in days && end > 0) out.add(0 to end)   // start == end: 24 h from start
         return out
     }
 
@@ -40,7 +39,8 @@ object BlockCalendar {
         return merge(if (s.mode == SchedMode.BLOCK) wins else complement(wins))
     }
 
-    fun build(items: List<Item>, groups: List<Group>, modes: List<Mode>, sleep: SleepCfg): Week {
+    fun build(items: List<Item>, groups: List<Group>, modes: List<Mode>, sleep: SleepCfg,
+              now: java.time.LocalDateTime = java.time.LocalDateTime.now()): Week {
         // kind -> weekday -> (interval, label)
         val parts = Array(7) { ArrayList<Triple<Kind, Pair<Int, Int>, String>>() }
         val noClock = ArrayList<Pair<Kind, String>>()
@@ -55,7 +55,7 @@ object BlockCalendar {
                 for (d in 0..6) scheduleOn(r.schedule, d).forEach { parts[d].add(Triple(Kind.HOURS, it, item.name)) }
             }
             if (rules.any { it.type == RuleType.TIME_LIMIT || it.type == RuleType.SWITCH_LIMIT }) noClock.add(Kind.LIMIT to item.name)
-            if (rules.any { it.type == RuleType.TEMPORARY }) noClock.add(Kind.TEMPORARY to item.name)
+            if (rules.any { it.type == RuleType.TEMPORARY && runCatching { now.isBefore(java.time.LocalDateTime.parse(it.tempUntil)) }.getOrDefault(false) }) noClock.add(Kind.TEMPORARY to item.name)
         }
         for (m in modes) {
             val s = m.schedule ?: continue
@@ -66,7 +66,7 @@ object BlockCalendar {
         if (sleep.on) {
             val b = runCatching { mins(sleep.bedtime) }.getOrNull()
             val w = runCatching { mins(sleep.wake) }.getOrNull()
-            if (b != null && w != null && b != w) {
+            if (b != null && w != null) {
                 val win = Window((0..6).toList(), sleep.bedtime, sleep.wake)
                 for (d in 0..6) windowOn(win, d).forEach { parts[d].add(Triple(Kind.BEDTIME, it, "Bedtime")) }
             }

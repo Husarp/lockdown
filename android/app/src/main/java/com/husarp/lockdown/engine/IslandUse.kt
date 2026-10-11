@@ -74,7 +74,7 @@ object IslandUse {
         val mine = rows.filter { it.day == d }
         if (mine.isEmpty()) return null
         val out = LongArray(24)
-        for (r in mine) out[r.hour] += r.sec * 1000L
+        for (r in mine) out[r.hour] = minOf(3_600_000L, out[r.hour] + r.sec * 1000L)   // duplicate rows can't pass an hour
         return out.toList()
     }
 

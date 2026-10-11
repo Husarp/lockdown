@@ -91,6 +91,7 @@ fun BlockingScreen(onOpenNetLog: () -> Unit, onOpenCalendar: () -> Unit = {}) {
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun BlockList(
     onAdd: () -> Unit,
@@ -156,7 +157,7 @@ private fun BlockList(
                 )
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val prot = cfg.protection.enabled.size
                     Chip(if (prot > 0) "Protection · $prot" else "Protection", selected = prot > 0, icon = Kinds.PROTECTION.icon,
                         hue = Kinds.PROTECTION.hue, iconTint = tone(Kinds.PROTECTION.hue).accent) { onProtection() }

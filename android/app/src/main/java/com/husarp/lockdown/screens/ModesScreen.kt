@@ -239,10 +239,13 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 SwitchRowInline("Mute notifications", draft.mute) { draft = draft.copy(mute = it) }
                 val fresh = com.husarp.lockdown.guard.rememberFresh()      // re-read on every return from Android's settings
                 if (draft.mute && !remember(fresh) { com.husarp.lockdown.guard.Perms.dnd(ctx) }) {
-                    Text("Do Not Disturb access is off, so only Lockdown's own warnings and reminders are muted, not other apps.",
-                        style = MaterialTheme.typography.bodySmall, color = cs.error, modifier = Modifier.padding(horizontal = 16.dp))
-                    Button(onClick = { runCatching { ctx.startActivity(com.husarp.lockdown.guard.Perms.dndIntent().addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } },
-                        modifier = Modifier.padding(horizontal = 16.dp)) { Text("Allow Do Not Disturb access") }
+                    Column(Modifier.padding(vertical = 4.dp)) {
+                        Text("Do Not Disturb access is off, so only Lockdown's own warnings and reminders are muted, not other apps.",
+                            style = MaterialTheme.typography.bodySmall, color = cs.error)
+                        androidx.compose.material3.TextButton(onClick = { runCatching { ctx.startActivity(com.husarp.lockdown.guard.Perms.dndIntent().addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }) {
+                            Text("Allow Do Not Disturb access")
+                        }
+                    }
                 }
                 SwitchRowInline("Focus (Pomodoro)", draft.pomodoro != null) { on -> draft = draft.copy(pomodoro = if (on) Pomodoro() else null) }
                 draft.pomodoro?.let { p ->

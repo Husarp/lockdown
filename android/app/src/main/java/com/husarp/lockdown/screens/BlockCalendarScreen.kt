@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,15 +27,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.ModesStore
@@ -84,7 +86,7 @@ fun BlockCalendarScreen() {
     val modes by ModesStore.modes.collectAsStateWithLifecycle()
     val cs = MaterialTheme.colorScheme
     val today = TrustedTime.local(LocalContext.current).dayOfWeek.value - 1
-    var picked by remember { mutableIntStateOf(today) }
+    var picked by rememberSaveable { mutableIntStateOf(today) }
     val week = remember(cfg.items, cfg.groups, modes, cfg.sleep) { BlockCalendar.build(cfg.items, cfg.groups, modes, cfg.sleep) }
     val kinds = remember(week) { week.days.flatMap { d -> d.spans.map { it.kind } }.distinct().sorted() }
     val day = week.days[picked]
@@ -102,7 +104,7 @@ fun BlockCalendarScreen() {
                     Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(tone(l.hue).accent))
                     Icon(l.icon, null, Modifier.size(14.dp), tint = tone(l.hue).accent)
                     Text(kindName(k) + if (k == Kind.LIMIT || k == Kind.TEMPORARY) " (no clock)" else "",
-                        style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        style = MaterialTheme.typography.labelMedium)
                 }
                 if (rowKinds.size == 1) Box(Modifier.weight(1f))
             }
@@ -111,10 +113,14 @@ fun BlockCalendarScreen() {
         Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(8.dp)) {
             Row(Modifier.fillMaxWidth()) {
                 Box(Modifier.width(28.dp))
-                for (d in 0..6) Text(DAY_NAMES[d], Modifier.weight(1f).clickable { picked = d }.padding(vertical = 4.dp), maxLines = 1,
-                    style = MaterialTheme.typography.labelSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    fontWeight = if (d == today) FontWeight.Bold else FontWeight.Normal,
-                    color = if (d == picked) cs.primary else cs.onSurfaceVariant)
+                for (d in 0..6) Box(Modifier.weight(1f).heightIn(min = 48.dp)
+                    .clickable(role = androidx.compose.ui.semantics.Role.Tab) { picked = d }
+                    .semantics { selected = d == picked }, contentAlignment = Alignment.Center) {
+                    Text(DAY_NAMES[d], maxLines = 1,
+                        style = MaterialTheme.typography.labelSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        fontWeight = if (d == today) FontWeight.Bold else FontWeight.Normal,
+                        color = if (d == picked) cs.primary else cs.onSurfaceVariant)
+                }
             }
             Row(Modifier.fillMaxWidth().height(HOUR_H * 24)) {
                 Box(Modifier.width(28.dp).fillMaxHeight()) {

@@ -656,13 +656,13 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
     /** Do Not Disturb follows a muting mode (engine/MuteDnd.kt). Only main does it (it is the whole phone's); what it
      *  changed is remembered in prefs, so a mode that ended while the app was dead still puts the user's setting back. */
-    private fun syncDnd() {
+    private fun syncDnd(release: Boolean = false) {
         if (IslandLink.isHelper) return
         val p = getSharedPreferences("mute-dnd", MODE_PRIVATE)
         val saved = com.husarp.lockdown.engine.MuteDnd.decode(p.getString("saved", null))
         val nm = getSystemService(android.app.NotificationManager::class.java)
         val now = Enforce.ldt(TrustedTime.now(this))
-        val step = com.husarp.lockdown.engine.MuteDnd.decide(muteWanted(now), nm.isNotificationPolicyAccessGranted,
+        val step = com.husarp.lockdown.engine.MuteDnd.decide(!release && muteWanted(now), nm.isNotificationPolicyAccessGranted,
             nm.currentInterruptionFilter, saved)
         step.filter?.let { nm.setInterruptionFilter(it) }
         if (step.saved != saved) p.edit().putString("saved", com.husarp.lockdown.engine.MuteDnd.encode(step.saved)).apply()
@@ -700,6 +700,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun onUnbind(intent: Intent?): Boolean { connected = false; return super.onUnbind(intent) }
     override fun onDestroy() {
         connected = false; removeOverlay()
+        runCatching { syncDnd(release = true) }        // the service going away puts Do Not Disturb back if we set it
         runCatching { Grayscale.app(this, false) }     // nothing watches what's in front any more: colour back
         // The bedtime screen goes with the service: count it as dismissed, so it comes back on its escalation.
         if ("sleep" in remindViews) runCatching { ReminderRunner.answer(this, "sleep", "dismiss") }

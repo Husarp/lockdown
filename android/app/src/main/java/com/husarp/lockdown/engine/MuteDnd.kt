@@ -11,6 +11,7 @@ package com.husarp.lockdown.engine
  */
 object MuteDnd {
     const val ALL = 1            // INTERRUPTION_FILTER_ALL = Do Not Disturb off
+    const val UNKNOWN = 0        // INTERRUPTION_FILTER_UNKNOWN = couldn't be read: says nothing about the user
     const val ALARMS = 4         // INTERRUPTION_FILTER_ALARMS = what the mode sets: only alarms get through
 
     data class Saved(val prev: Int, val set: Int, val yielded: Boolean = false)
@@ -24,6 +25,7 @@ object MuteDnd {
             // already on (or unknown): the user's, leave it. Off: turn it on and remember what to put back.
             return if (wantMute && current == ALL) Step(ALARMS, Saved(current, ALARMS)) else Step(null, null)
         }
+        if (current == UNKNOWN) return Step(null, saved)      // an unreadable value is not the user changing it
         if (saved.yielded) return Step(null, if (wantMute) saved else null)
         if (current != saved.set) return Step(null, if (wantMute) saved.copy(yielded = true) else null)   // the user's choice now
         return if (wantMute) Step(null, saved) else Step(saved.prev, null)

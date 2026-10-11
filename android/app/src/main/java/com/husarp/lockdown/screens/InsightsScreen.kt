@@ -45,7 +45,7 @@ import java.time.LocalDate
 
 private data class AppRow(val pkg: String, val label: String, val ms: Long)
 private data class Bar(val label: String, val ms: Long)
-private data class InsightData(val total: Long, val days: Int, val perApp: List<AppRow>, val bars: List<Bar>, val hourly: Boolean)
+private data class InsightData(val total: Long, val days: Int, val perApp: List<AppRow>, val bars: List<Bar>, val hourly: Boolean, val islandNotInBars: Long = 0L)
 
 @Composable
 fun InsightsScreen() {
@@ -91,7 +91,7 @@ fun InsightsScreen() {
                     Bar(label, ms)
                 }
             }
-            InsightData((du?.totalMs ?: 0L) + islandTotal, len, apps, bars, hourly)
+            InsightData((du?.totalMs ?: 0L) + islandTotal, len, apps, bars, hourly, if (hourly && islandHours == null) islandTotal else 0L)
         }
     }
 
@@ -126,6 +126,10 @@ fun InsightsScreen() {
                             if (b.label.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Text(b.label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
                         }
                     }
+                }
+                if (d.islandNotInBars >= 60_000L) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Includes ${d.islandNotInBars / 60_000} min in Island not shown by hour.", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                 }
             }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)) {
