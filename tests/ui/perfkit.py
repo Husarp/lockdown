@@ -47,6 +47,7 @@ BUDGET = {
 VIEWS: list = []        # (label, page id, click selector, ready selector)
 SCROLLS: list = []      # (label, page id, scroll selector, probe selector)
 SCROLLS.append(("blocking overview", "blocking", "#bo-list", ".vl-row:not([hidden])"))     # R18: the Overview's virtual list
+VIEWS.append(("blocking/add", "blocking", '[data-tab="add"]', ".ad-row"))     # R20: the Add / Edit tab, first visit (picker list on screen)
 VIEWS.append(("screentime/websites", "screentime", '[data-tab="websites"]', '[data-pane="websites"] .st-vl .vl-row'))     # R14: a tab, first visit
 VIEWS.append(("screentime/apps", "screentime", '[data-tab="apps"]', '[data-pane="apps"] .st-vl .vl-row'))                     # (apps last: the page then stays on it for the scroll below)
 SCROLLS.append(("screentime apps", "screentime", '[data-pane="apps"] .st-vl', ".vl-row:not([hidden])"))

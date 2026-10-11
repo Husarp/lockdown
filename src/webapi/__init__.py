@@ -29,6 +29,7 @@ PAGE_MODULES = [
     "protection",
     "groups",
     "screentime",
+    "blocking_edit",
 ]
 
 for _name in PAGE_MODULES:

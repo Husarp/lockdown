@@ -27,3 +27,4 @@ tabs.overview = () => import("./overview.js");
 tabs.calendar = () => import("./calendar.js");
 tabs.protect = () => import("./protection.js");
 tabs.groups = () => import("./groups.js");
+tabs.add = () => import("./add.js");
