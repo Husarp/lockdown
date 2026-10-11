@@ -120,7 +120,8 @@ class ReminderUI(Protocol):
 
     def break_start(self, until: datetime) -> None:
         """A strict break begins: minimise everything now and say so (MinimizeWorker keeps windows down until
-        `until`, and says "Break in progress" - the adapter does not loop)."""
+        `until`, and says "Break in progress" - the adapter does not loop). The new window also puts the "Break time"
+        cover up; its optional `break_blocked()` (MinimizeWorker's thread) brings the cover back after a Dismiss."""
 
     def break_end(self) -> None:
         """The break is over: say so."""
@@ -677,9 +678,10 @@ class MinimizeWorker(Worker):
     interval = MINIMIZE_SEC
     uses_db = False
 
-    def __init__(self, hub: Hub, alerter: Alerter, interval: float | None = None):
+    def __init__(self, hub: Hub, alerter: Alerter, interval: float | None = None, reminder_ui=None):
         super().__init__(hub, interval)
         self.alerter = alerter
+        self.reminder_ui = reminder_ui     # (its break_blocked(), if it has one, brings the break cover back)
         self._set_for = None
         self._set: dict = {}
         self._writes = None
@@ -732,6 +734,9 @@ class MinimizeWorker(Worker):
                 self._break_notice_at = now.timestamp()
                 self.hub.notify(f"Break in progress - {max(1, round((until - now).total_seconds() / 60))} min left.",
                                 force=True)
+            blocked = getattr(self.reminder_ui, "break_blocked", None)
+            if blocked is not None:     # (the new window: the cover comes back, unless it is up; any thread is fine)
+                blocked()
 
 
 # ---------------------------------------------------------------- reminders
@@ -938,8 +943,8 @@ class Workers:
         self.status = StatusWorker(self.hub)
         self.block_events = BlockEventWorker(self.hub, self.alerter)
         self.watcher = WatcherWorker(self.hub)
-        self.minimize = MinimizeWorker(self.hub, self.alerter)
         self.reminder_ui = reminder_ui or RecordingReminderUI()
+        self.minimize = MinimizeWorker(self.hub, self.alerter, reminder_ui=self.reminder_ui)
         self.reminders = ReminderWorker(self.hub, self.reminder_ui)
         self.updates = UpdateWorker(self.hub)
         self.netlog = NetLogWorker(self.hub)

@@ -190,8 +190,8 @@ class Overlay:
             if self._cur is None:
                 raise ValueError("That is not on screen any more.")
             cur = self._cur
-            if "dismiss" not in [b["action"] for b in cur["buttons"]]:
-                return {"back": True}           # (a running break has nothing to dismiss: it just goes on)
+            if cur["kind"] == "break" or "dismiss" not in [b["action"] for b in cur["buttons"]]:
+                return {"back": True}           # (a running break: Cancel only goes back to the countdown)
             if self._waiting():
                 self._restart_wait()
                 result = {"back": True}

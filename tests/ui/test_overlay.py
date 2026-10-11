@@ -465,6 +465,19 @@ def test_emergency_on_the_break_cover_works_and_cancel_comes_back_to_the_countdo
     assert ov.answers == [("sleep", "emergency:t1")]
 
 
+def test_dismiss_on_the_break_cover_is_a_button_that_takes_it_down(ov, page):
+    ov.open()
+    ov.strict_break(5, buttons=(("Emergency (3 left)", "emergency"), ("Dismiss", "dismiss")))
+    labels = page.eval_on_selector_all("#fs button", "els => els.map(e => e.textContent.trim())")
+    assert labels == ["Dismiss", "Emergency (3 left)"] and ov.text(".fs h1") == "Break time"
+    assert not page.locator('#fs button[data-action="dismiss"]').is_disabled()          # (a break cover has no Dismiss wait)
+    page.click('#fs button[data-action="dismiss"]')
+    deadline = time.time() + 3
+    while not ov.answers and time.time() < deadline:
+        time.sleep(0.02)
+    assert ov.answers == [("break-run", "dismiss")]
+
+
 # ================================================================ cheap: no timers while hidden, nothing animating
 
 def test_nothing_is_animated_and_nothing_ticks_once_the_cover_is_down(ov, page, perf):

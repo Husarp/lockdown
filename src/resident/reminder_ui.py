@@ -70,22 +70,43 @@ class CornerReminderUI:
         self.hub.notify(text)
 
     def break_start(self, until):
-        """A strict break: every window down now; MinimizeWorker keeps them down until `until` and says "Break in
-        progress" every 12 s."""
+        """A strict break: every window down now and the "Break time" cover up; MinimizeWorker keeps the windows down
+        until `until` and says "Break in progress" every 12 s. Dismiss takes the cover down (the break goes on); it
+        comes back only when a window you brought to the front is sent down again (break_blocked)."""
         self.hub.win.minimize_all()
         now = getattr(self.engine, "now", None)
         left = max(1, round((until - now).total_seconds() / 60)) if now else 1
         self.hub.notify(f"Break started - your windows are minimised for {left} min. Step away from the screen.",
                         force=True)
+        self._break_cover(until)
 
     def break_end(self):
+        self.close(BREAK_COVER_KEY)
         self.hub.notify("Break over - welcome back.", force=True)
 
+    def break_blocked(self):
+        """(MinimizeWorker's thread) You tried to open something during the strict break and it was sent back down:
+        the cover comes up again, unless it is up already. It runs on the reminder worker's thread, which owns the
+        engine and its database."""
+        if self.worker is not None and self.overlay_handler is not None:
+            self.worker.submit(self._reshow_break_cover)
+
+    def _reshow_break_cover(self):
+        engine = self.engine
+        until, now = getattr(engine, "break_until", None), getattr(engine, "now", None)
+        if not until or getattr(engine, "paused", None) or (now and now >= until) or self._cover_up():
+            return          # (no break any more, an emergency paused it, or the cover is up: nothing to do, no flicker)
+        self._break_cover(until)
+
+    def _cover_up(self):
+        key = getattr(self.overlay_handler, "key", None)
+        return callable(key) and key() == BREAK_COVER_KEY
+
     def _break_cover(self, until):
-        # parked: strict-break cover, see PLAN.md
         """The strict break's full-screen "Break time" (R08) until it ends - not while Do Not Disturb or a muting mode
-        holds the alerts (the windows are minimised all the same). Its only button is Emergency, while there are uses
-        left: the way out that pauses the break alerts, so nobody is shut out of the PC for the whole break."""
+        holds the alerts (the windows are minimised all the same). Buttons: Emergency while there are uses left (the
+        way out that pauses the break alerts, so nobody is shut out of the PC for the whole break) and Dismiss (free:
+        the cover goes, the break goes on)."""
         if self.overlay_handler is None or getattr(self.engine, "quiet", False):
             return
         buttons = []
@@ -93,6 +114,7 @@ class CornerReminderUI:
             left = emergency.available(self.worker.db, self.engine.now)
             if left:
                 buttons.append((f"Emergency ({left} left)", "emergency"))
+        buttons.append(("Dismiss", "dismiss"))
         self.overlay(BREAK_COVER_KEY, "Break time", BREAK_COVER_TEXT, until, buttons)
 
     def start_mode(self, mode_id, until):

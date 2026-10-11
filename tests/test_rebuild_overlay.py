@@ -20,7 +20,7 @@ import webapi
 from db import Database
 from gui import screens
 from resident import overlay as overlay_mod
-from resident import reminder_ui, windows
+from resident import reminder_ui, windows, workers
 from resident.overlay import Overlay, OverlayHost, overlay_background, plan_rects
 from webapi import core, guard
 from webapi.guard import GuardService
@@ -522,6 +522,32 @@ def test_a_break_cover_cannot_be_dismissed_or_snoozed_or_turned_off(env):
     assert env.overlay.shown and env.answers == []
 
 
+def test_dismiss_on_the_break_cover_takes_it_down_for_free_and_the_break_goes_on(env):
+    env.lock()                                                                          # (Anti-Bypass on: still no challenge)
+    reminders.save(env.db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "strict": True})
+    env.engine.now, env.engine.break_until = env.now, BREAK_END
+    break_cover(env, [("Emergency (3 left)", "emergency"), ("Dismiss", "dismiss")])
+    assert env.call("overlay_answer", "dismiss")["data"] == {"done": True, "key": "break-run"}
+    assert not env.overlay.shown and not env.host.shown
+    assert env.answers == [("break-run", "dismiss")] and env.engine.break_until == BREAK_END     # (the engine ignores it: the break goes on)
+    env.tick(1)
+    assert env.engine.break_until == BREAK_END and env.overlay.key() != "break-run"      # (nothing brings the break cover back)
+
+
+def test_cancel_in_the_emergency_list_goes_back_to_the_countdown_and_does_not_dismiss(env):
+    break_cover(env, [("Emergency (3 left)", "emergency"), ("Dismiss", "dismiss")])
+    assert env.call("overlay_answer", "cancel")["data"] == {"back": True}
+    assert env.overlay.shown and env.answers == []
+
+
+def test_dismissing_the_break_cover_brings_the_bedtime_screen_waiting_behind_it(env):
+    up(env)
+    break_cover(env, [("Dismiss", "dismiss")])
+    assert env.overlay.key() == "break-run"
+    assert env.call("overlay_answer", "dismiss")["data"]["done"]
+    assert env.overlay.key() == "sleep"
+
+
 def test_a_break_goes_in_front_of_the_bedtime_screen_which_comes_back_after_it(env):
     up(env)
     env.mono.t += 30                                                                    # (its wait is over)
@@ -596,36 +622,145 @@ def test_emergency_on_a_break_cover_pauses_the_alerts_and_ends_the_break(env):
     assert env.engine.break_until is None and ended == [1]
 
 
-# ---------------------------------------------------------------- the ReminderUI: the strict break (no cover)
+# ---------------------------------------------------------------- the ReminderUI: the strict break and its cover
 
 class Handler:
+    """A stand-in cover that only remembers what it was asked."""
+
     def __init__(self):
-        self.calls = []
+        self.calls, self.up = [], None
 
     def show(self, *args):
         self.calls.append(("show", *args))
+        self.up = args[0]
 
     def close(self, key):
         self.calls.append(("close", key))
+        self.up = None
+
+    def key(self):
+        return self.up
 
 
-def reminder_ui_env(tmp_path, quiet=False):
+class ImmediateWorker:
+    """The reminder worker: submit() runs at once (it would run on the worker's thread), answers are remembered."""
+
+    def __init__(self, db):
+        self.db, self.answers = db, []
+
+    def submit(self, fn):
+        fn()
+
+    def answer(self, key, action):
+        self.answers.append((key, action))
+
+
+def reminder_ui_env(tmp_path, quiet=False, handler=None):
     db = Database(tmp_path / "r.db")
     hub = SimpleNamespace(snapshot=None, notify=lambda *a, **k: None, win=SimpleNamespace(minimize_all=lambda: 1))
     corner = SimpleNamespace(popup_sink=None, remove=lambda key: None)
-    ui = reminder_ui.CornerReminderUI(hub, corner, overlay_handler=Handler())
-    ui.engine = SimpleNamespace(now=NIGHT, quiet=quiet)
-    ui.worker = SimpleNamespace(db=db)
+    ui = reminder_ui.CornerReminderUI(hub, corner, overlay_handler=handler or Handler())
+    ui.engine = SimpleNamespace(now=NIGHT, quiet=quiet, break_until=BREAK_END, paused=None)
+    ui.worker = ImmediateWorker(db)
     return ui, db
 
 
-def test_a_strict_break_shows_no_cover_and_still_minimises_and_tells(tmp_path):
+def shows(ui):
+    return [c for c in ui.overlay_handler.calls if c[0] == "show"]
+
+
+def test_a_strict_break_starts_with_the_cover_saying_break_time_with_emergency_and_dismiss(tmp_path):
     ui, _db = reminder_ui_env(tmp_path)
     minimised = []
     ui.hub.win.minimize_all = lambda: minimised.append(1)
     ui.break_start(BREAK_END)
+    assert minimised == [1]                                                             # (the windows go down as before)
+    [(_, key, title, text, until, buttons)] = shows(ui)
+    assert (key, title, text, until) == ("break-run", "Break time", reminder_ui.BREAK_COVER_TEXT, BREAK_END)
+    assert buttons == [("Emergency (3 left)", "emergency"), ("Dismiss", "dismiss")]
+
+
+def test_no_emergency_button_when_there_are_no_uses_left(tmp_path, monkeypatch):
+    ui, _db = reminder_ui_env(tmp_path)
+    monkeypatch.setattr(reminder_ui.emergency, "available", lambda db, now: 0)
+    ui.break_start(BREAK_END)
+    assert shows(ui)[0][5] == [("Dismiss", "dismiss")]
+
+
+def test_no_cover_while_do_not_disturb_holds_the_alerts_but_the_windows_still_go_down(tmp_path):
+    ui, _db = reminder_ui_env(tmp_path, quiet=True)
+    minimised = []
+    ui.hub.win.minimize_all = lambda: minimised.append(1)
+    ui.break_start(BREAK_END)
+    ui.break_blocked()                                                                  # (and trying to open something)
+    assert minimised == [1] and ui.overlay_handler.calls == []
+
+
+def test_the_break_ending_takes_the_cover_down(tmp_path):
+    ui, _db = reminder_ui_env(tmp_path)
+    ui.break_start(BREAK_END)
     ui.break_end()
-    assert minimised == [1] and ui.overlay_handler.calls == []                          # parked: the cover is not used
+    assert ui.overlay_handler.calls[-1] == ("close", "break-run") and ui.overlay_handler.up is None
+
+
+def test_a_window_minimised_during_the_break_brings_the_cover_back_once(tmp_path):
+    ui, _db = reminder_ui_env(tmp_path)
+    ui.break_start(BREAK_END)
+    ui.overlay_handler.close("break-run")                                               # (Dismiss)
+    ui.break_blocked()
+    assert len(shows(ui)) == 2 and ui.overlay_handler.up == "break-run"
+    ui.break_blocked()
+    ui.break_blocked()
+    assert len(shows(ui)) == 2                                                          # up already: nothing, no flicker
+
+
+def test_nothing_brings_the_cover_back_after_the_break_the_emergency_or_a_dismiss_alone(tmp_path):
+    ui, _db = reminder_ui_env(tmp_path)
+    ui.break_start(BREAK_END)
+    ui.overlay_handler.close("break-run")
+    assert len(shows(ui)) == 1                                                          # (no window tried: it stays down)
+    ui.engine.paused = NIGHT + timedelta(minutes=10)                                    # an emergency paused the alerts
+    ui.break_blocked()
+    ui.engine.paused, ui.engine.break_until = None, None                                # the break is over
+    ui.break_blocked()
+    ui.engine.break_until = NIGHT - timedelta(seconds=1)                                # ... or its time has passed
+    ui.break_blocked()
+    assert len(shows(ui)) == 1
+
+
+def test_with_no_worker_or_cover_a_blocked_window_does_nothing(tmp_path):
+    ui, _db = reminder_ui_env(tmp_path)
+    ui.worker = None
+    ui.break_blocked()
+    ui.worker, ui.overlay_handler = ImmediateWorker(None), None
+    ui.break_blocked()
+
+
+def test_the_minimize_worker_asks_for_the_cover_only_when_it_sent_a_window_down(tmp_path):
+    ui, _db = reminder_ui_env(tmp_path)
+    ui.break_start(BREAK_END)
+    ui.overlay_handler.close("break-run")                                               # (Dismiss)
+    front = {"down": False}
+    hub = SimpleNamespace(
+        engine=ui.engine, snapshot=None, notify=lambda *a, **k: None, usage=SimpleNamespace(limit_writes=0),
+        clock=SimpleNamespace(now_with=lambda offset: NIGHT), status_worker=None,
+        win=SimpleNamespace(minimize_foreground=lambda: front["down"], foreground=lambda: (0, "")))
+    worker = workers.MinimizeWorker(hub, None, reminder_ui=ui)
+    worker.tick()
+    assert len(shows(ui)) == 1                                                          # nothing opened: it stays down
+    front["down"] = True
+    worker.tick()
+    worker.tick()
+    assert len(shows(ui)) == 2 and ui.overlay_handler.up == "break-run"                 # once, not on every tick
+
+
+def test_the_legacy_window_and_a_recording_ui_are_left_alone_by_the_minimize_worker():
+    hub = SimpleNamespace(
+        engine=SimpleNamespace(break_until=BREAK_END), snapshot=None, notify=lambda *a, **k: None,
+        usage=SimpleNamespace(limit_writes=0), clock=SimpleNamespace(now_with=lambda offset: NIGHT), status_worker=None,
+        win=SimpleNamespace(minimize_foreground=lambda: True, foreground=lambda: (0, "")))
+    for ui in (None, workers.RecordingReminderUI(), SimpleNamespace()):
+        workers.MinimizeWorker(hub, None, reminder_ui=ui).tick()
 
 
 def test_with_no_overlay_handler_the_break_is_as_before(tmp_path):
