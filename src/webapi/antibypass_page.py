@@ -282,9 +282,9 @@ def antibypass_unlock_to_edit(ctx):
 
 @core.loosen
 def antibypass_try(ctx):
-    """"Try the challenge": the same challenge as a loosening change would meet, even when none is turned on, with
-    nothing to change. (Passing it opens the usual unlock - that is what a passed challenge does.)"""
-    return _unlock_request(ctx, "Try the challenge - nothing is changed", True)
+    """"Try the challenge": the same challenge as a loosening change would meet, even when none is turned on or it is
+    unlocked, with nothing to change. A dry run: passing it opens no unlock and starts no wait (R28)."""
+    return ctx.guard.request(["Try the challenge - nothing is changed"], lambda: _page(ctx), dry=True)
 
 
 # ---------------------------------------------------------------- Pause my blocks

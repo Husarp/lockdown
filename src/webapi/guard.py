@@ -30,8 +30,9 @@ SHOWN_CHANGES = 5           # lines listed in the challenge; the rest is "and N 
 class _Pending:
     """One request waiting for its challenge."""
 
-    def __init__(self, changes, action, cancel, force, now):
+    def __init__(self, changes, action, cancel, force, now, dry=False):
         self.changes, self.action, self.cancel, self.force = changes, action, cancel, force
+        self.dry = dry              # a dry run ("Try the challenge"): a pass opens no unlock and starts no wait
         self.created = now
         self.mode = None            # set by begin(): phrase | grid | waiting | closed
         self.phrase = None          # what must be typed (phrase mode) ...
@@ -61,16 +62,17 @@ class GuardService:
 
     # ---------------- asking
 
-    def request(self, changes: list[str], action, cancel=None, force: bool = False) -> Envelope:
+    def request(self, changes: list[str], action, cancel=None, force: bool = False, dry: bool = False) -> Envelope:
         """Run `action` now if Anti-Bypass allows it (status "free"; with force - a locked mode - only while a passed
         challenge is still unlocked), else keep it under a ticket for the challenge. `cancel` undoes whatever the
-        page shows if the challenge is cancelled or never passed."""
+        page shows if the challenge is cancelled or never passed. `dry`: always the challenge, and passing it only runs
+        `action` - no unlock is opened and no wait is started (nothing is allowed by it)."""
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
-        if antibypass.status(cfg, now) == "free" and not (force and not antibypass.unlocked_until(cfg, now)):
+        if not dry and antibypass.status(cfg, now) == "free" and not (force and not antibypass.unlocked_until(cfg, now)):
             return ok(action())
         changes = [str(c) for c in changes]
-        pending = _Pending(changes, action, cancel, force, self._mono())
+        pending = _Pending(changes, action, cancel, force, self._mono(), dry)
         ticket = secrets.token_urlsafe(18)
         with self._lock:
             previous, self._ticket, self._open = self._open, ticket, pending
@@ -168,6 +170,8 @@ class GuardService:
                 pending.started = self._mono()      # (the clock starts over: a macro has to wait the full time again)
                 return fail("Too fast - type it yourself.")
             self._ticket = self._open = None        # one use: whatever happens next, this ticket is gone
+        if pending.dry:
+            return ok({"passed": True, "dry": True, "result": pending.action()})
         waiting = antibypass.unlock(db, now)
         if waiting:
             self._run_cancel(pending)               # a cooling-off period: nothing is done now, come back later

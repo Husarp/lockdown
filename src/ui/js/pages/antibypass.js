@@ -146,7 +146,7 @@ export function mount(el_, pg) {
   page = pg;
   root.innerHTML = `${STYLE}<div class="page ab">
     <div class="page-h"><div class="grow"><h1>Anti-Bypass</h1><p class="sub">Tightening a rule is instant. Loosening one asks for the challenge first.</p></div>
-      <button class="btn" type="button" data-act="try" title="Opens the challenge as it would meet you - there is nothing to change. Passing it unlocks changes for a few minutes, like any pass.">${ic("keyboard")}Try the challenge</button></div>
+      <button class="btn" type="button" data-act="try" title="Opens the challenge as it would meet you - there is nothing to change. A practice run: passing it unlocks nothing.">${ic("keyboard")}Try the challenge</button></div>
     <section class="notice ab-banner k-grey" data-k="banner" role="status">${ic("shield")}
       <div class="ab-bt"><b data-k="b-title"></b><span class="muted small" data-k="b-text"></span></div>
       <button class="btn btn-sm" type="button" data-act="lock" hidden>${ic("lock")}Lock now</button>

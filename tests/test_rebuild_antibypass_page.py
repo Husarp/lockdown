@@ -392,16 +392,24 @@ def test_try_the_challenge_shows_it_even_with_nothing_turned_on_and_changes_no_s
     begin = data(api.challenge_begin(ticket))
     assert begin["mode"] == "phrase" and begin["changes"] == ["Try the challenge - nothing is changed"]
     out = pass_challenge(ctx, api, ticket)
-    assert out["passed"]
-    after = stored(ctx)
-    for key in ("phrase", "length", "grid", "complex", "custom_phrase", "hours", "windows", "wait_min"):
-        assert after[key] == before[key], key
+    assert out["passed"] and out["dry"]
+    assert stored(ctx) == before                         # a dry run (R28): no unlock opened, no wait started either
 
 
-def test_try_while_unlocked_runs_at_once(api, ctx):
+def test_try_is_a_dry_run_even_when_locked_with_a_wait(api, ctx):
+    locked(ctx, wait_min=30)
+    before = stored(ctx)
+    out = pass_challenge(ctx, api, needs_ticket(api.antibypass_try()))
+    assert out["passed"] and "waiting_until" not in out
+    assert stored(ctx) == before and ab.status(stored(ctx), NOW) == "phrase"     # still locked, no wait running
+
+
+def test_try_while_unlocked_still_shows_the_challenge_and_leaves_the_unlock_as_it_is(api, ctx):
     locked(ctx)
     ab.unlock(ctx.db, NOW)
-    assert data(api.antibypass_try())["banner"]["kind"] == "unlocked"
+    before = stored(ctx)
+    out = pass_challenge(ctx, api, needs_ticket(api.antibypass_try()))
+    assert out["passed"] and stored(ctx) == before
 
 
 # ---------------------------------------------------------------- Pause my blocks
