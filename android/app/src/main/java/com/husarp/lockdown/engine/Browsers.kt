@@ -53,4 +53,21 @@ object Browsers {
         val host = noScheme.substringBefore('/').substringBefore('?').removePrefix("www.")
         return if ("." in host) Sites.alias(host) ?: host else null
     }
+
+    // ---- private / incognito tabs ----
+
+    /** Words in a browser's own toolbar (its tab button, its address bar's status icon) that say the tab is private. */
+    private val PRIVATE_WORDS = listOf("incognito", "inprivate", "private tab", "private browsing", "private mode", "secret mode")
+
+    /** How far around the address bar to look for them: levels up to the toolbar, levels down from it, nodes at most. */
+    const val TOOLBAR_LEVELS = 2
+    const val TOOLBAR_DEPTH = 3
+    const val TOOLBAR_NODES = 60
+
+    /** Does any of the toolbar's [texts] (text and descriptions, never the page's) mark a private tab? A button to
+     *  open one ("New incognito tab") is not a mark. Where a browser says nothing like this, the tab can't be told
+     *  apart and counts as an ordinary one. */
+    fun privateMark(texts: Iterable<CharSequence?>): Boolean = texts.any { t ->
+        t != null && !t.trim().startsWith("new ", ignoreCase = true) && PRIVATE_WORDS.any { t.contains(it, ignoreCase = true) }
+    }
 }

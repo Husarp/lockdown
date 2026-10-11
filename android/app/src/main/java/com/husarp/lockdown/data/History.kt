@@ -3,8 +3,10 @@ package com.husarp.lockdown.data
 import android.content.Context
 import android.content.Intent
 import com.husarp.lockdown.engine.BlockedVisit
+import com.husarp.lockdown.engine.Charge
 import com.husarp.lockdown.engine.DayDetail
 import com.husarp.lockdown.engine.DayTotals
+import com.husarp.lockdown.engine.FrontSplit
 import com.husarp.lockdown.engine.HistoryLog
 import com.husarp.lockdown.engine.MinuteAcc
 import com.husarp.lockdown.engine.SwitchTracker
@@ -21,6 +23,7 @@ import java.time.LocalDateTime
 object History {
     private var dir: File? = null
     private val acc = MinuteAcc()
+    private val split = FrontSplit()
     private var switches: SwitchTracker? = null
 
     @Synchronized fun init(ctx: Context) {
@@ -39,18 +42,27 @@ object History {
         if (lines.isNotEmpty()) runCatching { f.appendText(lines.joinToString("\n", postfix = "\n")) }
     }
 
-    /** [seconds] of [app] (and [site], in a browser) in front, up to [now]. */
+    /** [app] (and [site], in a browser) is in front at [now]; [seconds] have passed since the last step. Those
+     *  seconds go to what was in front then ([FrontSplit]), so a site or app change splits the time where it happened. */
     @Synchronized fun record(now: LocalDateTime, app: String, site: String, seconds: Double) {
         dir ?: return
-        val done = acc.add(now, app, site, seconds)
-        if (done.isNotEmpty()) append(dayFile(done[0].minute.toLocalDate()), done.map(HistoryLog::minuteLine))
+        write(split.step(now, app, site, seconds))
         switches?.seen(now, app, site)?.let { append(dayFile(now.toLocalDate()), listOf(HistoryLog.switchLine(it))) }
     }
 
-    /** Nothing of the phone's is being used (screen off, a block up, Lockdown itself in front): the visit ends. */
-    @Synchronized fun idle(now: LocalDateTime) {
+    /** Nothing of the phone's is being used (screen off, a block up, Lockdown itself in front): the visit ends, and
+     *  the [seconds] since the last step still belong to what was in front until now. */
+    @Synchronized fun idle(now: LocalDateTime, seconds: Double = 0.0) {
         dir ?: return
+        write(split.idle(now, seconds))
         switches?.end(now)?.let { append(dayFile(now.toLocalDate()), listOf(HistoryLog.switchLine(it))) }
+    }
+
+    private fun write(charges: List<Charge>) {
+        for (c in charges) {
+            val done = acc.add(c.at, c.app, c.site, c.seconds)
+            if (done.isNotEmpty()) append(dayFile(done[0].minute.toLocalDate()), done.map(HistoryLog::minuteLine))
+        }
     }
 
     /** The block notice came up for an item. */

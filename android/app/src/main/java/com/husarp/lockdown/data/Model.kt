@@ -122,6 +122,7 @@ data class Settings(
     val weeklyDigest: Boolean = false,
     val networkLog: Boolean = true,
     val dailyGoalMin: Int = 0,                          // daily screen-time goal in minutes (0 = off)
+    val sitesInsteadOfBrowsers: Boolean = true,         // Insights' top apps and the CSV list sites, not one row per browser
     val home: List<HomeCard>? = null,                   // Home's cards, in order (data/HomeLayout.kt); null = the default
 )
 

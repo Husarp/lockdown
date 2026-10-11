@@ -76,13 +76,25 @@ fun appCategory(cfg: com.husarp.lockdown.data.Config, pkg: String): String? {
     return listed?.let { Modes.itemCategory(it, cfg.categories) } ?: cfg.categories["app:${pkg.lowercase()}"]
 }
 
-/** A small "Distracting ▾" menu for an app in Insights (an app on your list, or any other app). */
+/** A site's category: a listed site follows its item (Distracting unless chosen otherwise); another site is in no
+ *  category (null) until chosen. */
+fun siteCategory(cfg: com.husarp.lockdown.data.Config, host: String): String? {
+    val listed = cfg.items.firstOrNull { it.type == ItemType.SITE && com.husarp.lockdown.block.Enforce.hostMatches(it.target, host) }
+    return listed?.let { Modes.itemCategory(it, cfg.categories) } ?: cfg.categories["site:${host.lowercase()}"]
+}
+
+/** A small "Distracting ▾" menu for an app in Insights (an app on your list, or any other app) - or, with [site], for
+ *  a site (the item on your list it belongs to, or the site itself). */
 @Composable
-fun CategoryMenu(pkg: String) {
+fun CategoryMenu(pkg: String, site: String? = null) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val set = rememberCategorySetter()
     var open by remember { mutableStateOf(false) }
-    val current = appCategory(cfg, pkg)
+    val current = if (site != null) siteCategory(cfg, site) else appCategory(cfg, pkg)
+    val keys = if (site != null) {
+        cfg.items.firstOrNull { it.type == ItemType.SITE && com.husarp.lockdown.block.Enforce.hostMatches(it.target, site) }
+            ?.let(::categoryKeys) ?: listOf("site:${site.lowercase()}")
+    } else listOf("app:${pkg.lowercase()}")
     Box {
         TextButton(onClick = { open = true }) {
             Text((CATEGORY_NAMES.firstOrNull { it.first == current }?.second ?: "Category") + " ▾", style = MaterialTheme.typography.labelMedium,
@@ -94,7 +106,7 @@ fun CategoryMenu(pkg: String) {
                     androidx.compose.material3.Icon(Kinds.category(key).icon, null, tint = tone(Kinds.category(key).hue).accent)
                 }, onClick = {
                     open = false
-                    if (key != current) set(listOf("app:${pkg.lowercase()}"), current, key)
+                    if (key != current) set(keys, current, key)
                 })
             }
         }

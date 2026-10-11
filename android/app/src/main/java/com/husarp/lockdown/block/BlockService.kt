@@ -64,6 +64,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
     @Volatile private var currentPkg = ""
     private val lastUrl = HashMap<String, String>()   // browser -> last address read (kept while the bar is hidden)
+    private val privateTabs = HashSet<String>()       // browsers whose tab in front says it is private (not recorded as a site)
     private var prevTickPkg = ""
     private var lastBarRead = 0L
     private var lastPausePkg = ""
@@ -153,7 +154,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if (closeGap) {
             val ms = SystemClock.elapsedRealtime()
             runCatching { UsageStore.record(emptyList(), Enforce.ldt(TrustedTime.now(this))) }
-            lastHistMs = ms; lastRemindTick = ms
+            if (screenOn()) lastHistMs = ms     // (off: the step that follows still gives the history the last seconds before it)
+            lastRemindTick = ms
         }
         for (r in listOf(tick, bedtimeTick, remindTick, alertTick)) { handler.removeCallbacks(r); handler.post(r) }
     }
@@ -180,7 +182,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         // Locked or screen off: nothing is being used (audio holding the phone awake used to keep counting).
         if (!screenInUse()) {
             UsageStore.record(emptyList(), now); inUseIds = emptySet()
-            if (!IslandLink.isHelper) History.idle(now)
+            if (!IslandLink.isHelper) History.idle(now, dt)
             return
         }
         val mode = ModesStore.current(now)
@@ -235,7 +237,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         val key = "$pkg|${host ?: ""}"
         // The history is what was used: not a blocked try (it's logged as one), not Lockdown itself in front.
         if (!IslandLink.isHelper && pkg.isNotEmpty()) {
-            if (verdict == null && !ReminderRunner.appVisible) History.record(now, pkg, host ?: "", dt) else History.idle(now)
+            // (a site in a private tab isn't recorded: the browser is, the site isn't)
+            if (verdict == null && !ReminderRunner.appVisible) History.record(now, pkg, host?.takeUnless { pkg in privateTabs } ?: "", dt) else History.idle(now, dt)
         }
         if (verdict != null) block(verdict, pkg, key)
         else { allowedKey = key; if (quietUp) removeOverlay() }   // what's in front is allowed: a quiet notice has done its job
@@ -287,7 +290,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             navigates -> performGlobalAction(GLOBAL_ACTION_HOME)
         }
         // Left the browser: forget the blocked address, so a page opened later isn't judged by it before its bar is read.
-        if (v.site && "back" !in flags && navigates) lastUrl.remove(pkg)
+        if (v.site && "back" !in flags && navigates) { lastUrl.remove(pkg); privateTabs.remove(pkg) }
     }
 
     /** A blocked video that went on in picture-in-picture (YouTube, a browser's full-screen video) is paused -
@@ -337,7 +340,44 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun screenOn(): Boolean =
         runCatching { (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive }.getOrDefault(true)
 
-    private fun readBar(pkg: String) { browserBarText(pkg)?.let { lastUrl[pkg] = it } }
+    /** Reads [pkg]'s address bar. The tab is looked at for a private mark when the browser has just come to the front
+     *  ([fresh]) or the address changed - not on every step. */
+    private fun readBar(pkg: String, fresh: Boolean = false) {
+        val root = rootInActiveWindow
+        val text = browserBarText(pkg, root) ?: return
+        if (fresh || text != lastUrl[pkg]) markPrivate(pkg, root)
+        lastUrl[pkg] = text
+    }
+
+    /** Does [pkg]'s toolbar say the tab in front is private (incognito, InPrivate)? Best effort: a browser that says
+     *  nothing in its toolbar can't be told, and its tab counts as an ordinary one. */
+    private fun markPrivate(pkg: String, root: AccessibilityNodeInfo?) {
+        val marked = runCatching { Browsers.privateMark(toolbarTexts(pkg, root)) }.getOrDefault(false)
+        if (marked) privateTabs.add(pkg) else privateTabs.remove(pkg)
+    }
+
+    /** The text and descriptions around [pkg]'s address bar - its toolbar, a few levels down from a few up, never the
+     *  page and never the box being typed in. */
+    private fun toolbarTexts(pkg: String, root: AccessibilityNodeInfo?): List<CharSequence?> {
+        root ?: return emptyList()
+        val bar = Browsers.barIds(pkg).firstNotNullOfOrNull { id ->
+            runCatching { root.findAccessibilityNodeInfosByViewId(id) }.getOrNull()?.firstOrNull()
+        } ?: return emptyList()
+        var top = bar
+        for (i in 0 until Browsers.TOOLBAR_LEVELS) top = top.parent ?: break
+        val out = ArrayList<CharSequence?>()
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        queue.add(top to 0)
+        var seen = 0
+        while (queue.isNotEmpty() && seen < Browsers.TOOLBAR_NODES) {
+            val (n, depth) = queue.removeFirst()
+            seen++
+            if (n.className == "android.webkit.WebView" || n.isEditable) continue
+            out.add(n.contentDescription); out.add(n.text)
+            if (depth < Browsers.TOOLBAR_DEPTH) for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it to depth + 1) }
+        }
+        return out
+    }
 
     // Everything here is wrapped: an uncaught exception in an accessibility callback makes Android DISABLE the
     // service (the "it keeps losing the grant" symptom). Nothing this service does is worth that.
@@ -352,7 +392,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 if (debounce.leftover(pkg, at)) return@runCatching     // the dismissed app closing, not opened again
                 currentPkg = pkg
                 IslandLink.islandFront = null                   // a main-profile window came to the front
-                if (isBrowser(pkg)) readBar(pkg)
+                if (isBrowser(pkg)) readBar(pkg, fresh = true)
                 handler.post { runCatching { step() }; runCatching { syncRemindHidden() }; speedUpSteps() }   // react immediately
             }
             if (!isBrowser(pkg)) return@runCatching
@@ -366,6 +406,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             if (text != null) {
                 // a new site in the same tab (a link, back) isn't a window change: judge it now, not on the next tick
                 val newSite = Browsers.hostOf(pkg, text) != Browsers.hostOf(pkg, lastUrl[pkg])
+                if (text != lastUrl[pkg]) markPrivate(pkg, root)     // (a tab switch can change private / not)
                 lastUrl[pkg] = text
                 if (newSite) handler.post { runCatching { step() } }
             }

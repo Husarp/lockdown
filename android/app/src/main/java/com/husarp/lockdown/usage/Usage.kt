@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import com.husarp.lockdown.engine.AppSpan
 import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
@@ -68,6 +69,27 @@ object Usage {
             AppUse(pkg, label, ms, opens[pkg] ?: 0)
         }.filter { it.totalMs >= 1000 }.sortedByDescending { it.totalMs }
         return DayUse(apps, apps.sumOf { it.totalMs }, hourly)
+    }
+
+    /** Each stretch an app was in the foreground between [start] and [end] (epoch ms), from the raw events - what the
+     *  activity log turns into "opened" rows. One query; the caller runs it off the main thread. */
+    fun spans(ctx: Context, start: Long, end: Long): List<AppSpan> {
+        val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val events = usm.queryEvents(start, end)
+        val out = ArrayList<AppSpan>()
+        val resumedAt = HashMap<String, Long>()
+        val e = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            val pkg = e.packageName ?: continue
+            when (e.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = e.timeStamp
+                UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->
+                    resumedAt.remove(pkg)?.let { if (e.timeStamp > it) out.add(AppSpan(pkg, it, e.timeStamp)) }
+            }
+        }
+        for ((pkg, from) in resumedAt) if (end > from) out.add(AppSpan(pkg, from, end))
+        return out
     }
 
     private fun addSpan(from: Long, to: Long, pkg: String, total: HashMap<String, Long>, hourly: LongArray) {

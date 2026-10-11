@@ -120,11 +120,13 @@ private fun load(ctx: Context, cfg: Config, back: Int, len: Int): HistData {
     )
 }
 
-/** Screen time per day and app / site, the last 365 days, as CSV (PC: Screen Time > Export). */
+/** Screen time per day and app / site, the last 365 days, as CSV (PC: Screen Time > Export). With "Show sites instead
+ *  of browsers" off a browser is one row (its sites folded in), as the top apps list shows it. */
 private fun csv(ctx: Context, cfg: Config): String {
     val since = LocalDate.now().minusDays(365)
-    val days = com.husarp.lockdown.engine.IslandUse.fillTotals(History.allTotals().mapValues { it.value.seconds },
+    val all = com.husarp.lockdown.engine.IslandUse.fillTotals(History.allTotals().mapValues { it.value.seconds },
         runCatching { com.husarp.lockdown.link.IslandLink.islandRows(ctx) }.getOrDefault(emptyList())).filterKeys { !it.isBefore(since) }
+    val days = if (cfg.settings.sitesInsteadOfBrowsers) all else com.husarp.lockdown.engine.SiteTop.withoutSites(all)
     return HistoryLog.csv(days) { app, site -> if (site.isNotEmpty()) cfg.categories["site:$site"] else cfg.categories["app:$app"] }
 }
 

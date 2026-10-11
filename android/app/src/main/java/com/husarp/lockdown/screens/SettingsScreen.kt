@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.ImportExport
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
@@ -272,6 +273,10 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
                     }
                 }
             }
+            // Looks only, like the theme: saved at once, never a challenge.
+            Toggle(Icons.Filled.Language, "Show sites instead of browsers",
+                "Insights lists the time per site (youtube.com · in Chrome) instead of one row for the browser, and so does the CSV export.",
+                s.sitesInsteadOfBrowsers) { on -> set { it.copy(sitesInsteadOfBrowsers = on) } }
             HomeLayoutEditor()
         }
         "alerts" -> NotificationsCard()

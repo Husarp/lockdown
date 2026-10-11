@@ -28,9 +28,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
+import androidx.compose.ui.text.style.TextOverflow
+import com.husarp.lockdown.engine.ItemType
+import com.husarp.lockdown.engine.SiteTop
+import com.husarp.lockdown.engine.TopRow
 import com.husarp.lockdown.ui.AppIcon
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
+import com.husarp.lockdown.ui.ItemIcon
+import com.husarp.lockdown.ui.SectionCard
 import com.husarp.lockdown.ui.Numeral
 import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.fmtDuration
@@ -43,12 +51,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
-private data class AppRow(val pkg: String, val label: String, val ms: Long)
 private data class Bar(val label: String, val ms: Long)
-private data class InsightData(val total: Long, val days: Int, val perApp: List<AppRow>, val bars: List<Bar>, val hourly: Boolean, val islandNotInBars: Long = 0L)
+private data class InsightData(val total: Long, val days: Int, val perApp: List<TopRow>, val bars: List<Bar>, val hourly: Boolean, val islandNotInBars: Long = 0L)
 
 @Composable
-fun InsightsScreen() {
+fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var range by remember { mutableIntStateOf(0) }
@@ -57,7 +64,8 @@ fun InsightsScreen() {
     val cfg by com.husarp.lockdown.data.Store.state.collectAsStateWithLifecycle()
     val teal = tone(Hue.TEAL)
 
-    val data by produceState<InsightData?>(null, range) {
+    val showSites = cfg.settings.sitesInsteadOfBrowsers
+    val data by produceState<InsightData?>(null, range, showSites) {
         selected = -1
         // Each piece is guarded on its own so one failing query can't blank the whole screen (which showed a
         // permanent "Loading…" and was the "7/30 days doesn't work" bug). Always returns a non-null result.
@@ -71,9 +79,19 @@ fun InsightsScreen() {
             val islandDays = (0 until len).map { today.minusDays((back + len - 1 - it).toLong()) }
             val islandPerDay = runCatching { com.husarp.lockdown.engine.IslandUse.perDay(com.husarp.lockdown.link.IslandLink.islandRows(ctx), islandDays) }
                 .getOrDefault(List(len) { 0L })
-            val apps = com.husarp.lockdown.engine.IslandUse.topApps(
+            val allApps = com.husarp.lockdown.engine.IslandUse.topApps(
                 du?.apps?.map { com.husarp.lockdown.engine.AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island,
-            ).take(6).map { AppRow(it.pkg, it.label, it.ms) }
+            )
+            // Sites instead of browsers: the time per site Lockdown's history has for the range (the browser's address
+            // bar), each browser keeping only what no site was read for.
+            val sites = if (!showSites) emptyMap() else runCatching {
+                val last = com.husarp.lockdown.guard.TrustedTime.local(ctx).toLocalDate().minusDays(back.toLong())
+                SiteTop.msByBrowser(com.husarp.lockdown.data.History.detail(last.minusDays(len - 1L), last).values.flatMap { it.rows })
+            }.getOrDefault(emptyMap())
+            val pm = ctx.packageManager
+            val apps = SiteTop.rows(allApps, sites, showSites) { pkg ->
+                runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg)
+            }.take(6)
             val hourly = len == 1
             // Today/Yesterday: the helper's hourly rows (when it sent them for that day) fill the bars and the total
             val islandHours = if (hourly) runCatching { com.husarp.lockdown.link.IslandLink.islandHours(ctx, today.minusDays(back.toLong())) }.getOrNull() else null
@@ -136,12 +154,16 @@ fun InsightsScreen() {
                 SectionLabel("Top apps", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 val topMax = (d.perApp.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
                 d.perApp.forEach { a ->
-                    val barColor = tone(Kinds.category(appCategory(cfg, a.pkg)).hue).accent
+                    val site = a.site
+                    val barColor = tone(Kinds.category(if (site != null) siteCategory(cfg, site) else appCategory(cfg, a.pkg)).hue).accent
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AppIcon(a.pkg, a.label)
+                        if (site != null) ItemIcon(ItemType.SITE, site, site) else AppIcon(a.pkg, a.label)
                         Column(Modifier.weight(1f)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(a.label, style = MaterialTheme.typography.bodyMedium)
+                                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(a.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    a.via?.let { Text("in $it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                }
                                 Text(fmtDuration(a.ms), style = MaterialTheme.typography.titleSmall)
                             }
                             Spacer(Modifier.height(5.dp))
@@ -149,13 +171,14 @@ fun InsightsScreen() {
                                 Box(Modifier.fillMaxWidth((a.ms.toFloat() / topMax).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(barColor))
                             }
                         }
-                        CategoryMenu(a.pkg)
+                        CategoryMenu(a.pkg, site)
                     }
                 }
                 if (d.perApp.isEmpty()) Text("No usage yet. Grant usage access in Settings.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
                 else Text("Mark an app Distracting and modes like Work and Focus block it.", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
+            SectionCard(Icons.Filled.History, Hue.TEAL, "Activity log", "Apps opened, sites visited and blocks, last 7 days", onClick = onOpenActivity)
             val (back, len) = ranges[range].second
             InsightsHistory(back, len)
         }

@@ -9,6 +9,7 @@ import com.husarp.lockdown.engine.Rule
 import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.engine.Sites
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -75,5 +76,15 @@ class BrowsersTest {
         assertNotNull(Enforce.site(cfg, "youtube.com", t0, null))
         assertNull(Enforce.site(Config(), "www.youtube-nocookie.com", t0, null))
         assertNull(Enforce.site(cfg, "example.com", t0, null))
+    }
+
+    @Test fun a_private_tab_is_told_by_the_toolbar_and_a_button_to_open_one_is_not_a_mark() {
+        assertTrue(Browsers.privateMark(listOf("Home", "Switch or close tabs. 2 incognito tabs open")))
+        assertTrue(Browsers.privateMark(listOf(null, "InPrivate")))
+        assertTrue(Browsers.privateMark(listOf("Private browsing")))
+        assertTrue(Browsers.privateMark(listOf("Secret mode on")))
+        assertFalse(Browsers.privateMark(listOf("Home", "Switch or close tabs. 3 tabs open", null, "")))
+        assertFalse(Browsers.privateMark(listOf("New incognito tab", "New private tab")))
+        assertFalse(Browsers.privateMark(emptyList()))
     }
 }

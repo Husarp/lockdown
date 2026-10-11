@@ -149,7 +149,7 @@ fun App(askOff: MutableState<Boolean>) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (route == "blockcal") "Block calendar" else here.label) },
+                title = { Text(when (route) { "blockcal" -> "Block calendar"; "activity" -> "Activity log"; else -> here.label }) },
                 actions = {
                     for (d in listOf(Dest.GUARDRAILS, Dest.SETTINGS)) {
                         IconButton(onClick = { nav.go(d) }) { Icon(d.icon, d.label) }
@@ -162,7 +162,7 @@ fun App(askOff: MutableState<Boolean>) {
                 for (d in Dest.entries.filter { it.inBottomBar }) {
                     val t = tone(d.hue)
                     NavigationBarItem(
-                        selected = (if (route == "blockcal") Dest.BLOCKING else here) == d,
+                        selected = (when (route) { "blockcal" -> Dest.BLOCKING; "activity" -> Dest.INSIGHTS; else -> here }) == d,
                         onClick = { nav.go(d) },
                         icon = { Icon(d.icon, d.label) },
                         label = { Text(d.label) },
@@ -190,7 +190,8 @@ fun App(askOff: MutableState<Boolean>) {
             composable("blockcal") { BlockCalendarScreen() }
             composable("netlog") { NetLogScreen() }
             composable(Dest.MODES.route) { ModesScreen() }
-            composable(Dest.INSIGHTS.route) { InsightsScreen() }
+            composable(Dest.INSIGHTS.route) { InsightsScreen(onOpenActivity = { nav.navigate("activity") }) }
+            composable("activity") { com.husarp.lockdown.screens.ActivityLogScreen() }
             composable(Dest.REMINDERS.route) { ReminderScreen() }
             composable(Dest.GUARDRAILS.route) { GuardrailsScreen(onBack = { nav.popBackStack() }) }
             composable(Dest.SETTINGS.route + "?section={section}",
