@@ -98,6 +98,16 @@ def pills(page):
     return page.eval_on_selector_all(".ad-pills .pill .ellip", "els => els.map(e => e.textContent)")
 
 
+def pills_are(page, expected):
+    """The pills (what is picked) - once they show `expected`: picking from a dialog or a file asks Python first, so they come a moment after."""
+    try:
+        page.wait_for_function("(want) => JSON.stringify([...document.querySelectorAll('.ad-pills .pill .ellip')].map((e) => e.textContent)) === JSON.stringify(want)",
+                               arg=expected, timeout=4000)
+    except Exception:
+        pass
+    return pills(page) == expected
+
+
 def ticked_ways(page, group):
     return page.eval_on_selector_all(f'[data-g="{group}"] [data-flag]', "els => els.filter(e => e.checked).map(e => e.dataset.flag)")
 
@@ -317,7 +327,8 @@ def test_ticking_rows_in_the_list_selects_them(shell, page, env):
 def test_the_filter_narrows_the_list(shell, page, env):
     open_add(shell, page)
     page.click('[data-seg="adkind"] button:has-text("Websites")')
-    page.wait_for_function("document.querySelectorAll('.ad-list .vl-row:not([hidden])').length > 3")
+    page.wait_for_function("document.querySelectorAll('.ad-list .vl-row:not([hidden])').length > 3 && "
+                           "![...document.querySelectorAll('.ad-list .vl-row:not([hidden]) .chip')].some(c => c.textContent !== 'site' && c.textContent !== 'mine')")
     badges = page.eval_on_selector_all(f"{LIST} .chip", "els => [...new Set(els.map(e => e.textContent))]")
     assert set(badges) <= {"site", "mine"}
     page.click('[data-seg="adkind"] button:has-text("Installed apps")')
@@ -493,13 +504,13 @@ def test_browse_apps_picks_an_app_and_a_steam_game_gets_its_defaults(shell, page
     page.wait_for_selector("#dlg[open] .ab-row")
     page.click('#dlg .ab-row:has(b:text-is("Discord"))')
     dialog_closed(page)
-    assert pills(page) == ["Discord"] and ticked_ways(page, "app") == ["close"]
+    assert pills_are(page, ["Discord"]) and ticked_ways(page, "app") == ["close"]
     page.click(".ad-pills [data-remove]")
     page.click("[data-browse]")
     page.wait_for_selector("#dlg[open] .ab-row")
     page.click('#dlg .ab-row:has(b:text-is("Counter-Strike 2"))')
     dialog_closed(page)
-    assert pills(page) == ["Counter-Strike 2"]
+    assert pills_are(page, ["Counter-Strike 2"])
     page.wait_for_function("document.querySelector('[data-g=app] [data-flag=background]').checked")    # (it asked the catalog: a Steam game)
     assert ticked_ways(page, "app") == ["close", "background"]
     tick(page, "permanent")
@@ -554,7 +565,7 @@ def test_a_whole_interpreter_is_asked_about_first(shell, page, env, monkeypatch)
     page.click("[data-file]")
     page.click("#dlg button:has-text('Block all of java.exe')")
     dialog_closed(page)
-    assert pills(page) == ["java"]
+    assert pills_are(page, ["java"])
 
 
 def test_a_file_that_cannot_be_blocked_says_why(shell, page, env, monkeypatch):
@@ -568,7 +579,7 @@ def test_a_file_that_cannot_be_blocked_says_why(shell, page, env, monkeypatch):
 def test_a_typed_program_file_is_added_as_an_app(shell, page, env):
     open_add(shell, page)
     tick(page, "permanent")
-    type_in_search(page, "tools\\start.bat")
+    type_in_search(page, "C:\\tools\\start.bat")
     page.keyboard.press("Enter")
     on_overview(page)
     assert items(env)["Start"]["target"] == "start.bat" and items(env)["Start"]["block_type"] == "close"
