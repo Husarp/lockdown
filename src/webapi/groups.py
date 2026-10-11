@@ -354,9 +354,12 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
                                "member": target["display"]})
                 continue
             seen.add(key)
-            hosted = target["kind"] == "app" and is_hosted(target["name"])
-            overrides, way = check_member(target["display"], target["kind"], hosted, entry.get("overrides"),
-                                          entry.get("way"))
+            if existing:                      # an existing item decides the kind and the hosted status, not the entry
+                kind = block_method.kind(existing)
+                hosted = existing["item_type"] == "app" and is_hosted(exe_name(existing.get("target") or ""))
+            else:
+                kind, hosted = target["kind"], target["kind"] == "app" and is_hosted(target["name"])
+            overrides, way = check_member(target["display"], kind, hosted, entry.get("overrides"), entry.get("way"))
             targets.append((target, existing, overrides, way))
         if errors:
             return {"saved": False, "errors": errors}

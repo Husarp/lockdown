@@ -265,6 +265,17 @@ def test_a_pending_target_that_is_on_the_list_already_uses_that_item(env):
     assert list(g["members"]) == [env.reddit] and len(env.db.list_items()) == 4              # (no second Reddit)
 
 
+def test_a_pending_target_is_judged_by_the_item_it_resolves_to(env):
+    """The entry says "site" but tool.jar is a program file on the list: a site-style way is refused for it."""
+    bad = call(env, "draft_set_group", None, "More", [limit_form()], [], {"app_block": None, "site_block": None},
+               [{"kind": "site", "name": "tool.jar", "way": "dns,close"}])
+    assert bad["ok"] is False and "way" in bad["error"]
+    assert all(g["name"] != "More" for g in env.db.list_groups())
+    ok = result(call(env, "draft_set_group", None, "More", [limit_form()], [],
+                     {"app_block": None, "site_block": None}, [{"kind": "site", "name": "tool.jar"}]))
+    assert ok["saved"]
+
+
 def test_duplicates_are_refused_and_nothing_changes(env):
     autosave(env, False)
     got = result(save(env, three(env), pending=[{"kind": "site", "name": "reddit.com", "display": "Reddit"}]))

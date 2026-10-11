@@ -274,18 +274,11 @@ function showInvalid(errors) {
   showError(other.length ? other[0].message : "");
 }
 
-/** Show Overview and have it read the list again: it keeps what it has for 10 s unless a `blocks_changed` push says the blocks
- *  changed while it is the visible tab (the one Python sends after a save comes while this tab is still in front). */
-function toOverview() {
-  tab.go("overview");
-  ld.push([["blocks_changed", { rev: Date.now() }]]);
-}
-
 /** After a change that went through: the notice, a fresh form, and Overview with the change in it. */
 function finish(text) {
   tab.confirm(text);
   resetAdd();
-  toOverview();
+  tab.go("overview");
 }
 
 async function submitAdd() {

@@ -138,7 +138,7 @@ def pick_way(page, name, label):
     first and let the scroll event pass - Playwright's own scrolling before a click may arrive a frame late on a busy box.)"""
     btn = member_row(page, name).locator('[data-act="way"]')
     btn.scroll_into_view_if_needed()
-    frames(page)
+    frames(page, 4)
     btn.click()
     page.click(f'#menu button:has-text("{label}")')
 
@@ -302,7 +302,12 @@ def test_a_website_typed_in_the_box_can_be_added_and_a_listed_one_cannot_be_adde
 
 def test_add_member_browses_the_apps(shell, page, harness):
     open_fun(shell, page)
+    # Playwright scrolls the button into view when it clicks, and that scroll event arrives after the click: it would close the
+    # menu that just opened. So bring the button into view first and let the scroll settle, then click.
+    page.locator('[data-k="g-add"]').scroll_into_view_if_needed()
+    page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 100))))")
     page.click('[data-k="g-add"]')
+    page.wait_for_selector("#menu button:has-text('Website')", state="visible", timeout=5000)
     assert [b.inner_text() for b in page.locator("#menu button").all()] == ["App or program file…", "Website…"]
     page.click('#menu button:has-text("App or program file")')
     page.wait_for_selector("#dlg[open] .ab-row", timeout=5000)
@@ -469,6 +474,7 @@ def test_the_extra_limits_dialog_validates(shell, page, harness):
     page.fill(f'{sec} [data-f="day"]', "30m")
     page.click('#dlg button:has-text("OK")')
     dialog_closed(page)
+    page.wait_for_selector('[data-act="extras"]:has-text("Extra limits · 1")', timeout=5000)
     assert member_row(page, "Reddit").locator('[data-act="extras"]').inner_text() == "Extra limits · 1"
     # opening it again shows what was set; a cancelled dialog changes nothing
     member_row(page, "Reddit").locator('[data-act="extras"]').click()
@@ -477,6 +483,7 @@ def test_the_extra_limits_dialog_validates(shell, page, harness):
     page.click(f"{sec} .switch")
     page.click('#dlg button:has-text("Cancel")')
     dialog_closed(page)
+    page.wait_for_selector('[data-act="extras"]:has-text("Extra limits · 1")', timeout=5000)
     assert member_row(page, "Reddit").locator('[data-act="extras"]').inner_text() == "Extra limits · 1"
     page.click('.ge-top button:has-text("Done")')
     page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)

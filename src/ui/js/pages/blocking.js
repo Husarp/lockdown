@@ -264,7 +264,7 @@ export function hide() {
 
 export function patch(delta) {
   if (delta.event === "status") renderLock();
-  else for (const [id, st] of states) if (id !== current) st.stale = true;
+  else for (const [id, st] of states) if (id !== current) { st.stale = true; st.loadedAt = 0; }     // a change: reload on the next show, however fresh
   const st = states.get(current);
   if (st && st.status === "ready" && st.mod && st.mod.patch) {
     try { st.mod.patch(delta); } catch (err) { report(`blocking/${current}.patch`, err); }
