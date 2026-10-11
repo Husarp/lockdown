@@ -158,9 +158,14 @@ def test_empty_state(shell, page, harness):
 
 def test_the_other_tabs_are_coming_soon_and_overview_is_shown_again_on_return(shell, page, harness):
     open_page(shell, page)
-    page.click('[data-tab="groups"]')
-    page.wait_for_selector('[data-pane="groups"]:not([hidden])')
-    assert "Coming soon" in page.inner_text('[data-pane="groups"]')
+    unbuilt = page.evaluate("""async () => {      // a tab with no module yet (tabs get built one ticket at a time)
+      const { tabs } = await import('/js/pages/blocking/index.js');
+      return ['groups', 'add', 'protect', 'calendar'].find((id) => !tabs[id]) || null; }""")
+    other = unbuilt or "groups"
+    page.click(f'[data-tab="{other}"]')
+    page.wait_for_selector(f'[data-pane="{other}"]:not([hidden])')
+    if unbuilt:
+        assert "Coming soon" in page.inner_text(f'[data-pane="{other}"]')
     assert page.is_hidden('[data-pane="overview"]')
     page.click('#nav [data-nav="dashboard"]')
     page.click('#nav [data-nav="blocking"]')

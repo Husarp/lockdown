@@ -27,6 +27,7 @@ PAGE_MODULES = [
     "network",
     "overlay",
     "protection",
+    "groups",
 ]
 
 for _name in PAGE_MODULES:

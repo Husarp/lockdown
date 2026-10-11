@@ -48,6 +48,7 @@ VIEWS: list = []        # (label, page id, click selector, ready selector)
 SCROLLS: list = []      # (label, page id, scroll selector, probe selector)
 SCROLLS.append(("blocking overview", "blocking", "#bo-list", ".vl-row:not([hidden])"))     # R18: the Overview's virtual list
 VIEWS.append(("blocking/calendar", "blocking", '[data-tab="calendar"]', ".cal-row"))     # R22: a tab, first visit
+VIEWS.append(("blocking/groups", "blocking", '[data-tab="groups"]', ".gp-card[data-id]"))     # R21: a tab, first visit
 VIEWS.append(("blocking/protect", "blocking", '[data-tab="protect"]', '.pl-row[data-key="scam"]'))     # R23: Site protection, first visit
 VIEWS.append(("modes/editor", "modes", '[data-act="new"]', '.md-editor:not([hidden]) [data-k="name"]'))     # R25: the editor module, first open
 VIEWS.append(("netlog/graph", "netlog", '[data-seg="nlview"] [data-v="graph"]', ".nl-graph svg path.ch-bar"))     # R16: the Graph tab, first visit

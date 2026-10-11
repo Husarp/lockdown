@@ -32,6 +32,8 @@ READ_ARGS: dict = {
     "rules_validate": [[{"rule_type": "permanent"}, {"rule_type": "time_limit", "same": True, "day": "1h"}]],   # rule editors: two forms
     "appmenu_info": ["app", "chrome.exe"],     # right-click menu of an app: category, protected, groups
     "blocking_overview_get": ["Next block"],   # Blocking > Overview, in the order that works out the most
+    "group_get": lambda ctx: [(next(iter(ctx.db.list_groups()), None) or {}).get("id")],    # Blocking > Groups: the first group (or a new one)
+    "group_member_search": ["you"],            # Blocking > Groups: typing in the Members box
     "calendar_get": [None, 7, "all"],           # Blocking > Calendar: the week, the busiest view
     "protection_check": ["example.com"],       # Blocking > Site protection: "Check a site" (loads the list tables the first time)
     "manual_get": ["mine1"],                   # Blocking > Site protection: one of your own lists (null when it isn't there)
