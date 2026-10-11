@@ -83,8 +83,8 @@ class MainActivity : ComponentActivity() {
         }
         // A fresh start (not a rotation): the update banner may show again, and an installed update's APK goes.
         if (savedInstanceState == null) com.husarp.lockdown.update.Updates.onAppStart(this)
-        // Island helper: (re)start its service - also how main's "Fix" wakes it up.
-        if (com.husarp.lockdown.link.IslandLink.isHelper) runCatching { com.husarp.lockdown.link.LinkService.start(this) }
+        // Island helper: (re)start its service, or just check in while main covers Island - also how main's "Fix" wakes it up.
+        if (com.husarp.lockdown.link.IslandLink.isHelper) runCatching { com.husarp.lockdown.link.IslandLink.helperStart(this) }
         enableEdgeToEdge()
         setContent {
             val cfg by com.husarp.lockdown.data.Store.state.collectAsStateWithLifecycle()

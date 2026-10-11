@@ -13,6 +13,7 @@ import com.husarp.lockdown.MainActivity
 import com.husarp.lockdown.R
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.HelperWatch
+import com.husarp.lockdown.engine.IslandSight
 
 /**
  * Main's side of "the Island helper was stopped" (engine/HelperWatch.kt decides; this reads the phone and acts).
@@ -77,7 +78,7 @@ object HelperWatcher {
             cfg.enabled && cfg.guardrails.helperAlert && IslandLink.role(app) == Role.MAIN &&
                 IslandLink.mainState.value.state == "linked" && !paused,
             st.silent, now, graceUntil)
-        val out = HelperWatch.look(st, now, IslandLink.heardAt, screenOn, watching)
+        val out = HelperWatch.look(st, now, IslandLink.heardAt, screenOn, watching, IslandSight.quietMs(IslandLink.mainCovers()))
         st = out.state
         when (out.act) {
             HelperWatch.Act.RAISE -> {
@@ -132,7 +133,10 @@ object HelperWatcher {
                 description = "Tells you when Lockdown in Island has stopped, so its apps are not covered."
             })
         val n = record(ctx).count
-        val text = "Your Island apps aren't covered right now. Open Lockdown in Island to start it again." +
+        // While main covers Island a quiet helper leaves nothing open; it only can't double-check main any more.
+        val text = (if (IslandLink.mainCovers()) "Lockdown in Island hasn't checked in for a while. This Lockdown still blocks your Island apps, " +
+                "but can't double-check that it sees them. Open Lockdown in Island." else
+            "Your Island apps aren't covered right now. Open Lockdown in Island to start it again.") +
             if (n > 1) " It has gone quiet ${HelperWatch.times(n)}." else ""
         val tap = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

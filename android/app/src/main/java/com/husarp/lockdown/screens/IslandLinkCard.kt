@@ -78,7 +78,8 @@ private fun MainLinkCard() {
                     "rules and share their limits.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 "linked" -> {
                     val ago = (now - st.lastSeen) / 1000
-                    val recent = ago in 0 until 10 * 60          // negative: the clock was set back
+                    val covers = IslandLink.mainCovers()         // main blocks Island apps itself: the helper checks in every 15 min
+                    val recent = ago in 0 until com.husarp.lockdown.engine.IslandSight.seenWithinMs(covers) / 1000   // negative: the clock was set back
                     val text = when {
                         recent && !st.canBlock -> "Linked · Lockdown in Island can't block: open it there and grant what it asks for"
                         recent -> "Linked · last heard from Island ${agoText(ago)}"
@@ -86,6 +87,9 @@ private fun MainLinkCard() {
                         else -> "Linked · not heard from since ${hhmm(st.lastSeen)}: open Lockdown in Island"
                     }
                     Text(text, style = MaterialTheme.typography.bodyMedium, color = if (recent && st.canBlock) cs.onSurface else cs.error)
+                    Text(if (covers) "This Lockdown sees Island apps and blocks them itself. Lockdown in Island only checks in every 15 minutes, so it doesn't show in Android's active apps."
+                        else "Lockdown in Island blocks Island apps (it shows in Android's active apps). This Lockdown takes over once it sees Island apps itself.",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     com.husarp.lockdown.link.HelperWatcher.summary(ctx)?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }

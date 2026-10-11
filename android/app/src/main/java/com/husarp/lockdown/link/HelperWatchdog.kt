@@ -20,7 +20,8 @@ import com.husarp.lockdown.engine.HelperKeep
 import java.util.concurrent.TimeUnit
 
 /**
- * The Island helper's way back after its service was stopped. What Android allows:
+ * The Island helper's way back after its service was stopped - and, while main covers Island itself ([com.husarp.lockdown.engine.IslandSight])
+ * and no service runs, its regular check-in. What Android allows:
  *  - "Stop" in the foreground-service list (Android 13+) ends the whole app process, with no callback and no
  *    START_STICKY restart, but leaves its scheduled jobs: the 15-minute watchdog below runs, starts the process, and
  *    tries to start the service again.
@@ -90,11 +91,13 @@ object HelperWatchdog {
     }
 }
 
-/** The helper's 15-minute watchdog: the service isn't running in a linked helper, so start it. */
+/** The helper's 15-minute watchdog: the service isn't running in a linked helper, so check in with main - which is
+ *  also how Island's time, visits and apps reach main while main covers Island - and start the service unless main
+ *  covers Island. */
 class HelperWatchdogWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
         // (this process was just started if the service had been stopped: Application.onCreate has already tried once)
-        if (HelperKeep.shouldStart(IslandLink.isHelper, LinkService.alive)) HelperWatchdog.startOrNudge(applicationContext)
+        if (HelperKeep.shouldStart(IslandLink.isHelper, LinkService.alive)) IslandLink.helperWake(applicationContext)
         return Result.success()
     }
 }

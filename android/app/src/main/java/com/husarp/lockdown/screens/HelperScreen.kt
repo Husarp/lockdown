@@ -40,7 +40,6 @@ import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberNowMs
 import com.husarp.lockdown.link.IslandLink
-import com.husarp.lockdown.link.LinkService
 import com.husarp.lockdown.ui.Kinds
 import com.husarp.lockdown.ui.theme.tone
 import com.husarp.lockdown.usage.Usage
@@ -54,7 +53,7 @@ fun HelperScreen() {
     val now = rememberNowMs(1000)
     var newCode by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        runCatching { LinkService.start(ctx) }
+        runCatching { IslandLink.helperStart(ctx) }
         IslandLink.kick()
     }
     val mine = remember { IslandLink.versionCode(ctx) }
@@ -76,6 +75,9 @@ fun HelperScreen() {
                         else -> "Up to date · ${agoText((now - st.lastOk) / 1000)}" to false
                     }
                     Text(text, style = MaterialTheme.typography.bodyMedium, color = if (bad) cs.error else cs.onSurface)
+                    if (st.covered && st.problem == null) Text("Your main Lockdown sees Island apps and blocks them itself, so this copy only " +
+                        "checks in every 15 minutes and doesn't stay running (it isn't in Android's active apps).",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     if (st.cfgError) Text("Couldn't read the latest rules: update Lockdown here. Still blocking with the earlier ones.",
                         style = MaterialTheme.typography.bodySmall, color = cs.error)
                     if (st.mainApp > mine) Text("Update Lockdown here: your main Lockdown is newer.", style = MaterialTheme.typography.bodySmall, color = cs.error)

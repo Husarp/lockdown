@@ -16,6 +16,9 @@ package com.husarp.lockdown.engine
 object HelperWatch {
     /** Screen-on time with no check-in that makes the helper "silent". */
     const val QUIET_ON_MS = 2 * 60_000L
+    /** The same while main covers Island itself ([IslandSight]): the helper then only checks in when it wakes, every
+     *  15 minutes, and a quiet helper leaves no Island app uncovered - it only can't double-check main any more. */
+    const val COVERED_QUIET_ON_MS = 45 * 60_000L
     /** While silent, the alert comes again this often (screen on). */
     const val REPEAT_MS = 5 * 60_000L
     /** Looks further apart than this add nothing to the quiet time (the loop is every minute with the screen on). */
@@ -42,15 +45,16 @@ object HelperWatch {
     /**
      * One look. [heardAt]: when the helper last checked in (elapsed ms; a new value means it did). [watching]: linked,
      * blocking on, the setting on, and Island not paused (a paused work profile can't run anything, so nothing
-     * there needs covering).
+     * there needs covering). [quietMs]: the screen-on silence that counts as stopped ([QUIET_ON_MS], or
+     * [COVERED_QUIET_ON_MS] while main covers Island).
      */
-    fun look(s: State, now: Long, heardAt: Long, screenOn: Boolean, watching: Boolean): Out {
+    fun look(s: State, now: Long, heardAt: Long, screenOn: Boolean, watching: Boolean, quietMs: Long = QUIET_ON_MS): Out {
         if (!watching) return Out(State(heard = heardAt), if (s.silent) Act.CLEAR else Act.NONE)
         val back = heardAt != s.heard
         var quiet = if (back) 0L else s.quietOnMs
         val gap = now - s.lastLook
         if (!back && s.lastOn && s.lastLook >= 0 && gap in 0..MAX_LOOK_GAP_MS) quiet += gap
-        val silent = quiet >= QUIET_ON_MS
+        val silent = quiet >= quietMs
         val next = State(now, screenOn, heardAt, quiet, silent, s.alertedAt)
         return when {
             !silent -> Out(next.copy(alertedAt = -1), if (s.silent) Act.CLEAR else Act.NONE)

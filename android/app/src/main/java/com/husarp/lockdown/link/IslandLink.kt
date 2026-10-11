@@ -1,5 +1,7 @@
 package com.husarp.lockdown.link
 
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.CrossProfileApps
@@ -22,7 +24,9 @@ import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.AppTime
+import com.husarp.lockdown.engine.IslandFront
 import com.husarp.lockdown.engine.IslandHourRow
+import com.husarp.lockdown.engine.IslandSight
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
 import com.husarp.lockdown.guard.TrustedTime
@@ -86,6 +90,7 @@ object IslandLink {
             val p = prefs()
             _main.value = MainLink(p.getString("state", "") ?: "", p.getLong("lastSeen", 0), p.getLong("helperApp", 0), p.getBoolean("cfgError", false),
                 canBlock = p.getBoolean("canBlock", true), linkedAt = p.getLong("linkedAt", 0))
+            sight = IslandSight.Sight(p.getString("sight", "") ?: "", p.getBoolean("covers", false))
             if (_main.value.state.isNotEmpty()) ensureServer()
             HelperWatcher.init(app)
         } else {
@@ -93,10 +98,11 @@ object IslandLink {
             helperState = st
             UsageStore.base = st.base
             UsageStore.inflight = st.inflight
-            _status.value = HelperStatus(lastOk = st.lastOk, mainApp = st.mainApp)
+            coveredNow = st.covered
+            _status.value = HelperStatus(lastOk = st.lastOk, mainApp = st.mainApp, covered = st.covered)
             _helper.value = true
             stopAlerts(app)
-            HelperWatchdog.startOrNudge(app)
+            helperStart(app)
             runCatching { HelperWatchdog.schedule(app) }
         }
     }
@@ -167,6 +173,41 @@ object IslandLink {
     @Volatile var heardAt = 0L
         private set
 
+    /** Main: does its own accessibility service see Island apps? ([IslandSight]: the helper's visits checked against
+     *  what the service heard.) Kept in the link's prefs, so a new link starts from nothing. */
+    @Volatile private var sight = IslandSight.Sight()
+    private val heardLog = IslandSight.Log()
+    private val judged = HashMap<String, Long>()          // "pkg@from" -> when judged: each visit once
+
+    /** Main's accessibility service heard from [pkg] (every event; cheap, and only while linked). */
+    fun saw(pkg: String) {
+        if (isMain && _main.value.state == "linked") heardLog.add(pkg, System.currentTimeMillis())
+    }
+
+    /** Main sees and blocks Island apps itself (its service runs and has been seeing them): the helper then needs no
+     *  foreground service, counts nothing, and checks in only when it wakes. */
+    fun mainCovers(): Boolean = isMain && IslandSight.mainCovers(_main.value.state == "linked", BlockService.connected, sight)
+
+    @Synchronized private fun judgeFronts(fronts: List<IslandFront>) {
+        val now = System.currentTimeMillis()
+        val (log, since) = heardLog.snapshot()
+        val results = ArrayList<Boolean>()
+        for (f in IslandSight.clean(fronts)) {
+            val key = "${f.pkg}@${f.from}"
+            if (key in judged) continue
+            val r = IslandSight.seen(f, log, since, app.packageName) ?: continue
+            judged[key] = now
+            results.add(r)
+        }
+        judged.entries.removeIf { now - it.value !in 0..2 * IslandSight.BACK_MS }
+        val next = IslandSight.update(sight, results)
+        if (next == sight) return
+        sight = next
+        prefs().edit().putString("sight", next.recent).putBoolean("covers", next.covers).apply()
+    }
+
+    @Synchronized private fun resetSight() { sight = IslandSight.Sight(); judged.clear(); heardLog.clear() }
+
     private fun prefs() = app.getSharedPreferences("island_link", Context.MODE_PRIVATE)
 
     private fun publish(f: (MainLink) -> MainLink = { it }) {
@@ -203,15 +244,17 @@ object IslandLink {
     @Synchronized fun forget() {
         prefs().edit().clear().commit()
         islandFront = null
+        resetSight()
         if (pairing?.open(System.currentTimeMillis()) != true) stopServer()   // an expired code needs no socket
         publish { MainLink() }
     }
 
-    /** Main: the helper checked in lately and can block, or Island is paused (then nothing there can run). */
+    /** Main: the helper checked in lately and can block, or Island is paused (then nothing there can run). "Lately" is
+     *  10 minutes, an hour while main covers Island itself (the helper then checks in only when it wakes). */
     fun healthy(ctx: Context): Boolean {
         val m = _main.value
         // A negative age is a clock set back, not a fresh check-in.
-        if (System.currentTimeMillis() - m.lastSeen in 0 until 10 * 60_000L && m.canBlock) return true
+        if (System.currentTimeMillis() - m.lastSeen in 0 until IslandSight.seenWithinMs(mainCovers()) && m.canBlock) return true
         return profilePaused(ctx)
     }
 
@@ -283,6 +326,7 @@ object IslandLink {
                 .putLong("lastSeq", 0).putLong("lastSeen", now).putLong("linkedAt", now).commit()
             lastSeenSaved = now
             heardAt = SystemClock.elapsedRealtime()
+            resetSight()
             publish { MainLink(state = "linked", lastSeen = now, linkedAt = now) }
             s
         } ?: return deny(out)
@@ -311,7 +355,10 @@ object IslandLink {
             lastSeq = body.seq
             p.edit().putLong("lastSeq", lastSeq).commit()
         }
-        islandFront = body.front
+        body.fronts?.let { runCatching { judgeFronts(it) } }
+        val covers = mainCovers()
+        // Main sees Island apps itself while it covers: a report of the app in front would only stop it counting them.
+        islandFront = if (covers) null else body.front
         islandFrontAt = SystemClock.elapsedRealtime()
         body.apps?.let { saveIslandApps(it) }
         body.use?.let { saveIslandUse(it) }
@@ -334,7 +381,7 @@ object IslandLink {
             ack = lastSeq, usage = usage,
             cfg = cfgJson.takeIf { body.cfg != cfgHash }, cfgHash = cfgHash,
             modes = modesJson.takeIf { body.modes != modesHash }, modesHash = modesHash,
-            unlink = unlinking, app = versionCode(app),
+            unlink = unlinking, app = versionCode(app), covers = covers,
         )
         LinkProtocol.write(out, LinkProtocol.signed("state", secret, LinkProtocol.M2H, nM, nH, json.encodeToString(state)))
 
@@ -434,6 +481,7 @@ object IslandLink {
         val lastOk: Long = 0,
         val mainApp: Long = 0,
         val linkedAt: Long = 0,               // wall ms this copy was linked (0: by an older version)
+        val covered: Boolean = false,         // main said at the last check-in that it covers Island itself
     )
 
     /** When the link was made (wall ms), on either side; 0 if not linked or linked before this was kept. */
@@ -444,6 +492,7 @@ object IslandLink {
         val problem: String? = null,          // null | "unreachable" | "denied" | "version"
         val mainApp: Long = 0,
         val cfgError: Boolean = false,
+        val covered: Boolean = false,         // main sees and blocks Island apps itself: no service needed here
     )
 
     private val _status = MutableStateFlow(HelperStatus())
@@ -468,7 +517,44 @@ object IslandLink {
             Store.update { it.copy(pause = null) }
             cfgHash = ""
         }
-        kick()
+        if (LinkService.alive) kick() else runCatching { syncOnce(app) }     // no service while main covers Island
+    }
+
+    /** Helper: main covered Island at the last check-in that got through (false when it didn't get through). */
+    @Volatile private var coveredNow = false
+    @Volatile private var wokeAt = -1L
+
+    fun helperCovered(): Boolean = coveredNow
+
+    /**
+     * Helper: bring the Island side up (process start, boot, update, opening this copy, main's "Fix"). While main
+     * covered Island at the last check-in nothing needs to keep running here: one check-in in the background, then the
+     * service only if main no longer covers it. Otherwise the service, as before (it stops itself once main covers).
+     */
+    fun helperStart(ctx: Context) {
+        if (!isHelper) return
+        if (coveredNow) thread(isDaemon = true, name = "lockdown-link-wake") { runCatching { helperWake(ctx) } }
+        else HelperWatchdog.startOrNudge(ctx)
+    }
+
+    /** Helper, off the main thread (the 15-minute watchdog, [helperStart]): one check-in - sending Island's time,
+     *  visits and apps, taking the rules - then the service runs only if main doesn't cover Island. */
+    fun helperWake(ctx: Context) {
+        if (!isHelper) return
+        val t = SystemClock.elapsedRealtime()
+        var ok = coveredNow && wokeAt >= 0 && t - wokeAt < 10_000      // just checked in (process start + its worker)
+        if (!ok) {
+            ok = runCatching { syncOnce(ctx) }.getOrDefault(false)
+            if (!ok && isHelper) { Thread.sleep(3_000); ok = runCatching { syncOnce(ctx) }.getOrDefault(false) }
+            if (ok) wokeAt = SystemClock.elapsedRealtime()
+        }
+        if (!isHelper) return                   // that check-in was the unlink
+        if (IslandSight.helperNeedsService(ok, coveredNow)) {
+            if (!LinkService.alive) HelperWatchdog.startOrNudge(ctx)
+        } else {
+            HelperWatchdog.clearNudge(ctx)
+            if (LinkService.alive) LinkService.stop(ctx)
+        }
     }
 
     /** The app in front in this profile (helper), from its usage events. */
@@ -582,10 +668,11 @@ object IslandLink {
         null
     }
 
-    /** Helper: one exchange with main - send time used and the app in front, take rules, modes and main's usage. */
-    fun syncOnce(ctx: Context): Unit = synchronized(clientLock) {
-        if (helperState == null) return
-        val secret = LinkCrypto.unb64(helperState?.secret) ?: return
+    /** Helper: one exchange with main - send time used and the app in front, take rules, modes and main's usage.
+     *  True when it got through. */
+    fun syncOnce(ctx: Context): Boolean = synchronized(clientLock) {
+        if (helperState == null) return false
+        val secret = LinkCrypto.unb64(helperState?.secret) ?: return false
         // 1. Pending time becomes the batch out (sent again unchanged until acked).
         if (!onMain {
                 val st = helperState ?: return@onMain
@@ -596,8 +683,8 @@ object IslandLink {
                     saveHelper()            // the batch is saved before pending is: a crash counts it twice, never loses it
                     UsageStore.flush()
                 }
-            }) return
-        val st = helperState ?: return
+            }) return false
+        val st = helperState ?: return false
         val batch = UsageStore.inflight
         var asked: com.husarp.lockdown.engine.BlockPause? = null
         val apps = islandApps(ctx)
@@ -612,11 +699,12 @@ object IslandLink {
             use = use.takeIf { it.isNotEmpty() && useHash != st.useHash },
             useHours = hours.takeIf { it.isNotEmpty() && hoursHash != st.hoursHash },
             endPause = endPauseAsked.also { asked = it },
+            fronts = recentFronts(ctx, st.lastOk).takeIf { it.isNotEmpty() },
         ))
         val (reply, problem) = exchange(st.port,
             { nM, nH -> LinkProtocol.signed("sync", secret, LinkProtocol.H2M, nM, nH, body) },
         ) { r, nM, nH -> r.t == "state" && LinkProtocol.verify(r, secret, LinkProtocol.M2H, nM, nH) }
-        if (reply == null) { _status.value = _status.value.copy(problem = problem); return }
+        if (reply == null) { coveredNow = false; _status.value = _status.value.copy(problem = problem, covered = false); return false }
         val sb = json.decodeFromString<StateBody>(reply.frame.body!!)
         if (asked != null && endPauseAsked == asked) endPauseAsked = null      // main has had it (applied, or a newer pause there)
         if (sb.unlink) {
@@ -625,7 +713,8 @@ object IslandLink {
             val bye = json.encodeToString(SyncBody(app = versionCode(ctx), bye = true))
             exchange(reply.port, { nM, nH -> LinkProtocol.signed("sync", secret, LinkProtocol.H2M, nM, nH, bye) },
             ) { r, nM, nH -> r.t == "bye" && LinkProtocol.verify(r, secret, LinkProtocol.M2H, nM, nH) }
-            unlinkHere(ctx, sb); return
+            coveredNow = false
+            unlinkHere(ctx, sb); return true
         }
 
         sb.cfg?.let { text ->
@@ -644,11 +733,29 @@ object IslandLink {
             UsageStore.inflight = LinkUsage.acked(UsageStore.inflight, sb.ack)
             UsageStore.base = sb.usage          // already holds every acked batch: nothing counts twice
             val cur = helperState ?: return@onMain
-            helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash, hoursHash = hoursHash)
+            helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash, hoursHash = hoursHash, covered = sb.covers)
             saveHelper()
         }
-        _status.value = HelperStatus(lastOk = now, mainApp = sb.app, cfgError = cfgFailed != null)
+        coveredNow = sb.covers
+        _status.value = HelperStatus(lastOk = now, mainApp = sb.app, cfgError = cfgFailed != null, covered = sb.covers)
+        true
     }
+
+    /** Helper: Island's visits since a minute before the last good check-in (at most [IslandSight.BACK_MS] back), from
+     *  its usage events, so main can check it sees them too. None without usage access. */
+    private fun recentFronts(ctx: Context, lastOk: Long): List<IslandFront> = runCatching {
+        if (!Usage.hasAccess(ctx)) return emptyList()
+        val now = System.currentTimeMillis()
+        val events = ctx.getSystemService(UsageStatsManager::class.java)
+            .queryEvents(maxOf(now - IslandSight.BACK_MS, lastOk - 60_000L), now) ?: return emptyList()
+        val list = ArrayList<IslandSight.Ev>()
+        val e = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            list.add(IslandSight.Ev(e.timeStamp, e.eventType, e.packageName ?: continue, e.className ?: ""))
+        }
+        IslandSight.visits(list, now, ctx.packageName)
+    }.getOrDefault(emptyList())
 
     /** Helper: this copy can see the Island app in front and block it (its accessibility service, or usage access
      *  with the block screen). */

@@ -384,6 +384,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         runCatching {
             val pkg = event.packageName?.toString() ?: return@runCatching
+            IslandLink.saw(pkg)                 // Island link: does this service see Island apps too? (IslandSight)
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && breakDismissed) trackBreakFront(pkg)
             if (pkg == packageName || pkg == "com.android.systemui" || isKeyboard(pkg)) return@runCatching
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {

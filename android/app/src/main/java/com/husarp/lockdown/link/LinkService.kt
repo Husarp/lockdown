@@ -42,6 +42,7 @@ import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Cadence
+import com.husarp.lockdown.engine.IslandSight
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.guard.TrustedTime
@@ -53,6 +54,8 @@ import kotlin.concurrent.thread
  * app in front changes or the screen comes on), and finds the Island app in front from usage events. When this copy's
  * accessibility service can't run (the usual case in a work profile) it also counts and blocks Island apps itself,
  * with the same engine, behind a "Display over other apps" block screen.
+ * It runs only while main can't see Island apps itself: where main can ([IslandSight]), main covers Island and this
+ * stops after a check-in, so nothing of Lockdown shows in Android's "Active apps" list.
  */
 class LinkService : Service() {
     private val handler = Handler(Looper.getMainLooper())
@@ -102,7 +105,11 @@ class LinkService : Service() {
             handler.post(tick)
             thread(isDaemon = true, name = "lockdown-link-sync") {
                 while (running && IslandLink.isHelper) {
-                    runCatching { IslandLink.syncOnce(this) }
+                    val ok = runCatching { IslandLink.syncOnce(this) }.getOrDefault(false)
+                    // Main sees and blocks Island apps itself: nothing needs to run here (and so nothing shows in
+                    // Android's active apps). The 15-minute watchdog checks in from now on, and starts this again
+                    // if main stops covering Island or can't be reached.
+                    if (!IslandSight.helperNeedsService(ok, IslandLink.helperCovered())) { handler.post { stopSelf() }; break }
                     IslandLink.waitKick(Cadence.linkSyncMs(interactive(), IslandLink.localFront != null, IslandLink.syncPending(), IslandLink.syncFailing()))
                 }
             }
@@ -117,6 +124,7 @@ class LinkService : Service() {
         runCatching { unregisterReceiver(screenReceiver) }
         handler.removeCallbacksAndMessages(null)
         hideBlock()
+        IslandLink.localFront = null            // nothing watches Island's front now: main mustn't be told an old one
         IslandLink.kick()
         super.onDestroy()
     }
@@ -124,8 +132,8 @@ class LinkService : Service() {
     private fun interactive() = getSystemService(PowerManager::class.java).isInteractive
     private fun inUse() = interactive() && !getSystemService(KeyguardManager::class.java).isKeyguardLocked
     // This copy's own accessibility service does it when it really runs (ticked in Settings isn't enough: in a
-    // work profile Android usually never binds it).
-    private fun enforcing() = !BlockService.connected
+    // work profile Android usually never binds it). Never while main covers Island: main counts and blocks it then.
+    private fun enforcing() = !BlockService.connected && IslandSight.helperCounts(IslandLink.helperCovered())
 
     /** Every second with the screen on (every minute with it off, and at once when it comes on): the app in front,
      *  from this profile's usage events. */
