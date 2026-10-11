@@ -216,6 +216,30 @@ def test_draft_set_setting_only_takes_notification_settings(env):
     assert env.db.get_setting("notify.format") == "inapp"
 
 
+@pytest.mark.parametrize("key, good, bad", [
+    ("notify.cooldown_min", ["1", "30", "1440"], ["0", "-5", "1441", "abc", "", "5.5", " 5", "1e3", "٣"]),
+    ("notify.warn.minutes", ["1", "5", "60"], ["0", "-1", "99999", "x", "", "2 min"]),
+    ("notify.warn.repeat_sec", ["0", "5", "300", "86400"], ["1", "4", "86401", "-1", "off", "", "30s"]),
+    ("notify.warn.enabled", ["1", "0"], ["2", "true", "", "on", "11"]),
+    ("notify.started.enabled", ["1", "0"], ["yes", ""]),
+    ("notify.enabled.permanent", ["1", "0"], ["maybe", "-1"]),
+    ("notify.format", ["toast", "inapp", "both"], ["", "popup", "Toast", "x" * 20]),
+])
+def test_draft_set_setting_checks_each_keys_value(env, key, good, bad):
+    autosave(env, False)
+    for value in bad:
+        assert call(env, "draft_set_setting", key, value)["ok"] is False, (key, value)
+    assert data(call(env, "draft_get_state"))["dirty"] is False
+    for value in good:
+        assert call(env, "draft_set_setting", key, value)["ok"] is True, (key, value)
+
+
+def test_draft_set_setting_message_text_is_free_but_bounded(env):
+    autosave(env, False)
+    assert call(env, "draft_set_setting", "notify.msg.permanent", "{site} is blocked until {until}")["ok"] is True
+    assert call(env, "draft_set_setting", "notify.msg.permanent", "")["ok"] is True
+
+
 def test_draft_set_setting_saves_at_once_with_autosave_and_does_not_reload_blocks(env):
     autosave(env, True)
     lock(env)                                                               # (a setting is not a loosening)

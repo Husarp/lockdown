@@ -53,7 +53,7 @@ def _service_running(db) -> bool:
 
 def _id(value, what="item") -> int:
     if type(value) is not int:
-        raise ApiError(f"Bad request: a {what} number expected.")
+        raise ApiError(f"Bad request: {'an' if what[:1] in 'aeiou' else 'a'} {what} number expected.")
     return value
 
 

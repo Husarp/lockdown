@@ -21,6 +21,7 @@ import threading
 import time
 
 import alerts
+from reminders import MIN_INTERVAL_SEC
 from gui.draft import Draft
 
 from . import core
@@ -212,6 +213,25 @@ def run_edit(ctx, mutate, blocks: bool = True):
     return ok({**state, "result": result} if result is not None else state)
 
 
+# Number settings: whole digits only, within these limits (minutes: the old page offered 1-60 and 1-60; repeat seconds:
+# 0 = off, else MIN_INTERVAL_SEC to a day). Other keys: "1"/"0", a known format, or free text (the messages).
+_NUMBER_RANGES = {"notify.cooldown_min": (1, 1440), "notify.warn.minutes": (1, 1440), "notify.warn.repeat_sec": (MIN_INTERVAL_SEC, 86400)}
+
+
+def _setting_ok(key: str, value: str) -> bool:
+    if key in _NUMBER_RANGES:
+        if not (value.isascii() and value.isdigit()):
+            return False
+        low, high = _NUMBER_RANGES[key]
+        number = int(value)
+        return low <= number <= high or (key == "notify.warn.repeat_sec" and number == 0)
+    if key == "notify.format":
+        return value in alerts.FORMATS
+    if key.startswith("notify.msg."):
+        return True
+    return value in ("1", "0")
+
+
 # ---------------------------------------------------------------- Api
 
 @core.read
@@ -252,6 +272,6 @@ def draft_set_setting(ctx, key, value):
     page. Nothing else can be set from here. The page debounces typing (js/draft.js)."""
     if not isinstance(key, str) or not key.startswith("notify.") or key not in alerts.DEFAULTS:
         raise ApiError("That setting can't be changed from here.")
-    if not isinstance(value, str) or len(value) > MAX_SETTING:
+    if not isinstance(value, str) or len(value) > MAX_SETTING or not _setting_ok(key, value):
         raise ApiError("That value isn't valid.")
     return run_edit(ctx, lambda d: d.set_setting(key, value), blocks=False)

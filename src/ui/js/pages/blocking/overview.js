@@ -14,10 +14,10 @@ import { ld } from "../../bridge.js";
 import { CANCELLED, parseNaive } from "../../challenge.js";
 import { openDialog } from "../../dialog.js";
 import { draftCall, FAILED } from "../../draft.js";
-import { openEmergency } from "../../emergency.js";
 import { openMenu } from "../../menu.js";
 import { confirmButton, el, empty, esc, ic, setText } from "../../ui.js";
 import { createVList } from "../../vlist.js";
+import { takeEarlyOverview } from "./early.js";
 
 export const freshMs = 10_000;
 export const REFRESH_TICKS = 30;          // a reload every 30 s while shown (used times move)
@@ -316,7 +316,7 @@ function onSearch() {
 }
 
 function showEmergency() {
-  openEmergency({ onDone: (r) => { tab.confirm(r.text, true); tab.reload(); } });
+  import("../../emergency.js").then(({ openEmergency }) => openEmergency({ onDone: (r) => { tab.confirm(r.text, true); tab.reload(); } }));
 }
 
 // ---------------------------------------------------------------- showing the data
@@ -383,8 +383,9 @@ export function mount(host, t) {
 }
 
 export async function load() {
-  loadedRev = ld.status.blocks ? ld.status.blocks.rev : undefined;       // (before the call: a push that comes meanwhile still reloads)
-  data = await ld.call("blocking_overview_get");
+  const early = takeEarlyOverview();                                     // the first load uses the request early.js already sent
+  loadedRev = early ? early.rev : ld.status.blocks ? ld.status.blocks.rev : undefined;       // (before the call: a push that comes meanwhile still reloads)
+  data = await (early ? early.promise : ld.call("blocking_overview_get"));
   clock = { base: parseNaive(data.now), at: performance.now() };
   expired = false;
   render();

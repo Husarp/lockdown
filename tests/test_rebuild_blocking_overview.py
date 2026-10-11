@@ -541,3 +541,8 @@ def test_the_overview_is_fast_with_unsaved_edits_too(env):
     p95 = sorted(runs)[int(len(runs) * 0.95) - 1]
     print(f"blocking_overview_get with an unsaved draft: p95 {p95:.1f} ms")
     assert p95 <= 100, f"p95 {p95:.1f} ms (target 50)"
+
+
+def test_a_bad_id_is_named_with_the_right_article(env):
+    assert env.api.draft_set_notify("x", "on")["error"] == "Bad request: an item number expected."
+    assert env.api.draft_remove_group("x")["error"] == "Bad request: a group number expected."

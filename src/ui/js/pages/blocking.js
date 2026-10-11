@@ -5,6 +5,7 @@
 //
 // Everything that changes the blocklist goes through the draft (js/draft.js): Python decides what loosens a block and
 // asks for the challenge; nothing here compares old with new.
+import "./blocking/early.js";          // first: it sends the Overview's data request while the rest is still being evaluated
 import { ld } from "../bridge.js";
 import { CANCELLED, guarded } from "../challenge.js";
 import { autosaveOn } from "../draft.js";
@@ -15,7 +16,6 @@ import { tabs as registry } from "./blocking/index.js";
 // found one file later costs another round trip): the first visit is then two rounds, not four.
 import "./blocking/overview.js";
 import "../appicon.js";
-import "../emergency.js";
 import "../vlist.js";
 
 export const TABS = [["overview", "Overview"], ["groups", "Groups"], ["add", "Add"], ["protect", "Site protection"], ["calendar", "Calendar"]];

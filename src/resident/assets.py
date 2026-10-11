@@ -3,6 +3,7 @@ under src/ui/, plus routes other parts add (the app/site icons, /icon/...).
 
 The page is untrusted: no directory listing, no path that leaves src/ui/, and only requests addressed to the loopback
 name (so a web page on the internet can't read the files through a rebinding trick)."""
+import socket
 import sys
 import threading
 from http import HTTPStatus
@@ -105,6 +106,11 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):   # (no console, no log spam)
         pass
 
+    def setup(self):
+        super().setup()
+        # Small replies on a keep-alive connection otherwise wait for the browser's delayed ACK (~40 ms each: Nagle).
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].lower()
         return host in ("127.0.0.1", "localhost")
@@ -117,9 +123,11 @@ class _Handler(BaseHTTPRequestHandler):
         if response.etag:
             self.send_header("ETag", response.etag)
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        if not head:
-            self.wfile.write(response.body)
+        # Headers and body leave in ONE write (two small writes make the second wait for the first one's ACK).
+        self._headers_buffer.append(b"\r\n")
+        data = b"".join(self._headers_buffer) + (b"" if head else response.body)
+        self._headers_buffer = []
+        self.wfile.write(data)
 
     def _serve(self, head: bool):
         if not self._host_ok():
