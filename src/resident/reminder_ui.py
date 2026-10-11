@@ -77,13 +77,12 @@ class CornerReminderUI:
         left = max(1, round((until - now).total_seconds() / 60)) if now else 1
         self.hub.notify(f"Break started - your windows are minimised for {left} min. Step away from the screen.",
                         force=True)
-        self._break_cover(until)
 
     def break_end(self):
-        self.close(BREAK_COVER_KEY)
         self.hub.notify("Break over - welcome back.", force=True)
 
     def _break_cover(self, until):
+        # parked: strict-break cover, see PLAN.md
         """The strict break's full-screen "Break time" (R08) until it ends - not while Do Not Disturb or a muting mode
         holds the alerts (the windows are minimised all the same). Its only button is Emergency, while there are uses
         left: the way out that pauses the break alerts, so nobody is shut out of the PC for the whole break."""

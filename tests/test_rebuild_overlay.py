@@ -596,7 +596,7 @@ def test_emergency_on_a_break_cover_pauses_the_alerts_and_ends_the_break(env):
     assert env.engine.break_until is None and ended == [1]
 
 
-# ---------------------------------------------------------------- the ReminderUI: the strict break's cover
+# ---------------------------------------------------------------- the ReminderUI: the strict break (no cover)
 
 class Handler:
     def __init__(self):
@@ -619,29 +619,13 @@ def reminder_ui_env(tmp_path, quiet=False):
     return ui, db
 
 
-def test_a_strict_break_covers_the_screen_until_it_ends_with_emergency_while_uses_are_left(tmp_path):
+def test_a_strict_break_shows_no_cover_and_still_minimises_and_tells(tmp_path):
     ui, _db = reminder_ui_env(tmp_path)
-    ui.break_start(BREAK_END)
-    key, title, text, until, buttons = ui.overlay_handler.calls[-1][1:]
-    assert (key, title, until) == ("break-run", "Break time", BREAK_END) and text == reminder_ui.BREAK_COVER_TEXT
-    assert buttons == [("Emergency (3 left)", "emergency")]
-    ui.break_end()
-    assert ui.overlay_handler.calls[-1] == ("close", "break-run")
-
-
-def test_no_emergency_button_on_the_break_cover_when_none_is_left(tmp_path):
-    ui, db = reminder_ui_env(tmp_path)
-    db.set_setting("emergency.enabled", "0")
-    ui.break_start(BREAK_END)
-    assert ui.overlay_handler.calls[-1][-1] == []
-
-
-def test_a_break_under_do_not_disturb_still_minimises_but_has_no_cover(tmp_path):
-    ui, _db = reminder_ui_env(tmp_path, quiet=True)
     minimised = []
     ui.hub.win.minimize_all = lambda: minimised.append(1)
     ui.break_start(BREAK_END)
-    assert minimised == [1] and ui.overlay_handler.calls == []
+    ui.break_end()
+    assert minimised == [1] and ui.overlay_handler.calls == []                          # parked: the cover is not used
 
 
 def test_with_no_overlay_handler_the_break_is_as_before(tmp_path):
