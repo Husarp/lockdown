@@ -13,7 +13,7 @@ import pystray
 from pystray._util import win32
 
 from gui import icon_art
-from gui.theme import APP_ICON
+from ui_theme import APP_ICON
 
 NIIF_USER, NIIF_LARGE_ICON = 0x4, 0x20
 

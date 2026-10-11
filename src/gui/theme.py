@@ -5,11 +5,10 @@ import ctypes
 import customtkinter as ctk
 
 from paths import ASSETS
-
-APP_ICON = ASSETS / "lockdown.ico"   # the Lockdown logo (windows, notifications)
+from ui_theme import ACCENT_KEY, ACCENTS, APP_ICON, BG_AMOLED, BG_DARK, BG_LIGHT, SIZE_KEY, THEME_KEY, THEMES  # noqa: F401
 
 # Round 2 tokens (design/Lockdown Round 2.dc.html): (light, dark) pairs.
-BG = ("#EFF1F4", "#101418")
+BG = (BG_LIGHT, BG_DARK)
 SIDEBAR = ("#E3E6EA", "#0B0E12")
 SURFACE = ("#FFFFFF", "#181D23")
 SURFACE2 = ("#F1F3F6", "#202730")
@@ -33,11 +32,7 @@ WHITE = ("#FFFFFF", "#FFFFFF")
 
 # ---- your theme + accent colour (Settings > Appearance). Read here, before any widget exists, because colours are
 # fixed when widgets are made - so a new theme / accent applies after a restart (light / dark switch at once).
-THEME_KEY, ACCENT_KEY = "ui.theme", "ui.accent"
-THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "system"}
 MODES = {"dark": "dark", "amoled": "dark", "light": "light", "system": "system"}   # theme -> customtkinter mode
-ACCENTS = {"Orange": "#DB5126", "Red": "#D1342F", "Pink": "#D63F8C", "Purple": "#7C4DDB", "Blue": "#2F6FEB",
-           "Teal": "#12948A", "Green": "#23945A", "Yellow": "#C99A0E"}
 
 
 def _saved(key: str) -> str | None:
@@ -59,7 +54,7 @@ def _mix(a: str, b: str, t: float) -> str:
 
 THEME = _saved(THEME_KEY) or {"light": "light", "system": "system"}.get(_saved("ui.appearance") or "", "dark")
 if THEME == "amoled":   # pure black for OLED screens
-    BG, SIDEBAR = (BG[0], "#000000"), (SIDEBAR[0], "#000000")
+    BG, SIDEBAR = (BG[0], BG_AMOLED), (SIDEBAR[0], BG_AMOLED)
     SURFACE, SURFACE2, NAV_ACTIVE = (SURFACE[0], "#0B0B0C"), (SURFACE2[0], "#18181A"), (NAV_ACTIVE[0], "#18181A")
     BORDER, TRACK = (BORDER[0], "#26262A"), (TRACK[0], "#1C1C1F")
 ACCENT_HEX = _saved(ACCENT_KEY) or ACCENTS["Orange"]
@@ -73,7 +68,6 @@ if ACCENT_HEX != ACCENTS["Orange"] and len(ACCENT_HEX) == 7:   # (orange keeps t
 # Status (blocked = red, allowed = green - the user's choice over the design's green "blocked")
 BLOCKED, ALLOWED, PENDING = DANGER, SUCCESS, WARNING
 SPECIAL = ("#6B46C1", "#A78BFA")     # the allowance during blocked hours: not blocked, not simply allowed
-SIZE_KEY = "ui.scale"                # "auto", or how big everything is drawn as a percentage ("80")
 CATEGORY_COLORS = {"productive": SUCCESS, "neutral": MUTED, "distracting": DANGER}
 
 # Secondary buttons: a light-grey fill in light mode (so they don't vanish on white cards - fix 7b), a plain
