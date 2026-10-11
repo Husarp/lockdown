@@ -311,9 +311,18 @@ def loosens_reminder(old: dict, new: dict) -> bool:
     return bool((old.get("on") and not new.get("on")) or not new.get("guarded"))
 
 
+def sort_tiers(tiers: list[dict], bedtime: str) -> list[dict]:
+    """Bedtime steps in the order of the night: by minutes since bedtime (bedtime 22:00 -> 22:00, 22:30, 23:00,
+    01:00, 03:00; a step at bedtime first, after-midnight ones after the evening ones). Same time: stays in place."""
+    bed = parse_hhmm(bedtime)
+    return sorted(tiers or [], key=lambda t: (parse_hhmm(t["from"]).hour * 60 + parse_hhmm(t["from"]).minute
+                                              - bed.hour * 60 - bed.minute) % 1440)
+
+
 def tiers_of(s: dict) -> list[dict]:
-    """The sleep escalation tiers, earliest first. Empty means "use the flat `repeat` instead"."""
-    return sorted(s.get("tiers") or [], key=lambda t: parse_hhmm(t["from"]))
+    """The sleep escalation tiers in the order of the night (see sort_tiers). Empty means "use the flat `repeat`
+    instead"."""
+    return sort_tiers(s.get("tiers") or [], s.get("bedtime") or "23:00")
 
 
 def schedule_text(r: dict) -> str:

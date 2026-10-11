@@ -715,12 +715,14 @@ class RemindersView(ctk.CTkScrollableFrame):
         for t in tiers:
             self._tier_row(reminders.seconds_text(t.get("every_sec", 300)), t.get("from", "21:00"))
 
-    def _read_tiers(self):
+    def _read_tiers(self, bedtime):
         tiers = []
         for row in self.tier_rows:
             after, every = parse_hhmm(row.after.get()), reminders.parse_interval(row.every.get())
             tiers.append({"from": f"{after:%H:%M}", "every_sec": every})
-        return sorted(tiers, key=lambda t: parse_hhmm(t["from"]))
+        ordered = reminders.sort_tiers(tiers, f"{bedtime:%H:%M}")
+        self._tiers_moved = ordered != tiers
+        return ordered
 
     def _pick_wait(self, value: str):
         self.dismiss_wait_entry.delete(0, "end")
@@ -751,7 +753,7 @@ class RemindersView(ctk.CTkScrollableFrame):
             return
         try:
             before = reminders.parse_minutes(self.before.get(), most=12 * 60)
-            tiers = self._read_tiers()
+            tiers = self._read_tiers(bedtime)
         except ValueError:
             self._sleep_says("Steps need how often (5 min, 30s - at least 5s) and a time like 21:00.")
             return
@@ -769,6 +771,8 @@ class RemindersView(ctk.CTkScrollableFrame):
             "text": self.sleep_text.get().strip(),
             "guarded": bool(self.sleep_guarded.get()), "dismiss_wait": wait,
             "mode": self.mode_ids.get(self.sleep_mode.get(), "")})
+        if self._tiers_moved:
+            self._load_tiers(tiers)         # a step whose time moved earlier slots into its place at once
 
     def _sleep_says(self, text: str):
         self.sleep_error.configure(text=text)

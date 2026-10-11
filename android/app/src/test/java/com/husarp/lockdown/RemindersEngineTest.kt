@@ -442,4 +442,10 @@ class RemindersEngineTest {
         assertEquals(listOf(15, 5, 1), RemindersEngine.shiftSteps(steps, "23:00", "22:00").map { it.every })                 // only the times move
         assertEquals(steps, RemindersEngine.shiftSteps(steps, "23:00", "nonsense"))
     }
+
+    @Test fun stepsSortBySinceBedtime() {
+        val steps = listOf(ReminderTier("03:00", 1), ReminderTier("22:30", 15), ReminderTier("01:00", 2), ReminderTier("22:00", 20), ReminderTier("23:00", 5))
+        assertEquals(listOf("22:00", "22:30", "23:00", "01:00", "03:00"), RemindersEngine.sortSteps(steps, "22:00").map { it.from })
+        assertEquals(listOf("01:00", "03:00", "22:30"), RemindersEngine.sortSteps(listOf(ReminderTier("22:30", 1), ReminderTier("03:00", 1), ReminderTier("01:00", 1)), "00:30").map { it.from })
+    }
 }

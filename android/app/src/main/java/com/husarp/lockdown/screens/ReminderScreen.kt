@@ -208,9 +208,10 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     // edits, as on the PC; only un-flagging Important, or a shorter wait before Dismiss, asks for the challenge.
     val d = rememberDraft(BedtimeDraft(cfg.sleep, cfg.settings.bedtimeGrayscale))
     val s = d.value.sleep
-    fun set(block: (SleepCfg) -> SleepCfg) = d.update { it.copy(sleep = block(it.sleep)) }
+    // the steps re-order as soon as a step is added or its time changes
+    fun set(block: (SleepCfg) -> SleepCfg) = d.update { it.copy(sleep = block(it.sleep).let { c -> c.copy(tiers = RemindersEngine.sortSteps(c.tiers, c.bedtime)) }) }
     fun save(then: () -> Unit) {
-        val new = d.value
+        val new = d.value.let { it.copy(sleep = it.sleep.copy(tiers = RemindersEngine.sortSteps(it.sleep.tiers, it.sleep.bedtime))) }
         val old = Store.config.let { BedtimeDraft(it.sleep, it.settings.bedtimeGrayscale) }
         guard(RemindersEngine.bedtimeLooser(old.sleep, new.sleep)) {
             Store.update { c -> c.copy(sleep = new.sleep.copy(on = c.sleep.on), settings = c.settings.copy(bedtimeGrayscale = new.grayscale)) }

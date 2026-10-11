@@ -459,3 +459,18 @@ def test_the_20_20_20_text_is_saved_and_read_back(api, ctx):
     assert data(api.reminders_get())["break"]["twenty_text"] == "Look out of the window"
     data(api.reminder_save_break({**BREAK, "twenty": True, "twenty_text": ""}))      # empty = back to the built-in words
     assert data(api.reminders_get())["break"]["twenty_text"] == ""
+
+
+def test_bedtime_steps_are_saved_in_the_order_of_the_night(api, ctx):
+    steps = [{"every": e, "after": a} for e, a in (("1 min", "03:00"), ("15 min", "22:30"), ("5 min", "01:00"),
+                                                   ("20 min", "22:00"), ("10 min", "23:00"))]
+    data(api.reminder_save_sleep({**SLEEP, "bedtime": "22:00", "tiers": steps}))
+    s = reminders.load(ctx.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
+    assert [t["from"] for t in s["tiers"]] == ["22:00", "22:30", "23:00", "01:00", "03:00"]
+    assert [t["after"] for t in data(api.reminders_get())["sleep"]["tiers"]] == ["22:00", "22:30", "23:00", "01:00", "03:00"]
+
+
+def test_sort_tiers_counts_from_bedtime():
+    tiers = [{"from": f, "every_sec": 60} for f in ("03:00", "22:30", "01:00", "22:00", "23:00")]
+    assert [t["from"] for t in reminders.sort_tiers(tiers, "22:00")] == ["22:00", "22:30", "23:00", "01:00", "03:00"]
+    assert [t["from"] for t in reminders.sort_tiers(tiers, "00:30")] == ["01:00", "03:00", "22:00", "22:30", "23:00"]

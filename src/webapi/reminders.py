@@ -308,7 +308,7 @@ def reminder_save_sleep(ctx, cfg):
         except (ValueError, ApiError):
             raise ApiError("Steps need how often (5 min, 30s - at least 5s) and a time like 21:00.") from None
         tiers.append({"from": after, "every_sec": every})
-    tiers.sort(key=lambda t: parse_hhmm(t["from"]))
+    tiers = reminders.sort_tiers(tiers, bedtime)
     try:
         wait = reminders.parse_seconds(str(cfg.get("dismiss_wait", 0)))
     except ValueError as e:

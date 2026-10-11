@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Bedtime steps sort themselves by time.** In "Comes back after you dismiss it", a step you add or move to an earlier time slots into its place: the order follows the night from bedtime (bedtime 22:00: 22:30, 23:00, 01:00, 03:00), and what is saved and loaded is always in that order. Only the order changes, not when the screen returns.
+
 ## 0.85.0 - 2026-10-11 22:44
 - **Strict break: choose which apps stay usable (PC, both windows).** The Breaks card has a new list, **Allowed during breaks**: apps on it are not minimised during a strict break and don't bring the break screen back. It starts with Lockdown and Windows Settings, and you can take either off or add your own (pick an app or its .exe). Adding one, or putting a default back, needs the challenge; taking one off is free. Programs only (a .jar or script can't be told apart from the program that runs it). Tests: `tests/test_break_allow.py`.
 - **Review fixes (PC).** A Java game started as `java -cp x.jar com.game.Main` is matched by a listed `...\com\game\Main.class` (by its path, so an unrelated `Main.class` elsewhere is not), and the block calendar paints an hours window with start = end as 24 h from its start (Wed 08:00 to Thu 08:00), not two whole days. Tests: `test_a_packaged_java_main_class_is_matched_by_its_path`, `test_block_window_start_equals_end_is_24h_from_start`.

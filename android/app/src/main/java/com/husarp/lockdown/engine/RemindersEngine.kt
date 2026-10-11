@@ -663,6 +663,13 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             return tiers.map { t -> hm(t.from)?.plusMinutes(d.toLong())?.let { t.copy(from = "%02d:%02d".format(it.hour, it.minute)) } ?: t }
         }
 
+        /** The steps in the order of the night: by minutes since [bedtime] (a step at bedtime first, after-midnight
+         *  ones after the evening ones). Same time: stays in place. A step that isn't a time keeps going last. */
+        fun sortSteps(tiers: List<ReminderTier>, bedtime: String): List<ReminderTier> {
+            val bed = hm(bedtime) ?: return tiers
+            return tiers.sortedBy { t -> hm(t.from)?.let { sinceBed(bed, it) } ?: Int.MAX_VALUE }
+        }
+
         /** A change that weakens a guarded (important) reminder - turning it off, or dropping its guard. */
         fun loosensReminder(oldOn: Boolean, oldGuarded: Boolean, newOn: Boolean, newGuarded: Boolean): Boolean =
             oldGuarded && ((oldOn && !newOn) || !newGuarded)
