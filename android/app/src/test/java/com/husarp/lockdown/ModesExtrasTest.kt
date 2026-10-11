@@ -153,4 +153,55 @@ class ModesExtrasTest {
         assertNotNull(st.until)
         assertTrue(st.until!!.isAfter(mon9))
     }
+
+    // ---- scheduled Pomodoro cycles inside its window ----
+    private val pom = Pomodoro(25, 5, 2, 15)          // one cycle = 25+5+25+15 = 70 min
+    private val pm = mode(sched(Window((0..4).toList(), "09:00", "17:00")), pom)
+
+    @Test fun scheduled_pomodoro_cycles_from_the_window_start() {
+        val a = Modes.active(mon9.plusMinutes(10), listOf(pm), null)!!
+        assertEquals(mon9, a.started)
+        assertEquals(Triple("focus", mon9.plusMinutes(25), 1), a.phase)
+        assertTrue(Modes.blocking(a))
+        val b = Modes.active(mon9.plusMinutes(27), listOf(pm), null)!!
+        assertEquals("break", b.phase!!.first)
+        assertFalse(Modes.blocking(b))                                   // no blocking in a break
+        assertEquals("long break", Modes.active(mon9.plusMinutes(60), listOf(pm), null)!!.phase!!.first)
+        assertTrue(b.scheduled && !b.locked)
+    }
+
+    @Test fun scheduled_pomodoro_repeats_after_the_last_round_and_stops_at_the_window_end() {
+        val c = Modes.active(mon9.plusMinutes(70), listOf(pm), null)!!        // second cycle, round 1 again
+        assertEquals(Triple("focus", mon9.plusMinutes(95), 1), c.phase)
+        assertEquals("break", Modes.active(mon9.plusMinutes(70 + 26), listOf(pm), null)!!.phase!!.first)
+        // the last phase is cut at the window end (16:57 is a long break that would run to 17:10)
+        val late = Modes.active(mon9.withHour(16).withMinute(57), listOf(pm), null)!!
+        assertEquals(mon9.withHour(17), late.phase!!.second)
+        assertNull(Modes.active(mon9.withHour(17), listOf(pm), null))
+    }
+
+    @Test fun scheduled_pomodoro_in_an_overnight_window_counts_from_its_start() {
+        val m = mode(sched(Window(listOf(4), "22:00", "06:00")), pom)
+        val sat1 = LocalDateTime.of(2026, 10, 3, 1, 57)                     // 237 min after Fri 22:00 -> 27 into cycle 4 -> break
+        val a = Modes.active(sat1, listOf(m), null)!!
+        assertEquals(LocalDateTime.of(2026, 10, 2, 22, 0), a.started)
+        assertEquals("break", a.phase!!.first)
+    }
+
+    @Test fun break_in_a_scheduled_pomodoro_is_no_way_round_the_guards() {
+        val other = Mode("o", "O")
+        val inBreak = mon9.plusMinutes(27)
+        assertFalse(Modes.blocking(Modes.active(inBreak, listOf(pm, other), null)))
+        // starting another mode during the break still needs the challenge; so does saving a shorter schedule
+        assertTrue(Modes.startNeedsChallenge(inBreak, listOf(pm, other), null, other, other, null, false))
+        val shorter = pm.copy(schedule = sched(Window((0..4).toList(), "09:00", "12:00")))
+        assertTrue(Modes.startNeedsChallenge(inBreak, listOf(pm), null, pm, shorter, null, false))
+        // a hand-started locked mode is not shortened by the scheduled one: still locked and guarded
+        val st = ModeActive("o", mon9.toString(), mon9.plusHours(3).toString(), locked = true)
+        assertTrue(Modes.startLooser(Modes.active(inBreak, listOf(pm, other), st), "o", null, true))
+    }
+
+    @Test fun a_scheduled_mode_without_pomodoro_has_no_phase() {
+        assertNull(Modes.active(mon9, listOf(mode(sched(Window((0..4).toList(), "09:00", "17:00")))), null)!!.phase)
+    }
 }

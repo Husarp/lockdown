@@ -39,6 +39,16 @@ object Rules {
         return null
     }
 
+    /** If [win] covers [now], when this run of it started (the window start, yesterday's for the past-midnight part); else null. */
+    fun windowStart(win: Window, now: LocalDateTime): LocalDateTime? {
+        if (windowUntil(win, now) == null) return null
+        val start = parseHhmm(win.start)
+        val t = now.toLocalTime().withSecond(0).withNano(0)
+        val today = now.toLocalDate()
+        return if (win.start < win.end || (weekday(now) in win.days && t >= start)) LocalDateTime.of(today, start)
+        else LocalDateTime.of(today.minusDays(1), start)
+    }
+
     fun nextWindowStart(windows: List<Window>, now: LocalDateTime): LocalDateTime? {
         val starts = ArrayList<LocalDateTime>()
         for (offset in 0..7) {

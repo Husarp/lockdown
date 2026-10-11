@@ -79,9 +79,14 @@ object Modes {
     fun pomodoroLength(p: Pomodoro): Long =
         (p.rounds * p.work + (p.rounds - 1) * p.brk + p.long).toLong()   // minutes
 
-    /** (phase name, phase end, round) for the Pomodoro at [now], or null once every round is done. */
-    fun pomodoroPhase(p: Pomodoro, started: LocalDateTime, now: LocalDateTime): Triple<String, LocalDateTime, Int>? {
+    /** (phase name, phase end, round) for the Pomodoro at [now], or null once every round is done. With [repeat]
+     *  (a scheduled window) the cycle starts again from round 1 when the rounds are done, so it never ends. */
+    fun pomodoroPhase(p: Pomodoro, started: LocalDateTime, now: LocalDateTime, repeat: Boolean = false): Triple<String, LocalDateTime, Int>? {
         var t = started
+        if (repeat && !now.isBefore(started)) {
+            val len = pomodoroLength(p) * 60
+            t = started.plusSeconds(java.time.Duration.between(started, now).seconds / len * len)
+        }
         for (rnd in 1..p.rounds) {
             val phases = listOf(
                 "focus" to p.work,
@@ -116,8 +121,14 @@ object Modes {
         for (mode in modes) {
             val sched = mode.schedule ?: continue
             val until = Rules.scheduleUntil(sched, now) ?: continue
-            return ModeState(mode, now, if (until == LocalDateTime.MAX) null else until,
-                locked = false, scheduled = true, phase = null)
+            // A Pomodoro mode cycles inside its window, counted from the window start (block windows only); the
+            // last phase is cut at the window end. Never locked, so a break gives no way to edit or stop anything.
+            val winStart = if (sched.mode == SchedMode.BLOCK && mode.pomodoro != null)
+                sched.windows.filter { Rules.windowUntil(it, now) == until }.firstNotNullOfOrNull { Rules.windowStart(it, now) } else null
+            val phase = winStart?.let { pomodoroPhase(clamp(mode.pomodoro!!), it, now, repeat = true) }
+                ?.let { if (it.second.isAfter(until)) it.copy(second = until) else it }
+            return ModeState(mode, winStart ?: now, if (until == LocalDateTime.MAX) null else until,
+                locked = false, scheduled = true, phase = phase)
         }
         return null
     }
