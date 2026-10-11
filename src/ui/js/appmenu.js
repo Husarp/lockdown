@@ -10,6 +10,7 @@
 //              restore()          called when a dialog this menu opened (New category, the editor, a challenge) is over and
 //                                 nothing is open any more - the App browser uses it to open itself again
 //              goBlocking(prefill) default: the router's Blocking > Add with the app / site filled in
+//              start: "category"  open on the category list (a category chip); "‹ Back" leads to the whole menu
 // What a change needs (the challenge while Anti-Bypass is locked) is decided in Python - this file only asks.
 import { ld } from "./bridge.js";
 import { openMenu } from "./menu.js";
@@ -104,5 +105,5 @@ export async function openAppMenu(anchor, target, opts = {}) {
     return items;
   };
   const show = (items) => openMenu(at, items);
-  show(top());
+  show(opts.start === "category" ? categoryList() : top());
 }

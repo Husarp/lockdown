@@ -28,6 +28,7 @@ PAGE_MODULES = [
     "overlay",
     "protection",
     "groups",
+    "screentime",
 ]
 
 for _name in PAGE_MODULES:

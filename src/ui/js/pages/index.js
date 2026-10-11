@@ -21,3 +21,4 @@ pages.blocking = () => import("./blocking.js");
 pages.dashboard = () => import("./dashboard.js");
 pages.modes = () => import("./modes.js");
 pages.netlog = () => import("./netlog.js");
+pages.screentime = () => import("./screentime.js");
