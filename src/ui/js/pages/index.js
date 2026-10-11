@@ -14,3 +14,4 @@
 //     export function hide() {}                // the page was left
 export const pages = {};
 
+pages.reminders = () => import("./reminders.js");

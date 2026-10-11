@@ -12,6 +12,7 @@ from .core import api_methods, build_api
 PAGE_MODULES = [
     "guard",
     "shell",
+    "reminders",
 ]
 
 for _name in PAGE_MODULES:
