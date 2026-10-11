@@ -247,7 +247,10 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         if (cfg.settings.siteFilterOn && !com.husarp.lockdown.vpn.LockdownVpn.active)
             notify(4, "Site filter stopped", "The site filter isn't running - open Lockdown to restart it.")
         val link = com.husarp.lockdown.link.IslandLink
-        if (cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext))
+        // An open "Island helper stopped" alert (the service counts it) is put up again here, in case that service is
+        // gone; the plain notice is for everything else that leaves Island uncovered.
+        val stoppedAlert = cfg.enabled && cfg.guardrails.helperAlert && com.husarp.lockdown.link.HelperWatcher.repost(applicationContext)
+        if (!stoppedAlert && cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext))
             notify(8, "Island apps not covered", "Lockdown in Island isn't checking in or can't block - open it there.")
 
         // daily screen-time goal (once a day) - held while a pause silences alerts (PC 0.84.8); the tamper notices above

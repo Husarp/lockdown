@@ -86,6 +86,9 @@ private fun MainLinkCard() {
                         else -> "Linked · not heard from since ${hhmm(st.lastSeen)}: open Lockdown in Island"
                     }
                     Text(text, style = MaterialTheme.typography.bodyMedium, color = if (recent && st.canBlock) cs.onSurface else cs.error)
+                    com.husarp.lockdown.link.HelperWatcher.summary(ctx)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
                     if (st.cfgError) Text("Lockdown in Island couldn't read your rules: update it there.", style = MaterialTheme.typography.bodySmall, color = cs.error)
                     else if (st.helperApp in 1 until mine) Text("Lockdown in Island is older than this one: update it there, so it knows every rule.", style = MaterialTheme.typography.bodySmall, color = cs.error)
                     else if (st.helperApp > mine) Text("Lockdown in Island is newer: update this one.", style = MaterialTheme.typography.bodySmall, color = cs.error)

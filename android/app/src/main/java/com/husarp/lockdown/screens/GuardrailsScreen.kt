@@ -224,7 +224,8 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
         }
         SectionCard(Icons.Filled.ToggleOn, Hue.SLATE, "Switches",
             listOfNotNull(if (e.guardrails.persist) "Keep running" else null, if (e.guardrails.trustedTime) "Trusted time" else null,
-                if (e.guardrails.uninstallProtection && admin) "Uninstall protection" else null).joinToString(" · ").ifEmpty { "All off" },
+                if (e.guardrails.uninstallProtection && admin) "Uninstall protection" else null,
+                if (e.guardrails.helperAlert) "Island alert" else null).joinToString(" · ").ifEmpty { "All off" },
             dot = if ("switches" in changed) warnDot else null) { section = "switches" }
         }
 
@@ -379,6 +380,12 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 Text("Time zone changed to $new - Lockdown keeps $kept for 24 hours.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
+            SwitchRowInline("Alert when Lockdown in Island stops (and count it)", e.guardrails.helperAlert) { on ->
+                d.update { it.copy(guardrails = it.guardrails.copy(helperAlert = on)) }
+            }
+            Text("If Lockdown in Island is stopped (Android's Stop or Force stop) its apps are no longer blocked. Main sees that " +
+                "after 2 minutes of screen time and keeps an alert up until it is running again. Turning this off needs the challenge.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             // Saved: on only while Android really has it (turned off in Android's settings, or its screen cancelled,
             // shows off). Kept on but off in Android, turning it on asks Android again at once (like Fix above).
             val up = e.guardrails.uninstallProtection

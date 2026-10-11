@@ -107,7 +107,7 @@ fun HelperScreen() {
                 HelperRow("Display over other apps (the block screen)", overlay || a11y) {
                     open(ctx, Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
                 }
-                HelperRow("Battery not restricted", remember(now) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }) {
+                HelperRow("Battery not restricted (lets Lockdown start itself again if it is stopped)", remember(now) { ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName) }) {
                     Perms.openBattery(ctx)
                 }
                 HelperRow("Notifications", remember(now) { Perms.notifications(ctx) }) { open(ctx, Perms.notificationsIntent(ctx)) }

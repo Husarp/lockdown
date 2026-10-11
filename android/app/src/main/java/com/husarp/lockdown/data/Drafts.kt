@@ -23,7 +23,8 @@ data class GuardrailsEdit(
             AntiBypass.emergencyLooser(old.emergencyOn, old.tiers, emergencyOn, tiers) ||
             (old.guardrails.persist && !guardrails.persist) ||
             (old.guardrails.trustedTime && !guardrails.trustedTime) ||
-            (old.guardrails.uninstallProtection && !guardrails.uninstallProtection)
+            (old.guardrails.uninstallProtection && !guardrails.uninstallProtection) ||
+            (old.guardrails.helperAlert && !guardrails.helperAlert)
 
     /** The Guardrails sections whose settings differ from [old] (their unsaved dot): "challenge", "emergency",
      *  "switches". */

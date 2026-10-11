@@ -107,6 +107,7 @@ data class Guardrails(
     val uninstallProtection: Boolean = false,          // device-admin so it can't be uninstalled while on
     val persist: Boolean = true,                       // keep the service alive; restart on kill/boot
     val trustedTime: Boolean = true,                   // ignore the clock being changed; a new time zone after 24 h
+    val helperAlert: Boolean = true,                   // linked Island helper silent for 2 min of screen time: loud repeating alert + counted
 )
 
 @Serializable

@@ -19,6 +19,15 @@ object Cadence {
     const val REMIND_OFF_MS = 30_000L       // the reminders engine (bedtime, breaks, your reminders)
 
     fun stepMs(screenOn: Boolean) = if (screenOn) STEP_MS else STEP_OFF_MS
+
+    /** The step loop is waiting out its stretched (screen off) delay but the screen is on: bring it back to the quick
+     *  pace. The screen receiver does it at once; this is the net under it, for a receiver Android didn't register. */
+    fun rearmSteps(currentDelayMs: Long, screenOn: Boolean) = screenOn && currentDelayMs > STEP_MS
+
+    /** A screen broadcast that closes the usage gap (the time the screen was off is not use). Only SCREEN_ON and
+     *  SCREEN_OFF do: USER_PRESENT comes about a second after SCREEN_ON (on a phone without a lock screen too), when
+     *  the step may already be counting - closing the gap then would restart the visit and drop its seconds. */
+    fun closesUsageGap(action: String?) = action == "android.intent.action.SCREEN_ON" || action == "android.intent.action.SCREEN_OFF"
     fun alertMs(screenOn: Boolean) = if (screenOn) ALERT_MS else ALERT_OFF_MS
     fun bedtimeMs(screenOn: Boolean) = if (screenOn) BEDTIME_MS else BEDTIME_OFF_MS
 
@@ -46,6 +55,10 @@ object Cadence {
     const val LINK_SYNC_ACTIVE_MS = 5000L   // an Island app in front, or something waiting for main
     const val LINK_SYNC_IDLE_MS = 30_000L   // screen on, main's apps in use
     const val LINK_SYNC_OFF_MS = 3 * 60_000L   // (main calls the helper late after 10 min)
+
+    /** The Island helper's watchdog (WorkManager): it brings a stopped helper service back. 15 min is WorkManager's
+     *  shortest period, and the whole cost: one wake-up and a flag check when the service is running. */
+    const val HELPER_WATCHDOG_MIN = 15L
 
     fun linkPollMs(screenOn: Boolean) = if (screenOn) LINK_POLL_MS else LINK_POLL_OFF_MS
     fun linkTickMs(screenOn: Boolean) = if (screenOn) LINK_TICK_MS else LINK_TICK_OFF_MS

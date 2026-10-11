@@ -492,6 +492,9 @@ private fun IslandCard(onOpenSettings: (String?) -> Unit) {
                         TextButton(onClick = { IslandLink.openOtherProfile(ctx) }) { Text("Fix") }
                     }
                 }
+                remember(fresh, link) { com.husarp.lockdown.link.HelperWatcher.summary(ctx) }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             "unlinking" -> CardRow("Unlinking", "Finishes when Lockdown in Island next checks in.")
             else -> CardRow("Not linked", trailing = { TextButton(onClick = { onOpenSettings("island") }) { Text("Set up ›") } })

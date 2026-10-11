@@ -87,6 +87,7 @@ object IslandLink {
             _main.value = MainLink(p.getString("state", "") ?: "", p.getLong("lastSeen", 0), p.getLong("helperApp", 0), p.getBoolean("cfgError", false),
                 canBlock = p.getBoolean("canBlock", true), linkedAt = p.getLong("linkedAt", 0))
             if (_main.value.state.isNotEmpty()) ensureServer()
+            HelperWatcher.init(app)
         } else {
             val st = readHelper() ?: return
             helperState = st
@@ -95,7 +96,8 @@ object IslandLink {
             _status.value = HelperStatus(lastOk = st.lastOk, mainApp = st.mainApp)
             _helper.value = true
             stopAlerts(app)
-            runCatching { LinkService.start(app) }
+            HelperWatchdog.startOrNudge(app)
+            runCatching { HelperWatchdog.schedule(app) }
         }
     }
 
@@ -160,6 +162,11 @@ object IslandLink {
 
     fun islandInFront(): Boolean = islandFront != null && SystemClock.elapsedRealtime() - islandFrontAt < 15_000
 
+    /** Main: when the helper last checked in (elapsed ms on this phone's monotonic clock; 0: not since this process
+     *  started). What [HelperWatcher] reads: unlike the wall-clock lastSeen, setting the clock changes nothing. */
+    @Volatile var heardAt = 0L
+        private set
+
     private fun prefs() = app.getSharedPreferences("island_link", Context.MODE_PRIVATE)
 
     private fun publish(f: (MainLink) -> MainLink = { it }) {
@@ -205,12 +212,15 @@ object IslandLink {
         val m = _main.value
         // A negative age is a clock set back, not a fresh check-in.
         if (System.currentTimeMillis() - m.lastSeen in 0 until 10 * 60_000L && m.canBlock) return true
-        return runCatching {
-            val um = ctx.getSystemService(UserManager::class.java)
-            val others = um.userProfiles.filter { it != Process.myUserHandle() }
-            others.isNotEmpty() && others.all { um.isQuietModeEnabled(it) }
-        }.getOrDefault(false)
+        return profilePaused(ctx)
     }
+
+    /** Island (the work profile) is switched off: nothing in it can run, so nothing there needs covering. */
+    fun profilePaused(ctx: Context): Boolean = runCatching {
+        val um = ctx.getSystemService(UserManager::class.java)
+        val others = um.userProfiles.filter { it != Process.myUserHandle() }
+        others.isNotEmpty() && others.all { um.isQuietModeEnabled(it) }
+    }.getOrDefault(false)
 
     @Synchronized private fun ensureServer() {
         if (serverThread?.isAlive == true) return
@@ -270,6 +280,7 @@ object IslandLink {
             prefs().edit().clear().putString("state", "linked").putString("secret", LinkCrypto.b64(s))
                 .putLong("lastSeq", 0).putLong("lastSeen", now).putLong("linkedAt", now).commit()
             lastSeenSaved = now
+            heardAt = SystemClock.elapsedRealtime()
             publish { MainLink(state = "linked", lastSeen = now, linkedAt = now) }
             s
         } ?: return deny(out)
@@ -281,6 +292,8 @@ object IslandLink {
         val secret = LinkCrypto.unb64(p.getString("secret", null)) ?: return deny(out)
         if (!LinkProtocol.verify(req, secret, LinkProtocol.H2M, nM, nH)) return deny(out)
         val body = json.decodeFromString<SyncBody>(req.body!!)
+        heardAt = SystemClock.elapsedRealtime()        // (a signed message: the helper is running)
+        HelperWatcher.heard()
         // The helper got the unlink and stands alone now: only then is the link dropped here.
         if (body.bye) {
             if (p.getString("state", "") != "unlinking") return deny(out)
@@ -532,6 +545,7 @@ object IslandLink {
         _helper.value = true
         runCatching { syncOnce(ctx) }
         runCatching { LinkService.start(ctx) }
+        runCatching { HelperWatchdog.schedule(ctx) }
         return null
     }
 
@@ -674,6 +688,7 @@ object IslandLink {
             _helper.value = false
             _status.value = HelperStatus()
             Reminders.schedule(ctx)
+            runCatching { HelperWatchdog.cancel(ctx) }
             LinkService.stop(ctx)
         }
     }

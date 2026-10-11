@@ -81,13 +81,17 @@ class LinkService : Service() {
     override fun onBind(intent: Intent?) = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        runCatching {
+        // Android 12+ refuses this when the service was started from the background where that isn't allowed: then the
+        // service would be killed soon as a plain background service, so ask for a tap instead (HelperWatchdog).
+        val foreground = runCatching {
             ServiceCompat.startForeground(this, NOTIF_ID, notification(),
                 if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
-        }
+        }.isSuccess
         if (!IslandLink.isHelper) { stopSelf(); return START_NOT_STICKY }
+        if (foreground) HelperWatchdog.clearNudge(this) else HelperWatchdog.nudge(this)
         if (!running) {
             running = true
+            alive = true
             lastTs = System.currentTimeMillis() - 60 * 60_000L
             runCatching {
                 ContextCompat.registerReceiver(this, screenReceiver, IntentFilter().apply {
@@ -109,6 +113,7 @@ class LinkService : Service() {
 
     override fun onDestroy() {
         running = false
+        alive = false
         runCatching { unregisterReceiver(screenReceiver) }
         handler.removeCallbacksAndMessages(null)
         hideBlock()
@@ -259,6 +264,10 @@ class LinkService : Service() {
     companion object {
         private const val CHANNEL = "link"
         private const val NOTIF_ID = 43
+
+        /** The service is up in this process (a stopped app starts a new process, so this is false again). */
+        @Volatile var alive = false
+            private set
 
         fun start(ctx: Context) = ContextCompat.startForegroundService(ctx, Intent(ctx, LinkService::class.java))
         fun stop(ctx: Context) = ctx.stopService(Intent(ctx, LinkService::class.java))

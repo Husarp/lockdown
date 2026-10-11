@@ -40,6 +40,7 @@ import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.engine.RPrompt
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.guard.TrustedTime
+import com.husarp.lockdown.link.HelperWatcher
 import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.remind.Grayscale
 import com.husarp.lockdown.remind.ReminderRunner
@@ -94,7 +95,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     /** The screen went off / came on / was unlocked: the loops stretched for the screen being off run now, at the
      *  pace the screen calls for. A broadcast that can't be missed, so the stretch never delays blocking. */
     private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, intent: Intent) { runCatching { wake() } }
+        override fun onReceive(c: Context, intent: Intent) { runCatching { wake(Cadence.closesUsageGap(intent.action)) } }
     }
 
     override fun onServiceConnected() {
@@ -123,26 +124,34 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         override fun run() {
             runCatching { step() }
             stepDelay = Cadence.stepMs(screenOn())
+            handler.removeCallbacks(this)           // (step() may have set the next run already: one pending run only)
             handler.postDelayed(this, stepDelay)
         }
     }
 
-    /** The screen changed: close out the time it was off (so the first step counts none of it), then run the loops
-     *  now - each sets its own next pace from the screen's state. */
-    private fun wake() {
-        val ms = SystemClock.elapsedRealtime()
-        runCatching { UsageStore.record(emptyList(), Enforce.ldt(TrustedTime.now(this))) }
-        lastHistMs = ms; lastRemindTick = ms
+    /** The screen changed: close out the time it was off (so the first step counts none of it) - only on SCREEN_ON /
+     *  SCREEN_OFF ([closeGap], see [Cadence.closesUsageGap]) - then run the loops now: each sets its own next pace
+     *  from the screen's state. */
+    private fun wake(closeGap: Boolean) {
+        if (closeGap) {
+            val ms = SystemClock.elapsedRealtime()
+            runCatching { UsageStore.record(emptyList(), Enforce.ldt(TrustedTime.now(this))) }
+            lastHistMs = ms; lastRemindTick = ms
+        }
         for (r in listOf(tick, bedtimeTick, remindTick, alertTick)) { handler.removeCallbacks(r); handler.post(r) }
     }
 
-    /** The step loop is running at its stretched (screen off) pace but an app came up: run it again soon. */
+    /** The step loop is running at its stretched (screen off) pace but the screen is on: run it again soon. Called when
+     *  an app comes up and at every step - so a screen receiver Android didn't register can't leave blocking at the
+     *  slow pace. [stepDelay] is the quick pace from now on, which keeps a stream of events from pushing the run out. */
     private fun speedUpSteps() {
-        if (stepDelay <= Cadence.STEP_MS || !screenOn()) return
+        if (!Cadence.rearmSteps(stepDelay, screenOn())) return
+        stepDelay = Cadence.STEP_MS
         handler.removeCallbacks(tick); handler.postDelayed(tick, Cadence.STEP_MS)
     }
 
     private fun step() {
+        speedUpSteps()
         val cfg = Store.config
         // the app whose notice was just dismissed is still closing: not in front (until really brought back)
         val pkg = currentPkg.takeUnless { debounce.leftover(it, SystemClock.elapsedRealtime()) } ?: ""
@@ -671,6 +680,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 warnPauseEnding(now)
             }
             runCatching { Grayscale.sync(this@BlockService) }
+            // Island helper stopped? (screen-on time only; costs a flag check with the screen off or no link)
+            runCatching { if (!IslandLink.isHelper) HelperWatcher.look(this@BlockService, screenOn()) }
             handler.postDelayed(this, Cadence.bedtimeMs(screenOn()))
         }
     }
