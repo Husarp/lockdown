@@ -21,6 +21,7 @@ PAGE_MODULES = [
     "antibypass_page",
     "draft",
     "blocking",
+    "dashboard",
 ]
 
 for _name in PAGE_MODULES:

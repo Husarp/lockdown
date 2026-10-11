@@ -9,13 +9,11 @@ import re
 import sys
 import threading
 import time
-from datetime import datetime
 
 import antibypass
-import modes
 import pause
 import ui_theme
-from rules import TIME_FMT
+from resident import snapshot
 
 from . import core
 from .core import ApiError
@@ -39,25 +37,6 @@ def _service_running(db) -> bool:
         return False
 
 
-def _mode(state):
-    """The active mode as the page needs it, or None."""
-    if not state:
-        return None
-    phase = state["phase"]
-    return {"id": state["mode"]["id"], "name": state["mode"]["name"], "phase": phase[0] if phase else None,
-            "ends_at": _iso(state["until"]), "locked": state["locked"], "by_schedule": state["scheduled"]}
-
-
-def _off_since(db):
-    text = antibypass.off_since(db)
-    if not text:
-        return None
-    try:
-        return datetime.strptime(text, TIME_FMT).isoformat(timespec="seconds")
-    except ValueError:
-        return text
-
-
 def _draft(ctx, db) -> dict:
     """Unsaved changes. The draft itself arrives with R18, which sets `ctx.draft_state` to a function returning
     (dirty, summary); until then nothing is ever dirty."""
@@ -70,42 +49,21 @@ def _draft(ctx, db) -> dict:
 
 
 def _status(ctx) -> dict:
-    """The whole shell status (also what `status` pushes carry, as deltas)."""
+    """The whole shell status (also what `status` pushes carry, as deltas): the status snapshot's page part
+    (resident/snapshot.py - ONE vocabulary for this answer and the pushes) plus the clock, the draft and the tray text.
+    A snapshot is built for this call (about a millisecond), so a button that just changed something answers truthfully."""
     db, now = ctx.db, ctx.now()
-    cfg = antibypass.settings(db)
-    state = modes.active(db, now)
-    paused = pause.state(db, now)
-    off = _off_since(db)
-    running = _service_running(db)
-    if off:
-        tray = "OFF - nothing is enforced"
-    elif paused:
-        tray = f"Blocking paused until {paused['until']:%H:%M}"
-    else:
-        tray = f"{db.item_count()} sites/apps blocked" + (f" · {state['mode']['name']} mode" if state else "")
-    unlocked, waiting = antibypass.unlocked_until(cfg, now), antibypass.waiting_until(cfg, now)
-    nxt = antibypass.next_hours(cfg, now) if cfg["hours"] else None
-    return {
-        "service_running": running,
-        "off_since": off,
-        "mode": _mode(state),
-        "pause": {"started": _iso(paused["started"]), "until": _iso(paused["until"]), "silent": paused["silent"]}
-                 if paused else None,
-        "clock_now": _iso(now),
-        "draft": _draft(ctx, db),
-        "antibypass": {"status": antibypass.status(cfg, now), "unlocked_until": _iso(unlocked),
-                       "waiting_until": _iso(waiting), "next_open": _iso(nxt)},
-        "tray_text": tray,
-    }
+    snap = snapshot.build(db, now)
+    return {**snap.public(), "clock_now": _iso(now), "draft": _draft(ctx, db), "tray_text": snap.tray.text}
 
 
 # ---------------------------------------------------------------- reading
 
 @core.read
 def get_status(ctx):
-    """service_running, off_since, mode, pause, clock_now, draft, antibypass, tray_text (see _status()).
-    The words are BLUEPRINT 3.0's; the `status` pushes (resident/snapshot.py) say running / off / mode.phase as an
-    object instead - js/shell.js canon() turns this answer into the push words, so the two merge into one status."""
+    """The status snapshot's page part - running, off, pause, mode, blocks, antibypass, emergency, update,
+    clock_offset (resident/snapshot.py PUBLIC_KEYS, the same words the `status` pushes use) - plus clock_now, draft
+    {dirty, autosave, change_summary} and tray_text."""
     return _status(ctx)
 
 
@@ -219,10 +177,18 @@ def service_start(ctx):
     return {"starting": True}
 
 
+def _poke(ctx):
+    """Tell the status worker something changed (the tray and the mute rule then follow at once). Only the agent has one."""
+    worker = getattr(getattr(ctx, "hub", None), "status_worker", None)
+    if worker is not None:
+        worker.poke()
+
+
 @core.tighten
 def antibypass_switch_on(ctx):
     """Turn Lockdown back on after it was switched off. Never needs the challenge (it only adds protection)."""
     antibypass.switch_on(ctx.db)
+    _poke(ctx)
     return _status(ctx)
 
 
@@ -230,4 +196,5 @@ def antibypass_switch_on(ctx):
 def pause_resume(ctx):
     """End "Pause my blocks" early: blocking is back on at once. Always free."""
     pause.resume(ctx.db)
+    _poke(ctx)
     return _status(ctx)

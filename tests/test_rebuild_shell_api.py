@@ -65,43 +65,44 @@ def test_the_heartbeat_key_is_the_services():
 
 # ---------------------------------------------------------------- get_status
 
-STATUS_KEYS = {"service_running", "off_since", "mode", "pause", "clock_now", "draft", "antibypass", "tray_text"}
+STATUS_KEYS = {"running", "off", "pause", "mode", "blocks", "antibypass", "emergency", "update", "clock_offset",
+               "clock_now", "draft", "tray_text"}      # the snapshot's page part (resident/snapshot.py) + the shell's own
 
 
 def test_get_status_has_the_blueprint_keys(api):
     st = data(api.get_status())
     assert set(st) == STATUS_KEYS
     assert set(st["draft"]) == {"dirty", "autosave", "change_summary"}
-    assert set(st["antibypass"]) == {"status", "unlocked_until", "waiting_until", "next_open"}
+    assert set(st["antibypass"]) == {"status", "active", "unlocked_until", "waiting_until", "next_open"}
     assert st["clock_now"] == "2026-09-20T19:00:00"
-    assert st["mode"] is None and st["pause"] is None and st["off_since"] is None
+    assert st["mode"] is None and st["pause"] is None and st["off"] is None
     assert st["draft"] == {"dirty": False, "autosave": True, "change_summary": ""}
     assert st["antibypass"]["status"] == "free"
     assert st["tray_text"] == "0 sites/apps blocked"
 
 
 def test_service_running_follows_the_heartbeat(ctx, api):
-    assert data(api.get_status())["service_running"] is False
+    assert data(api.get_status())["running"] is False
     ctx.db.set_setting(shell.HEARTBEAT_KEY, str(time.time()))
-    assert data(api.get_status())["service_running"] is True
+    assert data(api.get_status())["running"] is True
     ctx.db.set_setting(shell.HEARTBEAT_KEY, str(time.time() - 60))
-    assert data(api.get_status())["service_running"] is False
+    assert data(api.get_status())["running"] is False
     ctx.db.set_setting(shell.HEARTBEAT_KEY, "garbage")
-    assert data(api.get_status())["service_running"] is False
+    assert data(api.get_status())["running"] is False
 
 
 def test_off_state_and_tray_text(ctx, api):
     ab.switch_off(ctx.db, NOW)
     st = data(api.get_status())
-    assert st["off_since"] == "2026-09-20T19:00:00"
+    assert st["off"] == "2026-09-20 19:00:00"                  # (the snapshot's word, as the page gets it in a push)
     assert st["tray_text"] == "OFF - nothing is enforced"
 
 
 def test_active_mode_is_reported(ctx, api):
     modes.start(ctx.db, "work", NOW - timedelta(minutes=5), NOW + timedelta(hours=1), locked=True)
     st = data(api.get_status())
-    assert st["mode"] == {"id": "work", "name": "Work", "phase": None, "ends_at": "2026-09-20T20:00:00",
-                          "locked": True, "by_schedule": False}
+    assert st["mode"]["id"] == "work" and st["mode"]["name"] == "Work" and st["mode"]["phase"] is None
+    assert (st["mode"]["ends_at"], st["mode"]["locked"], st["mode"]["by_schedule"]) == ("2026-09-20T20:00:00", True, False)
     assert st["tray_text"].endswith(" · Work mode")
 
 
@@ -113,7 +114,8 @@ def test_mode_until_stopped_has_no_end(ctx, api):
 
 def test_pomodoro_phase_is_reported(ctx, api):
     modes.start(ctx.db, "focus", NOW - timedelta(minutes=26), None)      # 25 min focus, then a break
-    assert data(api.get_status())["mode"]["phase"] == "break"
+    phase = data(api.get_status())["mode"]["phase"]
+    assert phase["name"] == "break" and phase["ends_at"] and phase["round"] == 1       # (the snapshot's object, as in a push)
 
 
 def test_pause_is_reported_and_changes_tray_text(ctx, api):
@@ -276,13 +278,13 @@ def test_antibypass_switch_on_is_never_gated(ctx, api):
     ab.switch_off(ctx.db, NOW)
     assert ab.status(ab.settings(ctx.db), NOW) == "phrase"
     st = data(api.antibypass_switch_on())
-    assert st["off_since"] is None and not ab.is_off(ctx.db)
+    assert st["off"] is None and not ab.is_off(ctx.db)
 
 
 def test_antibypass_switch_on_also_works_outside_the_allowed_hours(ctx, api):
     ab.save(ctx.db, {**ab.settings(ctx.db), "hours": True, "windows": [{"days": [0], "start": "09:00", "end": "10:00"}]})
     ab.switch_off(ctx.db, NOW)
-    assert data(api.antibypass_switch_on())["off_since"] is None
+    assert data(api.antibypass_switch_on())["off"] is None
 
 
 def test_pause_resume_is_free(ctx, api):

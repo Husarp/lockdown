@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { NAV, PAGE_IDS } from "../../../src/ui/js/router.js";
 import { PATHS, symbol } from "../../../src/ui/js/icons.js";
-import { canon, clockText, hhmm, parseNaive } from "../../../src/ui/js/shell.js";
+import { clockText, hhmm, parseNaive } from "../../../src/ui/js/shell.js";
 import { DAYN, esc, fmt, status, tag } from "../../../src/ui/js/ui.js";
 
 const html = readFileSync(new URL("../../../src/ui/index.html", import.meta.url), "utf8");
@@ -76,19 +76,4 @@ test("ui builders escape what they are given", () => {
   assert.equal(fmt(125), "2 h 05 m");
   assert.equal(fmt(60), "1 h");
   assert.equal(DAYN.length, 7);
-});
-
-test("get_status's words become the snapshot's words, so a push can be merged over a fetched status", () => {
-  const fetched = { service_running: false, off_since: "2026-10-11T15:00:00", mode: { id: "focus", name: "Focus", phase: "break", ends_at: null },
-    pause: null, clock_now: "2026-10-11T15:42:17", draft: { dirty: false }, antibypass: { status: "free" }, tray_text: "x" };
-  const c = canon(fetched);
-  assert.equal(c.running, false);
-  assert.equal(c.off, "2026-10-11T15:00:00");
-  assert.deepEqual(c.mode.phase, { name: "break" });
-  assert.ok(!("service_running" in c) && !("off_since" in c));
-  assert.equal(fetched.service_running, false);                         // the input is left alone
-  // a snapshot-shaped status is left as it is
-  const pushed = { running: true, off: null, mode: { id: "focus", name: "Focus", phase: { name: "focus", ends_at: "x", round: 1, rounds: 4 } } };
-  assert.deepEqual(canon(pushed), pushed);
-  assert.deepEqual(canon({ mode: null }), { mode: null });
 });

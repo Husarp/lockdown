@@ -291,9 +291,19 @@ def test_top_line_shows_the_active_mode(shell, page, harness):
     assert page.inner_text("#tb-mode .u") == "until you stop"
 
 
+def settled(page, harness):
+    """The number of Api calls once the boot (the shell's and the Dashboard page's first load) has stopped calling."""
+    last = -1
+    while len(harness.calls) != last:
+        last = len(harness.calls)
+        page.wait_for_timeout(300)
+    return last
+
+
 def test_status_pushes_patch_in_place_without_rpc(shell, page, harness, push):
+    stub_all_pages(page)                     # (this tests the shell: the Dashboard page asks again when the status changes)
     shell()
-    n = len(harness.calls)
+    n = settled(page, harness)
     node = page.evaluate_handle("document.querySelector('#tb-mode .n')")
     push("status", {"mode": {"id": "study", "name": "Study", "phase": None, "ends_at": "2026-10-11T17:00:00",
                              "locked": False, "by_schedule": False}})
@@ -317,10 +327,11 @@ def snapshot_public(harness):
 
 
 def test_status_pushes_from_the_real_snapshot_render_in_the_same_places(shell, page, harness, push):
-    """get_status and the status pushes speak different words (service_running vs running ...); the shell takes both."""
+    """get_status and the status pushes speak one vocabulary (running, off, mode.phase ...): a push renders in the same places."""
     now = harness.now
+    stub_all_pages(page)                     # (this tests the shell: the Dashboard page asks again when the status changes)
     shell()
-    n = len(harness.calls)
+    n = settled(page, harness)
     # a mode with a Pomodoro phase, Lockdown paused
     modes.start(harness.db, "focus", now - timedelta(minutes=3), None)
     pause.start(harness.db, now, 30, silent=False)
@@ -432,7 +443,7 @@ def test_pause_my_blocks_opens_the_anti_bypass_page(shell, page):
 
 def test_trusted_clock_ticks_locally(shell, page, harness, push):
     shell()
-    n = len(harness.calls)
+    n = settled(page, harness)
     push("status", {"clock_now": "2026-10-11T15:42:57"})
     assert page.inner_text("#tb-clock").endswith("15:42")
     page.wait_for_function("document.querySelector('#tb-clock').textContent.endsWith('15:43')", timeout=6000)
@@ -568,7 +579,7 @@ def test_a_dirty_flag_that_arrives_during_the_first_load_is_not_lost(shell, page
 def test_dirty_for_a_page_never_visited_does_nothing(shell, page, harness, push):
     shell()
     register(page, "blocking")
-    n = harness.rpc_count()
+    n = settled(page, harness)
     push("dirty", {"page": "blocking"})
     push("dirty", {"page": "nonsense"})
     push("dirty", None)

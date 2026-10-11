@@ -45,19 +45,6 @@ function syncClockFrom(piece) {
   else if (typeof piece.clock_offset === "number") syncClockOffset(piece.clock_offset);
 }
 
-/**
- * get_status answers in the BLUEPRINT's words (service_running, off_since, mode.phase as a name) but the `status`
- * pushes (resident/snapshot.py) use the snapshot's (running, off, mode.phase as {name, ends_at, round, rounds}). The shell
- * keeps ONE vocabulary - the push one - so a push can be merged over a fetched status.
- */
-export function canon(st) {
-  const out = { ...st };
-  if ("service_running" in out) { out.running = out.service_running; delete out.service_running; }
-  if ("off_since" in out) { out.off = out.off_since; delete out.off_since; }
-  if (out.mode && typeof out.mode.phase === "string") out.mode = { ...out.mode, phase: { name: out.mode.phase } };
-  return out;
-}
-
 // ---------------------------------------------------------------- banners (one element per id, updated in place)
 const bannerEls = new Map();
 
@@ -107,7 +94,7 @@ let status = {};
 async function action(name, ...args) {
   try {
     const data = await ld.call(name, ...args);
-    if (data && typeof data === "object" && "service_running" in data) { syncClockFrom(data); Object.assign(ld.status, canon(data)); setStatus(ld.status); }
+    if (data && typeof data === "object" && "clock_now" in data) { syncClockFrom(data); Object.assign(ld.status, data); setStatus(ld.status); }   // (a status answer)
     return data;
   } catch (err) {
     toast(err.message || "That didn't work.");
@@ -119,7 +106,7 @@ export async function refreshStatus() {
   try {
     const data = await ld.call("get_status");
     syncClockFrom(data);
-    Object.assign(ld.status, canon(data));
+    Object.assign(ld.status, data);
     setStatus(ld.status);
   } catch (err) {
     toast("Can't reach Lockdown: " + (err.message || "unknown error"));
@@ -300,7 +287,7 @@ async function boot() {
   const [look, st] = await Promise.all([ld.call("get_theme"), ld.call("get_status")]);
   applyLook(look);
   syncClockFrom(st);
-  Object.assign(ld.status, canon(st));
+  Object.assign(ld.status, st);
   setStatus(ld.status);
   initUpdate({ banners, go: (id) => router.go(id) });
   document.documentElement.dataset.ready = "1";
