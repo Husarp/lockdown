@@ -104,39 +104,94 @@ def _secs(r, key="every_sec"):
         return 0
 
 
+def _minute_of(hhmm: str) -> int:
+    t = parse_hhmm(hhmm)
+    return t.hour * 60 + t.minute
+
+
+def _night_interval(s: dict, minute: int):
+    """Seconds between two bedtime screens at this minute of the day, or None when the night doesn't cover it
+    (bedtime up to wake). Asks the engine itself (reminders.Engine._sleep_interval), so the rule can't drift."""
+    bed_min, wake_min = _minute_of(s["bedtime"]), _minute_of(s["wake"])
+    span = (wake_min - bed_min) % 1440 or 1440
+    off = (minute - bed_min) % 1440
+    if off >= span:
+        return None
+    bed = datetime(2000, 1, 1, bed_min // 60, bed_min % 60)
+    return reminders.Engine._sleep_interval(None, s, bed, bed + timedelta(minutes=off))
+
+
+def _sleep_weaker(old: dict, new: dict) -> bool:
+    """Weaker when at ANY minute of the old night the new settings are silent or come back less often (a step that
+    starts later, a later bedtime, an earlier wake, a longer interval); an extra, earlier step is stricter."""
+    if float(new.get("before") or 0) < float(old.get("before") or 0):
+        return True
+    if old.get("mode") and not new.get("mode"):
+        return True
+    # the interval only changes where a step starts or the night begins / ends - look at exactly those minutes
+    marks = {_minute_of(x[k]) for x in (old, new) for k in ("bedtime", "wake")}
+    marks |= {_minute_of(t["from"]) for x in (old, new) for t in reminders.tiers_of(x)}
+    for m in marks:
+        was = _night_interval(old, m)
+        if was is None:
+            continue
+        now = _night_interval(new, m)
+        if now is None or now > was:
+            return True
+    return False
+
+
+def _active_minutes(r: dict) -> tuple:
+    """(first, last) minute of the day a custom reminder can fire in, for 'only between' / a random time."""
+    lo, hi = _minute_of(r["window"][0]), _minute_of(r["window"][1])
+    return (lo, max(lo, hi - 1)) if r["kind"] == "random" else (lo, hi)
+
+
+def _hours_narrower(o: dict, n: dict) -> bool:
+    """True when the new 'only between' hours cover less of the day than the old ones (every day = no hours)."""
+    if not o.get("hours"):
+        return bool(n.get("hours"))
+    if not n.get("hours"):
+        return False
+    olo, ohi = _minute_of(o["window"][0]), _minute_of(o["window"][1])
+    nlo, nhi = _minute_of(n["window"][0]), _minute_of(n["window"][1])
+    o_set = set(range(olo, ohi)) if olo < ohi else set(range(olo, 1440)) | set(range(0, ohi))
+    n_set = set(range(nlo, nhi)) if nlo < nhi else set(range(nlo, 1440)) | set(range(0, nhi))
+    return not o_set <= n_set
+
+
 def _weaker(old: dict, new: dict, kind: str) -> bool:
     """True when an IMPORTANT reminder is changed so that it asks for less. Only an important one counts (a casual
-    reminder can be edited freely). `kind` is "sleep", "break" or "custom"."""
+    reminder can be edited freely). `kind` is "sleep", "break" or "custom". Turning something stricter ON (Strict
+    break, a daily limit ...) is always free."""
     if not old.get("guarded"):
         return False
     if kind == "sleep":
-        if float(new.get("before") or 0) < float(old.get("before") or 0):
-            return True
-        old_t, new_t = reminders.tiers_of(old), reminders.tiers_of(new)
-        if len(new_t) < len(old_t):
-            return True
-        return any(_secs(n) > _secs(o) for o, n in zip(old_t, new_t))
+        return _sleep_weaker({**reminders.DEFAULT_SLEEP, **old}, {**reminders.DEFAULT_SLEEP, **new})
     if kind == "break":
-        return (_secs(new) > _secs(old) or (old.get("strict") and not new.get("strict"))
-                or (old.get("twenty") and not new.get("twenty"))
-                or (new.get("strict") and int(new.get("max_snooze") or 0) > int(old.get("max_snooze") or 0)))
+        o, n = {**reminders.DEFAULT_BREAK, **old}, {**reminders.DEFAULT_BREAK, **new}
+        return (_secs(n) > _secs(o) or _secs(n, "snooze_sec") > _secs(o, "snooze_sec")
+                or int(n["length"]) < int(o["length"]) or (o["strict"] and not n["strict"])
+                or (o["twenty"] and not n["twenty"])
+                or (o["strict"] and n["strict"] and int(n["max_snooze"]) > int(o["max_snooze"])))
     o, n = _merged(old), _merged(new)
-    if o["kind"] != n["kind"]:
+    if o["kind"] != n["kind"]:                              # (can't be compared cheaply: ask)
         return True
     if not set(o["days"]) <= set(n["days"]):                # (a day dropped)
         return True
-    if n["kind"] == "interval" and _secs(n) > _secs(o):
+    if n["snooze"] > o["snooze"] or int(n["max_snooze"]) > int(o["max_snooze"]):
+        return True
+    if n["kind"] == "interval" and (_secs(n) > _secs(o) or _hours_narrower(o, n)):
         return True
     if n["kind"] == "times" and not set(o["times"]) <= set(n["times"]):
         return True
-    if n["kind"] == "random" and n["window"] != o["window"]:
-        return True
-    if n["kind"] == "interval" and n.get("hours") and (not o.get("hours") or n["window"][0] > o["window"][0]
-                                                       or n["window"][1] < o["window"][1]):
-        return True
-    if n["per_day"] and (not o["per_day"] or n["per_day"] < o["per_day"]):
-        return True
-    return int(n["max_snooze"]) > int(o["max_snooze"])
+    if n["kind"] == "random":
+        # once a day either way; a wider (or equal) window of possible times asks just as much, a narrower or
+        # moved one is a different promise
+        (olo, ohi), (nlo, nhi) = _active_minutes(o), _active_minutes(n)
+        if nlo > olo or nhi < ohi:
+            return True
+    return bool(n["per_day"]) and (not o["per_day"] or n["per_day"] < o["per_day"])
 
 
 def _loosens(old: dict, new: dict, kind: str) -> bool:

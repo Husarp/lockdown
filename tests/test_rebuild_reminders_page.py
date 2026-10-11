@@ -207,7 +207,7 @@ def test_a_shorter_interval_text_and_new_important_ones_are_free(api, ctx, locke
     a = add(api, guarded=True)                                # a NEW important reminder only adds protection
     assert data(api.reminder_save_custom({**CUSTOM, "id": a, "guarded": True, "every": "30 min"}))["saved"]
     assert data(api.reminder_save_custom({**CUSTOM, "id": a, "guarded": True, "every": "30 min", "text": "New",
-                                          "days": list(range(7)), "per_day": 0, "snooze": 10}))["saved"]
+                                          "days": list(range(7)), "per_day": 0, "snooze": 1}))["saved"]
     assert stored(ctx)[a]["every_sec"] == 1800 and stored(ctx)[a]["text"] == "New"
     assert data(api.reminder_set_on(a, True))["saved"]        # turning ON is free
 
@@ -239,6 +239,133 @@ def test_sleep_and_break_important_rules(api, ctx, locked):
     # tightening stays free
     assert data(api.reminder_save_sleep({**SLEEP, "guarded": True, "before": "60"}))["saved"]
     assert data(api.reminder_save_break({**BREAK, "guarded": True, "strict": True, "every": "30 min"}))["saved"]
+
+
+G_SLEEP = {**SLEEP, "guarded": True, "tiers": [{"every": "15 min", "after": "21:00"},
+                                               {"every": "5 min", "after": "00:00"}, {"every": "60s", "after": "03:00"}]}
+G_BREAK = {**BREAK, "guarded": True, "strict": True, "max_snooze": 2, "snooze": "5 min"}
+
+
+def _asks(reply):
+    return bool(data(reply).get("needs_challenge"))
+
+
+def _sleep_change(api, **ch):
+    return api.reminder_save_sleep({**G_SLEEP, **ch})
+
+
+def _tiers(*pairs):
+    return [{"every": e, "after": a} for e, a in pairs]
+
+
+@pytest.mark.parametrize("change", [
+    {"tiers": _tiers(("15 min", "21:00"), ("5 min", "00:30"), ("60s", "03:00"))},          # a step starts later
+    {"tiers": _tiers(("30 min", "21:00"), ("5 min", "00:00"), ("60s", "03:00"))},          # a longer interval
+    {"tiers": _tiers(("15 min", "21:00"), ("5 min", "00:00"))},                            # last step removed
+    {"bedtime": "01:00"}, {"wake": "05:00"},                                               # a shorter covered night
+], ids=["step-later", "interval-longer", "step-removed", "bedtime-later", "wake-earlier"])
+def test_sleep_weaker_asks(api, ctx, locked, change):
+    data(api.reminder_save_sleep(G_SLEEP))
+    assert _asks(_sleep_change(api, **change))
+
+
+def test_sleep_without_a_mode_at_bedtime_asks_but_another_mode_is_free(api, ctx, locked):
+    import modes
+    ids = [m["id"] for m in modes.load(ctx.db)]
+    assert len(ids) >= 2, ids
+    data(api.reminder_save_sleep({**G_SLEEP, "mode": ids[0]}))
+    assert _asks(_sleep_change(api, mode=""))
+    assert data(_sleep_change(api, mode=ids[1]))["saved"]
+    assert data(_sleep_change(api, mode=ids[1]))["saved"]
+
+
+@pytest.mark.parametrize("change", [
+    {"tiers": _tiers(("5 min", "20:00"), ("15 min", "21:00"), ("5 min", "00:00"), ("60s", "03:00"))},   # extra earlier step
+    {"tiers": _tiers(("15 min", "20:00"), ("5 min", "00:00"), ("60s", "03:00"))},                       # a step starts earlier
+    {"tiers": _tiers(("10 min", "21:00"), ("5 min", "00:00"), ("30s", "03:00"))},                       # shorter intervals
+    {"tiers": _tiers(("15 min", "21:00"), ("5 min", "00:00"), ("60s", "03:00"), ("30s", "04:00"))},    # a step added
+    {"bedtime": "22:00"}, {"wake": "09:00"}, {"before": "60"},
+], ids=["extra-earlier-step", "step-earlier", "shorter", "step-added", "bedtime-earlier", "wake-later", "heads-up-longer"])
+def test_sleep_stricter_is_free(api, ctx, locked, change):
+    data(api.reminder_save_sleep(G_SLEEP))
+    assert data(_sleep_change(api, **change))["saved"]
+
+
+def test_sleep_semantics_match_a_minute_by_minute_check(api, ctx, locked):
+    """The shortcut (only look where something changes) agrees with looking at every minute of the night."""
+    data(api.reminder_save_sleep(G_SLEEP))
+    cases = [dict(tiers=_tiers(("15 min", "21:00"), ("5 min", "00:30"), ("60s", "03:00"))),
+             dict(tiers=_tiers(("15 min", "21:00"), ("5 min", "00:00"), ("60s", "02:59"))),
+             dict(tiers=_tiers(("20 min", "21:00"), ("5 min", "00:00"), ("60s", "03:00"))),
+             dict(tiers=[]), dict(bedtime="23:01"), dict(bedtime="22:59"), dict(wake="06:59"), dict(wake="07:01")]
+    old = {**reminders.DEFAULT_SLEEP, **reminders.load(ctx.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)}
+    for ch in cases:
+        out = data(_sleep_change(api, **ch))
+        new_tiers = [{"from": t["after"], "every_sec": reminders.parse_interval(t["every"])} for t in ch.get("tiers", [])] \
+            if "tiers" in ch else old["tiers"]
+        new = {**old, **{k: v for k, v in ch.items() if k != "tiers"}, "tiers": new_tiers}
+        brute = False
+        for m in range(1440):
+            was = page._night_interval(old, m)
+            if was is None:
+                continue
+            now = page._night_interval(new, m)
+            brute = brute or now is None or now > was
+        assert bool(out.get("needs_challenge")) == brute, ch
+        if brute:
+            api.challenge_cancel(out["ticket"])
+        reminders.save(ctx.db, reminders.SLEEP_KEY, old)     # (back to the base for the next case)
+
+
+@pytest.mark.parametrize("change", [
+    {"strict": False}, {"snooze": "15 min"}, {"length": 2}, {"every": "60 min"}, {"twenty": False},
+    {"max_snooze": 3},
+], ids=["strict-off", "snooze-longer", "length-shorter", "every-longer", "twenty-off", "more-snoozes-when-strict"])
+def test_break_weaker_asks(api, ctx, locked, change):
+    data(api.reminder_save_break({**G_BREAK, "twenty": True, "length": 5}))
+    assert _asks(api.reminder_save_break({**G_BREAK, "twenty": True, "length": 5, **change}))
+
+
+def test_break_stricter_is_free_and_strict_on_is_free_even_with_more_snoozes(api, ctx, locked):
+    data(api.reminder_save_break({**G_BREAK, "strict": False, "max_snooze": 1}))
+    # turning Strict ON is free - the snooze count is only compared when it WAS strict
+    assert data(api.reminder_save_break({**G_BREAK, "strict": True, "max_snooze": 5}))["saved"]
+    base = reminders.load(ctx.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
+    for ch in ({"snooze": "1 min"}, {"length": 10}, {"every": "30 min"}, {"max_snooze": 1}, {"twenty": True}):
+        assert data(api.reminder_save_break({**G_BREAK, "strict": True, "max_snooze": 5, **ch}))["saved"], ch
+        reminders.save(ctx.db, reminders.BREAK_KEY, base)
+
+
+def test_non_strict_break_snoozes_are_not_compared(api, ctx, locked):
+    data(api.reminder_save_break({**G_BREAK, "strict": False, "max_snooze": 1}))
+    assert data(api.reminder_save_break({**G_BREAK, "strict": False, "max_snooze": 5}))["saved"]
+
+
+@pytest.mark.parametrize("change", [{"snooze": 15}, {"kind": "random"}, {"kind": "times"}], ids=["snooze-longer",
+                         "kind-random", "kind-times"])
+def test_custom_snooze_and_kind_changes_ask(api, ctx, locked, change):
+    a = add(api, guarded=True)
+    assert _asks(api.reminder_save_custom({**CUSTOM, "id": a, "guarded": True, **change}))
+
+
+def test_custom_random_window_wider_is_free_narrower_or_moved_asks(api, ctx, locked):
+    a = add(api, guarded=True, kind="random", window=["10:00", "18:00"])
+    base = {**CUSTOM, "id": a, "guarded": True, "kind": "random"}
+    assert data(api.reminder_save_custom({**base, "window": ["09:00", "19:00"]}))["saved"]
+    assert data(api.reminder_save_custom({**base, "window": ["09:00", "19:00"], "snooze": 1}))["saved"]
+    assert _asks(api.reminder_save_custom({**base, "window": ["11:00", "19:00"]}))
+    assert _asks(api.reminder_save_custom({**base, "window": ["09:00", "17:00"]}))
+    assert _asks(api.reminder_save_custom({**base, "window": ["20:00", "22:00"]}))
+    assert _asks(api.reminder_save_custom({**base, "window": ["09:00", "19:00"], "per_day": 1}))     # still a limit
+
+
+def test_custom_interval_hours_wider_or_off_is_free_narrower_or_on_asks(api, ctx, locked):
+    a = add(api, guarded=True, hours=True)
+    base = {**CUSTOM, "id": a, "guarded": True, "hours": True}
+    assert data(api.reminder_save_custom({**base, "window": ["09:00", "19:00"]}))["saved"]
+    assert _asks(api.reminder_save_custom({**base, "window": ["11:00", "19:00"]}))
+    assert data(api.reminder_save_custom({**base, "hours": False}))["saved"]
+    assert _asks(api.reminder_save_custom({**base, "hours": True}))          # hours ON: fewer minutes covered
 
 
 def test_a_shorter_dismiss_wait_needs_the_challenge_even_if_not_important(api, ctx, locked):
