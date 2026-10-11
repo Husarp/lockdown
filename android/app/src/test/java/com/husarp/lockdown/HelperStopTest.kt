@@ -64,14 +64,38 @@ class HelperStopTest {
 
     @Test fun screen_off_time_is_never_quiet_time() {
         val r = Run(); r.heard = 5
-        r.look(); r.advance(min); r.look()                      // 1 min of quiet, screen on
-        r.advance(min); r.look(screenOn = false)                // screen goes off
+        r.look(); r.advance(30_000); r.look()                   // 30 s of quiet, screen on
+        r.advance(10_000); r.look(screenOn = false)             // screen goes off: the interval ending here counts (40 s in all)
         r.advance(9 * 60 * min)                                 // the night (Doze: nothing runs)
         assertEquals(Act.NONE, r.look(screenOn = false))
-        r.advance(1); assertEquals(Act.NONE, r.look())          // morning, screen on: 1 min of quiet in the bank, not 9 hours
+        r.advance(1); assertEquals(Act.NONE, r.look())          // morning, screen on: 40 s in the bank, not 9 hours
         assertFalse(r.s.silent)
-        assertEquals(min, r.s.quietOnMs)
-        r.advance(min); assertEquals(Act.RAISE, r.look())       // one more minute of screen time: 2 in all
+        assertEquals(40_000L, r.s.quietOnMs)
+        r.advance(80_000); assertEquals(Act.RAISE, r.look())    // 80 s more of screen time: 2 min in all
+    }
+
+    @Test fun short_bursts_of_screen_time_add_up_to_silence() {
+        val r = Run(); r.heard = 5
+        var raised = false
+        repeat(4) {                                             // four 40 s sessions with long screen-off gaps
+            r.look(screenOn = true)
+            r.advance(40_000)
+            if (r.look(screenOn = false) == Act.RAISE) raised = true
+            r.advance(30 * min)
+        }
+        assertTrue(raised)
+        assertEquals(1, r.acts.count { it.second == Act.RAISE })
+        assertEquals(1_000_000L + 2 * (30 * min + 40_000L) + 40_000L, r.acts.first().first)   // the third burst: 3 x 40 s = 2 min
+    }
+
+    @Test fun a_screen_session_of_under_a_minute_counts_and_a_look_after_a_long_gap_does_not() {
+        val r = Run(); r.heard = 5
+        r.look(); r.advance(60_000); r.look(screenOn = false)
+        assertEquals(60_000L, r.s.quietOnMs)
+        r.advance(10 * min); r.look(screenOn = true)            // screen was off at the last look: nothing from the sleep
+        assertEquals(60_000L, r.s.quietOnMs)
+        r.advance(2 * min); r.look(screenOn = false)            // on at the last look, but the gap is over the limit
+        assertEquals(60_000L, r.s.quietOnMs)
     }
 
     @Test fun a_look_after_a_long_gap_with_the_screen_on_at_both_ends_adds_nothing() {
@@ -86,9 +110,9 @@ class HelperStopTest {
     @Test fun switching_the_screen_off_and_on_does_not_reset_the_quiet_time() {
         val r = Run(); r.heard = 5
         r.look(); r.advance(min); r.look()                      // 1 min
-        r.advance(10_000); r.look(screenOn = false)             // off
+        r.advance(10_000); r.look(screenOn = false)             // off (the 10 s before it count: 70 s)
         r.advance(10_000); r.look()                             // on again (no time added for the off interval)
-        r.advance(min); r.look()                                // 2 min of screen time in total
+        r.advance(min); r.look()                                // over 2 min of screen time in total
         assertTrue(r.s.silent)
     }
 
@@ -121,6 +145,25 @@ class HelperStopTest {
         repeat(3) { r.look(); r.advance(min) }
         assertEquals(Act.RAISE, r.acts.single().second)
         assertEquals(Act.CLEAR, r.look(watching = false))       // the setting went off / Island was paused / unlinked
+    }
+
+    @Test fun a_new_silence_waits_out_the_start_up_grace_but_an_open_episode_does_not() {
+        val grace = HelperWatch.GRACE_MS
+        assertFalse(HelperWatch.watchedNow(true, episodeOpen = false, now = 1_000, graceUntil = 1_000 + grace))
+        assertTrue(HelperWatch.watchedNow(true, episodeOpen = false, now = 1_000 + grace, graceUntil = 1_000 + grace))
+        assertTrue(HelperWatch.watchedNow(true, episodeOpen = true, now = 1_000, graceUntil = 1_000 + grace))
+        assertFalse(HelperWatch.watchedNow(false, episodeOpen = true, now = 5_000_000, graceUntil = 0))
+        // In a run: nothing counts during the grace, then two minutes of screen time raise it - a helper that never
+        // comes up is still caught, only later.
+        val r = Run(); r.heard = 5
+        val until = r.now + grace
+        var raisedAt = -1L
+        repeat(10) {
+            val w = HelperWatch.watchedNow(true, r.s.silent, r.now, until)
+            if (r.look(watching = w) == Act.RAISE) raisedAt = r.now
+            r.advance(min)
+        }
+        assertTrue(raisedAt >= until + 2 * min)
     }
 
     @Test fun times_reads_naturally() {

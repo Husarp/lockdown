@@ -249,7 +249,7 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         val link = com.husarp.lockdown.link.IslandLink
         // An open "Island helper stopped" alert (the service counts it) is put up again here, in case that service is
         // gone; the plain notice is for everything else that leaves Island uncovered.
-        val stoppedAlert = cfg.enabled && cfg.guardrails.helperAlert && com.husarp.lockdown.link.HelperWatcher.repost(applicationContext)
+        val stoppedAlert = com.husarp.lockdown.link.HelperWatcher.repost(applicationContext, cfg.enabled && cfg.guardrails.helperAlert)
         if (!stoppedAlert && cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext))
             notify(8, "Island apps not covered", "Lockdown in Island isn't checking in or can't block - open it there.")
 

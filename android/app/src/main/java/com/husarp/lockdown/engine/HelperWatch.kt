@@ -9,8 +9,9 @@ package com.husarp.lockdown.engine
  * setting the phone's clock changes nothing). The helper checks in at once when the screen comes on and then at
  * least every 30 s, so a helper that is running has no quiet screen-on time to speak of; two minutes of it is a
  * stopped helper. Screen-off time is never counted: Doze freezes both copies for hours, and a look after that sleep
- * must not read it as silence. So the time between two looks counts only if the screen was on at both and the looks
- * were no more than [MAX_LOOK_GAP_MS] apart (they come every minute while it is on); a longer gap counts for nothing.
+ * must not read it as silence. So the time between two looks counts only if the screen was on at the first and the looks
+ * were no more than [MAX_LOOK_GAP_MS] apart (they come every minute while it is on, and when the screen goes off, so the
+ * interval that ends at that look still counts: short bursts of use add up); a longer gap counts for nothing.
  */
 object HelperWatch {
     /** Screen-on time with no check-in that makes the helper "silent". */
@@ -48,7 +49,7 @@ object HelperWatch {
         val back = heardAt != s.heard
         var quiet = if (back) 0L else s.quietOnMs
         val gap = now - s.lastLook
-        if (!back && s.lastOn && screenOn && s.lastLook >= 0 && gap in 0..MAX_LOOK_GAP_MS) quiet += gap
+        if (!back && s.lastOn && s.lastLook >= 0 && gap in 0..MAX_LOOK_GAP_MS) quiet += gap
         val silent = quiet >= QUIET_ON_MS
         val next = State(now, screenOn, heardAt, quiet, silent, s.alertedAt)
         return when {
@@ -58,6 +59,16 @@ object HelperWatch {
             else -> Out(next, Act.NONE)
         }
     }
+
+    /** After main's process starts, and after Island's profile becomes usable again (unlocked after a reboot, switched
+     *  back on), the helper needs a moment to start: no new silence can begin for this long. Not applied to an episode
+     *  already open, and only a profile that can run is ever watched, so keeping it running with the helper stopped is
+     *  still caught. */
+    const val GRACE_MS = 2 * 60_000L
+
+    /** Whether to watch at this look: [watching] and, unless an episode is already open, past the start-up grace. */
+    fun watchedNow(watching: Boolean, episodeOpen: Boolean, now: Long, graceUntil: Long) =
+        watching && (episodeOpen || now >= graceUntil)
 
     /** "once", "twice", "5 times" - for the count on the Island card and in the alert. */
     fun times(n: Int) = when (n) { 1 -> "once"; 2 -> "twice"; else -> "$n times" }

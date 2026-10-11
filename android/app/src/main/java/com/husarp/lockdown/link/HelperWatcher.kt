@@ -33,6 +33,8 @@ object HelperWatcher {
 
     private lateinit var app: Context
     private var st = HelperWatch.State()
+    private var graceUntil = 0L                // elapsed ms: no new silence before this (start-up, Island coming up)
+    private var wasPaused = false
     @Volatile private var open = false          // an episode is open (read without the lock on every check-in)
 
     private fun prefs() = app.getSharedPreferences("island_watch", Context.MODE_PRIVATE)
@@ -59,15 +61,23 @@ object HelperWatcher {
         // An episode open when the process died is still open: it is not counted again, and the alert comes back.
         open = prefs().getLong("open", 0) > 0
         st = if (open) HelperWatch.resumed(IslandLink.heardAt) else HelperWatch.State(heard = IslandLink.heardAt)
+        graceUntil = SystemClock.elapsedRealtime() + HelperWatch.GRACE_MS      // a fresh process: the helper may still be starting
+        wasPaused = false
     }
 
     /** One look (main's service, once a minute with the screen on, and whenever the screen changes). */
     @Synchronized fun look(ctx: Context, screenOn: Boolean) {
         if (!::app.isInitialized) init(ctx)
         val cfg = Store.config
-        val watching = cfg.enabled && cfg.guardrails.helperAlert && IslandLink.role(app) == Role.MAIN &&
-            IslandLink.mainState.value.state == "linked" && !IslandLink.profilePaused(app)
-        val out = HelperWatch.look(st, SystemClock.elapsedRealtime(), IslandLink.heardAt, screenOn, watching)
+        val now = SystemClock.elapsedRealtime()
+        val paused = IslandLink.profilePaused(app)        // switched off, or locked after a reboot: nothing can run there
+        if (wasPaused && !paused) graceUntil = now + HelperWatch.GRACE_MS      // Island just came up: its helper needs a moment
+        wasPaused = paused
+        val watching = HelperWatch.watchedNow(
+            cfg.enabled && cfg.guardrails.helperAlert && IslandLink.role(app) == Role.MAIN &&
+                IslandLink.mainState.value.state == "linked" && !paused,
+            st.silent, now, graceUntil)
+        val out = HelperWatch.look(st, now, IslandLink.heardAt, screenOn, watching)
         st = out.state
         when (out.act) {
             HelperWatch.Act.RAISE -> {
@@ -100,10 +110,13 @@ object HelperWatcher {
     }
 
     /** The 15-minute worker: while an episode is open the alert is put up again (quietly when the screen is off), so
-     *  it is still there if the service that normally repeats it isn't running. False when none is open. */
-    @Synchronized fun repost(ctx: Context): Boolean {
+     *  it is still there if the service that normally repeats it isn't running. False when none is open. [wanted] is
+     *  false when blocking or the switch is off: an open alert is then taken down here too (the service that would
+     *  do it on its next look may not be running). */
+    @Synchronized fun repost(ctx: Context, wanted: Boolean = true): Boolean {
         if (!::app.isInitialized) init(ctx)
         if (!open) return false
+        if (!wanted) { st = HelperWatch.State(heard = IslandLink.heardAt); close(); return false }
         if (IslandLink.mainState.value.state != "linked") { st = HelperWatch.State(heard = IslandLink.heardAt); close(); return false }   // unlinked meanwhile
         val on = runCatching { app.getSystemService(android.os.PowerManager::class.java).isInteractive }.getOrDefault(false)
         post(app, loud = on)

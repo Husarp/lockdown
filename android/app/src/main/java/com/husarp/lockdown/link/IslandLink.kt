@@ -215,11 +215,13 @@ object IslandLink {
         return profilePaused(ctx)
     }
 
-    /** Island (the work profile) is switched off: nothing in it can run, so nothing there needs covering. */
+    /** Island (the work profile) can't run anything: it is switched off, or still locked after a reboot (not running /
+     *  not unlocked until you unlock it), so nothing there needs covering. A profile that is up with the helper
+     *  stopped is NOT paused. isUserUnlocked(handle) needs no permission for a profile of the same user (API 24+). */
     fun profilePaused(ctx: Context): Boolean = runCatching {
         val um = ctx.getSystemService(UserManager::class.java)
         val others = um.userProfiles.filter { it != Process.myUserHandle() }
-        others.isNotEmpty() && others.all { um.isQuietModeEnabled(it) }
+        others.isNotEmpty() && others.all { um.isQuietModeEnabled(it) || !um.isUserUnlocked(it) }
     }.getOrDefault(false)
 
     @Synchronized private fun ensureServer() {
