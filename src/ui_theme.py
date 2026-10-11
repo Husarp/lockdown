@@ -13,6 +13,18 @@ THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "syste
 ACCENTS = {"Orange": "#DB5126", "Red": "#D1342F", "Pink": "#D63F8C", "Purple": "#7C4DDB", "Blue": "#2F6FEB",
            "Teal": "#12948A", "Green": "#23945A", "Yellow": "#C99A0E"}
 
+# Which window Lockdown opens in. THE FLIP to the new window as the default = change DEFAULT_ENGINE to "web" (one line;
+# keep --legacy and the Settings switch for one release). The saved value ("web" / "legacy") wins; anything else
+# (missing, empty, junk) means the default.
+ENGINE_KEY = "ui.engine"
+DEFAULT_ENGINE = "legacy"
+
+
+def engine_of(value) -> str:
+    """"web" or "legacy" for a saved ui.engine value: those two words as saved, anything else = DEFAULT_ENGINE."""
+    return value if value in ("web", "legacy") else DEFAULT_ENGINE
+
+
 # The page background (design token BG) per theme - the web window is painted with it before the page loads.
 BG_LIGHT, BG_DARK, BG_AMOLED = "#EFF1F4", "#101418", "#000000"
 BACKGROUNDS = {"dark": BG_DARK, "amoled": BG_AMOLED, "light": BG_LIGHT}

@@ -28,13 +28,13 @@ import time
 import antibypass
 import backup
 import emergency
+from ui_theme import ENGINE_KEY, engine_of   # (= main.ENGINE_KEY; the default window is ui_theme.DEFAULT_ENGINE)
 from rules import DAY_NAMES, RESET_KEY, apply_reset_now, change_reset, parse_hhmm, reset_is_looser
 
 from . import categories, core, draft as drafts, shell
 from .core import ApiError
 from .dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 
-ENGINE_KEY = "ui.engine"            # main.ENGINE_KEY: "web" = the new window, anything else = the old one
 ENGINES = ("web", "legacy")
 MOTION_KEY = "ui.reduce_motion"     # "1": no transitions or animations (the page sets data-motion="off")
 core.allow_ui_settings(MOTION_KEY)
@@ -114,7 +114,7 @@ def settings_get(ctx):
         "now": _iso(now), "look": shell.get_theme(ctx), "motion": db.get_setting(MOTION_KEY) == "1",
         "goal": goal, "goal_options": sorted({*GOAL_HOURS, goal}),
         "reset": _reset_info(db, now), "categories": categories.load(db), "emergency": _emergency_info(db, now),
-        "engine": "web" if db.get_setting(ENGINE_KEY) == "web" else "legacy",
+        "engine": engine_of(db.get_setting(ENGINE_KEY)),
     }
 
 

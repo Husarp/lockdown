@@ -6,7 +6,8 @@
 --challenge TEXT: only show the Anti-Bypass challenge for TEXT; exit code 0 = passed (used by the uninstaller).
 --selftest REPORT: build check - every page built with a temporary data folder, result written to REPORT.
 --new-ui / --legacy: use the new web window (src/agent.py) or the customtkinter one. Without either, the setting
-            ui.engine = "web" picks the new one; the customtkinter app is the default.
+            ui.engine = "web" / "legacy" picks one; with neither saved, ui_theme.DEFAULT_ENGINE decides (today: the
+            customtkinter app).
 """
 import os
 import queue
@@ -22,14 +23,12 @@ if "--selftest" in sys.argv:   # (before paths is imported: it reads the data fo
 
 from gui import single_instance  # noqa: E402
 from paths import ASSETS, command_line, gui_command  # noqa: E402
+from ui_theme import ENGINE_KEY, engine_of  # noqa: E402   # (the saved window choice; the default: ui_theme.DEFAULT_ENGINE)
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WATCHDOG_TASK = "Lockdown Agent Watchdog"
 APP_ID = "com.husarp.lockdown"   # Windows app identity: notifications / taskbar show "Lockdown" + its icon, not "Python"
 ICON = ASSETS / "lockdown.ico"
-
-
-ENGINE_KEY = "ui.engine"   # "web" = the new window, anything else (or missing) = the customtkinter app
 
 
 def read_engine_setting() -> str | None:
@@ -40,7 +39,7 @@ def read_engine_setting() -> str | None:
 
 def use_new_ui(argv: list[str], db_setting) -> bool:
     """New web window or the old one? --legacy wins, then --new-ui, then the setting (a value, or a function that
-    reads it - only called when no flag decided). Anything unclear means the old window."""
+    reads it - only called when no flag decided). Anything unclear (or unreadable) means the default window."""
     if "--legacy" in argv:
         return False
     if "--new-ui" in argv:
@@ -48,8 +47,8 @@ def use_new_ui(argv: list[str], db_setting) -> bool:
     try:
         value = db_setting() if callable(db_setting) else db_setting
     except Exception:
-        return False
-    return value == "web"
+        value = None
+    return engine_of(value) == "web"
 
 
 def set_identity():

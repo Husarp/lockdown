@@ -244,10 +244,9 @@ class WebviewRuntime:
         self.tray = None
 
     def run(self, check):
-        import ui_theme
         import webapi
         from gui.tray import Tray
-        from resident import windows, workers
+        from resident import overlay, windows, workers
         from resident.assets import AssetServer
         if sys.platform == "win32":    # the build must carry what the old self-test checked too
             import comtypes.client  # noqa: F401
@@ -256,7 +255,7 @@ class WebviewRuntime:
         self.t0 = time.time()
         server = AssetServer()
         base_url = server.start()
-        win = self.windows = windows.create(base_url, ui_theme.background_color(), js_api=webapi.build_api(self.ctx))
+        win = self.windows = windows.create(base_url, overlay.saved_background(), js_api=webapi.build_api(self.ctx))
         windows.attach_publisher(win, self.log)
         pool = workers.Workers(tracker=_IdleThread(), word_guard=_IdleThread(), retention=_IdleThread(),
                                log_sink=self.log)

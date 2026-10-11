@@ -61,9 +61,8 @@ def run(argv: list[str]) -> int:
     import shutil
     import tempfile
 
-    import ui_theme
     import webapi
-    from resident import windows
+    from resident import overlay, windows
     from resident.assets import AssetServer
 
     ctx = webapi.make_context()
@@ -76,7 +75,7 @@ def run(argv: list[str]) -> int:
         api = standalone_api(ctx, lambda: box["win"].destroy())
         box["win"] = webview.create_window(
             "Anti-Bypass", f"{base}/challenge.html?ticket={quote(ticket)}", js_api=api, width=WINDOW_SIZE[0],
-            height=WINDOW_SIZE[1], min_size=WINDOW_MIN, on_top=True, background_color=ui_theme.background_color(),
+            height=WINDOW_SIZE[1], min_size=WINDOW_MIN, on_top=True, background_color=overlay.saved_background(),
             text_select=False)
         profile = tempfile.mkdtemp(prefix="lockdown-challenge-")
         try:

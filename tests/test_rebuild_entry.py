@@ -47,6 +47,53 @@ def test_a_failing_setting_read_means_the_old_window():
     assert main.use_new_ui([], boom) is False
 
 
+@pytest.mark.parametrize("argv, setting, expected", [
+    ([], None, True),                               # nothing saved: the default window (flipped to "web")
+    ([], "", True),
+    ([], "legacy", False),                          # a saved choice still wins
+    ([], "web", True),
+    ([], "junk", True),
+    (["--legacy"], None, False),                    # --legacy always opens the old window
+    (["--legacy"], "web", False),
+    (["--legacy", "--new-ui"], None, False),
+    (["--new-ui"], "legacy", True),
+    (["--new-ui"], None, True),
+    (["--tray"], None, True),
+])
+def test_use_new_ui_when_the_default_is_flipped(monkeypatch, argv, setting, expected):
+    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", "web")
+    assert main.use_new_ui(argv, setting) is expected
+    assert main.use_new_ui(argv, lambda: setting) is expected
+
+
+def test_a_failing_read_means_the_default_either_way(monkeypatch):
+    def boom():
+        raise sqlite3.DatabaseError("no")
+    assert main.use_new_ui([], boom) is False
+    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", "web")
+    assert main.use_new_ui([], boom) is True
+    assert main.use_new_ui(["--legacy"], boom) is False
+
+
+@pytest.mark.parametrize("default", ["legacy", "web"])
+def test_engine_of(monkeypatch, default):
+    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", default)
+    assert ui_theme.engine_of("web") == "web" and ui_theme.engine_of("legacy") == "legacy"
+    for junk in (None, "", "Web", "new", 1, True):
+        assert ui_theme.engine_of(junk) == default
+
+
+def test_the_default_window_is_still_the_old_one_in_this_run():
+    """The flip is ONE deliberate line (ui_theme.DEFAULT_ENGINE); this test is changed together with it."""
+    assert ui_theme.DEFAULT_ENGINE == "legacy"
+
+
+def test_legacy_flag_with_selftest_keeps_the_old_self_test():
+    argv = ["Lockdown.exe", "--legacy", "--selftest", "report.txt"]
+    assert main.use_new_ui(argv, "web") is False
+    assert argv[argv.index("--selftest") + 1] == "report.txt"
+
+
 def _db_with(tmp_path, monkeypatch, engine):
     (tmp_path / "config.db").unlink(missing_ok=True)
     import paths
@@ -279,3 +326,25 @@ def test_a_second_launch_open_event_shows_the_main_window(monkeypatch):
     events.put("open")
     assert done.wait(3)
     assert shown == [win]
+
+
+# ---------------------------------------------------------------- the web window's own background
+
+def test_web_backgrounds_equal_the_tokens_css():
+    """The window is painted before the page loads: its colours must be the page's --bg (so they can't drift)."""
+    from resident import overlay
+    css = (SRC / "ui" / "css" / "tokens.css").read_text(encoding="utf-8")
+    import re
+    found = {}
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S)):
+        bg = re.search(r"--bg:\s*(#[0-9A-Fa-f]{6})", body)
+        if bg:
+            for theme in re.findall(r'data-theme="(\w+)"', selector):
+                found[theme] = bg.group(1)   # (a later rule - amoled after dark - wins, like the cascade)
+    assert found == overlay.BACKGROUNDS
+    assert {k: v.upper() for k, v in found.items()} == {k: v.upper() for k, v in overlay.BACKGROUNDS.items()}
+
+
+def test_agent_paints_the_windows_with_the_pages_background():
+    text = (SRC / "agent.py").read_text(encoding="utf-8")
+    assert "windows.create(base_url, overlay.saved_background()" in text and "ui_theme.background_color" not in text

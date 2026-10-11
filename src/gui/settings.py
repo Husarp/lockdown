@@ -14,10 +14,10 @@ from gui.dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 from gui.widgets import ConfirmButton, ConfirmDialog, once
 from gui.components import Card, Segmented, accent_bar, hairline, help_icon, page_head, LockedStrip
 from trusted_time import now_from_db
+from ui_theme import ENGINE_KEY, engine_of   # (= main.ENGINE_KEY; default window: ui_theme.DEFAULT_ENGINE)
 
 MUTED = theme.MUTED
 ERROR = theme.DANGER
-ENGINE_KEY = "ui.engine"   # main.ENGINE_KEY: "web" = Lockdown opens in the new window, anything else = this one
 PER_LABELS = {"per day": "day", "per week": "week", "per month": "month"}
 NEW_KIND = {"uses": 1, "per": "week", "minutes": 20}   # "+ Add another kind" starts here
 SIZES = {"Auto": "auto", "100%": "100", "90%": "90", "80%": "80", "70%": "70"}
@@ -453,7 +453,7 @@ class SettingsPage(ctk.CTkFrame):
         box = card.body
         self.engine_switch = ctk.CTkSwitch(box, text="Use the new window (preview)", command=self._engine_changed)
         self.engine_switch.pack(anchor="w", pady=(6, 6))
-        if self.db.get_setting(ENGINE_KEY) == "web":
+        if engine_of(self.db.get_setting(ENGINE_KEY)) == "web":
             self.engine_switch.select()
         ctk.CTkLabel(box, text="Lockdown opens in the new window the next time it starts. Switch it off to come "
                                "back to this one.", text_color=MUTED, font=theme.body(12), anchor="w", justify="left",

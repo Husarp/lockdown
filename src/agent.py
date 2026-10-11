@@ -1,4 +1,4 @@
-"""The resident Lockdown agent with the new web window (switch: `--new-ui` or setting ui.engine = "web").
+"""The resident Lockdown agent with the new web window (switch: `--new-ui`, or setting ui.engine; default: ui_theme.DEFAULT_ENGINE).
 
 Starts the local asset server, makes the three windows hidden, shows the tray icon, starts the background workers
 (resident/workers.py) and runs the pywebview loop. The Api is added by later tickets. Heavy modules (pywebview,
@@ -73,7 +73,6 @@ def main(argv: list[str], on_first_instance=None) -> int:
         return 0   # already running: it was told to show its window
     if on_first_instance:
         on_first_instance()
-    import ui_theme
     from resident import windows
     from resident.assets import AssetServer
     server = AssetServer()
@@ -81,7 +80,7 @@ def main(argv: list[str], on_first_instance=None) -> int:
     import webapi
     ctx = webapi.make_context()
     from resident import overlay
-    win = windows.create(base_url, ui_theme.background_color(), js_api=webapi.build_api(ctx),
+    win = windows.create(base_url, overlay.saved_background(), js_api=webapi.build_api(ctx),   # (the page's own --bg)
                          overlay_background=overlay.saved_background())
     windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)

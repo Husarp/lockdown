@@ -284,6 +284,15 @@ def test_ui_engine_set_takes_only_web_or_legacy(api, ctx):
     assert main.use_new_ui([], "web") and not main.use_new_ui([], "legacy")      # the entry reads exactly these two words
 
 
+@pytest.mark.parametrize("default", ["legacy", "web"])
+def test_settings_get_engine_follows_the_default_when_nothing_is_saved(api, ctx, monkeypatch, default):
+    import ui_theme
+    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", default)
+    assert data(api.settings_get())["engine"] == default
+    data(api.ui_engine_set("legacy" if default == "web" else "web"))
+    assert data(api.settings_get())["engine"] != default                         # a saved choice wins
+
+
 def test_the_old_windows_switch_writes_the_key(tmp_path):
     from db import Database
     from gui.settings import SettingsPage

@@ -19,12 +19,16 @@ if ($LASTEXITCODE) { throw "Writing the version resource failed" }
 if ($LASTEXITCODE) { throw "Building the program failed" }
 
 if (-not $NoSelfTest) {
-    $report = "$Build\selftest.txt"
-    Remove-Item $report -ErrorAction SilentlyContinue
-    Start-Process "$Build\dist\Lockdown\Lockdown.exe" -ArgumentList "--selftest", "`"$report`"" -Wait
-    $result = Get-Content $report -Raw -ErrorAction SilentlyContinue
-    if (-not $result -or -not $result.StartsWith("OK")) { throw "Self-test failed:`n$result" }
-    Write-Output "Self-test: $result"
+    # While both windows ship, check both: the old one (--legacy) and the new one (--new-ui). Each writes a report
+    # that starts with "OK" when every page / window came up.
+    foreach ($check in @(@{ Flag = "--legacy"; File = "selftest.txt" }, @{ Flag = "--new-ui"; File = "selftest-new.txt" })) {
+        $report = "$Build\$($check.File)"
+        Remove-Item $report -ErrorAction SilentlyContinue
+        Start-Process "$Build\dist\Lockdown\Lockdown.exe" -ArgumentList $check.Flag, "--selftest", "`"$report`"" -Wait
+        $result = Get-Content $report -Raw -ErrorAction SilentlyContinue
+        if (-not $result -or -not $result.StartsWith("OK")) { throw "Self-test ($($check.Flag)) failed:`n$result" }
+        Write-Output "Self-test ($($check.Flag)): $($result.Split("`n")[0])"
+    }
 }
 
 $zip = "$Build\payload.zip"

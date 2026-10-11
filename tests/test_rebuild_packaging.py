@@ -87,3 +87,12 @@ def test_install_runs_webview2_step_last_without_aborting(setup, monkeypatch):
     steps = []
     setup.install(lambda t: None, lambda step, fraction=0.0, name=None: steps.append(step))
     assert steps == list(range(len(setup.INSTALL_WEIGHTS) + 1))
+
+
+def test_build_runs_and_checks_both_self_tests():
+    """While both windows ship, build.ps1 runs the old window's self-test (--legacy) and the new one's (--new-ui),
+    each with its own report, and fails the build unless both reports start with OK."""
+    script = (ROOT / "scripts" / "build.ps1").read_text(encoding="utf-8")
+    assert '"--legacy"' in script and '"--new-ui"' in script and '"--selftest"' in script
+    assert "selftest.txt" in script and "selftest-new.txt" in script
+    assert 'StartsWith("OK")' in script and "throw" in script
