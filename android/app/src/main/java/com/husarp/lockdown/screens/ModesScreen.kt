@@ -170,11 +170,10 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
 
     val modes by ModesStore.modes.collectAsStateWithLifecycle()
     fun write() = ModesStore.saveModes(ModesStore.modes.value.map { if (it.id == draft.id) draft else it }.let { if (it.any { m -> m.id == draft.id }) it else it + draft })
-    // A schedule that runs less, or (while this mode runs locked) a lighter Pomodoro / fewer things blocked, is a loosening: the challenge.
+    // A schedule that runs less, a lighter Pomodoro on a scheduled mode, or (while it is held: locked / its window running) fewer things blocked, is a loosening: the challenge.
     fun persist(then: () -> Unit) {
         val old = ModesStore.modes.value.firstOrNull { it.id == draft.id }
-        val cur = ModesStore.current(com.husarp.lockdown.guard.TrustedTime.local(ctx))
-        val lockedNow = cur != null && cur.mode.id == draft.id && cur.locked && !cur.scheduled
+        val lockedNow = Modes.holdsNow(com.husarp.lockdown.guard.TrustedTime.local(ctx), ModesStore.modes.value, ModesStore.active.value, draft.id)
         guard(old != null && Modes.modeLooser(old, draft, lockedNow)) { write(); then() }
     }
     com.husarp.lockdown.ui.UnsavedChanges(draft != (modes.firstOrNull { it.id == mode.id } ?: mode), onClose, { then -> persist(then) })

@@ -86,6 +86,27 @@ class ModesExtrasTest {
         assertFalse(Modes.modeLooser(old, old.copy(schedule = sched(Window((0..4).toList(), "09:00", "17:00"))), true))     // unchanged
     }
 
+    @Test fun scheduled_pomodoro_loosening_needs_the_challenge() {
+        val w = sched(Window((0..4).toList(), "09:00", "17:00"))
+        val old = mode(w, Pomodoro(25, 5, 4, 15))
+        assertTrue(Modes.modeLooser(old, old.copy(pomodoro = Pomodoro(1, 5, 4, 15)), false))     // shorter work
+        assertTrue(Modes.modeLooser(old, old.copy(pomodoro = Pomodoro(25, 60, 4, 15)), false))    // longer break
+        assertTrue(Modes.modeLooser(old, old.copy(pomodoro = null), false))
+        assertFalse(Modes.modeLooser(old, old.copy(pomodoro = Pomodoro(30, 3, 5, 10)), false))    // tighter: free
+        val plain = mode(p = Pomodoro(25, 5, 4, 15))
+        assertFalse(Modes.modeLooser(plain, plain.copy(pomodoro = Pomodoro(1, 60, 1, 120)), false)) // no schedule, not locked
+        assertFalse(Modes.modeLooser(old, old.copy(categories = emptyList()), false))              // window not running
+    }
+
+    @Test fun blocking_less_while_the_window_runs_needs_the_challenge() {
+        val old = mode(sched(Window((0..4).toList(), "09:00", "17:00")))
+        val less = old.copy(categories = emptyList())
+        assertTrue(Modes.holdsNow(mon9.plusHours(1), listOf(old), null, "m"))
+        assertFalse(Modes.holdsNow(mon9.minusHours(1), listOf(old), null, "m"))
+        assertTrue(Modes.modeLooser(old, less, Modes.holdsNow(mon9.plusHours(1), listOf(old), null, "m")))
+        assertFalse(Modes.modeLooser(old, less, Modes.holdsNow(mon9.minusHours(1), listOf(old), null, "m")))
+    }
+
     @Test fun overnight_schedule_extension_is_free_but_cutting_is_not() {
         val old = mode(sched(Window((0..6).toList(), "22:00", "06:00")))
         assertFalse(Modes.modeLooser(old, old.copy(schedule = sched(Window((0..6).toList(), "22:00", "07:00"))), false))

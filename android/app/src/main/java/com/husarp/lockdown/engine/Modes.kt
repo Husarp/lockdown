@@ -187,15 +187,25 @@ object Modes {
         return Rules.nextWindowStart(s.windows, now)
     }
 
+    /** Is [id] held right now: hand-started locked, or its schedule window is running (a standing commitment)? */
+    fun holdsNow(now: LocalDateTime, modes: List<Mode>, state: ModeActive?, id: String): Boolean {
+        val cur = active(now, modes, state)
+        if (cur != null && cur.mode.id == id && cur.locked && !cur.scheduled) return true
+        val s = modes.firstOrNull { it.id == id }?.schedule ?: return false
+        return Rules.scheduleUntil(s, now) != null
+    }
+
     /** Would saving [new] over [old] loosen it? A schedule that runs fewer minutes always does (it is a standing
-     *  commitment); while the mode runs [lockedNow] a shorter Pomodoro work / fewer rounds / longer breaks, or
-     *  blocking less, does too. Longer, more, or added is free. */
+     *  commitment), and so does a shorter Pomodoro work / fewer rounds / longer breaks on a scheduled mode (the
+     *  lengths now set its cycle inside the window); while the mode is held [lockedNow] (locked or its window
+     *  running) blocking less does too. Longer, more, or added is free. */
     fun modeLooser(old: Mode, new: Mode, lockedNow: Boolean): Boolean {
         if (old.schedule != null && AntiBypass.scheduleLooser(old.schedule, new.schedule)) return true
-        if (!lockedNow) return false
+        if (!lockedNow && old.schedule == null) return false
         val op = old.pomodoro
         val np = new.pomodoro
         if (op != null && (np == null || np.work < op.work || np.rounds < op.rounds || np.brk > op.brk || np.long > op.long)) return true
+        if (!lockedNow) return false
         return !new.categories.containsAll(old.categories) || !new.items.containsAll(old.items) ||
             !new.groups.containsAll(old.groups) || !new.extra.containsAll(old.extra)
     }
@@ -215,7 +225,7 @@ object Modes {
     fun startNeedsChallenge(now: LocalDateTime, modes: List<Mode>, state: ModeActive?, saved: Mode?, draft: Mode,
                             newUntil: LocalDateTime?, newLocked: Boolean): Boolean {
         val cur = active(now, modes, state)
-        val lockedNow = cur != null && cur.mode.id == draft.id && cur.locked && !cur.scheduled
+        val lockedNow = holdsNow(now, modes, state, draft.id)
         if (saved != null && modeLooser(saved, draft, lockedNow)) return true
         if (startLooser(cur, draft.id, newUntil, newLocked)) return true
         val sched = active(now, modes, null)       // the scheduled mode in its window, even when a hand-started one hides it
