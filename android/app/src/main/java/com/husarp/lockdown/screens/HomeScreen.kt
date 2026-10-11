@@ -68,6 +68,7 @@ import com.husarp.lockdown.engine.Modes
 import com.husarp.lockdown.engine.Pause
 import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.engine.RuleType
+import com.husarp.lockdown.engine.TimeLeft
 import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
@@ -81,7 +82,6 @@ import com.husarp.lockdown.ui.ItemIcon
 import com.husarp.lockdown.ui.Kinds
 import com.husarp.lockdown.ui.Numeral
 import com.husarp.lockdown.ui.Pill
-import com.husarp.lockdown.ui.Status
 import com.husarp.lockdown.ui.fmtDuration
 import com.husarp.lockdown.ui.theme.Hue
 import com.husarp.lockdown.ui.theme.tone
@@ -324,30 +324,29 @@ private fun LowCard(cfg: Config, now: LocalDateTime, modeState: ModeState?) {
     // Cheap prefilter (rule type only, no engine) before the per-item engine check, so thousands of imported
     // items don't freeze Home. Only items that actually have a limit can be "running low".
     val lowItems = remember(cfg, now, modeState) {
-        val groupLimited = cfg.groups.filter { g -> g.rules.any { it.type == RuleType.TIME_LIMIT || it.type == RuleType.SWITCH_LIMIT } }.flatMap { it.memberIds }.toSet()
-        cfg.items
-            .filter { it.id in groupLimited || it.rules.any { r -> r.type == RuleType.TIME_LIMIT || r.type == RuleType.SWITCH_LIMIT } }
-            .filter { Live.status(cfg, it, now, modeState) == Status.SOON }.take(5)   // a blocked one shows no "min left"
+        fun limited(r: com.husarp.lockdown.engine.Rule) = r.type == RuleType.TIME_LIMIT || r.type == RuleType.SWITCH_LIMIT || r.type == RuleType.SCHEDULED
+        val groupLimited = cfg.groups.filter { g -> g.rules.any(::limited) || g.overrides.values.any { m -> m.values.any(::limited) } }.flatMap { it.memberIds }.toSet()
+        cfg.items.asSequence()
+            .filter { it.id in groupLimited || it.rules.any(::limited) }
+            .map { it to Live.timeLeft(cfg, it, now, modeState) }
+            .filter { (_, l) -> l.low && l.kind != TimeLeft.Kind.BLOCKED }.take(5).toList()   // a blocked one shows no "min left"
     }
     if (lowItems.isEmpty()) return
     val cs = MaterialTheme.colorScheme
     val amber = tone(Hue.AMBER).accent
     val info = HOME_CARDS.getValue("low")
     HomePanel(info.name, info.icon, info.hue) {
-        lowItems.forEach { item ->
-            val frac = Live.dayLimitFraction(cfg, item, now)
+        lowItems.forEach { (item, left) ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ItemIcon(item.type, item.target, item.name, 32.dp)
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                        Text(frac?.let { "${it.second} min left" } ?: "Soon", style = MaterialTheme.typography.titleSmall, color = amber)
+                        Text(TimeLeft.line(left, now), style = MaterialTheme.typography.titleSmall, color = amber)
                     }
-                    if (frac != null) {
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(progress = { frac.first }, modifier = Modifier.fillMaxWidth().height(4.dp),
-                            color = amber, trackColor = cs.surfaceContainerHighest)
-                    }
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(progress = { left.fraction }, modifier = Modifier.fillMaxWidth().height(4.dp),
+                        color = amber, trackColor = cs.surfaceContainerHighest)
                 }
             }
         }
@@ -368,11 +367,10 @@ private fun AppsCard(cfg: Config, now: LocalDateTime, today: DayUse?, modeState:
         val top = (apps.maxOfOrNull { it.totalMs } ?: 1L).coerceAtLeast(1L)
         apps.forEach { a ->
             val item = listed[a.pkg.lowercase()]
-            val limit = item?.let { Live.dayLimitFraction(cfg, it, now) }
-            val blocked = item != null && limit != null && Live.status(cfg, item, now, modeState) == Status.BLOCKED
+            val left = item?.let { Live.timeLeft(cfg, it, now, modeState) }?.takeIf { it.kind != TimeLeft.Kind.FREE }
             val bar = when {
-                limit == null -> tone(Hue.TEAL).accent
-                blocked -> tone(Hue.RED).accent
+                left == null -> tone(Hue.TEAL).accent
+                left.kind == TimeLeft.Kind.BLOCKED -> tone(Hue.RED).accent
                 else -> tone(Hue.AMBER).accent
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -380,12 +378,12 @@ private fun AppsCard(cfg: Config, now: LocalDateTime, today: DayUse?, modeState:
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(a.label.ifEmpty { a.pkg }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        if (limit != null) Text(if (blocked) "Limit reached · " else "${limit.second} min left · ",
-                            style = MaterialTheme.typography.labelMedium, color = bar)
+                        if (left != null) Text(TimeLeft.line(left, now) + " · ", style = MaterialTheme.typography.labelMedium, color = bar,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(fmtDuration(a.totalMs), style = MaterialTheme.typography.titleSmall)
                     }
                     Spacer(Modifier.height(5.dp))
-                    val frac = limit?.first ?: (a.totalMs.toFloat() / top)
+                    val frac = left?.fraction ?: (a.totalMs.toFloat() / top)
                     Box(Modifier.fillMaxWidth().height(4.dp).background(cs.surfaceContainerHighest, CircleShape)) {
                         Box(Modifier.fillMaxWidth(frac.coerceIn(0.02f, 1f)).height(4.dp).background(bar, CircleShape))
                     }

@@ -194,7 +194,7 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                             PillRow(pills)
                         }
                         // (no chevron: the whole row opens the member, and the name keeps its room)
-                        StatusChip(info?.let { Kinds.chipText(it, now) } ?: when (st) { Status.BLOCKED -> "Blocked"; Status.SOON -> "Soon"; Status.PAUSED -> "Paused"; Status.ALLOWED -> "Allowed" },
+                        StatusChip(info?.let { Kinds.chipText(it, now) } ?: if (saved == null) "Allowed" else when (st) { Status.BLOCKED -> "Blocked"; Status.PAUSED -> "Paused"; else -> com.husarp.lockdown.data.Live.chipText(cfg, saved, now, mode) },
                             st, grey = info?.grey == true)
                     }
                 }

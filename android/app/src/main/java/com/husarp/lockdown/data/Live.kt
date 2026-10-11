@@ -9,6 +9,7 @@ import com.husarp.lockdown.engine.Modes
 import com.husarp.lockdown.engine.Reason
 import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.engine.Rules
+import com.husarp.lockdown.engine.TimeLeft
 import com.husarp.lockdown.engine.Usage
 import com.husarp.lockdown.ui.Status
 import java.time.LocalDateTime
@@ -34,12 +35,24 @@ object Live {
         val byMode = modeBlocks(cfg, item, mode)
         if (eff.isEmpty() && !byMode) return Status.ALLOWED
         if (com.husarp.lockdown.block.Enforce.paused(cfg, now)) return Status.PAUSED    // "Pause my blocks"
-        if (byMode) return Status.BLOCKED        // a running mode blocks it: no "min left" then
-        val clock = cfg.clock()
-        if (Rules.itemBlock(eff, now, usage, clock) != null) return Status.BLOCKED
-        val soon = eff.any { Rules.ruleState(it, now, usage, clock) == "soon" }
-        return if (soon) Status.SOON else Status.ALLOWED
+        val l = TimeLeft.of(eff, now, usage, cfg.clock(), byMode, mode?.until)
+        return when { l.kind == TimeLeft.Kind.BLOCKED -> Status.BLOCKED; l.low -> Status.SOON; else -> Status.ALLOWED }
     }
+
+    /** What an item's status line says (see [TimeLeft]): blocked until, blocked with minutes allowed, time left, or
+     *  free. A paused or switched-off item has nothing to show. One rule for Home's cards and the Blocking lists. */
+    fun timeLeft(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now(), mode: ModeState? = null,
+                 usage: Usage = UsageStore.usage): TimeLeft.Left {
+        if (item.disabled || com.husarp.lockdown.block.Enforce.paused(cfg, now)) return TimeLeft.Left(TimeLeft.Kind.FREE)
+        val byMode = modeBlocks(cfg, item, mode)
+        return TimeLeft.of(Rules.effectiveRules(item, cfg.groups), now, usage, cfg.clock(), byMode, mode?.until)
+    }
+
+    /** A list row's chip for a free (not blocked) item: "Allowed", "5 min left" when running low, "5 min allowed",
+     *  "Paused". */
+    fun chipText(cfg: Config, item: Item, now: LocalDateTime, mode: ModeState? = null, usage: Usage = UsageStore.usage): String =
+        if (item.disabled || com.husarp.lockdown.block.Enforce.paused(cfg, now)) "Paused"
+        else TimeLeft.chip(timeLeft(cfg, item, now, mode, usage))
 
     /** The one line for a blocked item: "Blocked until 18:00" - the block that lasts longest of its own rules, its
      *  groups' and the running mode's, never a line per rule or member. "Grey until 18:00" for an app only greyed. */
@@ -48,13 +61,9 @@ object Live {
 
     /** [blockedLine], with whether it's only greyed and why it's blocked (the status chip's look, the reason pill). */
     fun blockedInfo(cfg: Config, item: Item, now: LocalDateTime, mode: ModeState? = null, usage: Usage = UsageStore.usage): BlockedLine {
-        val ends = ArrayList<LocalDateTime?>()
         val eff = Rules.effectiveRules(item, cfg.groups)
-        Rules.blockEnd(eff, now, usage, cfg.clock())
-            ?.let { ends.add(it.takeIf { e -> e != LocalDateTime.MAX }) }
         val byMode = modeBlocks(cfg, item, mode)
-        if (byMode) ends.add(mode!!.until)
-        val until = if (ends.isEmpty() || ends.any { it == null }) null else ends.filterNotNull().max()
+        val until = TimeLeft.blockedUntil(eff, now, usage, cfg.clock(), byMode, mode?.until)
         val line = Alerts.blockedLine(until, now)
         val grey = item.type == ItemType.APP && !byMode &&
             BlockMethod.greyOnly(BlockMethod.blockingWay(item, cfg.groups, Rules.blockingRules(eff, now, usage, cfg.clock())))
@@ -101,21 +110,5 @@ object Live {
         val targets = Modes.targets(mode!!.mode, listOf(item), cfg.groups, cfg.categories)
         return if (item.type == ItemType.APP) item.target.lowercase() in Modes.blockedApps(targets)
         else Modes.blockedHosts(targets).let { hosts -> item.target.lowercase().split(" ").any { it.isNotEmpty() && it in hosts } }
-    }
-
-    /** The daily limit with the least time left (fraction used 0..1, minutes left), or null if none. */
-    fun dayLimitFraction(cfg: Config, item: Item, now: LocalDateTime = LocalDateTime.now(), usage: Usage = UsageStore.usage): Pair<Float, Int>? {
-        val clock = cfg.clock()
-        var best: Pair<Float, Int>? = null
-        for (eff in Rules.effectiveRules(item, cfg.groups)) {
-            if (eff.rule.type != com.husarp.lockdown.engine.RuleType.TIME_LIMIT) continue
-            val limit = Rules.timeLimits(eff.rule, now, clock)["day"] ?: continue     // today's amount
-            if (limit <= 0) continue
-            val used = usage(eff.usageOwner, Rules.timeBucket("day", now, clock))
-            val frac = (used.toFloat() / (limit * 60)).coerceIn(0f, 1f)
-            val leftMin = (limit - used / 60).coerceAtLeast(0)
-            if (best == null || leftMin < best!!.second) best = frac to leftMin
-        }
-        return best
     }
 }

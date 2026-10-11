@@ -12,8 +12,8 @@ val noUsage: Usage = { _, _ -> 0 }
 
 object Rules {
     private val WIN_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
-    private const val NEARLY = 0.9          // this much of a limit used = "soon"
-    private const val SOON_MIN = 10L        // a blocked stretch starting within this many minutes = "soon"
+    const val NEARLY = 0.9          // this much of a limit used = "soon"
+    const val SOON_MIN = 10L        // a blocked stretch starting within this many minutes = "soon"
 
     fun parseHhmm(t: String): LocalTime {
         val (h, m) = t.trim().split(":")
@@ -130,7 +130,7 @@ object Rules {
         }
     }
 
-    private fun switchLimits(r: Rule): Map<String, Int> = buildMap {
+    fun switchLimits(r: Rule): Map<String, Int> = buildMap {
         r.dailySwitchLimit?.let { put("day", it) }
         r.weeklySwitchLimit?.let { put("week", it) }
         r.monthlySwitchLimit?.let { put("month", it) }
@@ -290,7 +290,7 @@ object Rules {
     }
 
     /** When the next blocked stretch of a schedule starts (it isn't blocking now). */
-    private fun scheduleNextStart(s: Schedule, now: LocalDateTime): LocalDateTime? =
+    fun scheduleNextStart(s: Schedule, now: LocalDateTime): LocalDateTime? =
         if (s.mode == SchedMode.BLOCK) nextWindowStart(s.windows, now)
         else s.windows.mapNotNull { windowUntil(it, now) }.minOrNull()
 

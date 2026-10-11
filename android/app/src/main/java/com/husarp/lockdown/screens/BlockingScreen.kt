@@ -268,7 +268,7 @@ private fun ItemRow(item: Item, cfg: com.husarp.lockdown.data.Config, memberOf: 
             Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             PillRow(pills)
         }
-        StatusChip(info?.let { Kinds.chipText(it, now) } ?: statusText(st, cfg, item, now), st, grey = info?.grey == true)
+        StatusChip(info?.let { Kinds.chipText(it, now) } ?: statusText(st, cfg, item, now, mode), st, grey = info?.grey == true)
     }
 }
 
@@ -276,9 +276,9 @@ private fun ItemRow(item: Item, cfg: com.husarp.lockdown.data.Config, memberOf: 
 @Composable
 fun GroupTile(g: Group, size: androidx.compose.ui.unit.Dp = 40.dp) = IconTile(GroupLook.icon(g), GroupLook.hue(g), size)
 
-private fun statusText(status: Status, cfg: com.husarp.lockdown.data.Config, item: Item, now: LocalDateTime): String = when (status) {
+private fun statusText(status: Status, cfg: com.husarp.lockdown.data.Config, item: Item, now: LocalDateTime,
+                       mode: com.husarp.lockdown.engine.ModeState?): String = when (status) {
     Status.BLOCKED -> "Blocked"
-    Status.SOON -> Live.dayLimitFraction(cfg, item, now)?.let { "${it.second} min left" } ?: "Soon"
-    Status.ALLOWED -> "Allowed"
     Status.PAUSED -> "Paused"
+    else -> Live.chipText(cfg, item, now, mode)      // "Allowed", or "5 min left" / "5 min allowed" when running low
 }
