@@ -11,12 +11,11 @@ import threading
 import time
 
 TRAY_ARGS = ("--tray", "--watchdog")
-NOT_YET = ("--selftest",)   # R09 takes its name out of this list when it handles it
+NOT_YET = ()   # flags the agent can't do (main.py then keeps the old window for them): none left
 
 
 def handles(argv: list[str]) -> bool:
-    """Can the agent do everything argv asks for? (Until R09 it can't --selftest, and main.py then keeps using the old
-    window for that.)"""
+    """Can the agent do everything argv asks for? (A flag listed in NOT_YET makes main.py keep the old window.)"""
     return not any(a in argv for a in NOT_YET)
 
 
@@ -59,12 +58,15 @@ def _tray_exit(win, tray, ctx):
 def main(argv: list[str], on_first_instance=None) -> int:
     """`on_first_instance`: called once this process is the running agent (main.py: register autostart + watchdog)."""
     if not handles(argv):
-        _log("The new UI does not handle --selftest yet (R09)")
+        _log("The new UI does not handle these flags yet")
         return 2
     set_dpi_awareness()
     if "--challenge" in argv:   # the uninstaller's challenge: its own small window, no single-instance lock
         from resident import challenge_cli
         return challenge_cli.run(argv)
+    if "--selftest" in argv:   # the build check: temporary data folder (main.py), no single-instance lock
+        from resident import selftest
+        return selftest.run(argv[argv.index("--selftest") + 1])
     from gui import single_instance
     events: queue.Queue = queue.Queue()
     if not single_instance.acquire(events):
