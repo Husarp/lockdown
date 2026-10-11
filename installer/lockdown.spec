@@ -24,11 +24,17 @@ UIA_DLLS = collect_data_files("uiautomation", includes=["bin/*.dll"])
 # Windows notifications (gui/toast.py, 0.84.7): windows_toasts is imported lazily and the winrt .pyd modules are
 # namespace packages PyInstaller doesn't follow - name them all
 TOASTS = collect_submodules("windows_toasts") + collect_submodules("winrt")
+# The new window (src/agent.py, pywebview/WebView2): the agent, resident and webapi packages are imported lazily by
+# name, and pywebview picks its Windows backend (edgechromium + the pythonnet/clr_loader bridge) at run time
+WEB_UI = (collect_submodules("resident") + collect_submodules("webapi")
+          + ["agent", "webview", "webview.platforms.edgechromium", "webview.platforms.winforms", "clr_loader",
+             "pythonnet", "clr"])
 
 gui = Analysis([os.path.join(SRC, "main.py")], pathex=[SRC],
-               datas=[(os.path.join(ROOT, "assets"), "assets")] + UIA_DLLS,
+               datas=[(os.path.join(ROOT, "assets"), "assets"), (os.path.join(SRC, "ui"), "ui")] + UIA_DLLS
+               + collect_data_files("webview"),
                hiddenimports=["gui.about_page", "gui.antibypass_page", "gui.display_settings", "comtypes.stream"]
-               + TOASTS,
+               + TOASTS + WEB_UI,
                excludes=["pytest"])
 svc = Analysis([os.path.join(SRC, "service_win.py")], pathex=[SRC],
                hiddenimports=["win32timezone"], excludes=["pytest", "customtkinter", "PIL", "pystray", "uiautomation"])
