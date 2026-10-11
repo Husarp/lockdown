@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.85.1 - 2026-10-11 23:53
 - **Bedtime steps sort themselves by time.** In "Comes back after you dismiss it", a step you add or move to an earlier time slots into its place: the order follows the night from bedtime (bedtime 22:00: 22:30, 23:00, 01:00, 03:00), and what is saved and loaded is always in that order. Only the order changes, not when the screen returns.
 
 ## 0.85.0 - 2026-10-11 22:44
