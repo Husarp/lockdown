@@ -1,1 +1,35 @@
-<!doctype html><meta charset="utf-8"><title>Lockdown overlay</title>
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lockdown overlay</title>
+<link rel="icon" href="data:,">
+<!-- Look cache (cosmetic only, written by js/theme.js; same origin as the main window): applied before the first paint. -->
+<script>(function(){try{var l=JSON.parse(localStorage.getItem("ld.look")||"null");if(!l)return;var d=document.documentElement,
+t=l.pref==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):l.pref;if(!/^(dark|amoled|light)$/.test(t))return;
+d.dataset.theme=t;var v=l.vars&&l.vars[t];if(v)for(var k in v)d.style.setProperty(k,v[k]);if(l.s)d.style.setProperty("--s",l.s)}catch(e){}})()</script>
+<style>
+html,body{margin:0;overflow:hidden;background:#191817;color:#EFECEA}
+html[data-theme=light],html[data-theme=light] body{background:#F3F2F1;color:#1C1B1A}
+html[data-theme=amoled],html[data-theme=amoled] body{background:#000}
+</style>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/challenge.css">
+<link rel="stylesheet" href="css/overlay.css">
+<link rel="modulepreload" href="js/overlay.js">
+<link rel="modulepreload" href="js/bridge.js">
+<link rel="modulepreload" href="js/challenge.js">
+<link rel="modulepreload" href="js/theme.js">
+<link rel="modulepreload" href="js/icons.js">
+</head>
+<body>
+<!-- The full-screen cover: the bedtime screen and a running strict break. Python decides everything (resident/overlay.py);
+     this page draws it and counts the numbers locally. The challenge for "Disable alerts" opens in the dialog below. -->
+<svg id="sprite" xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"></svg>
+<main id="fs" hidden></main>
+<dialog class="dialog" id="dlg"></dialog>
+<script type="module" src="js/overlay.js"></script>
+</body>
+</html>

@@ -8,7 +8,7 @@ from pathlib import Path
 
 MAIN_SIZE, MAIN_MIN = (1100, 720), (560, 420)
 CORNER_SIZE = (380, 140)
-OVERLAY_BG = "#101418"   # solid, no transparency (R08 may set it per theme)
+OVERLAY_BG = "#191817"   # solid, no transparency: the dark page background (resident/overlay.BACKGROUNDS has the others)
 
 
 @dataclass
@@ -18,6 +18,8 @@ class Windows:
     overlay: object = None
     quitting: bool = False   # True once the agent really exits: then closing the main window is allowed
     publisher: object = None   # the main window's Publisher (R04); told when the window is shown / hidden
+    overlay_ctl: object = None   # R08: resident.overlay.Overlay (what is on the cover), and the overlay window's Publisher
+    overlay_publisher: object = None
 
 
 def storage_dir() -> Path:
@@ -28,7 +30,7 @@ def storage_dir() -> Path:
     return path
 
 
-def create(base_url: str, background: str, js_api=None) -> Windows:
+def create(base_url: str, background: str, js_api=None, overlay_background: str = OVERLAY_BG) -> Windows:
     """Make the three windows (hidden). `js_api` is the Api object the pages call (R02), or None for now."""
     import webview
     win = Windows()
@@ -39,10 +41,11 @@ def create(base_url: str, background: str, js_api=None) -> Windows:
         "Lockdown notices", f"{base_url}/corner.html", js_api=js_api, width=CORNER_SIZE[0], height=CORNER_SIZE[1],
         frameless=True, on_top=True, focus=False, hidden=True, resizable=False, easy_drag=False, shadow=False,
         background_color=background)
-    win.overlay = webview.create_window(
+    win.overlay = webview.create_window(      # (sized and placed by resident/overlay.OverlayHost, not "fullscreen")
         "Lockdown overlay", f"{base_url}/overlay.html", js_api=js_api, frameless=True, on_top=True,
-        fullscreen=True, hidden=True, easy_drag=False, shadow=False, background_color=OVERLAY_BG)
+        hidden=True, easy_drag=False, shadow=False, resizable=False, background_color=overlay_background)
     win.main.events.closing += lambda: close_means_hide(win)
+    win.overlay.events.closing += lambda: win.quitting      # Alt+F4 does nothing (the agent really quitting is allowed)
     win.main.events.minimized += lambda: set_visible(win, False)
     win.main.events.restored += lambda: set_visible(win, True)
     return win
@@ -79,6 +82,17 @@ def show_main(win: Windows):
     set_visible(win, True)
 
 
+def open_challenge(win: Windows, data: dict):
+    """Open the Anti-Bypass challenge for `data` ({needs_challenge, ticket, ...}) where the owner can see it: on the
+    full-screen cover while that is up (the main window would sit behind it), otherwise in the main window."""
+    cover, cover_publisher = getattr(win, "overlay_ctl", None), getattr(win, "overlay_publisher", None)
+    if cover is not None and cover.shown and cover_publisher is not None:
+        cover_publisher.publish("challenge_open", data)
+        return
+    show_main(win)
+    win.publisher.publish("challenge_open", data)
+
+
 def pump_open_events(events: queue.Queue, win: Windows):
     """A second launch (single_instance) puts "open" into `events`: show the main window. Runs on its own thread."""
     def run():
@@ -91,6 +105,12 @@ def pump_open_events(events: queue.Queue, win: Windows):
 def quit_agent(win: Windows):
     """Really close everything (the GUI loop then ends)."""
     win.quitting = True
+    host = getattr(getattr(win, "overlay_ctl", None), "host", None)
+    if host is not None:         # (R08: the covers on the other monitors are windows too)
+        try:
+            host.close_covers()
+        except Exception:
+            pass
     for w in (win.main, win.corner, win.overlay):
         try:
             w.destroy()

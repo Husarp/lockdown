@@ -4,11 +4,14 @@ bedtime / break cover to the overlay (R08), a popup held back by a full-screen a
 The engine calls these on the ReminderWorker's thread, so everything here returns quickly. Answers come back through
 `Corner.answer` (a card's button) -> `worker.answer(key, action)`, and through a Windows notification's button ->
 `worker.held_answer(key, action)`; both run on the worker's thread, because the engine is not thread-safe."""
+import emergency
 import reminders
 from gui import toast as toasts
 from resident import tray_actions
 
 MAX_TOAST_BUTTONS = 5      # Windows shows at most this many buttons on a notification
+BREAK_COVER_KEY = "break-run"     # the cover shown while a strict break runs (R08)
+BREAK_COVER_TEXT = "Look away from the screen, stand up, drink some water. Your work will be right here."
 
 
 class CornerReminderUI:
@@ -74,9 +77,24 @@ class CornerReminderUI:
         left = max(1, round((until - now).total_seconds() / 60)) if now else 1
         self.hub.notify(f"Break started - your windows are minimised for {left} min. Step away from the screen.",
                         force=True)
+        self._break_cover(until)
 
     def break_end(self):
+        self.close(BREAK_COVER_KEY)
         self.hub.notify("Break over - welcome back.", force=True)
+
+    def _break_cover(self, until):
+        """The strict break's full-screen "Break time" (R08) until it ends - not while Do Not Disturb or a muting mode
+        holds the alerts (the windows are minimised all the same). Its only button is Emergency, while there are uses
+        left: the way out that pauses the break alerts, so nobody is shut out of the PC for the whole break."""
+        if self.overlay_handler is None or getattr(self.engine, "quiet", False):
+            return
+        buttons = []
+        if self.worker is not None and getattr(self.engine, "now", None):
+            left = emergency.available(self.worker.db, self.engine.now)
+            if left:
+                buttons.append((f"Emergency ({left} left)", "emergency"))
+        self.overlay(BREAK_COVER_KEY, "Break time", BREAK_COVER_TEXT, until, buttons)
 
     def start_mode(self, mode_id, until):
         """The bedtime's "start a mode": unless another mode is locked on (that would need the challenge)."""
@@ -111,6 +129,7 @@ def attach(win, hub, ctx, show_main, log=None):
     import threading
 
     from gui.toast import Toaster
+    from resident import windows
     from resident.corner import Corner, CornerHost
     from resident.notices import Notices
     from resident.publisher import Publisher
@@ -125,4 +144,5 @@ def attach(win, hub, ctx, show_main, log=None):
     ctx.corner = corner
     actions = tray_actions.TrayActions(hub, ctx.guard, show_main, lambda event, payload=None: win.publisher.publish(event, payload))
     hub.open_page = actions.open_page
+    actions.open_challenge = lambda data: windows.open_challenge(win, data)   # (on the overlay while it is up)
     return ui, actions, toaster, publisher

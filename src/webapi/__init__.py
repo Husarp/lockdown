@@ -25,6 +25,7 @@ PAGE_MODULES = [
     "calendar",
     "modes",
     "network",
+    "overlay",
 ]
 
 for _name in PAGE_MODULES:

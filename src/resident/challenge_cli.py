@@ -97,7 +97,6 @@ def ask_in_main(win, ctx, changes: list[str], action, force: bool = False, cance
     reply = ctx.guard.request(changes, action, cancel, force)
     data = reply.get("data") if reply.get("ok") else None
     if isinstance(data, dict) and data.get("needs_challenge"):
-        windows.show_main(win)
-        win.publisher.publish("challenge_open", data)
+        windows.open_challenge(win, data)
         return False
     return bool(reply.get("ok"))

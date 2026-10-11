@@ -1,0 +1,32 @@
+/* The full-screen cover (the designer's fullscreen.html): bedtime and a running strict break. Solid colour, no animation
+   at all - the numbers on it change a few times a minute and that is all that is ever redrawn. */
+html, body { height: 100%; }
+body { display: grid; place-items: center; overflow-x: hidden; overflow-y: auto; background: var(--bg); user-select: none; cursor: default; }
+#fs { display: grid; place-items: center; width: 100%; min-height: 100%; }
+.fs { display: grid; justify-items: center; text-align: center; gap: var(--sp-4); width: min(560px, 100%); padding: var(--sp-8) var(--sp-6); }
+.fs .halo { width: calc(72px * var(--s)); height: calc(72px * var(--s)); border-radius: 50%; display: grid; place-items: center;
+  background: var(--k-soft); color: var(--k); }
+.fs .halo .ic { width: 45%; height: 45%; }
+.fs .hero { font: var(--fw-semibold) var(--fs-hero)/1 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.fs p { color: var(--text-2); font-size: var(--fs-lg); text-wrap: pretty; overflow-wrap: anywhere; }
+.fs p.fs-text { white-space: pre-wrap; }
+.fs .btn-row { justify-content: center; }
+.fs .btn-row:empty { display: none; }
+.fs .btn-lg:disabled { opacity: .55; cursor: not-allowed; }
+.fs-panel { display: grid; gap: var(--sp-3); width: min(420px, 100%); text-align: left; justify-items: stretch; }
+.fs-panel h2, .fs-panel > p { text-align: center; }
+.fs-panel > p { font-size: var(--fs-body); }
+.fs-panel .btn-row { justify-content: center; }
+.fs .kinds { display: grid; gap: var(--sp-2); }
+.fs .rcard { position: relative; }
+.fs .rcard input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.fs .rcard:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+.fs .rcard .kic { background: var(--k-soft); color: var(--k); }
+.fs-err { color: var(--k-block); font-size: var(--fs-body); text-align: center; }
+/* a break reads title first, then the countdown (the designer's break screen); the bedtime screen has the time on top */
+.fs.k-ok > * { order: 6; }
+.fs.k-ok > .halo { order: 0; }
+.fs.k-ok > h1 { order: 1; }
+.fs.k-ok > .hero { order: 2; }
+.fs.k-ok > .fs-text { order: 3; }
+.fs.k-ok > .btn-row { order: 4; }

@@ -80,7 +80,9 @@ def main(argv: list[str], on_first_instance=None) -> int:
     base_url = server.start()
     import webapi
     ctx = webapi.make_context()
-    win = windows.create(base_url, ui_theme.background_color(), js_api=webapi.build_api(ctx))
+    from resident import overlay
+    win = windows.create(base_url, ui_theme.background_color(), js_api=webapi.build_api(ctx),
+                         overlay_background=overlay.saved_background())
     windows.attach_publisher(win, _log)
     windows.pump_open_events(events, win)
     # R11: app icons (/icon/...), the installed-apps catalog (loads in the background after the window is up) and the
@@ -98,6 +100,8 @@ def main(argv: list[str], on_first_instance=None) -> int:
     ctx.window_visible = lambda: win.publisher.visible    # R16: the Network Log's live feed sleeps while the window is hidden
     # R07: the corner window (reminder popups + notices), the tray's handlers, hub.notify.show and hub.open_page
     ui, tray_actions, toaster, corner_publisher = reminder_ui.attach(win, hub, ctx, lambda: windows.show_main(win), _log)
+    # R08: the full-screen cover (bedtime screen, running strict break): its Publisher, ctx.overlay, ui.overlay_handler
+    overlay_publisher = overlay.attach(win, hub, ctx, ui, _log)
     pool = workers.Workers(hub=hub, reminder_ui=ui, log_sink=_log)   # (the background jobs: only the process that owns the port runs them)
 
     def ready():   # (runs once the GUI loop is up)
@@ -120,5 +124,6 @@ def main(argv: list[str], on_first_instance=None) -> int:
     pool.stop()
     win.publisher.stop()
     corner_publisher.stop()
+    overlay_publisher.stop()
     server.stop()
     return 0
