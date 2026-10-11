@@ -6,8 +6,9 @@
 // update(); text is written only when it changed. Nothing is re-rendered on a data tick:
 //   - usage_tick {active_sec}  -> the screen-time number (and its "vs yesterday" words) change, nothing else;
 //   - status / blocks_changed / mode_changed -> load() again (one Api call) when something the cards show changed;
-//   - the pause and bedtime countdowns tick locally from their end times (page.every, only while this page is shown);
-//   - every 30 s while shown the page reloads (the numbers that nobody pushes).
+//   - the pause and bedtime countdowns tick locally from their end times (page.every, only while this page is shown).
+// Nothing reloads on a timer: the agent pushes usage_tick every ~5 s while the window is shown, and a page that was
+// left while things changed is marked and reloads on its next show.
 // The shell owns the "Lockdown is off" and "service stopped" banners; this page only says it in the Blocked-now number.
 // Cards the owner hid are not in dashboard_get's answer (Python does not compute them).
 import { wireIconReady, iconImg } from "../appicon.js";
@@ -19,7 +20,6 @@ import { el, empty, esc, fmt, ic, setText } from "../ui.js";
 
 export const freshMs = 10_000;
 export const events = ["usage_tick", "status", "blocks_changed", "mode_changed"];
-export const REFRESH_SEC = 30;         // a shown Dashboard reloads this often (nothing pushes the roll-up numbers)
 const SPAN = { stats: 3, today: 3, limits: 2, week: 2 };           // columns of the 3-column grid (default 1)
 const TONE = { ok: "t-ok", warn: "t-warn", bad: "t-bad", muted: "" };
 const METER = { ok: "k-ok", warn: "k-limit", bad: "k-block" };
@@ -117,7 +117,6 @@ let root = null, page = null, grid = null;
 let data = null;                         // the last dashboard_get answer
 const cards = new Map();                 // key -> {node, update(d), tick?()}
 let editing = false;
-let sinceReload = 0;
 let status = {};                         // what the cards were last loaded for (to tell a push that matters)
 let savedLayout = Promise.resolve();
 
@@ -389,11 +388,15 @@ const BUILD = {
 
   emergency(title) {
     const [wrap, body] = frame("emergency", title);
-    body.innerHTML = `<div data-n="rows"></div><p class="muted small" data-n="off" hidden>Emergency unlock is turned off in Settings.</p>`;
+    body.innerHTML = `<div data-n="rows"></div><p class="muted small" data-n="off" hidden>Emergency unlock is turned off in Settings.</p>
+      <div class="btn-row" style="margin-top:var(--sp-2)" data-n="use-row" hidden><button class="btn btn-emerg" type="button" data-n="use">${ic("lifebuoy")}Use emergency unlock</button></div>`;
+    n(wrap, "use").addEventListener("click", () =>
+      import("../emergency.js").then(({ openEmergency }) => openEmergency({ onDone: () => page.reload() })));
     return {
       node: wrap,
       update(d) {
         n(wrap, "off").hidden = d.usable;
+        n(wrap, "use-row").hidden = !(d.usable && d.kinds.some((k) => k.left > 0));
         syncRows(n(wrap, "rows"), d.usable ? d.kinds : [], () => el(`<div class="low-row"><div class="hstack"><b class="grow ellip" data-n="detail"></b><span class="small muted num" data-n="text"></span></div><div class="uses" data-n="uses"></div><span class="small faint" data-n="resets"></span></div>`),
           (node, r) => {
             setText(n(node, "detail"), r.detail);
@@ -519,7 +522,6 @@ export async function load() {
   const d = await ld.call("dashboard_get");
   data = d;
   status = d.status;
-  sinceReload = 0;
   setText(q("sub"), subLine(d.date, d.since, d.status.mode));
   q("empty").hidden = !d.empty;
   grid.hidden = d.empty;
@@ -560,7 +562,6 @@ export function patch({ event, payload }) {
 
 function tick() {
   for (const c of cards.values()) if (c.tick && !c.node.hidden) c.tick();
-  if (++sinceReload >= REFRESH_SEC) { sinceReload = 0; page.reload(); }
 }
 
 export function show() {

@@ -176,6 +176,48 @@ def test_bedtime_card_shows_the_time_and_counts_to_it(shell, page, harness):
     assert page.inner_text('[data-card="bedtime"] [data-n="sub"]') == "in 7 h 18 m · heads-up 15 min before"
 
 
+def test_the_emergency_card_has_a_button_that_opens_the_dialog_and_reloads_after(shell, page, harness):
+    import emergency
+    emergency.save_tiers(harness.db, [{"id": "a", "uses": 2, "per": "week", "minutes": 5}])
+    open_dash(shell, page)
+    use = page.locator('[data-card="emergency"] [data-n="use"]')
+    assert use.is_visible() and use.inner_text() == "Use emergency unlock"
+    assert page.inner_text('[data-card="emergency"] [data-n="text"]') == "2 of 2 left this week"
+    calls = harness.rpc_count("dashboard_get")
+    use.click()
+    page.wait_for_selector("#dlg[open] .em-kind", timeout=5000)
+    assert page.inner_text("#dlg h2") == "Emergency unlock"
+    page.locator('.em-list .vl-row:not([hidden]):has(.name:text-is("Twitch")) input').first.check()
+    button = page.locator("#dlg .dlg-f .btn-primary")
+    button.click()
+    button.click()
+    wait_for(page, "!document.getElementById('dlg').open")
+    wait_for(page, "document.querySelector('[data-card=\"emergency\"] [data-n=\"text\"]').textContent === '1 of 2 left this week'")
+    assert harness.rpc_count("dashboard_get") == calls + 1                    # the page asked again once
+
+
+def test_the_emergency_button_is_not_there_without_a_use_left_or_when_it_is_off(shell, page, harness):
+    import emergency
+    emergency.save_tiers(harness.db, [{"id": "a", "uses": 1, "per": "week", "minutes": 5}])
+    emergency.unlock(harness.db, [], NOW, alerts=True, tier="a")
+    open_dash(shell, page)
+    assert page.locator('[data-card="emergency"] [data-n="use"]').is_hidden()
+    assert page.inner_text('[data-card="emergency"] [data-n="text"]') == "0 of 1 left this week"
+    harness.db.set_setting("emergency.enabled", "0")
+    page.evaluate("window.ld.push([['mode_changed', {}]])")
+    wait_for(page, "!document.querySelector('[data-card=\"emergency\"] [data-n=\"off\"]').hidden")
+    assert page.locator('[data-card="emergency"] [data-n="use"]').is_hidden()
+
+
+def test_the_dashboard_does_not_reload_on_a_timer(shell, page, harness):
+    open_dash(shell, page)
+    calls = len(harness.calls)
+    page.evaluate("window.ld.push([['usage_tick', {active_sec: 1234}]])")
+    page.wait_for_timeout(3500)                                             # (the old window reloaded every 30 s; ticks only patch)
+    assert len(harness.calls) == calls
+    assert page.evaluate("import('/js/pages/dashboard.js').then(m => 'REFRESH_SEC' in m)") is False
+
+
 # ---------------------------------------------------------------- empty state
 
 def test_a_fresh_install_shows_the_empty_state_and_its_two_buttons(shell, page, harness):

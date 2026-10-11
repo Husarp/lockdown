@@ -110,19 +110,35 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'s' * (n != 1)}"
 
 
-def _app_name(exe: str, items: list[dict]) -> str:
-    """The blocklist's name for an app, else its file name made readable (Chrome, Code ...)."""
+def _catalog_name(catalog, exe: str) -> str | None:
+    """The app catalog's name for a program (resident/catalog.py, the Start Menu list), once it has loaded."""
+    if catalog is None or not catalog.loaded.is_set():
+        return None
+    stem = exe[:-4] if exe.endswith(".exe") else exe
+    try:
+        found = catalog.search("all", stem, limit=30)["apps"]
+    except Exception:
+        return None
+    return next((a["name"] for a in found if a["exe"].lower() == exe and a["name"]), None)
+
+
+def _app_name(exe: str, items: list[dict], catalog=None, cached=None) -> str:
+    """The blocklist's name for an app, else the app catalog's, else its file name made readable (Chrome, Code ...)."""
     if exe == "pythonw.exe":     # Lockdown's own window
         return "Lockdown"
     for item in items:
         if item["item_type"] == "app" and item["target"].lower() == exe:
             return item["display_name"]
+    if catalog is not None:
+        name = cached(("app-name", exe), lambda: _catalog_name(catalog, exe)) if cached else _catalog_name(catalog, exe)
+        if name:
+            return name
     stem = exe[:-4] if exe.endswith(".exe") else exe
     return stem[:1].upper() + stem[1:]
 
 
-def _name_of(kind: str, name: str, items: list[dict]) -> str:
-    return _app_name(name, items) if kind == "app" else name
+def _name_of(kind: str, name: str, items: list[dict], catalog=None, cached=None) -> str:
+    return _app_name(name, items, catalog, cached) if kind == "app" else name
 
 
 def _icon(item: dict | None, fallback: str = "?") -> list:
@@ -262,8 +278,8 @@ def limit_entries(now, items, groups, usage) -> list[dict]:
 class _Day:
     """What the cards share, each worked out the first time a shown card asks for it."""
 
-    def __init__(self, db, snap, cache=None):
-        self.db, self.snap = db, snap
+    def __init__(self, db, snap, cache=None, catalog=None):
+        self.db, self.snap, self.catalog = db, snap, catalog
         self.cache = {} if cache is None else cache       # kept between calls (ctx.dash_cache): key -> (when, value)
         self.now = snap.now
         self.today = self.now.date()
@@ -361,10 +377,15 @@ def _saved_stat(d: _Day) -> dict:
     events = d.blocked_today
     saved = 0.0
     if events:     # (the 30 days of visits are only needed to price a blocked visit)
-        def price():
-            history = stats.switches(d.db, d.today - timedelta(days=30), d.tomorrow)
-            return stats.time_saved(events, d.items, [], history, d.now)
-        saved = d.cached(("saved", d.today, len(events)), price)
+        # The 30 days before today are summed in SQL and kept for the day; only the last old visit (it ends at
+        # today's first switch) and today's own visits are worked out live - the same number as time_saved gives.
+        totals, last = d.cached(("saved-past", d.today),
+                                lambda: stats.visit_totals(d.db, d.today - timedelta(days=30), d.today))
+        live = dict(totals)
+        for (_, name), sec in stats.visits(([last] if last else []) + d.events, d.now):
+            have = live.get(name, (0, 0))
+            live[name] = [have[0] + sec, have[1] + 1]
+        saved = stats.time_saved_totals(events, d.items, live)
     return {"value": stats.hm(saved), "note": f"{_plural(len(events), 'blocked visit')} turned away", "tone": "muted"}
 
 
@@ -386,9 +407,13 @@ def _card_today(d: _Day) -> dict:
     saved, cats = db.categories(), categories.load(db)
     known = {c["key"] for c in cats}
 
+    seen = {}
+
     def category(exe, site):
-        cat = stats.category_of(*(("site", site) if site else ("app", exe)), saved, d.items)
-        return cat if cat in known else "neutral"
+        if (exe, site) not in seen:
+            cat = stats.category_of(*(("site", site) if site else ("app", exe)), saved, d.items)
+            seen[exe, site] = cat if cat in known else "neutral"
+        return seen[exe, site]
     segments = stats.timeline(d.rows, d.today, category)
     if len(segments) > MAX_TIMELINE_SEGMENTS:
         segments = sorted(sorted(segments, key=lambda g: -g[1])[:MAX_TIMELINE_SEGMENTS])
@@ -474,16 +499,54 @@ def _card_visits(d: _Day) -> dict:
     return {"count": len(events), "open": d.db.get_setting(VISITS_OPEN_KEY, "0") == "1", "rows": rows}
 
 
+def _streaks(d: _Day, goal) -> dict:
+    """stats.streaks(db, today, goal), with the days before today kept for the day (key: the day, the goal, when
+    recording started and what the emergency unlocks look like) and only today worked out live: today ends a streak
+    when it is over the goal / has an unlock, else it adds one day to the run of the days before."""
+    db, today = d.db, d.today
+    first = stats.first_activity(db)
+    start = max(first.date(), today - timedelta(days=366)) if first else None
+    if start is None or start > today:
+        return {"goal": 0, "no_unlock": 0}
+    unlocks = tuple(db.conn.execute("SELECT COUNT(*), MAX(started) FROM emergency_unlocks").fetchone())
+
+    def earlier() -> tuple[int, int]:
+        run_goal, end = 0, today
+        # (the run of days within the goal usually stops soon: a week is looked at first, then further back)
+        for size in (7, 60, 400) if goal else ():
+            lo = max(start, end - timedelta(days=size))
+            active = stats.daily_active(db, lo, end)
+            days = [end - timedelta(days=i) for i in range(1, (end - lo).days + 1)]
+            over = next((n for n, day in enumerate(days) if active.get(day.isoformat(), 0) > goal), None)
+            if over is not None:
+                run_goal += over
+                break
+            run_goal += len(days)
+            end = lo
+        unlocked = {u["started"].date() for u in db.unlocks_since(datetime.combine(start, datetime.min.time()))}
+        run_unlock = 0
+        for day in (today - timedelta(days=i) for i in range(1, (today - start).days + 1)):
+            if day in unlocked:
+                break
+            run_unlock += 1
+        return run_goal, run_unlock
+    run_goal, run_unlock = d.cached(("streaks-past", today, goal, start, unlocks), earlier)
+    unlocked_today = db.conn.execute("SELECT 1 FROM emergency_unlocks WHERE started >= ? AND started < ? LIMIT 1",
+                                     (f"{today} 00:00:00", f"{d.tomorrow} 00:00:00")).fetchone()
+    over = stats.active_on(db, today) > goal if goal else True
+    return {"goal": 0 if over else run_goal + 1, "no_unlock": 0 if unlocked_today else run_unlock + 1}
+
+
 def _card_glance(d: _Day) -> dict:
     entries, now = [], d.now
     apps = stats.per_app(d.rows)
     if apps:
         exe, sec = apps.most_common(1)[0]
-        entries.append({"label": "Top app today", "main": _app_name(exe, d.items), "extra": stats.hm(sec)})
+        entries.append({"label": "Top app today", "main": _app_name(exe, d.items, d.catalog, d.cached), "extra": stats.hm(sec)})
     summary = stats.switch_summary(d.events, now)
     if summary["targets"]:
         (kind, name), count, avg = summary["targets"][0]
-        entries.append({"label": "Most switched to", "main": _name_of(kind, name, d.items),
+        entries.append({"label": "Most switched to", "main": _name_of(kind, name, d.items, d.catalog, d.cached),
                         "extra": f"{count} switches · avg {stats.ms(avg)} per visit"})
     hours = sorted(summary["per_hour"])
     if len(hours) >= 2:
@@ -493,8 +556,7 @@ def _card_glance(d: _Day) -> dict:
         entries.append({"label": "Quietest hour", "main": f"{quiet:02d}:00 - {quiet + 1:02d}:00",
                         "extra": f"{n} switch{'es' * (n != 1)}"})
     goal = d.goal
-    unlocks = d.db.conn.execute("SELECT COUNT(*), MAX(started) FROM emergency_unlocks").fetchone()
-    streak = d.cached(("streaks", d.today, goal, tuple(unlocks)), lambda: stats.streaks(d.db, d.today, goal))
+    streak = _streaks(d, goal)
     if goal:
         n = streak["goal"]
         entries.append({"label": "Goal streak", "main": f"{_plural(n, 'day')} in a row", "extra": "within your daily goal"})
@@ -562,7 +624,7 @@ def dashboard_get(ctx):
     is not hidden. With nothing ever recorded `empty` is true and there are no cards."""
     db = ctx.db
     snap = fresh_snapshot(ctx)
-    d = _Day(db, snap, ctx.__dict__.setdefault("dash_cache", {}))
+    d = _Day(db, snap, ctx.__dict__.setdefault("dash_cache", {}), getattr(ctx, "catalog", None))
     order, hidden = layout(db)
     today = d.today
     out = {"now": iso(d.now), "date": f"{DAY_NAMES[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}",

@@ -603,6 +603,88 @@ def test_poke_builds_a_snapshot_now(env):
     assert env.hub.snapshot.running is True
 
 
+class UsageSink:
+    """A listener with the publisher's usage_tick surface: `visible` is the window being shown."""
+
+    def __init__(self, visible=True):
+        self.visible, self.ticks = visible, []
+
+    def __call__(self, old, new):
+        pass
+
+    def usage_tick(self, payload):
+        self.ticks.append(payload)
+
+
+def test_a_shown_window_hears_todays_active_seconds_every_five_seconds(env):
+    env.heartbeat()
+    env.db.add_activity(f"{NOW.date()} 09:00", "code.exe", "", 600, 480)
+    env.db.add_activity(f"{NOW.date()} 21:59", "code.exe", "", 60, 30)
+    env.db.add_activity(f"{NOW.date() - timedelta(days=1)} 09:00", "code.exe", "", 600, 600)     # (not today's)
+    sink = UsageSink()
+    run_status(env, 12, listeners=[sink])
+    assert sink.ticks == [{"active_sec": 510}] * 3                    # at 0 s, 5 s and 10 s
+    assert env.errors == []
+
+
+def test_a_hidden_window_costs_no_usage_query_and_gets_one_empty_tick(env):
+    env.heartbeat()
+    sink = UsageSink(visible=False)
+    w, per_tick = run_status(env, 8, listeners=[sink])
+    assert sink.ticks == [{}]                                         # once per hidden stretch: becomes dirty flags
+    assert len(set(per_tick[1:])) == 1                                # (the same handful of statements as without a sink)
+
+
+def test_the_ticks_resume_when_the_window_is_shown_again(env):
+    env.heartbeat()
+    sink = UsageSink(visible=False)
+    w = workers.StatusWorker(env.hub)
+    env.hub.listeners.append(sink)
+    w.tick()
+    w.tick()
+    assert sink.ticks == [{}]
+    sink.visible = True
+    w.tick()                                                          # (the first shown tick answers at once)
+    env.clock.advance(1)
+    w.tick()
+    assert sink.ticks == [{}, {"active_sec": 0}]
+    sink.visible = False
+    env.clock.advance(1)
+    w.tick()
+    assert sink.ticks == [{}, {"active_sec": 0}, {}]                  # a new hidden stretch flags again
+
+
+def test_the_publisher_listener_pushes_usage_ticks_only_while_the_window_is_shown(env):
+    from resident.publisher import Publisher
+
+    class Window:
+        def __init__(self):
+            self.scripts = []
+
+        def evaluate_js(self, script):
+            self.scripts.append(script)
+    window = Window()
+    pub = Publisher(window, start=False, visible=False)
+    listener = workers.publisher_listener(SimpleNamespace(publisher=pub))
+    env.heartbeat()
+    env.db.add_activity(f"{NOW.date()} 09:00", "code.exe", "", 600, 480)
+    w = workers.StatusWorker(env.hub)
+    env.hub.listeners.append(listener)
+    w.tick()
+    assert pub.flush() is False and window.scripts == []              # hidden: no push, only dirty flags kept for later
+    assert pub._dirty == {"dashboard": True, "screentime": True}
+    pub.set_visible(True)
+    pub.flush()
+    window.scripts.clear()
+    env.clock.advance(5)
+    w.tick()
+    pub.flush()
+    assert len(window.scripts) == 1 and '["usage_tick",{"active_sec":480}]' in window.scripts[0]
+    env.clock.advance(5)
+    w.tick()                                                          # (the same number again: dropped by the publisher)
+    assert pub.flush() is False
+
+
 class FakeTray:
     on_mode = None
 

@@ -33,6 +33,7 @@ from typing import Protocol
 import alerts
 import digest
 import reminders
+import stats
 import updates
 from blocker import protection
 from blocker.apps import exe_name, is_hosted, minimizes
@@ -57,6 +58,7 @@ BREAK_NOTICE_SEC = 12      # "Break in progress" at most this often
 ERROR_REPEAT_SEC = 60      # the same worker error in a row is logged once per this long
 MIN_GAP_SEC = 0.05         # a tick never starts sooner than this after the last one began (no busy loop)
 STOP_WAIT_SEC = 1.0        # Workers.stop() waits this long for the workers to wind up
+USAGE_TICK_SEC = 5.0       # R13: how often a shown window is told today's active seconds (`usage_tick`)
 NETLOG_SEC = 3.0            # R16: how often the Network Log's live feed looks for new rows
 NETLOG_IDLE_SEC = 60.0      # (and how often it wakes when nobody asked for it)
 GOAL_KEY, DEFAULT_GOAL_HOURS = "stats.goal_hours", "5"   # the daily screen-time goal (the weekly summary names it)
@@ -350,9 +352,15 @@ class Worker(threading.Thread):
 # ---------------------------------------------------------------- status
 
 class StatusWorker(Worker):
-    """One snapshot a second; the listeners (publisher, tray) get (old, new)."""
+    """One snapshot a second; the listeners (publisher, tray) get (old, new).
+
+    A listener that also has `usage_tick(payload)` and `visible` (the publisher's) is told today's active seconds every
+    USAGE_TICK_SEC, but only while its window is shown - a hidden window costs no query (once per hidden stretch it gets an
+    empty tick, which the Publisher turns into `dirty` flags, so the pages reload on the next show)."""
     label = "status"
     interval = STATUS_SEC
+    _usage_at = None             # when (hub.clock.mono) the last usage_tick went out
+    _usage_flagged = False       # the empty tick of this hidden stretch has gone out
 
     def tick(self):
         hub = self.hub
@@ -360,6 +368,27 @@ class StatusWorker(Worker):
         old, hub.snapshot = hub.snapshot, new
         for listener in list(hub.listeners):
             self._guard(lambda: listener(old, new))
+        self._guard(lambda: self._usage_tick(new))
+
+    def _usage_tick(self, snap):
+        sinks = [l for l in list(self.hub.listeners) if hasattr(l, "usage_tick")]
+        if not sinks:
+            return
+        if not any(s.visible for s in sinks):
+            if not self._usage_flagged:
+                self._usage_flagged = True
+                for s in sinks:
+                    s.usage_tick({})
+            return
+        self._usage_flagged = False
+        mono = self.hub.clock.mono()
+        if self._usage_at is not None and mono - self._usage_at < USAGE_TICK_SEC:
+            return
+        self._usage_at = mono
+        payload = {"active_sec": stats.active_on(self.db, snap.now.date())}
+        for s in sinks:
+            if s.visible:
+                s.usage_tick(payload)
 
 
 def tray_listener(tray):
@@ -377,14 +406,29 @@ def tray_listener(tray):
     return on_snapshot
 
 
-def publisher_listener(win):
-    """A snapshot listener that pushes what changed to the main window (`status` event, a delta of the page part). The
-    publisher itself holds the pushes back while the window is hidden."""
-    def on_snapshot(old, new):
+class PublisherListener:
+    """A snapshot listener that pushes what changed to the main window (`status` event, a delta of the page part) and
+    carries the window's `usage_tick`. The publisher itself holds the pushes back while the window is hidden."""
+
+    def __init__(self, win):
+        self.win = win
+
+    def __call__(self, old, new):
         delta = snapshot.changed(old, new)
-        if delta and win.publisher is not None:
-            win.publisher.publish("status", delta)
-    return on_snapshot
+        if delta and self.win.publisher is not None:
+            self.win.publisher.publish("status", delta)
+
+    @property
+    def visible(self) -> bool:
+        return self.win.publisher is not None and self.win.publisher.visible
+
+    def usage_tick(self, payload):
+        if self.win.publisher is not None:
+            self.win.publisher.publish("usage_tick", payload)
+
+
+def publisher_listener(win):
+    return PublisherListener(win)
 
 
 # ---------------------------------------------------------------- blocked visits
