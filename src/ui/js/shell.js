@@ -6,6 +6,7 @@ import { applyLook, currentLook } from "./theme.js";
 import { injectSprite } from "./icons.js";
 import { router } from "./router.js";
 import { el, esc, ic, installControls, setText, toast, fmt } from "./ui.js";
+import { initUpdate } from "./update.js";   // R17: the update banner + dialog
 import "./challenge.js";   // R06: the challenge dialog (opens on a challenge_open push / needs-challenge event)
 
 const $ = (id) => document.getElementById(id);
@@ -298,6 +299,7 @@ async function boot() {
   syncClockFrom(st);
   Object.assign(ld.status, canon(st));
   setStatus(ld.status);
+  initUpdate({ banners, go: (id) => router.go(id) });
   document.documentElement.dataset.ready = "1";
   await ld.call("ui_ready");
 }

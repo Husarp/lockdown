@@ -15,3 +15,4 @@
 export const pages = {};
 
 pages.reminders = () => import("./reminders.js");
+pages.about = () => import("./about.js");

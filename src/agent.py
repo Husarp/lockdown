@@ -105,6 +105,10 @@ def main(argv: list[str], on_first_instance=None) -> int:
         toaster.fallback = tray.notify      # (a Windows notification that can't be had: the tray's balloon says it)
         tray.start()
         pool.hub.listeners += [workers.tray_listener(tray), workers.publisher_listener(win)]
+        from resident import update_flow   # R17: the in-app update (notice "Install", About, banner); quits WITHOUT EXITED_KEY
+        ctx.update_flow = update_flow.attach(pool.hub, pool.updates, win.publisher.publish,
+                                             show=lambda: windows.show_main(win),
+                                             quit_app=lambda: (tray.stop(), windows.quit_agent(win)))
         pool.start()
         app_catalog.start()   # (R11: reads the cached list, scans again if it is over a day old)
         if not any(a in argv for a in TRAY_ARGS):
