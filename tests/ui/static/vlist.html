@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><title>vlist</title><link rel="icon" href="data:,">
+<link rel="stylesheet" href="/css/tokens.css"><link rel="stylesheet" href="/css/components.css"><link rel="stylesheet" href="/css/app.css">
+</head>
+<body style="display:flex;flex-direction:column;height:100vh">
+<div id="list" style="height:600px;flex:none"></div>
+<script type="module">
+import { createVList } from "/js/vlist.js";
+const rows = Array.from({ length: 10000 }, (_, i) => ({ id: "r" + i, name: "Row " + i, sub: "sub " + (i * 7) }));
+const create = () => {
+  const d = document.createElement("div");
+  d.className = "row row-simple";
+  d.innerHTML = '<span class="aic"></span><div class="name"><b></b><span></span></div><span class="chip chip-soft"></span>';
+  return d;
+};
+let renders = 0;
+window.__renders = () => renders;
+window.vl = createVList(document.getElementById("list"), {
+  rowVar: "--row-h-sm", rows, key: (r) => r.id, create,
+  render(n, r, i) { renders++; n.querySelector("b").textContent = r.name; n.querySelector(".name span").textContent = r.sub; n.querySelector(".chip").textContent = "#" + i; },
+});
+window.__ready = true;
+</script>
+</body>
+</html>

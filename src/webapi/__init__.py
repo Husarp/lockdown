@@ -11,6 +11,7 @@ from .core import api_methods, build_api
 
 PAGE_MODULES = [
     "guard",
+    "shell",
 ]
 
 for _name in PAGE_MODULES:

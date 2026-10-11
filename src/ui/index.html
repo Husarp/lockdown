@@ -1,1 +1,89 @@
-<!doctype html><meta charset="utf-8"><title>Lockdown</title>
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lockdown</title>
+<link rel="icon" href="data:,">
+<!-- Look cache (cosmetic only: js/theme.js writes it): the last theme / accent / size, applied before the first paint
+     so a restart doesn't flash the default colours. The real values always come from Python (get_theme). -->
+<script>(function(){try{var l=JSON.parse(localStorage.getItem("ld.look")||"null");if(!l)return;var d=document.documentElement,
+t=l.pref==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):l.pref;if(!/^(dark|amoled|light)$/.test(t))return;
+d.dataset.theme=t;var v=l.vars&&l.vars[t];if(v)for(var k in v)d.style.setProperty(k,v[k]);if(l.s)d.style.setProperty("--s",l.s)}catch(e){}})()</script>
+<!-- Critical CSS: background and colour per theme, and the grid of the shell, so the skeleton below paints in the right
+     place with no script and before the stylesheets are parsed. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#191817;color:#EFECEA}
+html[data-theme=light],html[data-theme=light] body{background:#F3F2F1;color:#1C1B1A}
+html[data-theme=amoled],html[data-theme=amoled] body{background:#000}
+.app{display:grid;grid-template-columns:calc(212px*var(--s,1)) minmax(0,1fr);height:100vh}
+@media (max-width:1100px){.app{grid-template-columns:calc(56px*var(--s,1)) minmax(0,1fr)}}
+</style>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="modulepreload" href="js/shell.js">
+<link rel="modulepreload" href="js/bridge.js">
+<link rel="modulepreload" href="js/router.js">
+<link rel="modulepreload" href="js/theme.js">
+<link rel="modulepreload" href="js/ui.js">
+<link rel="modulepreload" href="js/icons.js">
+<link rel="modulepreload" href="js/dialog.js">
+<link rel="modulepreload" href="js/menu.js">
+<link rel="modulepreload" href="js/pages/index.js">
+</head>
+<body>
+<!-- Only the icons the shell below needs for the first paint; js/icons.js adds the rest when it loads. -->
+<svg id="sprite" xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"><symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><rect x="9" y="11" width="6" height="5" rx="1"/><path d="M10 11V9.5a2 2 0 0 1 4 0V11"/></symbol><symbol id="i-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol><symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol><symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol><symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol><symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol><symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol><symbol id="i-alarm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></symbol><symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.27 21a2 2 0 0 0 3.46 0"/><path d="M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33"/></symbol><symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol><symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol><symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l14 9-14 9z"/></symbol><symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol></svg>
+<div class="app" id="root">
+  <aside class="sidebar">
+    <div class="brand"><svg class="ic" aria-hidden="true"><use href="#i-logo"/></svg><span class="brand-name">Lockdown</span></div>
+    <nav class="nav" id="nav" aria-label="Pages">
+      <button data-nav="dashboard" aria-current="page" title="Dashboard"><svg class="ic" aria-hidden="true"><use href="#i-dashboard"/></svg><span>Dashboard</span></button>
+      <button data-nav="blocking" title="Blocking"><svg class="ic" aria-hidden="true"><use href="#i-ban"/></svg><span>Blocking</span></button>
+      <button data-nav="antibypass" title="Anti-Bypass"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg><span>Anti-Bypass</span></button>
+      <button data-nav="screentime" title="Screen Time"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg><span>Screen Time</span></button>
+      <button data-nav="netlog" title="Network Log"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg><span>Network Log</span></button>
+      <button data-nav="modes" title="Modes"><svg class="ic" aria-hidden="true"><use href="#i-target"/></svg><span>Modes</span></button>
+      <button data-nav="reminders" title="Reminders"><svg class="ic" aria-hidden="true"><use href="#i-alarm"/></svg><span>Reminders</span></button>
+      <button data-nav="notifications" title="Notifications"><svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg><span>Notifications</span></button>
+      <div class="sep"></div>
+      <button data-nav="settings" title="Settings"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+      <button data-nav="about" title="About"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><span>About</span></button>
+    </nav>
+    <div class="side-foot" id="side-foot" title="Checking the service">
+      <span class="dot" id="svc-dot" style="--k:var(--text-3)"></span><span id="svc-text">Service</span>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar" id="topbar">
+      <span class="tb-sk sk" style="width:calc(110px*var(--s))"></span><span class="tb-sk sk" style="width:calc(150px*var(--s))"></span><span class="tb-sk sk" style="width:calc(170px*var(--s))"></span>
+      <span class="seg-item k-ok" id="tb-prot"><span class="dot"></span>Protection on</span>
+      <span class="chip chip-block" id="tb-prot-off" hidden><svg class="ic" aria-hidden="true"><use href="#i-power"/></svg>Protection off</span>
+      <button class="btn btn-sm" id="tb-prot-on" type="button" hidden>Turn on</button>
+      <span class="div"></span>
+      <span class="seg-item k-mode" id="tb-mode"><svg class="ic" aria-hidden="true"><use href="#i-target"/></svg><b class="n">No mode</b><span class="muted opt u"></span></span>
+      <span class="div" id="tb-div2"></span>
+      <span class="seg-item muted" id="tb-active"><span class="opt">Blocks active</span></span>
+      <span class="chip chip-paused" id="tb-paused" hidden><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg><span id="tb-paused-t"></span></span>
+      <button class="btn btn-sm btn-ghost" id="tb-pause" type="button"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg><span class="opt">Pause my blocks</span></button>
+      <button class="btn btn-sm btn-primary" id="tb-resume" type="button" hidden><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg>Resume</button>
+      <span class="grow"></span>
+      <span class="small muted num opt" id="tb-clock"></span>
+    </header>
+    <div id="banners"></div>
+    <main class="view" id="view"><div class="page" id="boot-skeleton" aria-hidden="true"><div class="sk sk-line" style="width:30%;height:calc(26px*var(--s))"></div><div class="grid-3"><div class="card"><div class="card-b" style="height:calc(120px*var(--s))"></div></div><div class="card"><div class="card-b" style="height:calc(120px*var(--s))"></div></div><div class="card"><div class="card-b" style="height:calc(120px*var(--s))"></div></div></div></div></main>
+    <footer class="savebar" id="savebar">
+      <label class="hstack small"><span class="switch"><input type="checkbox" id="sb-auto" checked aria-label="Auto-save"><span></span></span><span>Auto-save</span></label>
+      <span class="grow sb-msg"><span class="dot" id="sb-dot" hidden></span><span class="small" id="sb-text"></span></span>
+      <button class="btn" id="sb-discard" type="button" hidden>Discard</button>
+      <button class="btn btn-primary" id="sb-save" type="button" hidden disabled>Saved</button>
+    </footer>
+  </div>
+</div>
+<dialog class="dialog" id="dlg"></dialog>
+<div class="menu" id="menu" role="menu" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script type="module" src="js/shell.js"></script>
+</body>
+</html>
