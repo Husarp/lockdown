@@ -182,6 +182,45 @@ def test_break_under_five_seconds_is_refused(shell, page, harness):
     assert break_saved(harness)["every_sec"] == 45 * 60
 
 
+def allow_rows(page):
+    return page.eval_on_selector_all('[data-k="allow"] [data-exe]', "els => els.map(e => e.dataset.exe)")
+
+
+def test_allowed_during_breaks_shows_the_default_and_removing_is_free(shell, page, harness):
+    lock(harness)
+    open_page(shell, page)
+    assert allow_rows(page) == ["lockdown.exe", "systemsettings.exe"]
+    assert "Windows Settings" in page.inner_text('[data-k="allow"]')
+    assert page.locator('[data-act="allow-restore"]').is_hidden()
+    page.locator('[data-exe="systemsettings.exe"] [data-act="allow-x"]').click()     # free, even while locked
+    wait_for(page, "document.querySelectorAll('[data-k=\"allow\"] [data-exe]').length === 1")
+    assert reminders.allowed_apps(break_saved(harness)) == ["lockdown.exe"]
+    assert page.locator('[data-act="allow-restore"]').is_visible()
+    assert not page.is_visible("#dlg[open]")
+
+
+def test_bringing_a_default_back_asks_for_the_challenge_when_locked(shell, page, harness):
+    reminders.save(harness.db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "allow": ["lockdown.exe"]})
+    lock(harness)
+    open_page(shell, page)
+    page.click('[data-act="allow-restore"]')
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    assert "Windows Settings" in page.inner_text("#dlg")
+    assert reminders.allowed_apps(break_saved(harness)) == ["lockdown.exe"]
+    page.keyboard.press("Escape")
+    page.wait_for_function("!document.querySelector('#dlg').open")
+    assert reminders.allowed_apps(break_saved(harness)) == ["lockdown.exe"]
+
+
+def test_bringing_a_default_back_is_immediate_without_a_challenge(shell, page, harness):
+    reminders.save(harness.db, reminders.BREAK_KEY, {**reminders.DEFAULT_BREAK, "allow": []})
+    open_page(shell, page)
+    assert allow_rows(page) == [] and "Nothing" in page.inner_text('[data-k="allow"]')
+    page.click('[data-act="allow-restore"]')
+    wait_for(page, "document.querySelectorAll('[data-k=\"allow\"] [data-exe]').length === 2")
+    assert reminders.allowed_apps(break_saved(harness)) == ["lockdown.exe", "systemsettings.exe"]
+
+
 # ---------------------------------------------------------------- Your reminders
 
 def test_add_edit_switch_and_delete_a_reminder(shell, page, harness):

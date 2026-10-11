@@ -10,7 +10,9 @@ that is over rather than being skipped.
 import json
 import random
 import re
+import sys
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 import emergency
 import pause
@@ -43,8 +45,18 @@ DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30,
                            {"from": "03:00", "every_sec": 60}],
                  "guarded": False,   # dismissing the bedtime screen needs the Anti-Bypass challenge
                  "dismiss_wait": 0}  # seconds before the bedtime screen's Dismiss works (0 = at once)
+# Apps that stay usable during a strict break ("Allowed during breaks"): the break settings' "allow" list, program
+# (.exe) names. A list saved before it existed has none, so it reads as this default; the user can take either out.
+BREAK_ALLOW_DEFAULT = ("lockdown.exe", "systemsettings.exe")
+BREAK_ALLOW_MAX = 40
+BREAK_ALLOW_NAMES = {"lockdown.exe": "Lockdown", "systemsettings.exe": "Windows Settings"}
+# "Lockdown" stands for every program Lockdown runs as: the window and agent, the challenge the uninstaller asks for, the
+# uninstaller and the installer / updater. (A Store app such as Settings is found by its own process, not by the
+# ApplicationFrameHost.exe frame around it: monitor.win.content_pid.)
+LOCKDOWN_EXES = ("lockdown.exe", "lockdownservice.exe", "lockdownsetup.exe", "uninstall lockdown.exe")
 DEFAULT_BREAK = {"on": True, "every_sec": 45 * 60, "length": 5, "strict": False, "snooze_sec": 5 * 60,
-                 "max_snooze": 2, "twenty": False, "text": "", "twenty_text": "", "guarded": False}
+                 "max_snooze": 2, "twenty": False, "text": "", "twenty_text": "", "guarded": False,
+                 "allow": list(BREAK_ALLOW_DEFAULT)}
 DEFAULT_CUSTOM = {"on": True, "text": "", "kind": "interval", "every_sec": 60 * 60, "times": ["12:00"],
                   "days": [0, 1, 2, 3, 4, 5, 6], "window": ["10:00", "18:00"], "snooze": 5, "max_snooze": 3,
                   "check": 0, "packs": [], "quotes": "",
@@ -186,6 +198,54 @@ def in_seconds(key: str, saved):
     elif key == CUSTOM_KEY and isinstance(saved, list):
         saved = [_minutes_to_seconds(r, ("every",)) for r in saved]
     return saved
+
+
+def break_allow_exe(text) -> str:
+    """What was picked or typed for "Allowed during breaks" as a lower-case program name ("C:\\x\\Discord.exe" ->
+    "discord.exe"). A ValueError says why not: only programs can be told apart in front (a Java game or a script runs
+    inside java.exe / python.exe, which would let every other one through)."""
+    name = re.split(r"[\\/]", str(text or "").strip().strip('"').strip())[-1].strip().lower()
+    if not name:
+        raise ValueError("Pick an app, or write its file name like discord.exe.")
+    if not name.endswith(".exe"):
+        raise ValueError("Only programs (.exe) can stay open during a break - a Java game or a script runs inside "
+                         "another program and can't be told apart. Pick that program itself, or its own .exe.")
+    if len(name) > 100 or not re.fullmatch(r"[a-z0-9 ._()+&@~-]+", name):
+        raise ValueError("That isn't a program file name.")
+    return name
+
+
+def allowed_apps(b) -> list[str]:
+    """The apps allowed during a strict break, from the break settings: the program names, cleaned (a damaged entry is
+    left out, the same one only once, at most BREAK_ALLOW_MAX). No list at all (settings from before it existed, a
+    backup of those) is the default; an empty list is a choice and stays empty."""
+    raw = b.get("allow") if isinstance(b, dict) else None
+    if not isinstance(raw, (list, tuple)):
+        return list(BREAK_ALLOW_DEFAULT)
+    out = []
+    for entry in raw:
+        try:
+            exe = break_allow_exe(entry)
+        except ValueError:
+            continue
+        if exe not in out and len(out) < BREAK_ALLOW_MAX:
+            out.append(exe)
+    return out
+
+
+def allowed_exes(apps) -> frozenset:
+    """The process names that stay in front during a strict break for these apps: "lockdown.exe" stands for all of
+    Lockdown's programs (and, run from source, for the interpreter that runs it)."""
+    out = set(apps)
+    if "lockdown.exe" in out:
+        out.update(LOCKDOWN_EXES)
+        if not getattr(sys, "frozen", False):
+            out.add(Path(sys.executable).name.lower())
+    return frozenset(out)
+
+
+def break_allow_name(exe: str) -> str:
+    return BREAK_ALLOW_NAMES.get(exe, exe)
 
 
 def load(db, key: str, default):

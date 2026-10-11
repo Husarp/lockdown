@@ -729,7 +729,8 @@ class MinimizeWorker(Worker):
         now = self.hub.clock.now_with(snap.clock_offset if snap else 0.0)
         if now >= until:     # safety net; the reminder engine ends it on its own tick
             return
-        if self.hub.win.minimize_foreground():     # you tried to open something - send it back and say why
+        allowed = snapshot.break_allowed(snap)
+        if self.hub.win.minimize_foreground(allowed):     # you tried to open something - send it back and say why
             if now.timestamp() - self._break_notice_at > BREAK_NOTICE_SEC:
                 self._break_notice_at = now.timestamp()
                 self.hub.notify(f"Break in progress - {max(1, round((until - now).total_seconds() / 60))} min left.",

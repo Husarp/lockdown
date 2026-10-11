@@ -956,7 +956,7 @@ class LockdownApp(ctk.CTk):
         now = now_from_db(self.db)
         if now >= until:   # safety net; the reminders engine also ends it on its own tick
             return
-        if win.minimize_foreground():   # you tried to open something - send it back and say why
+        if win.minimize_foreground(getattr(ui, "break_allow", None)):   # you tried to open something - send it back and say why
             if now.timestamp() - getattr(self, "_break_notice_at", 0) > 12:
                 self._break_notice_at = now.timestamp()
                 self._show(f"Break in progress - {max(1, round((until - now).total_seconds() / 60))} min left.",

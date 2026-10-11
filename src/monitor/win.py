@@ -462,20 +462,42 @@ def minimize_windows(pids) -> int:
     return count
 
 
-def minimize_all() -> int:
-    """Minimize every visible top-level window except Lockdown's own (used for a strict break)."""
+# Lockdown's own full-screen cover (resident/overlay.TITLE, and "... cover N" on the other monitors) is never sent down,
+# even when Lockdown is not on the "allowed during breaks" list: it carries Emergency, and it puts itself back anyway.
+COVER_TITLE = "Lockdown overlay"
+
+
+def window_exe(hwnd: int) -> str:
+    """Lowercase exe name of the app a window shows: a Store app's frame is its CoreWindow child's process (Settings,
+    not ApplicationFrameHost.exe), a process that can't be opened is named from the process list."""
+    pid = content_pid(hwnd)
+    path = pid_path(pid)
+    return exe_name(path) if path else snapshot_name(pid)
+
+
+def _keep_up(hwnd: int, allowed) -> bool:
+    """Does a strict break leave this window alone? `allowed` None: only this process's own windows (the old rule);
+    else the cover and the apps on the "allowed during breaks" list (their lowercase exe names)."""
+    if allowed is None:
+        return window_pid(hwnd) == os.getpid()
+    return window_title(hwnd).startswith(COVER_TITLE) or window_exe(hwnd) in allowed
+
+
+def minimize_all(allowed=None) -> int:
+    """Minimize every visible top-level window except the ones a strict break leaves up (_keep_up)."""
     count = 0
     for hwnd, _title, _path in top_windows():
-        if window_pid(hwnd) != os.getpid() and not _user32.IsIconic(hwnd):
+        if not _user32.IsIconic(hwnd) and not _keep_up(hwnd, allowed):
             _user32.ShowWindow(hwnd, SW_MINIMIZE)
             count += 1
     return count
 
 
-def minimize_foreground() -> bool:
-    """Minimize the window in front unless it's Lockdown - so opening something during a strict break sends it back."""
+def minimize_foreground(allowed=None) -> bool:
+    """Minimize the window in front unless a strict break leaves it up (_keep_up) - so opening something during the
+    break sends it back."""
     hwnd = _user32.GetForegroundWindow()
-    if hwnd and window_pid(hwnd) != os.getpid() and not _user32.IsIconic(hwnd):
+    if hwnd and not _user32.IsIconic(hwnd) and not _keep_up(hwnd, allowed):
         _user32.ShowWindow(hwnd, SW_MINIMIZE)
         return True
     return False

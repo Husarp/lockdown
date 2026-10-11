@@ -64,7 +64,7 @@ class FakeWin:
         self.front = (0, "")
         self.closed_apps, self.closed_windows, self.minimized_apps, self.minimized_windows = [], [], [], []
         self.minimize_result = True
-        self.break_minimizes, self.break_result = 0, False
+        self.break_minimizes, self.break_result, self.break_allowed = 0, False, []
         self.dnd, self.idle, self.fullscreen = False, 0.0, False
 
     def foreground(self):
@@ -86,8 +86,9 @@ class FakeWin:
         self.minimized_windows.append(set(pids))
         return self.minimize_result
 
-    def minimize_foreground(self):
+    def minimize_foreground(self, allowed=None):
         self.break_minimizes += 1
+        self.break_allowed.append(allowed)
         return self.break_result
 
     def content_pid(self, hwnd):

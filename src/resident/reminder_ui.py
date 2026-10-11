@@ -7,7 +7,7 @@ The engine calls these on the ReminderWorker's thread, so everything here return
 import emergency
 import reminders
 from gui import toast as toasts
-from resident import tray_actions
+from resident import snapshot, tray_actions
 
 MAX_TOAST_BUTTONS = 5      # Windows shows at most this many buttons on a notification
 BREAK_COVER_KEY = "break-run"     # the cover shown while a strict break runs (R08)
@@ -73,7 +73,7 @@ class CornerReminderUI:
         """A strict break: every window down now and the "Break time" cover up; MinimizeWorker keeps the windows down
         until `until` and says "Break in progress" every 12 s. Dismiss takes the cover down (the break goes on); it
         comes back only when a window you brought to the front is sent down again (break_blocked)."""
-        self.hub.win.minimize_all()
+        self.hub.win.minimize_all(snapshot.break_allowed(self.hub.snapshot))
         now = getattr(self.engine, "now", None)
         left = max(1, round((until - now).total_seconds() / 60)) if now else 1
         self.hub.notify(f"Break started - your windows are minimised for {left} min. Step away from the screen.",

@@ -245,6 +245,13 @@ class ReminderUI:
         self.notices = {}         # key -> the Windows notification standing in for a popup held by a game
         self.engine = None
         self.break_until = None   # set during a strict break: the app minimises windows until then
+        self.break_allow = reminders.allowed_exes(reminders.BREAK_ALLOW_DEFAULT)   # what it leaves up (load_break_allow)
+
+    def load_break_allow(self):
+        """Read "Allowed during breaks" again: at a break's start and whenever the Breaks card changes it - the tick
+        that sends windows down never reads the database."""
+        b = reminders.load(self.app.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
+        self.break_allow = reminders.allowed_exes(reminders.allowed_apps(b))
 
     def popup(self, key, title, text, buttons):
         self.close(key)
@@ -289,7 +296,8 @@ class ReminderUI:
         """Strict break: minimise everything now; the app keeps windows down until `until` (see _poll_minimize)."""
         from monitor import win
         self.break_until = until
-        win.minimize_all()
+        self.load_break_allow()
+        win.minimize_all(self.break_allow)
         left = max(1, round((until - now_from_db(self.app.db)).total_seconds() / 60))
         self.app._show(f"Break started - your windows are minimised for {left} min. Step away from the screen.",
                        force=True)
@@ -412,6 +420,17 @@ def _give_up(window):
 
 
 # ---------------------------------------------------------------- the Reminders tab
+
+def _allow_row(parent):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.name = ctk.CTkLabel(f, text="", font=theme.semi(13), anchor="w", height=18)
+    f.name.pack(side="left")
+    f.exe = ctk.CTkLabel(f, text="", text_color=MUTED, font=theme.body(11), anchor="w", height=18)
+    f.exe.pack(side="left", padx=(8, 0))
+    f.remove = ctk.CTkButton(f, text="Remove", width=70, height=26, **theme.SECONDARY)
+    f.remove.pack(side="right")
+    return f
+
 
 def _reminder_row(parent):
     f = ctk.CTkFrame(parent, fg_color="transparent")
@@ -575,6 +594,17 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.max_snooze = _option(b, "Snoozes first", ["1", "2", "3", "5"], "before a strict break starts on its own",
                                   LABEL_W)
         self.max_snooze.configure(command=lambda v: self._save_break())
+        line = ctk.CTkFrame(b, fg_color="transparent")
+        line.pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(line, text="Allowed during breaks", font=theme.semi(13), anchor="w").pack(side="left")
+        self.allow_restore = ctk.CTkButton(line, text="Add Lockdown + Settings back", width=190, height=26,
+                                           **theme.SECONDARY, command=self._allow_restore)
+        ctk.CTkButton(line, text="Add app...", width=90, height=26, **theme.SECONDARY,
+                      command=self._allow_pick).pack(side="right")
+        note(b, "These apps are not minimised during a strict break, and don't bring the break screen back. Adding one "
+                "needs the challenge; taking one off does not.")
+        self.allow_rows = Rows(b, _allow_row, "Nothing - a strict break minimises every app.", {"fill": "x", "pady": 2})
+        self.allow_error = ctk.CTkLabel(b, text="", text_color=theme.DANGER, height=16)   # packed while it says something
         self.twenty = ctk.CTkSwitch(b, text="20-20-20", font=theme.semi(13), command=self._save_break)
         self.twenty.pack(anchor="w", pady=(8, 0))
         note(b, "Every 20 min, look 20 feet (6 m) away for 20 seconds.")
@@ -625,6 +655,7 @@ class RemindersView(ctk.CTkScrollableFrame):
         self.strict.select() if b.get("strict") else self.strict.deselect()
         self.break_guarded.select() if b.get("guarded") else self.break_guarded.deselect()
         self.max_snooze.set(str(b.get("max_snooze", 2)))
+        self._fill_allow(b)
         self.twenty.select() if b["twenty"] else self.twenty.deselect()
         for entry, value in ((self.break_text, b.get("text")), (self.twenty_text, b.get("twenty_text"))):
             if entry.get() != (value or ""):
@@ -757,7 +788,70 @@ class RemindersView(ctk.CTkScrollableFrame):
             "length": int(self.length.get().split()[0]), "strict": bool(self.strict.get()),
             "snooze_sec": snooze, "max_snooze": int(self.max_snooze.get()),
             "twenty": bool(self.twenty.get()), "text": self.break_text.get().strip(),
-            "twenty_text": self.twenty_text.get().strip(), "guarded": bool(self.break_guarded.get())})
+            "twenty_text": self.twenty_text.get().strip(), "guarded": bool(self.break_guarded.get()),
+            "allow": reminders.allowed_apps(old)})
+
+    # ---------- allowed during breaks ----------
+
+    def _fill_allow(self, b: dict):
+        apps = reminders.allowed_apps(b)
+        for row, exe in zip(self.allow_rows.take(len(apps)), apps):
+            row.name.configure(text=reminders.break_allow_name(exe) if exe in reminders.BREAK_ALLOW_NAMES else exe)
+            row.exe.configure(text=exe if exe in reminders.BREAK_ALLOW_NAMES else "")
+            row.remove.configure(command=lambda e=exe: self._allow_remove(e))
+        if all(d in apps for d in reminders.BREAK_ALLOW_DEFAULT):
+            self.allow_restore.pack_forget()
+        else:
+            self.allow_restore.pack(side="right", padx=(0, 8))
+        ui = getattr(self.page, "reminder_ui", None)
+        if ui is not None:
+            ui.load_break_allow()
+
+    def _allow_says(self, text: str):
+        if text:
+            self.allow_error.configure(text=text)
+            self.allow_error.pack(anchor="w")
+        else:
+            self.allow_error.pack_forget()
+
+    def _allow_change(self, change):
+        """Save the list `change(apps)` makes from what is stored NOW (the challenge can take minutes)."""
+        b = reminders.load(self.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
+        reminders.save(self.db, reminders.BREAK_KEY, {**b, "allow": change(reminders.allowed_apps(b))})
+        self.refresh()
+
+    def _allow_pick(self):
+        from gui.app_browser import AppBrowser
+        AppBrowser(self, self._allow_add)
+
+    def _allow_add(self, app: dict):
+        """An app picked in the browser: it stays open during a strict break - a loosening, so the challenge first."""
+        try:
+            exe = reminders.break_allow_exe(app.get("exe"))
+        except ValueError as e:
+            self._allow_says(str(e))
+            return
+        self._allow_says("")
+        b = reminders.load(self.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
+        apps = reminders.allowed_apps(b)
+        if exe in apps:
+            return
+        if len(apps) >= reminders.BREAK_ALLOW_MAX:
+            self._allow_says(f"At most {reminders.BREAK_ALLOW_MAX} apps - take one off first.")
+            return
+        self.page.guard([f"Let {app.get('name') or exe} stay open during a strict break"],
+                        lambda: self._allow_change(lambda now: now if exe in now else [*now, exe][:reminders.BREAK_ALLOW_MAX]))
+
+    def _allow_restore(self):
+        self._allow_says("")
+        self.page.guard(["Let Lockdown and Windows Settings stay open during a strict break"],
+                        lambda: self._allow_change(lambda now: [*now, *(d for d in reminders.BREAK_ALLOW_DEFAULT
+                                                                         if d not in now)][:reminders.BREAK_ALLOW_MAX]))
+
+    def _allow_remove(self, exe: str):
+        """Free: the break gets stricter."""
+        self._allow_says("")
+        self._allow_change(lambda now: [e for e in now if e != exe])
 
     # ---------- your reminders ----------
 

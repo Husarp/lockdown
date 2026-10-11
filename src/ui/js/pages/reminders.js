@@ -7,6 +7,7 @@
 // Page contract: mount() builds the static structure once, load() = one Api call (reminders_get) that fills it. The
 // rows of "Your reminders" are keyed by id and reused; a field you are typing in is never overwritten by a reload.
 import { ld } from "../bridge.js";
+import { iconImg } from "../appicon.js";
 import { guarded } from "../challenge.js";
 import { check, confirmButton, el, empty, esc, field, ic, kic, seg, setText, sw, tp, toast } from "../ui.js";
 
@@ -100,6 +101,10 @@ function breaksCard() {
       ${field("Important", "Turning it off or making it ask for less needs the challenge.", flag("b-guarded", "break", "Important"))}
       ${field("Strict break", "Minimises everything until the break is over - you can't just dismiss it.", flag("b-strict", "break", "Strict break"))}
       ${field("Snoozes first", "before a strict break starts on its own", select("b-max", "break", BREAK_SNOOZES.map((n) => [n, String(n)])))}
+      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Allowed during breaks</b><span>These apps are not minimised during a strict break and don't bring the break screen back. Adding one needs the challenge; taking one off does not.</span></div>
+        <div data-k="allow"></div>
+        <div class="hstack"><button class="btn btn-sm" type="button" data-act="allow-add">${ic("plus")}Add app…</button><button class="btn btn-sm" type="button" data-act="allow-restore" hidden>Add Lockdown + Settings back</button></div>
+        <p class="err" data-k="allow-err" role="alert"></p></div>
       ${field("20-20-20", "Every 20 min, look 20 feet (6 m) away for 20 seconds.", flag("b-twenty", "break", "20-20-20"))}
       ${field("20-20-20 says", "Your own words, or leave empty.", text("b-twenty-text", "break", "20-20-20 says"))}
     </div></section>`;
@@ -217,7 +222,11 @@ function onClick(e) {
   } else if (act === "tier-x") {
     b.closest("[data-tier]").remove();
     flush("sleep");
-  } else if (act === "new") edit(null);
+  } else if (act === "allow-add") {
+    import("../appbrowser.js").then((m) => m.openAppBrowser({ mode: "pick", onPick: (app) => run(() => ld.call("break_allow_add", app.exe), "allow-err") }));
+  } else if (act === "allow-restore") run(() => ld.call("break_allow_restore"), "allow-err");
+  else if (act === "allow-x") run(() => ld.call("break_allow_remove", b.closest("[data-exe]").dataset.exe), "allow-err");
+  else if (act === "new") edit(null);
   else if (act === "edit") {
     const item = rows.get(b.closest("[data-id]").dataset.id);
     if (item) edit(item.view);
@@ -293,6 +302,21 @@ function fillBreak(b) {
   q("b-text").placeholder = data.defaults.break_text;
   q("b-twenty-text").placeholder = data.defaults.twenty_text;
   setText(q("b-today"), `Breaks today: ${b.today}`);
+  fillAllow(b.allow, b.allow_missing);
+}
+
+let allowKey = "";
+/** "Allowed during breaks": one row per app, drawn again only when the list changes. */
+export function fillAllow(allow, missing) {
+  const key = JSON.stringify(allow);
+  if (key !== allowKey) {
+    allowKey = key;
+    q("allow").replaceChildren(...allow.map((a) => el(`<div class="row row-sm row-simple" data-exe="${esc(a.exe)}"><span class="aic aic-sm">${iconImg("app", a.exe)}</span>` +
+      `<span class="name"><b>${esc(a.name)}</b>${a.name !== a.exe ? `<span>${esc(a.exe)}</span>` : ""}</span>` +
+      `<button class="btn btn-sm" type="button" data-act="allow-x" aria-label="Remove ${esc(a.name)}">Remove</button></div>`)));
+    if (!allow.length) q("allow").replaceChildren(el(`<p class="muted small" style="margin:0">Nothing - a strict break minimises every app.</p>`));
+  }
+  root.querySelector('[data-act="allow-restore"]').hidden = !missing.length;
 }
 
 function newRow(id) {

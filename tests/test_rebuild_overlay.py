@@ -657,7 +657,7 @@ class ImmediateWorker:
 
 def reminder_ui_env(tmp_path, quiet=False, handler=None):
     db = Database(tmp_path / "r.db")
-    hub = SimpleNamespace(snapshot=None, notify=lambda *a, **k: None, win=SimpleNamespace(minimize_all=lambda: 1))
+    hub = SimpleNamespace(snapshot=None, notify=lambda *a, **k: None, win=SimpleNamespace(minimize_all=lambda allowed=None: 1))
     corner = SimpleNamespace(popup_sink=None, remove=lambda key: None)
     ui = reminder_ui.CornerReminderUI(hub, corner, overlay_handler=handler or Handler())
     ui.engine = SimpleNamespace(now=NIGHT, quiet=quiet, break_until=BREAK_END, paused=None)
@@ -672,7 +672,7 @@ def shows(ui):
 def test_a_strict_break_starts_with_the_cover_saying_break_time_with_emergency_and_dismiss(tmp_path):
     ui, _db = reminder_ui_env(tmp_path)
     minimised = []
-    ui.hub.win.minimize_all = lambda: minimised.append(1)
+    ui.hub.win.minimize_all = lambda allowed=None: minimised.append(1)
     ui.break_start(BREAK_END)
     assert minimised == [1]                                                             # (the windows go down as before)
     [(_, key, title, text, until, buttons)] = shows(ui)
@@ -690,7 +690,7 @@ def test_no_emergency_button_when_there_are_no_uses_left(tmp_path, monkeypatch):
 def test_no_cover_while_do_not_disturb_holds_the_alerts_but_the_windows_still_go_down(tmp_path):
     ui, _db = reminder_ui_env(tmp_path, quiet=True)
     minimised = []
-    ui.hub.win.minimize_all = lambda: minimised.append(1)
+    ui.hub.win.minimize_all = lambda allowed=None: minimised.append(1)
     ui.break_start(BREAK_END)
     ui.break_blocked()                                                                  # (and trying to open something)
     assert minimised == [1] and ui.overlay_handler.calls == []
@@ -744,7 +744,7 @@ def test_the_minimize_worker_asks_for_the_cover_only_when_it_sent_a_window_down(
     hub = SimpleNamespace(
         engine=ui.engine, snapshot=None, notify=lambda *a, **k: None, usage=SimpleNamespace(limit_writes=0),
         clock=SimpleNamespace(now_with=lambda offset: NIGHT), status_worker=None,
-        win=SimpleNamespace(minimize_foreground=lambda: front["down"], foreground=lambda: (0, "")))
+        win=SimpleNamespace(minimize_foreground=lambda allowed=None: front["down"], foreground=lambda: (0, "")))
     worker = workers.MinimizeWorker(hub, None, reminder_ui=ui)
     worker.tick()
     assert len(shows(ui)) == 1                                                          # nothing opened: it stays down
@@ -758,7 +758,7 @@ def test_the_legacy_window_and_a_recording_ui_are_left_alone_by_the_minimize_wor
     hub = SimpleNamespace(
         engine=SimpleNamespace(break_until=BREAK_END), snapshot=None, notify=lambda *a, **k: None,
         usage=SimpleNamespace(limit_writes=0), clock=SimpleNamespace(now_with=lambda offset: NIGHT), status_worker=None,
-        win=SimpleNamespace(minimize_foreground=lambda: True, foreground=lambda: (0, "")))
+        win=SimpleNamespace(minimize_foreground=lambda allowed=None: True, foreground=lambda: (0, "")))
     for ui in (None, workers.RecordingReminderUI(), SimpleNamespace()):
         workers.MinimizeWorker(hub, None, reminder_ui=ui).tick()
 

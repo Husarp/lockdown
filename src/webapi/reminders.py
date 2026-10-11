@@ -238,7 +238,9 @@ def _break_view(b: dict, today_count: int) -> dict:
             "length": b["length"], "snooze": reminders.seconds_text(b.get("snooze_sec", 300)),
             "strict": bool(b.get("strict")), "max_snooze": int(b.get("max_snooze", 2)),
             "twenty": bool(b.get("twenty")), "text": b.get("text") or "", "twenty_text": b.get("twenty_text") or "",
-            "today": today_count}
+            "today": today_count, "allow": [{"exe": e, "name": reminders.break_allow_name(e)}
+                                            for e in reminders.allowed_apps(b)],
+            "allow_missing": [e for e in reminders.BREAK_ALLOW_DEFAULT if e not in reminders.allowed_apps(b)]}
 
 
 def _custom_view(r: dict, counts: dict) -> dict:
@@ -352,6 +354,52 @@ def reminder_save_break(ctx, cfg):
         reminders.save(ctx.db, reminders.BREAK_KEY, new)
         return {"saved": True}
     return _save_or_ask(ctx, old, new, "break", "break reminder", apply)
+
+
+# ---------------------------------------------------------------- "Allowed during breaks"
+
+def _allow_save(ctx, change):
+    """Save the list `change(apps)` makes from what is stored NOW - a challenge can take minutes, and the card's
+    other settings may have changed meanwhile."""
+    b = _stored(ctx.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK)
+    reminders.save(ctx.db, reminders.BREAK_KEY, {**b, "allow": change(reminders.allowed_apps(b))})
+    return {"saved": True}
+
+
+@core.loosen
+def break_allow_add(ctx, exe):
+    """An app that stays open during a strict break (picked in the App browser or typed). It loosens the break, so
+    Python asks for the challenge when Anti-Bypass is on; what the page sends is only checked and stored here."""
+    try:
+        exe = reminders.break_allow_exe(exe)
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+    apps = reminders.allowed_apps(_stored(ctx.db, reminders.BREAK_KEY, reminders.DEFAULT_BREAK))
+    if exe in apps:
+        return {"saved": True}
+    if len(apps) >= reminders.BREAK_ALLOW_MAX:
+        raise ApiError(f"At most {reminders.BREAK_ALLOW_MAX} apps - take one off first.")
+    return ctx.guard.request([f"Let {reminders.break_allow_name(exe)} stay open during a strict break"],
+                             lambda: _allow_save(ctx, lambda now: now if exe in now
+                                                 else [*now, exe][:reminders.BREAK_ALLOW_MAX]))
+
+
+@core.loosen
+def break_allow_restore(ctx):
+    """Lockdown and Windows Settings back on the list (the default). Like adding an app, it needs the challenge."""
+    return ctx.guard.request(["Let Lockdown and Windows Settings stay open during a strict break"],
+                             lambda: _allow_save(ctx, lambda now: [*now, *(d for d in reminders.BREAK_ALLOW_DEFAULT
+                                                                           if d not in now)][:reminders.BREAK_ALLOW_MAX]))
+
+
+@core.tighten
+def break_allow_remove(ctx, exe):
+    """Take an app off the list: the break gets stricter, so it is free."""
+    try:
+        exe = reminders.break_allow_exe(exe)
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+    return _allow_save(ctx, lambda now: [e for e in now if e != exe])
 
 
 def _custom_from_page(r: dict, editing: dict | None) -> dict:

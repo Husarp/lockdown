@@ -22,12 +22,14 @@ ticket (ctx.guard.request) and the page only gets the ticket; nothing here reads
   Reduce motion is saved with the generic `ui_setting` (allow-listed below).
 """
 import hashlib
+import json
 import secrets
 import time
 
 import antibypass
 import backup
 import emergency
+import reminders
 from ui_theme import ENGINE_KEY, engine_of   # (= main.ENGINE_KEY; the default window is ui_theme.DEFAULT_ENGINE)
 from rules import DAY_NAMES, RESET_KEY, apply_reset_now, change_reset, parse_hhmm, reset_is_looser
 
@@ -337,6 +339,18 @@ def _group_ok(g) -> bool:
             and _text_or_none(g.get("app_block")) and _text_or_none(g.get("site_block")))
 
 
+def _break_allow_ok(sets) -> bool:
+    """The break settings' "Allowed during breaks" list, when the backup has one: a list of at most
+    reminders.BREAK_ALLOW_MAX short names. (A backup from before it existed has none: it reads as the default.)"""
+    try:
+        b = json.loads(sets.get(reminders.BREAK_KEY) or "null")
+    except ValueError:
+        return True                                       # (unreadable settings are read as the defaults)
+    allow = b.get("allow") if isinstance(b, dict) else None
+    return allow is None or (isinstance(allow, list) and len(allow) <= reminders.BREAK_ALLOW_MAX
+                             and all(isinstance(e, str) and len(e) <= 260 for e in allow))
+
+
 def _check_shape(data: dict):
     """A backup that would stop half-way is refused before anything is touched - every field restore() reads, of the
     kind it needs (backup.restore is also one transaction, so a file that still fails changes nothing)."""
@@ -349,7 +363,7 @@ def _check_shape(data: dict):
                   for i in items)
           and all(isinstance(c, dict) and all(isinstance(c.get(k), str) for k in ("kind", "name", "category"))
                   for c in cats))
-    ok = ok and all(_group_ok(g) for g in groups)
+    ok = ok and all(_group_ok(g) for g in groups) and _break_allow_ok(sets)
     if not ok:
         raise ApiError("That backup file is damaged, so it can't be imported.")
 

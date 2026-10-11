@@ -105,8 +105,9 @@ class FakeWin:
     def is_fullscreen(self):
         return self.fullscreen
 
-    def minimize_all(self):
+    def minimize_all(self, allowed=None):
         self.minimized += 1
+        self.minimize_all_allowed = allowed
         return 1
 
 

@@ -22,6 +22,7 @@ import antibypass
 import emergency
 import modes
 import pause
+import reminders
 import updates
 from rules import effective_rules, next_block
 from trusted_time import OFFSET_KEY
@@ -81,6 +82,7 @@ class StatusSnapshot:
     block_list: tuple                 # db.blocks(...): [{item, reason, until, rule}] (empty while paused)
     item_states: dict                 # item id -> {blocked, reason, until, next, rule}; enabled items only
     tray: TrayState
+    break_allow: frozenset | None = None   # process names a strict break leaves up (reminders.allowed_exes); None = the default
 
     def public(self) -> dict:
         """The page part as one dict (the `status` event's payload)."""
@@ -96,6 +98,13 @@ def changed(old: "StatusSnapshot | None", new: "StatusSnapshot | None") -> dict:
     if old is None:
         return new.public()
     return {key: getattr(new, key) for key in PUBLIC_KEYS if getattr(new, key) != getattr(old, key)}
+
+
+def break_allowed(snap) -> frozenset:
+    """The process names a strict break leaves up, from a snapshot (no database read on MinimizeWorker's tick): the
+    user's "Allowed during breaks" list; the default when there is no snapshot yet."""
+    allowed = getattr(snap, "break_allow", None)
+    return allowed if allowed is not None else reminders.allowed_exes(reminders.BREAK_ALLOW_DEFAULT)
 
 
 def tray_changed(old: "StatusSnapshot | None", new: "StatusSnapshot") -> bool:
@@ -213,4 +222,6 @@ def build(db, now: datetime, wall: float | None = None) -> StatusSnapshot:
         mode=_mode_part(state), blocks=_blocks_part(items, block_list, states),
         antibypass=_antibypass_part(db, now), emergency=_emergency_part(db, now), update=update, clock_offset=offset,
         now=now, wall=wall, items=tuple(items), groups=tuple(groups), usage=usage, block_list=tuple(block_list),
-        item_states=states, tray=_tray(len(items), running, bool(off), paused_until, state, mode_list, update))
+        item_states=states, tray=_tray(len(items), running, bool(off), paused_until, state, mode_list, update),
+        break_allow=reminders.allowed_exes(reminders.allowed_apps(reminders.load(db, reminders.BREAK_KEY,
+                                                                                 reminders.DEFAULT_BREAK))))
