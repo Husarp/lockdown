@@ -9,7 +9,7 @@ import pytest
 
 import antibypass as ab
 import webapi
-from resident import challenge_cli
+from resident import challenge_cli, windows
 from webapi import core, guard
 from webapi.guard import GuardService
 
@@ -194,9 +194,10 @@ class FakeWindow:
         pass
 
 
-class FakeWin:
+class FakeWin(windows.Windows):
     def __init__(self):
-        self.main, self.publisher = FakeWindow(), FakePublisher()
+        super().__init__(main=FakeWindow(), publisher=FakePublisher())
+        windows.page_ready(self, "main")         # (its page works: show_main shows at once)
 
 
 def test_tray_free_runs_the_action_without_showing_anything(ctx):

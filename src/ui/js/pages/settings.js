@@ -1,7 +1,6 @@
 // Settings page (BLUEPRINT 3.10): the REAL options of the old window - Appearance (theme, accent, interface size, daily
-// goal, Reduce motion), When limits reset, Categories, Emergency unlock, Backup & export, and the switch that picks the
-// new window. The mock's General / Updates / Protection / Data content (start with Windows, language, channel, ...) has no
-// backend and is left out.
+// goal, Reduce motion), When limits reset, Categories, Emergency unlock, Backup & export. The mock's General / Updates /
+// Protection / Data content (start with Windows, language, channel, ...) has no backend and is left out.
 //
 // The look applies live, with no reload and no restart (js/shell.js setLook). Python decides everything that loosens and
 // this file never compares old with new: moving the reset back and starting a fresh day now, more / longer emergency
@@ -95,7 +94,6 @@ const NOTE = {
   emergency: "The \"Emergency unlock\" button (Blocking > Overview) unblocks the sites / apps you pick for a while. Unlocking several at once counts as one use. With more than one kind (e.g. 3 a week for 5 min and 1 a month for 60 min) you pick which kind to use; each counts its own uses.",
   emergencyRule: "Fewer, shorter, per day to per week or month, or removing a kind saves at once. More, longer, any other period, a new kind or turning it on needs the challenge.",
   backup: "A backup has everything you set up: blocked sites and apps with their rules, groups, categories, modes, reminders and settings. Importing one replaces yours - it can loosen blocks, so it asks for the challenge first.",
-  engine: "Lockdown opens in the new window the next time it starts. Switch it off to come back to the old window.",
 };
 
 const sel = (k, label, extra = "") => `<select class="select select-sm" data-k="${k}" aria-label="${esc(label)}" ${extra}></select>`;
@@ -155,15 +153,6 @@ function backupCard() {
     </div></section>`;
 }
 
-function engineCard() {
-  return `<section class="card" data-card="engine">
-    <header class="card-h">${kic("k-mode", "sparkle")}<h3>New window</h3><span class="chip chip-soft">Preview</span></header>
-    <div class="card-b" style="padding:0">
-      ${field("Use the new window (preview)", NOTE.engine, sw(false, 'data-k="engine" aria-label="Use the new window (preview)"'))}
-      <p class="set-note" data-k="engine-note" role="status"></p>
-    </div></section>`;
-}
-
 // ---------------------------------------------------------------- the page
 
 let root = null, page = null;
@@ -179,7 +168,7 @@ export function mount(host, p) {
   host.innerHTML = `${STYLE}<div class="page set"><div class="page-h"><h1>Settings</h1></div>
     <div class="banner k-block set-lock" data-k="lock" hidden>${ic("shield-check")}<span class="grow"><b>Locked</b> <span class="muted"></span></span><button class="btn btn-sm btn-primary" type="button" data-act="unlock">Unlock to edit</button></div>
     <div class="grid-2"><div class="stack">${appearanceCard()}${resetCard()}${categoriesCard()}</div>
-      <div class="stack">${emergencyCard()}${backupCard()}${engineCard()}</div></div></div>`;
+      <div class="stack">${emergencyCard()}${backupCard()}</div></div></div>`;
   root = host;
   q("reset-slot").replaceWith(confirmButton({ label: "Change", confirmLabel: "Confirm change", onConfirm: changeReset, cls: "btn btn-sm", ms: 4000 }));
   root.addEventListener("change", onChange);
@@ -323,8 +312,6 @@ function fill(d) {
   fillReset(d.reset);
   renderCategories(d.categories);
   fillEmergency(d.emergency);
-  const web = d.engine === "web";
-  if (q("engine").checked !== web) q("engine").checked = web;
   built = true;
 }
 
@@ -375,17 +362,6 @@ async function setGoal(hours) {
   } catch (err) {
     toast((err && err.message) || "That didn't work.");
     page.reload();
-  }
-}
-
-async function setEngine(on) {
-  const note = q("engine-note");
-  try {
-    await ld.call("ui_engine_set", on ? "web" : "legacy");
-    note.textContent = on ? "The new window opens the next time Lockdown starts." : "The old window opens the next time Lockdown starts.";
-  } catch (err) {
-    q("engine").checked = !on;
-    toast((err && err.message) || "That didn't work.");
   }
 }
 
@@ -525,7 +501,6 @@ function onChange(e) {
   if (k === "scale") return lookChange({ scale: t.value });
   if (k === "goal") return setGoal(Number(t.value));
   if (k === "motion") return setMotion(t.checked);
-  if (k === "engine") return setEngine(t.checked);
   if (k === "accent-input") return lookChange({ accent: t.value });
   if (k === "em-on" || (k && k.startsWith("k-"))) return saveCurrent();
 }

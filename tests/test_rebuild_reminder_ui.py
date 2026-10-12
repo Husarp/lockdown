@@ -17,7 +17,7 @@ import reminders
 import webapi
 from db import Database
 from resident import corner as corner_mod
-from resident import notices, reminder_ui, tray_actions, workers
+from resident import notices, reminder_ui, tray_actions, windows, workers
 from resident.corner import Corner, CornerHost, corner_rect
 from webapi import core
 from webapi.guard import GuardService
@@ -760,12 +760,15 @@ def test_attach_wires_everything(env):
     corner_window = SimpleNamespace(evaluate_js=pushes.append, show=lambda: None, hide=lambda: None,
                                     move=lambda x, y: None, resize=lambda w, h: None)
     main_pub = FakePublisher(env.log)
-    win = SimpleNamespace(corner=corner_window, publisher=main_pub)
+    win = windows.Windows(corner=corner_window, publisher=main_pub)
     ctx = webapi.make_context(env.path, clock=lambda db: NOW)
     hub = workers.Hub(env.path, win=env.win, log_sink=lambda t: None)
     ui, actions, toaster, publisher = reminder_ui.attach(win, hub, ctx, lambda: None)
     try:
         assert ctx.corner is not None and isinstance(ui, reminder_ui.CornerReminderUI)
+        assert not ctx.corner.page_ok                               # (the window waits for its page's ready call)
+        windows.page_ready(win, "corner")
+        assert ctx.corner.page_ok
         assert hub.open_page == actions.open_page
         hub.notify.show("Hello", sticky=False)                      # default format "toast": the (fake) notification path
         ctx.corner.popup("a", "t", "x", [("OK", "ok")])

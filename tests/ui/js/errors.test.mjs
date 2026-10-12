@@ -47,3 +47,13 @@ test("a failing log call never throws into the page", async () => {
   p.raise("error", { message: "boom", filename: "a.js", lineno: 1 });
   await settle();                       // (no unhandled rejection: the test would fail)
 });
+
+test("a page with the early error hook in its <head> is not reported twice: the bridge leaves it to the hook", async () => {
+  const p = fakePage();
+  p.env.window.__ldErrorHook = 1;
+  createBridge(p.env);
+  p.raise("error", { message: "boom", filename: "a.js", lineno: 1 });
+  p.raise("unhandledrejection", { reason: "nope" });
+  await settle();
+  assert.deepEqual(p.logged, []);
+});

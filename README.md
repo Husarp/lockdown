@@ -56,8 +56,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   dismissing asks half as often for the rest of the day, and reminders due around a break ride along in it.
   A strict break minimises your windows; apps on your "Allowed during breaks" list (Lockdown + Settings by
   default) stay usable.
-- **New window (preview, 0.85.0):** a faster window in a new look (`Lockdown.exe --new-ui`, or Settings > "Try the
-  new window"); the old window stays the default for now.
+- **New window:** a faster window in a new look - the window Lockdown opens in. If it can't start on a PC (no
+  WebView2, its page never loads), the old window opens instead for that run; the reason is in the Lockdown log and
+  `%TEMP%\lockdown-newui.log`.
 - **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
   emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
   pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)

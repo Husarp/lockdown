@@ -18,8 +18,8 @@ ticket (ctx.guard.request) and the page only gets the ticket; nothing here reads
   for shape first (a damaged one must not half-restore), and an import never switches Lockdown off or on (that is
   `app.off`, which has its own gated switch).
 - Export / CSV: the owner picks the place in the native Save dialog; the page never sends a path.
-- Cosmetic (ui): the daily goal, the look (webapi/shell.py), Reduce motion, and the new-window switch (`ui.engine`).
-  Reduce motion is saved with the generic `ui_setting` (allow-listed below).
+- Cosmetic (ui): the daily goal, the look (webapi/shell.py), Reduce motion. Reduce motion is saved with the generic
+  `ui_setting` (allow-listed below).
 """
 import hashlib
 import json
@@ -30,14 +30,12 @@ import antibypass
 import backup
 import emergency
 import reminders
-from ui_theme import ENGINE_KEY, engine_of   # (= main.ENGINE_KEY; the default window is ui_theme.DEFAULT_ENGINE)
 from rules import DAY_NAMES, RESET_KEY, apply_reset_now, change_reset, parse_hhmm, reset_is_looser
 
 from . import categories, core, draft as drafts, shell
 from .core import ApiError
 from .dashboard import DEFAULT_GOAL_HOURS, GOAL_KEY
 
-ENGINES = ("web", "legacy")
 MOTION_KEY = "ui.reduce_motion"     # "1": no transitions or animations (the page sets data-motion="off")
 core.allow_ui_settings(MOTION_KEY)
 
@@ -108,19 +106,18 @@ def _goal(db) -> float:
 def settings_get(ctx):
     """Everything the page shows in one answer: {now, look: {theme, accent, scale, accents}, motion, goal, goal_options,
     reset: {time, ends, ends_text, carry_note}, categories, emergency: {enabled, kinds: [{id, uses, per, minutes,
-    per_text, left, allowed, resets_text}], ...}, engine: "web" | "legacy"}. Meters are worked out now, so showing the
-    page again always shows today's uses."""
+    per_text, left, allowed, resets_text}], ...}}. Meters are worked out now, so showing the page again always shows
+    today's uses."""
     db, now = ctx.db, ctx.now()
     goal = _goal(db)
     return {
         "now": _iso(now), "look": shell.get_theme(ctx), "motion": db.get_setting(MOTION_KEY) == "1",
         "goal": goal, "goal_options": sorted({*GOAL_HOURS, goal}),
         "reset": _reset_info(db, now), "categories": categories.load(db), "emergency": _emergency_info(db, now),
-        "engine": engine_of(db.get_setting(ENGINE_KEY)),
     }
 
 
-# ---------------------------------------------------------------- the goal and the new-window switch (cosmetic)
+# ---------------------------------------------------------------- the goal (cosmetic)
 
 @core.ui
 def set_goal(ctx, hours):
@@ -130,16 +127,6 @@ def set_goal(ctx, hours):
     ctx.db.set_setting(GOAL_KEY, str(hours))
     _dirty(ctx, "dashboard", "screentime")
     return {"goal": hours}
-
-
-@core.ui
-def ui_engine_set(ctx, value):
-    """"Use the new window (preview)": "web" opens the new window the next time Lockdown starts, "legacy" the old one.
-    Only these two words are accepted. Nothing changes until the next start."""
-    if value not in ENGINES:
-        raise ApiError("Pick the new window or the old one.")
-    ctx.db.set_setting(ENGINE_KEY, value)
-    return {"engine": value}
 
 
 # ---------------------------------------------------------------- when limits reset

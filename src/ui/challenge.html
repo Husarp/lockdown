@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Anti-Bypass</title>
 <link rel="icon" href="data:,">
+<!-- Early error hook, before any module: every script error, file that fails to load and unhandled rejection of this page
+     goes to the Lockdown log through pywebview's Api as soon as that is there - also when the page's own modules never
+     run (js/bridge.js leaves the reporting to this when it sees __ldErrorHook). -->
+<script>(function(w){var q=[],n=0;w.__ldErrorHook=1;function send(){var a=w.pywebview&&w.pywebview.api;if(!a||typeof a.log_client_error!=="function")return;
+while(q.length){try{var p=a.log_client_error(q.shift());if(p&&p.catch)p.catch(function(){})}catch(e){}}}
+function add(m){if(n++<8){q.push((location.pathname+": "+m).slice(0,2000));send()}}
+w.addEventListener("error",function(e){var t=e.target;if(t&&t!==w&&t.tagName)add("could not load "+(t.src||t.href||t.tagName));
+else add((e.message||"error")+" ("+(e.filename||"?")+":"+(e.lineno||0)+")")},true);
+w.addEventListener("unhandledrejection",function(e){var r=e.reason;add("unhandled: "+(r&&r.stack?r.stack:r))});
+w.addEventListener("pywebviewready",send)})(window)</script>
 <style>html,body{margin:0;height:100%;overflow:hidden;background:#101418;color:#EFECEA}html[data-theme=light],html[data-theme=light] body{background:#EFF1F4;color:#1C1B1A}html[data-theme=amoled],html[data-theme=amoled] body{background:#000}</style>
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/components.css">
@@ -25,7 +35,9 @@ import { openChallenge, CANCELLED } from "./js/challenge.js";
 injectSprite();
 const ticket = new URLSearchParams(location.search).get("ticket");
 try { applyLook(await ld.call("get_theme")); } catch (_) { /* the default look is fine */ }
-const outcome = await openChallenge(ticket);        // passed -> the change ran in Python; anything else -> CANCELLED
+const opening = openChallenge(ticket);              // passed -> the change ran in Python; anything else -> CANCELLED
+ld.call("page_ready", "challenge").catch(() => {});  // (the window works: no fallback to the old challenge)
+const outcome = await opening;
 try { await ld.call("challenge_window_close", outcome !== CANCELLED); } catch (_) { /* (only the standalone window has it) */ }
 </script>
 </body>

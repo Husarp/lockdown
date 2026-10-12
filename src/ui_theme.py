@@ -13,16 +13,17 @@ THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "syste
 ACCENTS = {"Orange": "#DB5126", "Red": "#D1342F", "Pink": "#D63F8C", "Purple": "#7C4DDB", "Blue": "#2F6FEB",
            "Teal": "#12948A", "Green": "#23945A", "Yellow": "#C99A0E"}
 
-# Which window Lockdown opens in. THE FLIP to the new window as the default = change DEFAULT_ENGINE to "web" (one line;
-# keep --legacy and the Settings switch for one release). The saved value ("web" / "legacy") wins; anything else
-# (missing, empty, junk) means the default.
+# Which window Lockdown opens in: the new one (flipped 2026-10-12). The old window is only the automatic fallback when
+# the new one can't start (agent.py), and the hidden --legacy flag. The "Try the new window" switch is gone: a saved
+# ui.engine = "legacy" from it no longer keeps anyone on the old window (main.py also deletes the key once).
 ENGINE_KEY = "ui.engine"
-DEFAULT_ENGINE = "legacy"
+DEFAULT_ENGINE = "web"
 
 
 def engine_of(value) -> str:
-    """"web" or "legacy" for a saved ui.engine value: those two words as saved, anything else = DEFAULT_ENGINE."""
-    return value if value in ("web", "legacy") else DEFAULT_ENGINE
+    """"web" or "legacy" for a saved ui.engine value: "web" as saved, anything else (a saved "legacy" too) =
+    DEFAULT_ENGINE."""
+    return "web" if value == "web" else DEFAULT_ENGINE
 
 
 # The page background (design token BG) per theme - the web window is painted with it before the page loads.

@@ -85,10 +85,11 @@ def test_shell_paints_with_no_errors(shell, page, harness):
     assert page.get_attribute("#topbar", "data-ready") == "1"
     assert page.query_selector("#boot-skeleton") is None
     assert visible_host(page) == ["dashboard"]
-    # boot makes exactly these three rpc calls
+    # boot makes exactly these rpc calls (page_ready: the agent may show the window now)
     names = sorted(n for _, n, _ in harness.calls)
-    assert {"get_status", "get_theme", "ui_ready"} <= set(names) and len(names) == len(set(names))
-    assert set(names) <= {"get_status", "get_theme", "ui_ready", "update_opened", "update_state"}   # (update_* are the shell's own)
+    assert {"get_status", "get_theme", "ui_ready", "page_ready"} <= set(names) and len(names) == len(set(names))
+    assert set(names) <= {"get_status", "get_theme", "ui_ready", "page_ready", "update_opened", "update_state"}   # (update_* are the shell's own)
+    assert [a for _, n, a in harness.calls if n == "page_ready"] == [["main"]]
     assert page.evaluate("typeof window.ld.call") == "function"
 
 

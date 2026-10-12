@@ -114,6 +114,21 @@ def ui_ready(ctx):
     ctx.ui_ready_at = time.time()
 
 
+PAGES = ("main", "overlay", "corner", "challenge")
+
+
+@core.ui
+def page_ready(ctx, name):
+    """A window's page has loaded and its link to Python works (the cover and the corner: and it has drawn what is up).
+    Only then does the agent show that window: one shown before is an empty dark rectangle - the full-screen cover a
+    black screen with no way out - and a main page that never says it works hands the run to the old window."""
+    if name not in PAGES:
+        raise ApiError("Bad request: unknown page.")
+    hook = getattr(ctx, "on_page_ready", None)
+    if hook is not None:
+        hook(name)
+
+
 CLIENT_ERRORS_PER_MIN = 20
 CLIENT_ERRORS_PER_RUN = 500
 _client_errors = {"minute": -1e9, "count": 0, "total": 0, "dropped": 0}

@@ -4,6 +4,7 @@ import socket
 import threading
 
 PORT = 47391  # localhost only
+_server: list = []   # the listening socket of this process, once acquire() won (release() closes it)
 
 
 def running() -> bool:
@@ -34,12 +35,31 @@ def acquire(events: queue.Queue) -> bool:
             pass
         return False
     srv.listen(5)
+    _server.append(srv)
 
     def serve():
         while True:
-            conn, _ = srv.accept()
+            try:
+                conn, _ = srv.accept()
+            except OSError:     # (released: this process hands over to another one)
+                return
             conn.close()
             events.put("open")
 
     threading.Thread(target=serve, daemon=True).start()
     return True
+
+
+def release():
+    """Let go of the port before this process ends, so the instance that takes over can have it (the new window falling
+    back to the old one). Nothing happens when this process doesn't hold it."""
+    while _server:
+        srv = _server.pop()
+        try:
+            srv.shutdown(socket.SHUT_RDWR)    # (wakes the accept() waiting in serve(); Windows refuses it on a listener)
+        except OSError:
+            pass
+        try:
+            srv.close()
+        except OSError:
+            pass

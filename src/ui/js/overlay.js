@@ -349,6 +349,7 @@ if (typeof document !== "undefined" && document.getElementById("fs")) {
   ld.call("overlay_ready").then((state) => {
     if (state.look) applyLook(state.look);
     overlay.render(state);
+    return ld.call("page_ready", "overlay");   // only now may Python show the window: what is up is drawn
   }).catch(() => {});
   document.documentElement.dataset.ready = "1";
 }

@@ -4,11 +4,12 @@ What is checked: the alert settings go through the DRAFT (only `notify.*`, shown
 sink), the weekly summary is saved directly, every loosening change (reset moved back + start now, more / longer / another
 period / new kind / turning on the emergency unlock, every import) waits under a Python-checked challenge ticket while the
 free ones (later reset, "From {end}", fewer / shorter / remove, off) are saved at once, an import is read again by its token
-and a file that changed in between is refused, nothing takes a path from the page, `ui_engine_set` takes only web / legacy,
-and the old window's new switch writes the same key."""
+and a file that changed in between is refused, nothing takes a path from the page, and the "Try the new window" switch is
+gone from both settings pages (2026-10-12: the new window is the only one)."""
 import json
 import random
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,7 @@ from webapi import core, notifications, settings
 from webapi.guard import GuardService
 
 NOW = datetime(2026, 10, 11, 15, 42, 17)          # a Sunday
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +95,7 @@ def test_the_methods_are_classified():
     kinds = dict(webapi.api_methods())
     assert kinds["notifications_get"] == "read" and kinds["settings_get"] == "read"
     assert kinds["reset_change_preview"] == "read"
-    for name in ("digest_set", "notify_repeat_set", "notify_test", "set_goal", "ui_engine_set", "backup_export",
+    for name in ("digest_set", "notify_repeat_set", "notify_test", "set_goal", "backup_export",
                  "backup_import_pick"):
         assert kinds[name] == "ui", name
     for name in ("reset_change_apply", "emergency_settings_save", "backup_import_apply"):
@@ -114,10 +116,16 @@ def test_nothing_takes_a_path_or_a_confirmed_flag():
     assert not core.ui_setting_allowed("antibypass") and not core.ui_setting_allowed("app.off")
 
 
-def test_the_engine_key_is_the_one_main_reads():
-    import main
+def test_the_new_window_switch_is_gone_from_both_settings_pages():
+    """No way back to the old window from either page: no Api method, no settings field, no switch in the old page."""
+    import inspect
     from gui import settings as legacy
-    assert settings.ENGINE_KEY == main.ENGINE_KEY == legacy.ENGINE_KEY == "ui.engine"
+    assert core.registry.get("ui_engine_set") is None and "engine" not in inspect.getsource(settings)
+    for gone in ("_build_engine", "_engine_changed", "engine_switch"):
+        assert gone not in inspect.getsource(legacy), gone
+    js = (ROOT / "src" / "ui" / "js" / "pages" / "settings.js").read_text(encoding="utf-8")
+    for gone in ("engine", "use the new window", "back to the old window", "old window opens"):
+        assert gone not in js.lower(), gone
 
 
 # ---------------------------------------------------------------- Notifications
@@ -235,7 +243,7 @@ def test_send_a_test_goes_through_the_normal_notice_path(api, ctx):
 
 def test_the_settings_page_data(api, ctx):
     d = data(api.settings_get())
-    assert d["now"] == "2026-10-11T15:42:17" and d["engine"] == "legacy" and d["motion"] is False
+    assert d["now"] == "2026-10-11T15:42:17" and "engine" not in d and d["motion"] is False
     assert d["look"]["theme"] == "dark" and d["look"]["accents"]["Orange"] == "#DB5126" and d["look"]["scale"] == "auto"
     assert d["goal"] == 5 and d["goal_options"] == list(range(13))
     assert d["reset"]["time"] == "00:00" and d["reset"]["ends_text"] == "Mon 12 Oct 00:00" and d["reset"]["carry_note"] == ""
@@ -271,41 +279,6 @@ def test_the_daily_goal(api, ctx):
 def test_the_goal_is_free_while_locked(api, ctx):
     locked(ctx)
     assert data(api.set_goal(3)) == {"goal": 3}
-
-
-def test_ui_engine_set_takes_only_web_or_legacy(api, ctx):
-    assert data(api.ui_engine_set("web")) == {"engine": "web"} and saved(ctx, "ui.engine") == "web"
-    assert data(api.settings_get())["engine"] == "web"
-    assert data(api.ui_engine_set("legacy")) == {"engine": "legacy"} and saved(ctx, "ui.engine") == "legacy"
-    for bad in ("Web", "new", "", None, True, ["web"], "web "):
-        error(api.ui_engine_set(bad))
-    assert saved(ctx, "ui.engine") == "legacy"
-    import main
-    assert main.use_new_ui([], "web") and not main.use_new_ui([], "legacy")      # the entry reads exactly these two words
-
-
-@pytest.mark.parametrize("default", ["legacy", "web"])
-def test_settings_get_engine_follows_the_default_when_nothing_is_saved(api, ctx, monkeypatch, default):
-    import ui_theme
-    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", default)
-    assert data(api.settings_get())["engine"] == default
-    data(api.ui_engine_set("legacy" if default == "web" else "web"))
-    assert data(api.settings_get())["engine"] != default                         # a saved choice wins
-
-
-def test_the_old_windows_switch_writes_the_key(tmp_path):
-    from db import Database
-    from gui.settings import SettingsPage
-    db = Database(tmp_path / "t.db")
-    page = SettingsPage.__new__(SettingsPage)
-    page.db = db
-    page.engine_line = SimpleNamespace(pack=lambda **kw: setattr(page, "line_shown", True))
-    page.engine_switch = SimpleNamespace(get=lambda: 1)
-    page._engine_changed()
-    assert db.get_setting("ui.engine") == "web" and page.line_shown                # (and offers the restart)
-    page.engine_switch = SimpleNamespace(get=lambda: 0)
-    page._engine_changed()
-    assert db.get_setting("ui.engine") == "legacy"
 
 
 # ---------------------------------------------------------------- Settings: when limits reset

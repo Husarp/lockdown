@@ -65,8 +65,8 @@ words_update"""
 UI = """backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
 corner_answer corner_ready corner_size digest_set display_set draft_discard draft_set_notify draft_set_setting
 log_client_error network_export_csv network_live_stop notify_repeat_set notify_test open_path open_url overlay_ready
-protection_preview protection_set_updates protection_update_now reveal_in_explorer screentime_export_csv set_accent
-set_appearance set_goal set_scale suggest_clear_history ui_engine_set ui_ready ui_setting update_check update_download
+page_ready protection_preview protection_set_updates protection_update_now reveal_in_explorer screentime_export_csv
+set_accent set_appearance set_goal set_scale suggest_clear_history ui_ready ui_setting update_check update_download
 update_install update_opened update_set_prefs"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
 COUNTS = {"read": 45, "tighten": 9, "loosen": 42, "ui": 41}            # 137 in all (R28; +3 for "Allowed during breaks")
@@ -614,7 +614,7 @@ UI_ARGS = {
     "protection_preview": ["https://example.com/l.txt"], "protection_set_updates": [False, 168],
     "protection_update_now": [], "reveal_in_explorer": ["C:\\Windows\\notepad.exe"], "screentime_export_csv": [],
     "set_accent": ["#112233"], "set_appearance": ["light"], "set_goal": [3], "set_scale": ["80"],
-    "suggest_clear_history": [], "ui_engine_set": ["legacy"], "ui_ready": [], "ui_setting": ["dash.cards", "x"],
+    "suggest_clear_history": [], "page_ready": ["main"], "ui_ready": [], "ui_setting": ["dash.cards", "x"],
     "update_check": [], "update_download": [], "update_install": [], "update_opened": [], "update_set_prefs": [False, False],
 }
 # What a tighten method may change, checked to be stricter (state before, state after).

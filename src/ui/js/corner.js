@@ -226,6 +226,7 @@ if (typeof document !== "undefined" && document.getElementById("stack")) {
   ld.call("corner_ready").then((state) => {
     if (state.look) applyLook(state.look);
     corner.render(state);
+    return ld.call("page_ready", "corner");    // only now may Python show the window: the cards are drawn
   }).catch(() => {});
   window.addEventListener("resize", corner.sizeSoon);
   document.documentElement.dataset.ready = "1";

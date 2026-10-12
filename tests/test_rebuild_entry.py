@@ -15,19 +15,22 @@ from resident.assets import AssetServer
 SRC = Path(__file__).resolve().parents[1] / "src"
 
 
-# ---------------------------------------------------------------- the switch
+# ---------------------------------------------------------------- the switch (flipped 2026-10-12: the new window)
 
 @pytest.mark.parametrize("argv, setting, expected", [
-    (["--legacy"], "web", False),                  # --legacy always wins
+    (["--legacy"], "web", False),                  # --legacy (hidden: the automatic fallback) always wins
     (["--legacy", "--new-ui"], "web", False),
+    (["--legacy"], None, False),
     (["--new-ui"], None, True),
     (["--new-ui"], "legacy", True),
     ([], "web", True),
-    ([], "legacy", False),
-    ([], None, False),                              # no setting = the old window
-    (["--tray"], "web", True),
-    (["--tray"], None, False),
-    (["--watchdog", "--new-ui"], None, True),
+    ([], "legacy", True),                           # a saved "legacy" from the removed switch no longer counts
+    ([], None, True),                               # nothing saved: the new window
+    ([], "", True),
+    ([], "junk", True),
+    (["--tray"], "legacy", True),
+    (["--tray"], None, True),
+    (["--watchdog"], "legacy", True),
 ])
 def test_use_new_ui_truth_table(argv, setting, expected):
     assert main.use_new_ui(argv, setting) is expected
@@ -41,36 +44,9 @@ def test_the_setting_is_only_read_when_no_flag_decides():
     assert main.use_new_ui(["--legacy"], boom) is False
 
 
-def test_a_failing_setting_read_means_the_old_window():
+def test_a_failing_setting_read_means_the_new_window():
     def boom():
         raise sqlite3.DatabaseError("no")
-    assert main.use_new_ui([], boom) is False
-
-
-@pytest.mark.parametrize("argv, setting, expected", [
-    ([], None, True),                               # nothing saved: the default window (flipped to "web")
-    ([], "", True),
-    ([], "legacy", False),                          # a saved choice still wins
-    ([], "web", True),
-    ([], "junk", True),
-    (["--legacy"], None, False),                    # --legacy always opens the old window
-    (["--legacy"], "web", False),
-    (["--legacy", "--new-ui"], None, False),
-    (["--new-ui"], "legacy", True),
-    (["--new-ui"], None, True),
-    (["--tray"], None, True),
-])
-def test_use_new_ui_when_the_default_is_flipped(monkeypatch, argv, setting, expected):
-    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", "web")
-    assert main.use_new_ui(argv, setting) is expected
-    assert main.use_new_ui(argv, lambda: setting) is expected
-
-
-def test_a_failing_read_means_the_default_either_way(monkeypatch):
-    def boom():
-        raise sqlite3.DatabaseError("no")
-    assert main.use_new_ui([], boom) is False
-    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", "web")
     assert main.use_new_ui([], boom) is True
     assert main.use_new_ui(["--legacy"], boom) is False
 
@@ -78,14 +54,16 @@ def test_a_failing_read_means_the_default_either_way(monkeypatch):
 @pytest.mark.parametrize("default", ["legacy", "web"])
 def test_engine_of(monkeypatch, default):
     monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", default)
-    assert ui_theme.engine_of("web") == "web" and ui_theme.engine_of("legacy") == "legacy"
-    for junk in (None, "", "Web", "new", 1, True):
-        assert ui_theme.engine_of(junk) == default
+    assert ui_theme.engine_of("web") == "web"
+    for other in ("legacy", None, "", "Web", "new", 1, True):      # a saved "legacy" is no choice any more
+        assert ui_theme.engine_of(other) == default
 
 
-def test_the_default_window_is_still_the_old_one_in_this_run():
-    """The flip is ONE deliberate line (ui_theme.DEFAULT_ENGINE); this test is changed together with it."""
-    assert ui_theme.DEFAULT_ENGINE == "legacy"
+def test_the_default_window_is_the_new_one():
+    """Flipped 2026-10-12 (Adam: "we are switching to the new one"). The old window stays only as the automatic
+    fallback (agent.FALLBACK) and the hidden --legacy flag, until Adam confirms the new one works on his PC."""
+    assert ui_theme.DEFAULT_ENGINE == "web"
+    assert main.use_new_ui([], None) and main.use_new_ui([], "legacy") and not main.use_new_ui(["--legacy"], None)
 
 
 def test_legacy_flag_with_selftest_keeps_the_old_self_test():
@@ -108,22 +86,50 @@ def _db_with(tmp_path, monkeypatch, engine):
 
 
 def test_reading_the_setting_from_a_real_db(tmp_path, monkeypatch):
-    _db_with(tmp_path, monkeypatch, "web")
-    assert main.use_new_ui([], main.read_engine_setting) is True
-    _db_with(tmp_path, monkeypatch, "legacy")
-    assert main.use_new_ui([], main.read_engine_setting) is False
-    _db_with(tmp_path, monkeypatch, None)
-    assert main.use_new_ui([], main.read_engine_setting) is False
+    for saved in ("web", "legacy", None):           # (a saved "legacy" from the old switch: the new window all the same)
+        _db_with(tmp_path, monkeypatch, saved)
+        assert main.use_new_ui([], main.read_engine_setting) is True
+    assert main.use_new_ui(["--legacy"], main.read_engine_setting) is False
 
 
-def test_missing_or_corrupt_db_means_the_old_window(tmp_path, monkeypatch):
+def test_missing_or_corrupt_db_means_the_new_window(tmp_path, monkeypatch):
     import paths
     monkeypatch.setattr(paths, "DB_PATH", tmp_path / "nope" / "config.db")
-    assert main.use_new_ui([], main.read_engine_setting) is False
+    assert main.use_new_ui([], main.read_engine_setting) is True
     bad = tmp_path / "config.db"
     bad.write_bytes(b"this is not a database" * 100)
     monkeypatch.setattr(paths, "DB_PATH", bad)
-    assert main.use_new_ui([], main.read_engine_setting) is False
+    assert main.use_new_ui([], main.read_engine_setting) is True
+
+
+def test_a_saved_old_window_choice_is_deleted_once(tmp_path, monkeypatch):
+    """Migration: the "Try the new window" switch's ui.engine is removed at start (with the autostart, off the window's
+    thread), so nothing can bring the old window back; other settings stay; no database is made where there is none."""
+    _db_with(tmp_path, monkeypatch, "legacy")
+    con = sqlite3.connect(tmp_path / "config.db")
+    con.execute("INSERT INTO settings VALUES ('ui.theme', 'light')")
+    con.commit()
+    con.close()
+    main.forget_engine_choice()
+    con = sqlite3.connect(tmp_path / "config.db")
+    assert con.execute("SELECT key, value FROM settings").fetchall() == [("ui.theme", "light")]
+    con.close()
+    main.forget_engine_choice()                     # (nothing left: nothing happens)
+    import paths
+    monkeypatch.setattr(paths, "DB_PATH", tmp_path / "none" / "config.db")
+    main.forget_engine_choice()
+    assert not (tmp_path / "none").exists()
+
+
+def test_the_clean_up_runs_with_the_autostart_and_a_failure_is_only_logged(monkeypatch):
+    import threading
+    done, logged = threading.Event(), []
+    monkeypatch.setattr(main, "forget_engine_choice", lambda: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
+    monkeypatch.setattr(main, "register_autostart", done.set)
+    monkeypatch.setattr(main, "_log", logged.append)
+    main.register_autostart_later()
+    assert done.wait(5)                             # (the autostart still happens)
+    assert any("old window choice" in line for line in logged)
 
 
 def test_agent_hands_unfinished_flags_back_to_the_old_window():

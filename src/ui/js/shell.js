@@ -1,6 +1,7 @@
 // The shell: sidebar footer, top status line, banners, save bar, trusted clock - all patched in place from
 // get_status() and `status` / `draft` pushes. The page content is the router's job (js/router.js).
-// Boot order: apply the look -> start the router (first page loads in parallel) -> fetch status -> ui_ready.
+// Boot order: apply the look -> start the router (first page loads in parallel) -> page_ready (Python may show the window:
+// the skeleton is drawn and the link to Python works) -> fetch status -> ui_ready.
 import { ld } from "./bridge.js";
 import { applyLook, currentLook } from "./theme.js";
 import { injectSprite } from "./icons.js";
@@ -276,6 +277,7 @@ async function boot() {
   ld.on("draft", (d, whole) => { whole.draft = { ...(whole.draft || {}), ...d }; renderDraft(whole.draft); });   // (kept in ld.status too)
   ld.everySecond(tickClock);
   router.start();
+  ld.call("page_ready", "main").catch(() => {});   // (until this arrives the window stays hidden; never, and the old one takes over)
   const [look, st] = await Promise.all([ld.call("get_theme"), ld.call("get_status")]);
   applyLook(look);
   syncClockFrom(st);

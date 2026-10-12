@@ -986,7 +986,8 @@ class FakePub:
 
 def test_a_challenge_asked_for_by_the_tray_opens_on_the_cover_while_it_is_up(env):
     main = SimpleNamespace(shown=0, show=lambda: None, restore=lambda: None)
-    win = SimpleNamespace(main=main, publisher=FakePub(), overlay_ctl=env.overlay, overlay_publisher=FakePub())
+    win = windows.Windows(main=main, publisher=FakePub(), overlay_ctl=env.overlay, overlay_publisher=FakePub())
+    windows.page_ready(win, "main")
     up(env)
     windows.open_challenge(win, {"needs_challenge": True, "ticket": "T"})
     assert win.overlay_publisher.sent == [("challenge_open", {"needs_challenge": True, "ticket": "T"})]

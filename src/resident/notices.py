@@ -78,6 +78,8 @@ class Notices:
         buttons = list(actions or ([action] if action else []))
         full = self._fullscreen()
         windows, card = route(self.fmt(), full, bool(buttons), self.toaster.works())
+        if card and not getattr(self.corner, "page_ok", True):     # (the corner's page has not said it works yet)
+            windows, card = True, False
         self.last_toast = None
         if windows:
             self.last_toast = self.toaster.send(

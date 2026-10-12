@@ -9,6 +9,10 @@ the list, times the notices out and tells Python what was pressed (`corner_answe
 Python removes a popup's card FIRST and only then lets the reminder engine hear the answer (as the old popup did: a
 challenge or question that follows can never end up behind a popup that is still up).
 
+The window is shown only once its page has said it is ready (`page_loaded`, from the page's `page_ready` call after it
+drew the cards): before that it would be an empty dark box. Cards that come earlier wait for it; the agent sends
+notices and reminder popups as Windows notifications while the page is not ready (`page_ok`).
+
 `CornerHost` is the Win32 / pywebview glue (bottom-right of the work area of the monitor with the window in front,
 topmost, never takes the focus). It is kept thin; the maths is in `corner_rect`."""
 import itertools
@@ -45,10 +49,12 @@ class Corner:
     """The cards. Thread-safe: reminders, workers and the page's calls all arrive on different threads.
 
     publisher: has `publish(event, payload)` (the corner window's Publisher).   host: `show()`, `hide()`, `place(h, dpr)`.
-    spawn(fn): runs a notice's button callback off the calling thread."""
+    spawn(fn): runs a notice's button callback off the calling thread.
+    page_ready: is the page known to work? The agent passes False: the window is then only shown after `page_loaded()`."""
 
-    def __init__(self, publisher=None, host=None, spawn=None, log=None):
+    def __init__(self, publisher=None, host=None, spawn=None, log=None, page_ready=True):
         self.publisher, self.host = publisher, host
+        self._page_ok = bool(page_ready)
         self.spawn = spawn or _spawn
         self.log = log or (lambda text: None)
         self._lock = threading.RLock()
@@ -120,14 +126,28 @@ class Corner:
             self.publisher.publish("corner", payload)
         self._sync_host()
 
+    @property
+    def page_ok(self) -> bool:
+        """Has the page said it works? (Until then nothing should count on a card being seen.)"""
+        return self._page_ok
+
+    def page_loaded(self):
+        """The page has loaded and drawn the cards (its `page_ready` call): the window may be shown from now on."""
+        if self._page_ok:
+            return
+        self._page_ok = True
+        self._sync_host()
+
     def _sync_host(self):
         """Show the window when there are cards, hide it when there are none (self-correcting: it looks at the cards as
-        they are NOW, so two threads racing here still end right)."""
+        they are NOW, so two threads racing here still end right). Never before the page is ready."""
         if self.host is None:
             return
         with self._host_lock:
             wanted = bool(self._cards)
             if wanted and not self._shown:
+                if not self._page_ok:
+                    return
                 self._shown = True
                 self._guard(self.host.show)
             elif not wanted and self._shown:
@@ -193,7 +213,7 @@ def _spawn(fn):
 
 TITLE = "Lockdown notices"
 WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, GWL_EXSTYLE = 0x08000000, 0x80, -20
-HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE = -1, 0x10, 0x40, 0
+HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE = -1, 0x10, 0x40, 0, 4
 
 
 def foreground_work_area():
@@ -266,10 +286,17 @@ class CornerHost:
         user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
         user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                         ctypes.c_int, wintypes.UINT]
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF
         wanted = style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
         if wanted != style:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ctypes.c_long(wanted).value)
+        if not user32.IsWindowVisible(hwnd):
+            # Up through ShowWindow first: it sends WM_SHOWWINDOW, which is how WinForms - and with it the WebView2
+            # control, which draws nothing while its form counts as hidden - learns the window is shown. SetWindowPos's
+            # SWP_SHOWWINDOW alone shows the frame and leaves the page undrawn: an empty dark box.
+            user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
         user32.SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
 
     @staticmethod

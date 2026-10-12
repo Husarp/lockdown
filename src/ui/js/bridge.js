@@ -54,11 +54,13 @@ export function createBridge(env = {}) {
   }
 
   // ------------------------------------------------------------ errors in our own code go to the log (every page that loads the bridge)
+  // A page whose <head> has the early error hook (root.__ldErrorHook: it also catches a module that fails to load, before
+  // this file runs) leaves the reporting to it, so nothing is logged twice.
   let sentErrors = 0;
   const sendError = (msg) => {
     if (sentErrors++ < 5) ld.call("log_client_error", String(msg).slice(0, 2000)).catch(() => {});      // (at most 5 per page)
   };
-  if (root.addEventListener) {
+  if (root.addEventListener && !root.__ldErrorHook) {
     root.addEventListener("error", (e) => sendError(`${e.message} (${e.filename}:${e.lineno})`));
     root.addEventListener("unhandledrejection", (e) => sendError(`unhandled: ${e.reason && e.reason.stack ? e.reason.stack : e.reason}`));
   }

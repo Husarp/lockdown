@@ -99,11 +99,11 @@ def kind_ui(page):
 def test_the_page_shows_every_part(shell, page, harness):
     open_page(shell, page)
     heads = page.eval_on_selector_all(".set .card-h h3", "els => els.map(e => e.textContent)")
-    assert heads == ["Appearance", "When limits reset", "Categories", "Emergency unlock", "Backup & export", "New window"]
+    assert heads == ["Appearance", "When limits reset", "Categories", "Emergency unlock", "Backup & export"]
     text = page.inner_text(".set")
     for label in ("Theme", "Accent colour", "Interface size", "Daily goal", "Reduce motion", "Reset at", "ends ",
                   "Manage categories", "Allow emergency unlocks", "Add another kind", "Export…", "Import…",
-                  "Screen time (CSV)…", "Use the new window (preview)", "Applies at once - no restart"):
+                  "Screen time (CSV)…", "Applies at once - no restart"):
         assert label in text, label
     assert page.locator('[data-seg="theme"] button').all_inner_texts() == ["Dark", "AMOLED", "Light", "System"]
     assert page.locator("[data-k=swatches] [data-color]").count() == 8
@@ -115,7 +115,6 @@ def test_the_page_shows_every_part(shell, page, harness):
     assert re.fullmatch(r"\d of 3 left this week · resets \w{3} \d+ \w{3} \d\d:\d\d", page.inner_text(".set-meter"))
     assert page.locator(".set-meter .uses i").count() == 3
     assert page.locator('[data-k="lock"]').is_hidden()
-    assert page.locator('[data-k="engine"]').is_checked() is False
 
 
 def test_the_mocks_invented_settings_are_left_out(shell, page, harness):
@@ -559,25 +558,15 @@ def test_the_screen_time_csv_says_how_many_rows(shell, page, harness, tmp_path, 
     assert target.read_text(encoding="utf-8").startswith("date,app,site,minutes")
 
 
-# ================================================================ the new-window switch
+# ================================================================ no way back to the old window (2026-10-12)
 
-def test_the_new_window_switch_writes_the_engine_and_says_when(shell, page, harness):
+def test_there_is_no_new_or_old_window_switch(shell, page, harness):
+    harness.db.set_setting("ui.engine", "legacy")                       # (an old choice is ignored)
     open_page(shell, page)
-    page.click('[data-k="engine"]')
-    assert eventually(lambda: saved(harness, "ui.engine") == "web")
-    wait_for(page, "document.querySelector('[data-k=engine-note]').textContent.includes('next time')")
-    page.click('[data-k="engine"]')
-    assert eventually(lambda: saved(harness, "ui.engine") == "legacy")
-    wait_for(page, "document.querySelector('[data-k=engine-note]').textContent.includes('old window')")
-    shell(route="settings")
-    wait_for(page, "document.querySelector('[data-k=engine]') !== null")
-    assert page.locator('[data-k="engine"]').is_checked() is False
-
-
-def test_the_switch_shows_the_saved_choice(shell, page, harness):
-    harness.db.set_setting("ui.engine", "web")
-    open_page(shell, page)
-    assert page.locator('[data-k="engine"]').is_checked()
+    text = page.inner_text(".set")
+    for gone in ("New window", "Use the new window", "old window", "Preview"):
+        assert gone not in text, gone
+    assert page.locator('[data-k="engine"], [data-card="engine"]').count() == 0
 
 
 # ================================================================ looks

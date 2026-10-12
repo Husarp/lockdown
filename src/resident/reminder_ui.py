@@ -32,6 +32,9 @@ class CornerReminderUI:
 
     # ------------------------------------------------------------------ the engine's calls
     def popup(self, key, title, text, buttons):
+        if not getattr(self.corner, "page_ok", True):    # (the corner's page has not said it works: a card there would
+            self.held(key, title, text, buttons)          #  never be seen - a Windows notification with the same buttons)
+            return
         self.close(key)
         self.corner.popup(key, title, text, buttons)
 
@@ -156,7 +159,8 @@ def attach(win, hub, ctx, show_main, log=None):
     from resident.publisher import Publisher
 
     publisher = Publisher(win.corner, interval=CORNER_PUSH_SEC, visible=True, log=log)   # (always shown: the page is
-    corner = Corner(publisher, CornerHost(win.corner), log=log)                          #  loaded even while it is hidden)
+    corner = Corner(publisher, CornerHost(win.corner), log=log, page_ready=False)       #  loaded even while it is hidden)
+    windows.on_page_ready(win, "corner", corner.page_loaded)     # (shown only once its page has said it works)
     toaster = Toaster(lambda fn: threading.Thread(target=fn, name="lockdown-toast", daemon=True).start(),
                       lambda text: None, on_click=show_main)
     notices = Notices(hub, corner, toaster)

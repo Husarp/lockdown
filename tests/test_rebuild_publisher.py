@@ -227,6 +227,9 @@ def test_windows_hooks_tell_the_publisher_when_shown_or_hidden():
     w = windows.Windows(main=Win(), publisher=pub)
     pub.publish("blocks_changed", {})
     windows.show_main(w)
+    assert pub._visible is False and w.main.calls == []      # (its page has not said it works yet: not shown)
+    windows.page_ready(w, "main")                            # ... and now it has: shown at once
+    assert w.main.calls == ["show", "restore"]
     assert pub._visible is True
     assert windows.close_means_hide(w) is False
     assert pub._visible is False

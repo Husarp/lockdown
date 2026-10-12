@@ -256,6 +256,7 @@ class WebviewRuntime:
         server = AssetServer()
         base_url = server.start()
         win = self.windows = windows.create(base_url, overlay.saved_background(), js_api=webapi.build_api(self.ctx))
+        self.ctx.on_page_ready = lambda name: windows.page_ready(win, name)   # (show_main waits for the main page)
         windows.attach_publisher(win, self.log)
         pool = workers.Workers(tracker=_IdleThread(), word_guard=_IdleThread(), retention=_IdleThread(),
                                log_sink=self.log)

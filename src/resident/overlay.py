@@ -13,6 +13,12 @@ Rules kept here, never in the page:
   challenge or question that follows can never sit behind it.
 - Only the buttons the engine gave can be used; an answer works once (a second click finds the screen gone).
 
+The window is shown only once its page has said it is ready (`page_loaded`, from the page's `page_ready` call after it
+drew what is up): a cover shown before is a solid dark screen, always on top, Alt+F4 ignored - a black screen with no
+way out when the page never comes (0.85.1 at bedtime). A screen that is due while the page is not ready waits for it;
+if it is not ready within PAGE_READY_SEC the owner is told another way (`fallback`: a Windows notification for the
+bedtime screen; a strict break keeps its windows minimised all the same) and the reason goes to the log.
+
 `OverlayHost` is the Win32 / pywebview glue (the window on the primary monitor, a plain cover of the same colour on
 every other one, always on top). It is kept thin; the maths is in `plan_rects`."""
 import sys
@@ -31,6 +37,7 @@ MAX_BUTTONS = 4
 KINDS = {"sleep": "sleep", "break-run": "break"}       # engine key -> what the page shows
 EMERGENCY_KEY = "sleep"                # the engine hears every emergency under this key (it pauses bedtime AND break)
 TITLE = "Lockdown overlay"
+PAGE_READY_SEC = 10                    # a screen due before the page is ready waits this long, then the fallback
 
 
 def overlay_background(theme: str, system_is_light: bool = False) -> str:
@@ -72,10 +79,12 @@ class Overlay:
     publisher: `publish(event, payload)` (the overlay window's Publisher).   host: `show(background)`, `hide()`,
     `refresh()`.   answer(key, action): the reminder worker's answer (the engine hears it on its own thread).
     now(): the trusted time.   wait_for(key): the Dismiss wait in seconds for that screen (0 = none).
-    clock: a monotonic clock in seconds (tests drive it)."""
+    clock: a monotonic clock in seconds (tests drive it).
+    page_ready: is the page known to work? The agent passes False: the window is then only shown after `page_loaded()`.
+    fallback(kind, title, text): tells the owner another way when the page is not ready within `ready_wait` seconds."""
 
     def __init__(self, publisher=None, host=None, answer=None, now=None, wait_for=None, clock=time.monotonic,
-                 background=saved_background, log=None):
+                 background=saved_background, log=None, page_ready=True, fallback=None, ready_wait=PAGE_READY_SEC):
         self.publisher, self.host, self._answer = publisher, host, answer
         self._now = now or datetime.now
         self._wait_for = wait_for or (lambda key: 0)
@@ -91,12 +100,25 @@ class Overlay:
         self._shown = False                  # the window, as the host has it
         self._stop = threading.Event()       # ends the monitor guard of the screen that is up
         self._failsafe: threading.Timer | None = None
+        self._page_ok = bool(page_ready)     # the page said it works: only then is the window shown
+        self._fallback = fallback
+        self._ready_wait = ready_wait
+        self._waiting_for_page = None        # the token of the screen whose "page not ready" timer is running
 
     # ------------------------------------------------------------------ what the page gets
     @property
     def shown(self) -> bool:
         with self._lock:
             return self._cur is not None
+
+    @property
+    def on_screen(self) -> bool:
+        """Is the window really up? (A screen can be due while its page is not ready yet: then it is not.)"""
+        return self._shown
+
+    @property
+    def page_ok(self) -> bool:
+        return self._page_ok
 
     def key(self):
         with self._lock:
@@ -295,6 +317,44 @@ class Overlay:
         self.log("overlay: a break cover outlived its end and was taken down")
         self._changed()
 
+    # ------------------------------------------------------------------ the page's ready handshake
+    def page_loaded(self):
+        """The page has loaded and drawn what is up (its `page_ready` call): from now on the window may be shown - and is
+        at once if a screen is due."""
+        with self._lock:
+            if self._page_ok:
+                return
+            self._page_ok = True
+            up = self._cur is not None
+        self.log("overlay: its page is ready" + (" - the screen that was waiting comes up now" if up else ""))
+        self._sync_host(up)
+
+    def _not_ready(self):
+        """A screen is due but the page has not said it works: the window stays down (a cover without its page is a black
+        screen with no way out). Once per screen: if the page is still not ready after `ready_wait`, the fallback."""
+        with self._lock:
+            cur = self._cur
+            if cur is None or self._waiting_for_page == cur["token"]:
+                return
+            token = self._waiting_for_page = cur["token"]
+        timer = threading.Timer(self._ready_wait, self._page_late, args=(token,))
+        timer.daemon = True
+        timer.start()
+
+    def _page_late(self, token: int):
+        with self._lock:
+            cur = self._cur
+            if self._page_ok or cur is None or cur["token"] != token:
+                return
+            kind, title, text = cur["kind"], cur["title"], cur["text"]
+        self.log(f"overlay: its page did not say it was ready within {self._ready_wait:.0f} s - the {kind} screen "
+                 "is not shown (it would be a black screen with no way out); told another way")
+        if self._fallback is not None:
+            try:
+                self._fallback(kind, title, text)
+            except Exception as error:
+                self.log(f"overlay fallback: {error}")
+
     # ------------------------------------------------------------------ to the page and the window
     def _changed(self):
         with self._lock:
@@ -314,6 +374,9 @@ class Overlay:
             wanted = self.shown
             try:
                 if wanted and not self._shown:
+                    if not self._page_ok:
+                        self._not_ready()
+                        return
                     self._shown = True
                     self._stop = threading.Event()
                     self.host.show(self._background())
@@ -534,8 +597,18 @@ def attach(win, hub, ctx, ui, log=None):
         ui.worker.answer(key, action)
         ui.worker.poke()        # (an emergency ends a strict break on the engine's very next tick)
 
-    overlay = Overlay(publisher, OverlayHost(win.overlay, log=log), answer, now, wait_for, log=log)
+    def fallback(kind, title, text):
+        """The cover's page never said it works: the bedtime screen becomes a Windows notification (it needs no web
+        page); a strict break keeps your windows minimised all the same (MinimizeWorker), so it is only logged."""
+        if kind == "break" or getattr(ui, "toaster", None) is None:
+            return
+        ui.toaster.send(text, title=title)
+
+    overlay = Overlay(publisher, OverlayHost(win.overlay, log=log), answer, now, wait_for, log=log, page_ready=False,
+                      fallback=fallback)
     ctx.overlay = overlay
     ui.overlay_handler = overlay
     win.overlay_ctl, win.overlay_publisher = overlay, publisher
+    from resident import windows
+    windows.on_page_ready(win, "overlay", overlay.page_loaded)
     return publisher

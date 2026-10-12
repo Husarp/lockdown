@@ -37,12 +37,28 @@ class Response:
         self.body, self.content_type, self.status, self.cache, self.etag = body, content_type, status, cache, etag
 
 
+LOGGED_REQUESTS = 40    # with `log`: the first this many requests are noted (did the window reach us, what failed)
+
+
 class AssetServer:
-    def __init__(self, root: Path | None = None):
+    def __init__(self, root: Path | None = None, log=None):
+        """`log(text)`: notes the first LOGGED_REQUESTS requests (path and status) - the start-up diagnostics."""
         self.root = (root or ui_dir()).resolve()
         self.routes: dict[str, object] = {}   # "/icon/" -> fn(rest: str, query: dict) -> Response | None
         self.httpd: ThreadingHTTPServer | None = None
         self.base_url = ""
+        self.log = log
+        self.served = 0                        # requests answered so far
+        self.last = ""                         # the latest one, "path status"
+
+    def note(self, path: str, status: int):
+        self.served += 1
+        self.last = f"{path} {int(status)}"
+        if self.log is not None and self.served <= LOGGED_REQUESTS:
+            try:
+                self.log(f"asset server: {self.last}")
+            except Exception:
+                pass
 
     def add_route(self, prefix: str, handler):
         """Serve everything under `prefix` (like "/icon/") with handler(rest, query) -> Response, or None for 404."""
@@ -131,7 +147,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _serve(self, head: bool):
         if not self._host_ok():
-            return self._send(Response(b"forbidden", "text/plain", HTTPStatus.FORBIDDEN), head)
+            self._send(Response(b"forbidden", "text/plain", HTTPStatus.FORBIDDEN), head)
+            self.owner.note(f"{self.path[:120]} (refused: host {(self.headers.get('Host') or '')[:60]!r})", 403)
+            return
         parsed = urlsplit(self.path)
         try:
             response = self.owner.respond(parsed.path, parse_qs(parsed.query))
@@ -141,6 +159,7 @@ class _Handler(BaseHTTPRequestHandler):
         if response.etag and response.status == 200 and response.etag in self._client_etags():
             response = Response(b"", response.content_type, HTTPStatus.NOT_MODIFIED, response.cache, response.etag)
         self._send(response, head)
+        self.owner.note(parsed.path, response.status)
 
     def _client_etags(self) -> set:
         """The ETags the browser already holds (If-None-Match)."""

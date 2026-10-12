@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lockdown notices</title>
 <link rel="icon" href="data:,">
+<!-- Early error hook, before any module: every script error, file that fails to load and unhandled rejection of this page
+     goes to the Lockdown log through pywebview's Api as soon as that is there - also when the page's own modules never
+     run (js/bridge.js leaves the reporting to this when it sees __ldErrorHook). -->
+<script>(function(w){var q=[],n=0;w.__ldErrorHook=1;function send(){var a=w.pywebview&&w.pywebview.api;if(!a||typeof a.log_client_error!=="function")return;
+while(q.length){try{var p=a.log_client_error(q.shift());if(p&&p.catch)p.catch(function(){})}catch(e){}}}
+function add(m){if(n++<8){q.push((location.pathname+": "+m).slice(0,2000));send()}}
+w.addEventListener("error",function(e){var t=e.target;if(t&&t!==w&&t.tagName)add("could not load "+(t.src||t.href||t.tagName));
+else add((e.message||"error")+" ("+(e.filename||"?")+":"+(e.lineno||0)+")")},true);
+w.addEventListener("unhandledrejection",function(e){var r=e.reason;add("unhandled: "+(r&&r.stack?r.stack:r))});
+w.addEventListener("pywebviewready",send)})(window)</script>
 <!-- Look cache (cosmetic only, written by js/theme.js; same origin as the main window): applied before the first paint. -->
 <script>(function(){try{var l=JSON.parse(localStorage.getItem("ld.look")||"null");if(!l)return;var d=document.documentElement,
 t=l.pref==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):l.pref;if(!/^(dark|amoled|light)$/.test(t))return;

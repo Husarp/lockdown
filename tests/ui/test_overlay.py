@@ -609,3 +609,39 @@ def test_the_cover_is_drawn_within_a_frame_or_two_of_the_push(ov, page, capsys):
     first = page.evaluate("performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? -1")
     say(capsys, f"overlay.html: first contentful paint {first:.0f} ms (hidden pre-created window: this is paid once at start)")
     assert_clean(page)
+
+
+# ================================================================ the ready handshake (0.85.1's black screen)
+
+def test_a_cover_due_before_the_page_loaded_is_shown_only_after_the_page_drew_it(harness, page):
+    """The agent's Overlay waits for the page's page_ready (sent after it drew what overlay_ready gave it) before the
+    window is shown - a cover shown earlier is a solid dark screen."""
+    host = Host()
+    cover = Overlay(Publisher(), host, lambda key, action: None, now=lambda: harness.now, wait_for=lambda key: 0,
+                    background=lambda: "#191817", page_ready=False)
+    harness.ctx.overlay = cover
+    harness.ctx.on_page_ready = lambda name: name == "overlay" and cover.page_loaded()
+    cover.show("sleep", "Time for bed", "Sleep well.", None, BEDTIME)          # due at start, before the page is there
+    assert host.calls == []
+    page.goto(harness.url("/overlay.html"), wait_until="load")
+    page.wait_for_selector("#fs:not([hidden])")
+    deadline = time.time() + 5
+    while time.time() < deadline and not host.calls:
+        time.sleep(0.02)
+    assert host.calls == [("show", "#191817")]
+    assert "Time for bed" in page.inner_text("#fs")                            # (drawn before the window came up)
+    names = [n for _, n, _ in harness.calls]
+    assert names.index("overlay_ready") < names.index("page_ready")
+
+
+@pytest.mark.allow_console_errors
+def test_a_script_that_fails_to_load_reaches_the_log(harness, page):
+    """The early error hook in <head> reports what the page's own modules can't: here overlay.js itself never loads."""
+    page.route("**/js/overlay.js", lambda route: route.fulfill(status=404, body="no"))
+    page.goto(harness.url("/overlay.html"), wait_until="load")
+    deadline = time.time() + 5
+    while time.time() < deadline and not harness.rpc_count("log_client_error"):
+        time.sleep(0.02)
+    logged = [str(a) for _, n, a in harness.calls if n == "log_client_error"]
+    assert any("/overlay.html: could not load" in m and "overlay.js" in m for m in logged), logged
+    assert "page_ready" not in [n for _, n, _ in harness.calls]                # (so the window would never be shown)

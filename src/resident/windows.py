@@ -1,14 +1,24 @@
 """The three windows of the new UI, all made hidden when the agent starts: main (closing it only hides it), corner
 (small, no frame, always on top, never takes focus: notices and reminder popups) and overlay (full screen, no frame,
-always on top: bedtime / strict break). Win32 / pywebview glue only - kept thin; pywebview is imported when used."""
+always on top: bedtime / strict break). Win32 / pywebview glue only - kept thin; pywebview is imported when used.
+
+No window is shown before its page has said it works (the Api's `page_ready`, after the page's script ran and its link
+to Python answered). A window shown before that is a solid dark rectangle - for the full-screen cover, a black screen
+with no way out. `show_main` waits for the main page (it is shown the moment the page is ready); `watch_main` gives the
+page MAIN_READY_SEC (a start in the tray: MAIN_READY_HIDDEN_SEC) and otherwise calls `on_timeout(reason)` - the agent
+then hands this run over to the old window."""
 import queue
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 MAIN_SIZE, MAIN_MIN = (1100, 720), (560, 420)
 CORNER_SIZE = (380, 140)
 OVERLAY_BG = "#191817"   # solid, no transparency: the dark page background (resident/overlay.BACKGROUNDS has the others)
+PAGES = ("main", "overlay", "corner")    # the pages that say when they are ready (webapi/shell.page_ready)
+MAIN_READY_SEC = 8           # the main page must say it works within this once the window is wanted on screen ...
+MAIN_READY_HIDDEN_SEC = 45   # ... or, started in the tray (at login the PC is busy), within this
 
 
 @dataclass
@@ -20,6 +30,10 @@ class Windows:
     publisher: object = None   # the main window's Publisher (R04); told when the window is shown / hidden
     overlay_ctl: object = None   # R08: resident.overlay.Overlay (what is on the cover), and the overlay window's Publisher
     overlay_publisher: object = None
+    ready: dict = field(default_factory=lambda: {name: threading.Event() for name in PAGES})   # page -> said it works
+    ready_hooks: dict = field(default_factory=lambda: {name: [] for name in PAGES})   # page -> [fn()] run when it does
+    show_wanted: bool = False   # the main window was asked for before its page was ready: shown once it is
+    lock: object = field(default_factory=threading.Lock)
 
 
 def storage_dir() -> Path:
@@ -76,17 +90,94 @@ def close_means_hide(win: Windows) -> bool:
 
 
 def show_main(win: Windows):
-    """Bring the main window up (tray Open, a second launch)."""
+    """Bring the main window up (tray Open, a second launch). Before its page has said it works this only notes the wish:
+    the window comes up the moment the page is ready (or, if it never is, the old window takes over - watch_main)."""
+    with win.lock:
+        if not win.ready["main"].is_set():
+            win.show_wanted = True
+            return
+    _show_now(win)
+
+
+def _show_now(win: Windows):
     win.main.show()
     win.main.restore()
     set_visible(win, True)
+
+
+def on_page_ready(win: Windows, name: str, fn):
+    """Run fn() when page `name` says it is ready (at once if it already has)."""
+    with win.lock:
+        if not win.ready[name].is_set():
+            win.ready_hooks[name].append(fn)
+            return
+    fn()
+
+
+def page_ready(win: Windows, name: str) -> bool:
+    """Page `name` says it works (webapi/shell.page_ready). The first time: its hooks run, and the main window comes up if
+    it was asked for in the meantime. Returns False for an unknown name or a repeat."""
+    if name not in PAGES:
+        return False
+    with win.lock:
+        if win.ready[name].is_set():
+            return False
+        win.ready[name].set()
+        hooks, win.ready_hooks[name] = win.ready_hooks[name], []
+        show = name == "main" and win.show_wanted
+        win.show_wanted = False if show else win.show_wanted
+    for fn in hooks:
+        try:
+            fn()
+        except Exception:
+            pass
+    if show:
+        _show_now(win)
+    return True
+
+
+def watch_main(win: Windows, start_visible: bool, on_timeout, describe=None, visible_sec: float | None = None,
+               hidden_sec: float | None = None, clock=time.monotonic, step: float = 0.2):
+    """On a thread of its own: wait for the main page to say it works. Started on screen (or asked for later: tray Open,
+    a second launch), it gets `visible_sec` (MAIN_READY_SEC) from that moment; started in the tray, `hidden_sec`
+    (MAIN_READY_HIDDEN_SEC). Too late: on_timeout(reason) once - `describe()` adds what was seen (pywebview's events,
+    the files served)."""
+    visible_sec = MAIN_READY_SEC if visible_sec is None else visible_sec
+    hidden_sec = MAIN_READY_HIDDEN_SEC if hidden_sec is None else hidden_sec
+    start = clock()
+
+    def run():
+        wanted_at = start if start_visible else None
+        while not win.ready["main"].wait(step):
+            if win.quitting:
+                return
+            now = clock()
+            if wanted_at is None and win.show_wanted:
+                wanted_at = now
+            deadline = start + hidden_sec
+            if wanted_at is not None:
+                deadline = min(deadline, wanted_at + visible_sec)
+            if now >= deadline:
+                waited = now - (wanted_at if wanted_at is not None else start)
+                reason = f"the main window's page did not say it was ready within {waited:.0f} s"
+                if describe is not None:
+                    try:
+                        reason += f" ({describe()})"
+                    except Exception:
+                        pass
+                on_timeout(reason)
+                return
+
+    thread = threading.Thread(target=run, name="lockdown-main-ready", daemon=True)
+    thread.start()
+    return thread
 
 
 def open_challenge(win: Windows, data: dict):
     """Open the Anti-Bypass challenge for `data` ({needs_challenge, ticket, ...}) where the owner can see it: on the
     full-screen cover while that is up (the main window would sit behind it), otherwise in the main window."""
     cover, cover_publisher = getattr(win, "overlay_ctl", None), getattr(win, "overlay_publisher", None)
-    if cover is not None and cover.shown and cover_publisher is not None:
+    if cover is not None and getattr(cover, "on_screen", cover.shown) and cover_publisher is not None:
         cover_publisher.publish("challenge_open", data)
         return
     show_main(win)
@@ -112,6 +203,9 @@ def quit_agent(win: Windows):
         except Exception:
             pass
     for w in (win.main, win.corner, win.overlay):
+        events = getattr(w, "events", None)
+        if events is not None and hasattr(events, "shown") and not events.shown.is_set():
+            continue             # (never made - pywebview gave up on it: destroy() would wait 20 s for nothing)
         try:
             w.destroy()
         except Exception:

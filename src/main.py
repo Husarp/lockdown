@@ -5,9 +5,10 @@
             tray Exit (e.g. killed in Task Manager); does nothing (quickly) when it's running.
 --challenge TEXT: only show the Anti-Bypass challenge for TEXT; exit code 0 = passed (used by the uninstaller).
 --selftest REPORT: build check - every page built with a temporary data folder, result written to REPORT.
---new-ui / --legacy: use the new web window (src/agent.py) or the customtkinter one. Without either, the setting
-            ui.engine = "web" / "legacy" picks one; with neither saved, ui_theme.DEFAULT_ENGINE decides (today: the
-            customtkinter app).
+--legacy: the old customtkinter window (hidden flag: kept only as the new window's automatic fallback - agent.py hands a
+            run to it when the new window can't start - and for the build's self-test of it). Without it Lockdown opens
+            in the new web window (src/agent.py; ui_theme.DEFAULT_ENGINE). --new-ui still means the new window. A saved
+            ui.engine = "legacy" from the removed "Try the new window" switch no longer counts (the key is deleted).
 """
 import os
 import queue
@@ -39,7 +40,8 @@ def read_engine_setting() -> str | None:
 
 def use_new_ui(argv: list[str], db_setting) -> bool:
     """New web window or the old one? --legacy wins, then --new-ui, then the setting (a value, or a function that
-    reads it - only called when no flag decided). Anything unclear (or unreadable) means the default window."""
+    reads it - only called when no flag decided; only a saved "web" counts, see ui_theme.engine_of). Anything unclear
+    (or unreadable) means the default window: the new one."""
     if "--legacy" in argv:
         return False
     if "--new-ui" in argv:
@@ -83,9 +85,26 @@ def _log(message: str):
         pass
 
 
+def forget_engine_choice():
+    """One-off clean-up (0.86): the "Try the new window" switch is gone and a saved ui.engine decides nothing any more
+    (ui_theme.engine_of): the key is deleted. A plain query; a write only when the key is there."""
+    import sqlite3
+    from contextlib import closing
+    import paths
+    if read_engine_setting() is None:      # (read-only: nothing to do, or no database yet - none is made here)
+        return
+    with closing(sqlite3.connect(paths.DB_PATH, timeout=5)) as con:
+        with con:
+            con.execute("DELETE FROM settings WHERE key = ?", (ENGINE_KEY,))
+
+
 def register_autostart_later():
     """register_autostart off the UI thread (a failure there must not stop the app starting - it is logged)."""
     def run():
+        try:
+            forget_engine_choice()
+        except Exception as e:
+            _log(f"WARNING Removing the old window choice failed: {e!r}")
         try:
             register_autostart()
         except Exception as e:

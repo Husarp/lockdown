@@ -1525,12 +1525,15 @@ def test_no_heavy_module_is_imported_at_the_top(name):
 def test_the_agent_starts_the_workers_once_the_gui_is_up_and_stops_them_on_exit():
     tree = ast.parse((SRC / "agent.py").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
-    ready = next(n for n in ast.walk(main) if isinstance(n, ast.FunctionDef) and n.name == "ready")
+    run = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_run")
+    ready = next(n for n in ast.walk(run) if isinstance(n, ast.FunctionDef) and n.name == "ready")
+    start_up = next(n for n in ast.walk(run) if isinstance(n, ast.FunctionDef) and n.name == "start_up")
 
     def calls(node):
         return {ast.unparse(c.func) for c in ast.walk(node) if isinstance(c, ast.Call)}
-    assert "pool.start" in calls(ready) and "workers.tray_listener" in calls(ready)
-    assert "pool.stop" in calls(main)
+    assert "start_up" in calls(ready)                       # (ready = the GUI loop is up; start_up = its work)
+    assert "pool.start" in calls(start_up) and "workers.tray_listener" in calls(start_up)
+    assert "pool.stop" in calls(run)
     # (and `main` returns before any of it when another instance owns the port)
     first_acquire = next(i for i, n in enumerate(main.body) if "single_instance.acquire" in ast.unparse(n))
-    assert all("pool" not in ast.unparse(n) for n in main.body[:first_acquire])
+    assert all("pool" not in ast.unparse(n) and "_run" not in ast.unparse(n) for n in main.body[:first_acquire])

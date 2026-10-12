@@ -51,7 +51,7 @@ def test_shell_methods_are_registered_with_the_right_kind():
     kinds = dict(webapi.api_methods())
     for name in ("get_status", "get_theme"):
         assert kinds[name] == "read"
-    for name in ("set_appearance", "set_accent", "set_scale", "ui_ready", "log_client_error"):
+    for name in ("set_appearance", "set_accent", "set_scale", "ui_ready", "page_ready", "log_client_error"):
         assert kinds[name] == "ui"
     # these only make blocking stricter, so they are free - and none of them is a "loosen"
     for name in ("service_start", "antibypass_switch_on", "pause_resume"):

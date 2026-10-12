@@ -347,3 +347,17 @@ def test_an_older_list_arriving_late_is_ignored(corner):
     page.evaluate("(p) => window.ld.push([['corner', p]])", {"seq": newest["seq"] - 1, "cards": []})
     page.wait_for_timeout(300)
     assert corner.keys() == ["custom:a"]
+
+
+def test_the_corner_page_says_ready_after_it_drew_the_cards(corner, harness):
+    seen = []
+    harness.ctx.on_page_ready = seen.append
+    popup(corner, "custom:water")
+    page = corner.open()
+    page.wait_for_selector("#stack .cc")
+    deadline = time.time() + 5
+    while time.time() < deadline and not seen:
+        time.sleep(0.02)
+    assert seen == ["corner"]
+    names = [n for _, n, _ in harness.calls]
+    assert names.index("corner_ready") < names.index("page_ready")
