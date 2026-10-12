@@ -65,6 +65,18 @@ def test_limits_rows_use_the_blocked_until_line_once(shell, page, harness):
     assert page.locator('[data-card="limits"] .lim-row .meter i').first.evaluate("e => e.style.width") != ""
 
 
+def test_a_groups_limit_row_wears_the_groups_icon_and_colour(shell, page, harness):
+    g = next(g for g in harness.db.list_groups() if g["name"] == "Fun")
+    harness.db.update_group(g["id"], g["name"], g["rules"], g["members"], False, None, {"icon": "car", "color": "blue"})
+    open_dash(shell, page)
+    row = '[data-card="limits"] .lim-row:has-text("Fun (group)") [data-n="icon"]'
+    page.wait_for_selector(f"{row}.gl-tile", timeout=5000)
+    assert page.locator(f"{row} use").get_attribute("href") == "#i-car"
+    assert "hue-blue" in page.get_attribute(row, "class")
+    other = '[data-card="limits"] .lim-row:not(:has-text("(group)")) [data-n="icon"]'
+    assert page.locator(f"{other}.gl-tile").count() == 0 and page.locator(f"{other} img").count() >= 1
+
+
 def test_a_hidden_card_is_not_asked_for(shell, page, harness):
     harness.db.set_setting("dash.hidden", json.dumps(["glance", "visits"]))
     open_dash(shell, page)

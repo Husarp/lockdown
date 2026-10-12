@@ -638,3 +638,77 @@ def test_a_group_keep_keeps_the_saved_end_of_its_own_running_block(env):
     keep = {"rule_type": "temporary", "choice": "keep", "keep_until": short}
     assert result(save(env, three(env), rules=[keep]))["saved"]
     assert [r["temp_until"] for r in group(env)["rules"]] == [left]
+
+
+# ---------------------------------------------------------------- a group's icon and colour (looks only: always free)
+
+def test_the_list_and_the_editor_say_the_icon_and_colour_picked_or_automatic(env):
+    [card] = data(call(env, "groups_list"))["groups"]
+    assert (card["icon"], card["icon_picked"], card["color_picked"]) == ("folder", False, False)
+    assert card["color"] in ("orange", "amber", "green", "teal", "blue", "indigo", "violet", "pink")      # (never red / slate)
+    assert data(call(env, "group_get", env.gid))["auto_color"] == card["color"]
+    env.db.update_group(env.gid, "Good Night", [dict(LIMIT_2H)], group(env)["members"], False, None, {"icon": "car", "color": "blue"})
+    drafts.draft_of(env).reload()
+    [card] = data(call(env, "groups_list"))["groups"]
+    assert (card["icon"], card["color"], card["icon_picked"], card["color_picked"]) == ("car", "blue", True, True)
+    got = data(call(env, "group_get", env.gid))
+    assert (got["icon"], got["color"], got["icon_picked"], got["color_picked"]) == ("car", "blue", True, True)
+    env.db.update_group(env.gid, "Good Night", [dict(LIMIT_2H)], group(env)["members"], False, None, {"icon": None, "color": None})
+    drafts.draft_of(env).reload()
+    got = data(call(env, "group_get", env.gid))
+    assert (got["icon"], got["icon_picked"], got["color_picked"]) == ("moon", False, False)          # "Good Night" -> the moon
+    new = data(call(env, "group_get"))
+    assert (new["icon"], new["icon_picked"], new["color_picked"]) == ("folder", False, False) and new["color"] == new["auto_color"]
+
+
+def test_done_saves_a_picked_icon_and_colour_and_a_missing_look_changes_nothing(env):
+    autosave(env, False)
+    assert result(save(env, three(env), name="Fun"))["saved"]                 # (no look sent: the automatic ones stay)
+    assert (drafts.draft_of(env).groups[env.gid]["icon"], drafts.draft_of(env).groups[env.gid]["color"]) == (None, None)
+    got = result(call(env, "draft_set_group", env.gid, "Fun", [limit_form()], three(env),
+                      {"app_block": "close", "site_block": "dns"}, None, {"icon": "car", "color": "blue"}))
+    assert got["saved"]
+    assert group(env)["icon"] is None                                         # (waiting for Save, like a rename)
+    data(call(env, "draft_save"))
+    assert (group(env)["icon"], group(env)["color"]) == ("car", "blue")
+    # no look argument: kept; a look with one field: the other stays; null: automatic again
+    assert result(save(env, three(env), name="Fun 2"))["saved"]
+    data(call(env, "draft_save"))
+    assert (group(env)["name"], group(env)["icon"], group(env)["color"]) == ("Fun 2", "car", "blue")
+    for look, want in (({"color": "pink"}, ("car", "pink")), ({"icon": None}, (None, "pink")), ({"icon": "bed", "color": None}, ("bed", None))):
+        assert result(call(env, "draft_set_group", env.gid, "Fun 2", [limit_form()], three(env),
+                           {"app_block": "close", "site_block": "dns"}, None, look))["saved"]
+        data(call(env, "draft_save"))
+        assert (group(env)["icon"], group(env)["color"]) == want, look
+
+
+def test_a_new_group_can_be_given_its_look(env):
+    got = result(call(env, "draft_set_group", None, "Work", [limit_form("1h")], [member(env.reddit)],
+                      {"app_block": "close", "site_block": None}, None, {"icon": "laptop", "color": "teal"}))
+    assert got["saved"] and got["added"]
+    g = next(g for g in env.db.list_groups() if g["name"] == "Work")
+    assert (g["icon"], g["color"]) == ("laptop", "teal")
+
+
+@pytest.mark.parametrize("look", [{"icon": "nope"}, {"icon": 5}, {"icon": ["car"]}, {"color": "neon"}, {"color": "BLUE"}, {"color": 3},
+                                  {"icon": "car", "extra": 1}, "car", ["car"], {"icon": "../x"}])
+def test_a_look_that_is_not_on_the_lists_is_refused_and_nothing_changes(env, look):
+    autosave(env, False)
+    refused = call(env, "draft_set_group", env.gid, "Renamed", [limit_form()], three(env), {"app_block": "close", "site_block": "dns"}, None, look)
+    assert not refused["ok"] and "Bad request" in refused["error"], refused
+    assert drafts.draft_of(env).groups[env.gid]["name"] == "Fun" and not drafts.draft_of(env).dirty
+
+
+def test_changing_only_the_look_never_asks_for_the_challenge_also_while_locked(env):
+    lock(env)
+    got = data(call(env, "draft_set_group", env.gid, "Fun", [limit_form()], three(env), {"app_block": "close", "site_block": "dns"},
+                    None, {"icon": "shield", "color": "slate"}))
+    assert "needs_challenge" not in got and got["result"]["saved"], got
+    assert (group(env)["icon"], group(env)["color"]) == ("shield", "slate")
+    got = data(call(env, "draft_set_group", env.gid, "Fun", [limit_form()], three(env), {"app_block": "close", "site_block": "dns"},
+                    None, {"icon": None, "color": None}))                        # back to automatic: free as well
+    assert "needs_challenge" not in got and (group(env)["icon"], group(env)["color"]) == (None, None)
+    # ... while a look sent together with a loosening change still asks (for the loosening only)
+    got = data(call(env, "draft_set_group", env.gid, "Fun", [limit_form()], three(env)[:2], {"app_block": "close", "site_block": "dns"},
+                    None, {"icon": "car"}))
+    assert got.get("needs_challenge") is True and group(env)["icon"] is None

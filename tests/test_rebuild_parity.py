@@ -170,8 +170,6 @@ LEFT_OUT = {
     "mute-it-way": ["Mute it"],
     "pause-limit-longest": ["Longest pause"],
     "pause-limit-per-day": ["Pause time per day"],
-    "group-icon-picker": ["g-icon", "icon-pick"],
-    "group-colour-picker": ["g-col", "--g-1"],
     "word-option-ignore-accents": ["Ignore accents"],
     "word-option-wildcard-switch": ["as a wildcard"],
     "notifications-sound-and-position": ["Lockdown pop-up only", "Windows notification"],

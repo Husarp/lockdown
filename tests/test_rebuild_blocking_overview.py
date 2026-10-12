@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import emergency
+import group_look
 import pause
 import webapi
 from rules import (allowance_bucket, allowance_owner, effective_rules, make_schedule, schedule_until, time_bucket)
@@ -227,7 +228,22 @@ def test_a_loose_item_in_a_group_lists_the_groups_rules_with_an_arrow(env):
     reddit = entry(view, "Reddit")
     assert [c["t"] for c in reddit["chips"]] == ["Permanent", "→ Fun · disabled"]
     assert reddit["groups"] == [{"id": env.db.list_groups()[0]["id"], "name": "Fun"}]
-    assert view["disabled"] == [{"t": "group", "id": reddit["groups"][0]["id"], "name": "Fun"}]
+    assert view["disabled"] == [{"t": "group", "id": reddit["groups"][0]["id"], "name": "Fun", "icon": "folder",
+                                 "color": group_look.auto_hue(reddit["groups"][0]["id"])}]
+
+
+def test_a_group_box_and_a_disabled_group_carry_the_groups_icon_and_colour(env):
+    a = add(env, "Reddit", [])
+    gid = env.db.add_group("Good Night", [{"rule_type": "time_limit", "daily_limit_min": 120}], {a: {}})
+    box = entry(overview(env), "Good Night")
+    assert (box["icon"], box["color"]) == ("moon", group_look.auto_hue(gid))              # automatic: the name, the id
+    env.db.update_group(gid, "Good Night", env.db.list_groups()[0]["rules"], {a: {}}, False, None, {"icon": "car", "color": "blue"})
+    drafts.draft_of(env).reload()
+    box = entry(overview(env), "Good Night")
+    assert (box["icon"], box["color"]) == ("car", "blue")
+    env.db.update_group(gid, "Good Night", env.db.list_groups()[0]["rules"], {a: {}}, True)      # disabled: its row keeps the look
+    drafts.draft_of(env).reload()
+    assert [(g["icon"], g["color"]) for g in overview(env)["disabled"] if g["t"] == "group"] == [("car", "blue")]
 
 
 def test_a_disabled_member_of_a_group_says_disabled_and_lists_no_blockers(env):

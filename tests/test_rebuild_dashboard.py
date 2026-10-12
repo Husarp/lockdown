@@ -189,6 +189,25 @@ def test_a_group_with_every_member_blocked_is_one_blocked_until_line(env):
     assert rows[0]["tone"] == "bad" and rows[0]["frac"] == 1.0 and rows[0]["icon"] == ["letter", "Fun"]
 
 
+def test_a_group_s_row_also_says_its_icon_and_colour_and_an_item_s_row_does_not(env):
+    record(env.db, "2026-09-14", "09:00")
+    yt, tw, gid = _fun(env)
+    solo = env.db.add_item("Game", ["game.exe"], "app", rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])
+    env.db.add_usage([(f"group:{gid}", "day:2026-09-14")], 30 * 60, MON.date())
+    env.db.add_usage([(f"item:{solo}", "day:2026-09-14")], 15 * 60, MON.date())
+    rows = {r["name"]: r for r in card(env, "limits")["rows"]}
+    assert rows["Fun (group)"]["look"] == {"icon": "folder", "color": webapi_look(gid)}        # automatic: the name suggests none
+    assert "look" not in rows["Game"]
+    env.db.update_group(gid, "Fun", [GROUP_2H], {yt: {}, tw: {}}, False, None, {"icon": "car", "color": "blue"})
+    rows = {r["name"]: r for r in card(env, "limits")["rows"]}
+    assert rows["Fun (group)"]["look"] == {"icon": "car", "color": "blue"} and rows["Fun (group)"]["icon"] == ["letter", "Fun"]
+
+
+def webapi_look(gid):
+    import group_look
+    return group_look.auto_hue(gid)
+
+
 def test_a_time_limit_row_says_used_of_limit_and_what_is_left(env):
     record(env.db, "2026-09-14", "09:00")
     solo = env.db.add_item("Game", ["game.exe"], "app", rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])

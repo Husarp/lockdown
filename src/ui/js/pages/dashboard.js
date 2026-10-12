@@ -92,6 +92,8 @@ const STYLE = `<style>
 .dash-lg { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
 .dash-lg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .dash-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.aic.gl-tile { --c: var(--k-soft); --fg: var(--k); }
+.aic.gl-tile .ic { width: 70%; height: 70%; stroke-width: 2; }
 .lim-row { display: grid; gap: var(--sp-1); padding: var(--sp-2) 0; }
 .lim-row + .lim-row { border-top: 1px solid var(--line); }
 .lim-row .hstack { gap: var(--sp-3); }
@@ -138,6 +140,21 @@ function frame(key, title, note = false) {
 }
 
 const n = (node, k) => node.querySelector(`[data-n="${k}"]`);
+/** The icon of a Limits row: the app / site icon, or - for a group's row - the group's own icon and colour (js/groupicons.js is
+ *  loaded only when there is such a row; the letter tile shows until it is there). */
+function limitIcon(node, row) {
+  node.classList.remove("gl-tile");
+  for (const c of [...node.classList]) if (c.startsWith("hue-")) node.classList.remove(c);
+  node.innerHTML = iconImg(row.icon[0], row.icon[1]);
+  if (!row.look) return;
+  const sig = node.dataset.sig;
+  import("../groupicons.js").then((g) => {
+    if (node.dataset.sig !== sig) return;                       // (the row was reused for something else meanwhile)
+    node.classList.add("gl-tile");
+    g.setHue(node, row.look.color);
+    node.innerHTML = ic(g.symbolOf(row.look.icon));
+  }).catch(() => {});
+}
 const iconBox = (icon, cls = "aic-sm") => `<span class="aic ${cls}">${iconImg(icon[0], icon[1])}</span>`;
 
 // ---------------------------------------------------------------- the cards (one builder each: mount once, update(d) in place)
@@ -196,8 +213,8 @@ const BUILD = {
         syncRows(n(wrap, "rows"), d.rows, () => el(`<div class="lim-row"><div class="hstack"><span class="aic aic-sm" data-n="icon"></span><span class="name ellip" data-n="name"></span><span class="grow"></span><span class="text num ellip" data-n="text"></span><b class="num" data-n="left"></b></div><div class="meter"><i></i></div></div>`),
           (node, r) => {
             const icon = n(node, "icon");
-            const sig = r.icon.join("|");
-            if (icon.dataset.sig !== sig) { icon.dataset.sig = sig; icon.innerHTML = iconImg(r.icon[0], r.icon[1]); }
+            const sig = r.icon.join("|") + (r.look ? `|${r.look.icon}|${r.look.color}` : "");
+            if (icon.dataset.sig !== sig) { icon.dataset.sig = sig; limitIcon(icon, r); }
             setText(n(node, "name"), r.name);
             setText(n(node, "text"), r.text);
             const left = n(node, "left");

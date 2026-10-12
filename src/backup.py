@@ -32,7 +32,9 @@ def export(db) -> dict:
                     "members": {str(i): o for i, o in g["members"].items()},
                     # how its members are blocked (0.84.11; absent / None: as each member is set)
                     "app_block": g.get("app_block"), "site_block": g.get("site_block"),
-                    "member_blocks": {str(i): w for i, w in (g.get("member_blocks") or {}).items()}}
+                    "member_blocks": {str(i): w for i, w in (g.get("member_blocks") or {}).items()},
+                    # its picked icon and colour (absent / None: automatic)
+                    "icon": g.get("icon"), "color": g.get("color")}
                    for g in db.list_groups()],
         "categories": [{"kind": k, "name": n, "category": c} for (k, n), c in db.categories().items()],
         "settings": {k: _without_unlock(k, v) for k, v in db.all_settings().items() if k not in RUNTIME_KEYS},
@@ -185,7 +187,8 @@ def _restore(db, data: dict):
                              if kinds[i] != "site" else w for i, w in member_blocks.items()}
         ways = {"app_block": g.get("app_block"), "site_block": g.get("site_block"),
                 "member_blocks": member_blocks}
-        db.add_group(g["name"], g.get("rules", []), members, ways)
+        db.add_group(g["name"], g.get("rules", []), members, ways,
+                     {k: g[k] for k in ("icon", "color") if isinstance(g.get(k), str) and len(g[k]) <= 40})
     for c in data.get("categories", []):
         db.set_category(c["kind"], c["name"], c["category"])
     settings = data.get("settings", {})

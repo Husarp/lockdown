@@ -93,6 +93,13 @@
   --ok: #306A43;         --ok-soft: #E4F1E7;          /* allowed */
   --on-k: #FFFFFF;                                    /* text on filled meaning chips */
 
+  /* group colours: the phone's ten hues (ui/theme/Color.kt) - accent = the glyph, soft = the tile behind it */
+  --hue-red: #AD2F41; --hue-red-soft: #FFDADA;  --hue-orange: #A93D17; --hue-orange-soft: #FFDBCF;
+  --hue-amber: #8A5A00; --hue-amber-soft: #FFDFA6;  --hue-green: #306A43; --hue-green-soft: #C8EED3;
+  --hue-teal: #246867; --hue-teal-soft: #ADEEEC;  --hue-blue: #006496; --hue-blue-soft: #CCE5FF;
+  --hue-indigo: #4359A9; --hue-indigo-soft: #DCE1FF;  --hue-violet: #6E4DA1; --hue-violet-soft: #ECDCFF;
+  --hue-pink: #983D71; --hue-pink-soft: #FFD8E8;  --hue-slate: #575F67; --hue-slate-soft: #DBE4ED;
+
   /* categories */
   --cat-prod: #306A43;
   --cat-neutral: #8A9199;
@@ -131,6 +138,12 @@
   --ok: #95D4A3;         --ok-soft: #203428;
   --on-k: #1A1918;
 
+  --hue-red: #FFB3B6; --hue-red-soft: #8C142C;  --hue-orange: #FFB59C; --hue-orange-soft: #7E2B0C;
+  --hue-amber: #F5C04E; --hue-amber-soft: #5E4200;  --hue-green: #8BD9A0; --hue-green-soft: #0E5128;
+  --hue-teal: #91D2D0; --hue-teal-soft: #00504F;  --hue-blue: #91CDFF; --hue-blue-soft: #004B72;
+  --hue-indigo: #B7C4FF; --hue-indigo-soft: #294190;  --hue-violet: #D6BAFF; --hue-violet-soft: #563587;
+  --hue-pink: #FFAFD6; --hue-pink-soft: #7B2559;  --hue-slate: #BFC8D0; --hue-slate-soft: #3F484F;
+
   --cat-prod: #95D4A3;
   --cat-neutral: #8E959C;
   --cat-dist: #FFB3B7;
@@ -154,8 +167,14 @@
   --on-brand-soft: #E06B47;
 }
 
-/* group colours (user picks one) — tile background, white glyph, AA in both themes */
-:root {
-  --g-1: #3B6EA8; --g-2: #2E7D5B; --g-3: #7E4FB0; --g-4: #B5482A; --g-5: #8C6A00;
-  --g-6: #1F7A8C; --g-7: #A8396F; --g-8: #5B6B2E; --g-9: #6B5A4C; --g-10: #4A4F9E;
-}
+/* group colours (js/groupicons.js): .hue-<name> sets the pair a tile uses, like the meaning colours' .k-* */
+.hue-red { --k: var(--hue-red); --k-soft: var(--hue-red-soft); }
+.hue-orange { --k: var(--hue-orange); --k-soft: var(--hue-orange-soft); }
+.hue-amber { --k: var(--hue-amber); --k-soft: var(--hue-amber-soft); }
+.hue-green { --k: var(--hue-green); --k-soft: var(--hue-green-soft); }
+.hue-teal { --k: var(--hue-teal); --k-soft: var(--hue-teal-soft); }
+.hue-blue { --k: var(--hue-blue); --k-soft: var(--hue-blue-soft); }
+.hue-indigo { --k: var(--hue-indigo); --k-soft: var(--hue-indigo-soft); }
+.hue-violet { --k: var(--hue-violet); --k-soft: var(--hue-violet-soft); }
+.hue-pink { --k: var(--hue-pink); --k-soft: var(--hue-pink-soft); }
+.hue-slate { --k: var(--hue-slate); --k-soft: var(--hue-slate-soft); }

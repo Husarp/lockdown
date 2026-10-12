@@ -14,6 +14,7 @@ import threading
 from datetime import datetime
 
 import emergency
+import group_look
 from blocker import site_block
 from blocker.apps import block_flags
 from rules import (DAY_NAMES, allowance_left, allowance_note, block_end, blocked_text, describe_rule, duration_text,
@@ -36,6 +37,12 @@ _unlock_lock = threading.Lock()         # two unlocks at once must not both spen
 
 def _iso(when):
     return when.isoformat(timespec="seconds") if when and when != datetime.max else None
+
+
+def _look(group: dict) -> dict:
+    """The group's icon and colour as the page paints them: {icon, color} (picked, or else automatic - group_look)."""
+    shown = group_look.look(group)
+    return {"icon": shown["icon"], "color": shown["color"]}
 
 
 def _short_when(when) -> str:
@@ -241,6 +248,7 @@ class _Build:
         members = sorted((d.items[i] for i in group["members"] if i in d.items), key=lambda i: i["display_name"].lower())
         own_rules = [_group_rule(group, r) for r in group["rules"]]
         return {"t": "group", "id": group["id"], "name": group["name"], "count": len(members),
+                **_look(group),
                 "status": self.group_status(group), "chips": _chips(own_rules, now, usage, own_rules),
                 "members": [self.member_entry(m, group) for m in members],
                 "created": group.get("created_at")}
@@ -307,7 +315,7 @@ def blocking_overview_get(ctx, sort=None):
         blocked = sum(1 for k in seen.values() if k in ("blocked", "pending"))
         disabled = [{"t": "item", "id": i["id"], "name": i["display_name"], "type": i["item_type"], "icon": _icon(i)}
                     for i in d.sorted_items() if i.get("disabled")]
-        disabled += [{"t": "group", "id": g["id"], "name": g["name"]} for g in d.sorted_groups() if g.get("disabled")]
+        disabled += [{"t": "group", "id": g["id"], "name": g["name"], **_look(g)} for g in d.sorted_groups() if g.get("disabled")]
         autosave = d.autosave
     return {"now": _iso(now), "sort": how, "sorts": SORTS, "autosave": autosave,
             "emergency": emergency.usable(db), "counts": {"total": len(seen), "blocked": blocked, "groups": len(groups),

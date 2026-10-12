@@ -9,6 +9,9 @@
 // Done sends the rail's FORMS, the members and the ways to Python (`draft_set_group`) through the draft: Python reads the forms
 // again, checks everything and decides what loosens (a member taken out, a raised shared limit, a lighter way ...) - then the
 // challenge opens by itself and the editor stays until it passes. Nothing here compares old with new.
+//
+// The group's icon and colour (js/groupicons.js): the coloured chip in the editor's header opens the picker; a choice shows at
+// once and goes with Done like the name. Looks only - Python never asks for the challenge for them.
 import { openAppBrowser } from "../../appbrowser.js";
 import { iconKey, iconUrl, wireIconReady } from "../../appicon.js";
 import { ld } from "../../bridge.js";
@@ -17,6 +20,7 @@ import { openCustomizeMember, openMemberWay } from "../../customize_member.js";
 import { createWays, wayText } from "../../ways.js";
 import { draftCall, FAILED } from "../../draft.js";
 import { openMenu } from "../../menu.js";
+import { autoIcon, chipHtml, openLookPicker, paint } from "../../groupicons.js";
 import { createRail } from "../../rules/rail.js";
 import * as S from "../../rules/summary.js";
 import { confirmButton, el, empty, ic, setText, toast } from "../../ui.js";
@@ -110,7 +114,7 @@ let tab = null, root = null, vl = null;
 let cards = [];                      // groups_list
 let loaded = false, wantEdit = null, ticks = 0, reloadQueued = false;
 let clock = { base: 0, at: 0 };
-let ed = null;                       // the open editor: {id, isNew, disabled, name, members: Map, busy}
+let ed = null;                       // the open editor: {id, isNew, disabled, members: Map, busy, look: {icon, color} picked (null = automatic), autoColor}
 let rail = null, ways = null;
 let query = "", found = null, searchTimer = 0, seq = 0;
 const nodes = new Map();             // group id -> its card
@@ -132,6 +136,10 @@ const STYLE = `<style>
 .gp-card .top .grow > * { display: block; }
 .gp-card .top .chip { max-width: 100%; flex: none; min-width: 0; }
 .gp-card .top .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gp-ic, .gp-look { width: calc(40px * var(--s)); height: calc(40px * var(--s)); border-radius: var(--r-md); }
+.gp-ic .ic, .gp-look .ic { width: calc(22px * var(--s)); height: calc(22px * var(--s)); stroke-width: 2; }
+.gp-look { border: 0; padding: 0; cursor: pointer; font: inherit; }
+.gp-look:hover { box-shadow: 0 0 0 2px var(--k); }
 .gp-ways { overflow-wrap: anywhere; }
 .gp-chips { display: flex; flex-wrap: wrap; gap: 3px var(--sp-1); min-width: 0; }
 .gp-chips:empty { display: none; }
@@ -175,10 +183,10 @@ const STYLE = `<style>
 
 function createCard() {
   const node = el(`<div class="card card-click group-card gp-card" role="button" tabindex="0">
-    <div class="top"><span class="gtile gtile-lg" style="--g: var(--brand)">${ic("layers")}</span><div class="grow"><h3 class="ellip"></h3><span class="small muted ellip"></span></div>
+    <div class="top">${chipHtml({ icon: "folder", color: "orange" }, "gp-ic")}<div class="grow"><h3 class="ellip"></h3><span class="small muted ellip"></span></div>
     <span class="chip"><span></span></span></div>
     <div class="gp-chips"></div><div class="small muted gp-ways"></div></div>`);
-  node._r = { name: node.querySelector("h3"), line: node.querySelector(".grow .small"), chip: node.querySelector(".chip"), chipText: node.querySelector(".chip span"),
+  node._r = { ic: node.querySelector(".gp-ic"), name: node.querySelector("h3"), line: node.querySelector(".grow .small"), chip: node.querySelector(".chip"), chipText: node.querySelector(".chip span"),
     chips: node.querySelector(".gp-chips"), ways: node.querySelector(".gp-ways") };
   return node;
 }
@@ -186,6 +194,7 @@ function createCard() {
 function paintCard(node, g) {
   const r = node._r;
   node.dataset.id = g.id;
+  paint(r.ic, g);
   setText(r.name, g.name);
   setText(r.line, membersLine(g));
   r.line.title = r.line.textContent;
@@ -264,9 +273,11 @@ async function openEditor(id) {
     return;
   }
   clock = { base: parseNaive(g.now), at: performance.now() };
-  ed = { id: g.id, isNew: !!g.new, disabled: !!g.disabled, members: new Map(), busy: false };
+  ed = { id: g.id, isNew: !!g.new, disabled: !!g.disabled, members: new Map(), busy: false,
+    look: { icon: g.icon_picked ? g.icon : null, color: g.color_picked ? g.color : null }, autoColor: g.auto_color };
   setText(els.title, g.new ? "New group" : "Edit group");
   els.name.value = g.name;
+  paintLook();
   clearErrors();
   els.remove.hidden = els.disable.hidden = g.new;
   setText(els.disable, g.disabled ? "Enable" : "Disable");
@@ -293,6 +304,16 @@ function closeEditor() {
   ed = null;
   showEditor(false);
   markSelected();
+}
+
+/** The chip in the editor's header: the picked icon / colour, else what the name and the group's number suggest. */
+function paintLook() {
+  paint(els.look, ed ? { icon: ed.look.icon || autoIcon(nameValue()), color: ed.look.color || ed.autoColor } : { icon: "folder", color: "orange" });
+}
+
+function pickLook() {
+  if (!ed) return;
+  openLookPicker({ look: ed.look, name: nameValue, autoColor: ed.autoColor, onChange: (look) => { if (ed) { ed.look = look; paintLook(); } } });
 }
 
 function clearErrors() {
@@ -331,7 +352,8 @@ async function done() {
   const { id, isNew } = ed;
   try {
     const { members, pending } = donePayload(ed.members);
-    const r = await draftCall("draft_set_group", id, name, rail.forms(), members, { app_block: ways.value("app"), site_block: ways.value("site") }, pending);
+    const r = await draftCall("draft_set_group", id, name, rail.forms(), members, { app_block: ways.value("app"), site_block: ways.value("site") }, pending,
+      { icon: ed.look.icon, color: ed.look.color });
     if (r === FAILED || r === CANCELLED) return;                  // a toast said why / the challenge was cancelled: the editor stays
     if (r && r.result && r.result.saved === false) { showErrors(r.result.errors || []); return; }
     closeEditor();
@@ -548,7 +570,7 @@ export function mount(host, t) {
     <div class="gp-right">
       <div class="card gp-blank" data-k="g-blank">${ic("layers", "ic-lg")}<h3>No group open</h3><p>Pick a group on the left to edit its rules and members, or make a new one.</p><button class="btn" type="button" data-k="g-new2">${ic("plus")}New group</button></div>
       <section class="ge" data-k="g-editor" hidden aria-label="Group editor">
-        <div class="card ge-top"><header class="card-h"><h2 data-k="g-title">New group</h2><span class="grow"></span>
+        <div class="card ge-top"><header class="card-h"><button class="kic gp-look hue-orange" type="button" data-k="g-look" aria-haspopup="dialog" aria-label="Group icon and colour" title="Choose the icon and colour">${ic("folder")}</button><h2 data-k="g-title">New group</h2><span class="grow"></span>
           <span data-k="g-removeslot"></span>
           <button class="btn" type="button" data-k="g-disable">Disable</button>
           <button class="btn" type="button" data-k="g-cancel">Cancel</button>
@@ -567,7 +589,7 @@ export function mount(host, t) {
       </section>
     </div></div>`;
   for (const k of ["cards", "none", "new", "new2", "blank", "editor", "title", "disable", "cancel", "done", "name", "nameerr", "wnote", "mcount", "search", "mhint",
-    "mlist", "mnone", "err", "add"]) els[k] = q(k);
+    "mlist", "mnone", "err", "add", "look"]) els[k] = q(k);
   els.remove = confirmButton({ label: "Remove group", confirmLabel: "Confirm remove", cls: "btn", ms: 4000, onConfirm: removeGroup });
   q("removeslot").replaceWith(els.remove);
   rail = createRail({ shared: true, types: S.RULE_TYPES, name: () => nameValue(), now: trustedNow, requireOne: true, compact: true });
@@ -589,7 +611,8 @@ export function mount(host, t) {
   els.cancel.addEventListener("click", closeEditor);
   els.done.addEventListener("click", done);
   els.disable.addEventListener("click", toggleDisabled);
-  els.name.addEventListener("input", () => { els.nameerr.hidden = true; rail.refresh(); });
+  els.name.addEventListener("input", () => { els.nameerr.hidden = true; rail.refresh(); paintLook(); });
+  els.look.addEventListener("click", pickLook);
   els.name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done(); } });
   els.search.addEventListener("input", onSearch);
   els.search.addEventListener("keydown", (e) => {

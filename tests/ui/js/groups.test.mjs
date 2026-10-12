@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 const g = await import("../../../src/ui/js/pages/blocking/groups.js");
 const cm = await import("../../../src/ui/js/customize_member.js");
 const ways = await import("../../../src/ui/js/ways.js");
+const gi = await import("../../../src/ui/js/groupicons.js");
+const { readFileSync } = await import("node:fs");
 
 const item = (id, name, over = {}) => ({ id, name, kind: "site", type: "site", icon: { k: "site", n: `${name.toLowerCase()}.com` }, sub: `site · ${name.toLowerCase()}.com`,
   targets: [`${name.toLowerCase()}.com`], hosted: false, item_way: "dns", ...over });
@@ -98,4 +100,67 @@ test("the group's own way boxes: closing excludes minimizing, and an app way of 
   assert.equal(cm.createWays, undefined);                                       // (one implementation: js/ways.js)
   assert.deepEqual(ways.APP_WAYS.map((w) => w[0]), ["close", "background", "minimize", "internet"]);
   assert.deepEqual(ways.SITE_WAYS.map((w) => w[0]), ["dns", "close", "back"]);
+});
+
+// ---------------------------------------------------------------- a group's icon and colour (js/groupicons.js)
+
+test("the picker's icons: sections of unique keys with a label each, the phone's 24 among them", () => {
+  assert.equal(new Set(gi.KEYS).size, gi.KEYS.length);
+  assert.ok(gi.KEYS.length >= 55 && gi.KEYS.length <= 70);
+  for (const key of ["moon", "phone", "game", "social", "video", "chat", "music", "news", "web", "photo", "shopping", "money", "casino", "food", "sport",
+    "work", "school", "book", "focus", "coffee", "heart", "star", "bolt", "folder"]) assert.ok(gi.KEYS.includes(key), key);
+  for (const [title, list] of gi.SECTIONS) {
+    assert.ok(title && list.length, title);
+    for (const [key, sprite, label] of list) assert.ok(key && sprite && label, key);
+  }
+  assert.deepEqual(gi.HUES.map(([c]) => c), ["red", "orange", "amber", "green", "teal", "blue", "indigo", "violet", "pink", "slate"]);
+});
+
+test("every icon key has its own symbol in the sprite once the module is loaded (and an unknown key is a folder)", async () => {
+  const icons = await import("../../../src/ui/js/icons.js");
+  for (const [key, sprite] of gi.SECTIONS.flatMap(([, list]) => list)) assert.ok(icons.PATHS[sprite], `${key}: no symbol ${sprite}`);
+  assert.equal(gi.symbolOf("car"), "car");
+  assert.equal(gi.symbolOf("rocketship"), "folder");
+  assert.equal(gi.symbolOf(null), "folder");
+  assert.equal(gi.hueOf("blue"), "blue");
+  assert.equal(gi.hueOf("BLUE"), "orange");
+  assert.equal(gi.hueOf(undefined), "orange");
+});
+
+test("the automatic icon follows the phone's word table: whole words for short stems", () => {
+  assert.equal(gi.autoIcon("Good Night"), "moon");
+  assert.equal(gi.autoIcon("Nocna zmiana"), "moon");
+  assert.equal(gi.autoIcon("Instagram"), "social");                             // not a game ("gra" only as a whole word)
+  assert.equal(gi.autoIcon("Better"), "folder");                                // not a casino
+  assert.equal(gi.autoIcon("Betting"), "casino");
+  assert.equal(gi.autoIcon("Senior"), "folder");
+  assert.equal(gi.autoIcon("Ready"), "folder");
+  assert.equal(gi.autoIcon("read"), "book");
+  assert.equal(gi.autoIcon("Szkoła"), "school");
+  assert.equal(gi.autoIcon(""), "folder");
+  assert.equal(gi.autoIcon(null), "folder");
+});
+
+test("the page's icon keys, hues and word table are the ones Python checks (src/group_look.py)", () => {
+  const py = readFileSync(new URL("../../../src/group_look.py", import.meta.url), "utf8");
+  const keys = [...py.slice(py.indexOf("KEYS = ("), py.indexOf("DEFAULT_KEY")).matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(gi.KEYS, keys);
+  const hues = [...py.slice(py.indexOf("HUES = ("), py.indexOf("# The automatic")).matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(gi.HUES.map(([c]) => c), hues);
+});
+
+test("a group's chip names its icon symbol and hue; a repaint changes only those", () => {
+  const html = gi.chipHtml({ icon: "car", color: "blue" }, "gp-ic");
+  assert.match(html, /class="kic hue-blue gp-ic"/);
+  assert.match(html, /href="#i-car"/);
+  assert.match(gi.chipHtml({ icon: "bolt", color: "nope" }), /hue-orange/);        // (an unusable colour is the first automatic one)
+  assert.match(gi.chipHtml({ icon: "bolt", color: "red" }), /href="#i-zap"/);
+  const classes = new Set(["kic", "hue-blue"]);
+  const use = { href: "#i-car", getAttribute: () => use.href, setAttribute: (_n, v) => { use.href = v; } };
+  const node = { classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c), remove: (c) => classes.delete(c), [Symbol.iterator]: () => classes[Symbol.iterator]() }, querySelector: () => use };
+  gi.paint(node, { icon: "moon", color: "pink" });
+  assert.deepEqual([...classes].sort(), ["hue-pink", "kic"]);
+  assert.equal(use.href, "#i-moon");
+  gi.setHue(node, null);
+  assert.deepEqual([...classes], ["kic"]);
 });

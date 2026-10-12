@@ -15,6 +15,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 import emergency
+import group_look
 import stats
 from resident import snapshot
 from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left, allowance_owner,
@@ -432,10 +433,12 @@ def _card_today(d: _Day) -> dict:
             "colors": colors, "names": {**{c["key"]: c["name"] for c in cats}, "idle": "Idle"}, "legend": legend}
 
 
-def _limit_row(e: dict, now, usage) -> dict:
+def _limit_row(e: dict, now, usage, looks: dict | None = None) -> dict:
+    """`looks`: {group id: group_look.look(group)} - a group's row also says its icon and colour ({look: {icon, color}})."""
     name, kind, frac, period, used, limit = (e[k] for k in ("name", "kind", "frac", "period", "used", "limit"))
     item = e["item"]
     icon = ["letter", e["group"]] if e["group"] else _icon(item)
+    look = (looks or {}).get(((e["rule"].get("group") or {}).get("id")) if e["group"] else None)
     tone = GOOD if frac < 0.6 else WARN if frac < 0.85 else BAD
     if e["blocked"]:     # one line, no used / left times: they can't be spent
         text, left, tone, label = "", e["blocked"], BAD, name
@@ -451,15 +454,19 @@ def _limit_row(e: dict, now, usage) -> dict:
     else:
         text = f"{used} opens of {limit} {period_words(period, now, usage.clock)}"
         left, label = (f"{limit - used} left" if used < limit else "limit reached"), name + " - opens"
-    return {"key": f"{label}|{kind}", "name": label, "icon": icon, "left": left, "text": text, "tone": tone,
-            "frac": round(min(max(frac, 0.0), 1.0), 4), "blocked": bool(e["blocked"])}
+    row = {"key": f"{label}|{kind}", "name": label, "icon": icon, "left": left, "text": text, "tone": tone,
+           "frac": round(min(max(frac, 0.0), 1.0), 4), "blocked": bool(e["blocked"])}
+    if look:
+        row["look"] = {"icon": look["icon"], "color": look["color"]}
+    return row
 
 
 def _card_limits(d: _Day) -> dict:
     entries = limit_entries(d.now, d.items, d.groups, d.usage)
+    looks = {g["id"]: group_look.look(g) for g in d.groups}
     rows, seen = [], Counter()
     for e in entries:
-        row = _limit_row(e, d.now, d.usage)
+        row = _limit_row(e, d.now, d.usage, looks)
         seen[row["key"]] += 1
         if seen[row["key"]] > 1:         # (two rows alike: the page still needs a key for each)
             row["key"] += f"#{seen[row['key']]}"

@@ -146,6 +146,18 @@ def test_the_page_opens_on_overview_with_the_list(shell, page, harness):
         assert page.locator(f"text={text}").count() == 0
 
 
+def test_a_group_row_wears_the_groups_icon_and_colour_and_a_loose_row_does_not(shell, page, harness):
+    g = next(g for g in harness.db.list_groups() if g["name"] == "Fun")
+    harness.db.update_group(g["id"], g["name"], g["rules"], g["members"], False, None, {"icon": "car", "color": "blue"})
+    open_page(shell, page)
+    head = row(page, "Fun").locator(".bo-ic")
+    assert head.locator(".bo-tile use").get_attribute("href") == "#i-car"
+    assert "hue-blue" in head.get_attribute("class") and "bo-grp" in head.get_attribute("class")
+    loose = row(page, "Discord").locator(".bo-ic")
+    assert "bo-grp" not in loose.get_attribute("class") and "hue-" not in loose.get_attribute("class")
+
+
+
 def test_the_list_is_a_virtual_list(shell, page, harness):
     open_page(shell, page)
     assert page.evaluate("document.querySelector('#bo-list').classList.contains('vlist')")

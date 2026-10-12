@@ -14,6 +14,7 @@ import { ld } from "../../bridge.js";
 import { CANCELLED, parseNaive } from "../../challenge.js";
 import { openDialog } from "../../dialog.js";
 import { draftCall, FAILED } from "../../draft.js";
+import { paint, setHue } from "../../groupicons.js";
 import { openMenu } from "../../menu.js";
 import { confirmButton, el, empty, esc, ic, setText } from "../../ui.js";
 import { createVList } from "../../vlist.js";
@@ -142,6 +143,7 @@ const STYLE = `<style>
 .bo-ic .aic { position: relative; }
 .bo-ic .aic .bo-tile { width: 62%; height: 62%; stroke-width: 2; }
 .bo-ic.tile .aic { --c: var(--brand); --fg: var(--on-brand); }
+.bo-ic.bo-grp .aic { --c: var(--k-soft); --fg: var(--k); }
 .bo-ic.tile img, .bo-ic:not(.tile) .bo-tile { display: none; }
 .bo-row[data-t="ghead"] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--brand); }
 .bo-row[data-t="member"] { cursor: pointer; background: var(--surface-2); box-shadow: inset 3px 0 0 var(--line-strong); padding-left: calc(var(--sp-4) + var(--sp-4)); }
@@ -188,7 +190,9 @@ function createRow() {
 }
 
 function setIcon(r, e, group) {
-  if (group) { r.ic.classList.add("tile"); r.use.setAttribute("href", "#i-layers"); return; }
+  if (group) { r.ic.classList.add("tile", "bo-grp"); paint(r.ic, e); return; }       // (the group's own icon and colour)
+  r.ic.classList.remove("bo-grp");
+  setHue(r.ic, null);
   const icon = e.icon;
   if (!icon || icon.k === "category") { r.ic.classList.add("tile"); r.use.setAttribute("href", "#i-folder"); return; }
   r.ic.classList.remove("tile");

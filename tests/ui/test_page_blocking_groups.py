@@ -10,6 +10,8 @@ tightens, with the editor staying put until the challenge passes.
 
 What can only be proven on Windows: the page inside WebView2 (this is Chrome), real app and site icons, the native "Pick a
 program file" dialog."""
+import re
+
 import pytest
 
 import antibypass as ab
@@ -166,8 +168,10 @@ def test_the_tab_lists_the_groups_with_a_new_group_card_and_a_placeholder(shell,
     # nothing open yet
     assert "No group open" in page.inner_text('[data-k="g-blank"]') and page.is_visible('[data-k="g-blank"]')
     assert page.is_hidden('[data-k="g-editor"]')
-    # what has no PC backend is not there
-    assert page.locator('[data-pane="groups"] >> text=Icon').count() == 0 and page.locator(".gp .swatches").count() == 0
+    # the card wears the group's icon (a folder: "Fun" suggests none) on a chip of its automatic colour
+    chip = card.locator(".kic.gp-ic")
+    assert chip.count() == 1 and chip.locator("use").get_attribute("href") == "#i-folder"
+    assert re.search(r"\bhue-(orange|amber|green|teal|blue|indigo|violet|pink)\b", chip.get_attribute("class"))
 
 
 def test_with_no_groups_the_list_says_so(shell, page, harness):
@@ -260,6 +264,133 @@ def test_opening_a_group_fills_the_editor(shell, page, harness):
     page.click('.ge-top button:has-text("Cancel")')
     assert page.is_visible('[data-k="g-blank"]') and page.is_hidden('[data-k="g-editor"]')
     assert page.get_attribute(".gp-card[data-id]", "aria-current") == "false"
+
+
+# ---------------------------------------------------------------- the group's icon and colour (looks only)
+
+PICKER = "#dlg[open] .gl-pick"
+
+
+def chip_of(page, selector):
+    """(sprite symbol, hue name) of a group chip."""
+    return page.evaluate("""(sel) => { const n = document.querySelector(sel); return [n.querySelector('use').getAttribute('href').slice(3),
+      [...n.classList].find((c) => c.startsWith('hue-')).slice(4)]; }""", selector)
+
+
+def test_the_icon_button_opens_the_picker_and_a_choice_goes_with_done_and_save(shell, page, harness):
+    autosave(harness, False)
+    open_fun(shell, page)
+    assert page.get_attribute('[data-k="g-look"]', "aria-label") == "Group icon and colour"
+    assert chip_of(page, '[data-k="g-look"]')[0] == "folder"
+    page.click('[data-k="g-look"]')
+    page.wait_for_selector(PICKER)
+    assert page.inner_text("#dlg h2") == "Icon and colour"
+    assert page.locator(f"{PICKER} .gl-ic").count() == 63 and page.locator(f"{PICKER} .gl-hue").count() == 10
+    assert page.locator(f"{PICKER} .gl-ic[aria-label][title]").count() == 63                # every icon has a name for screen readers
+    assert page.locator(f"{PICKER} [data-hue='']").get_attribute("aria-checked") == "true"   # nothing picked: Automatic
+    page.click(f'{PICKER} .gl-ic[aria-label="Driving"]')
+    page.click(f'{PICKER} .gl-hue[aria-label="Blue"]')
+    assert chip_of(page, '[data-k="g-look"]') == ["car", "blue"]                              # the editor changed at once
+    assert page.locator(f'{PICKER} .gl-ic[aria-label="Driving"]').get_attribute("aria-checked") == "true"
+    page.click("#dlg .dlg-f button:has-text('Done')")
+    dialog_closed(page)
+    assert chip_of(page, '[data-k="g-look"]') == ["car", "blue"]
+    assert page.evaluate("document.activeElement.dataset.k") == "g-look"                       # focus went back to the button
+    assert group(harness)["icon"] is None                                                    # (nothing sent yet: the editor's Done does that)
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    wait_for(page, "document.querySelector('#sb-save').textContent === 'Save changes'")
+    assert chip_of(page, ".gp-card[data-id] .gp-ic") == ["car", "blue"]                        # (the draft is shown, waiting for Save)
+    assert page.inner_text(".gp-card .chip") == "Not applied (unsaved)"
+    assert group(harness)["icon"] is None
+    page.click("#sb-save")                                                                   # the normal Save bar: no challenge
+    wait_for(page, "document.querySelector('#sb-save').textContent === 'Saved'")
+    assert (group(harness)["icon"], group(harness)["color"]) == ("car", "blue")
+    assert chip_of(page, ".gp-card[data-id] .gp-ic") == ["car", "blue"]
+    assert page.locator(".gp-card[data-id] .chip").inner_text() == "1 of 3 blocked now"
+
+
+def test_the_picked_look_comes_back_when_the_group_is_opened_and_automatic_is_a_choice(shell, page, harness):
+    g = group(harness)
+    harness.db.update_group(g["id"], "Good Night", g["rules"], g["members"], False, None, {"icon": "plane", "color": "violet"})
+    reload_draft(harness)
+    open_groups(shell, page)
+    assert chip_of(page, ".gp-card[data-id] .gp-ic") == ["plane", "violet"]
+    page.click(".gp-card[data-id]")
+    page.wait_for_selector('[data-k="g-editor"]:not([hidden]) [data-k="g-name"]')
+    assert chip_of(page, '[data-k="g-look"]') == ["plane", "violet"]
+    page.click('[data-k="g-look"]')
+    page.wait_for_selector(PICKER)
+    assert page.locator(f'{PICKER} .gl-ic[aria-label="Travel"]').get_attribute("aria-checked") == "true"
+    assert page.locator(f'{PICKER} .gl-hue[aria-label="Violet"]').get_attribute("aria-checked") == "true"
+    page.click(f"{PICKER} [data-key='']")                                                     # Automatic icon: from the name
+    page.click(f"{PICKER} [data-hue='']")
+    assert chip_of(page, '[data-k="g-look"]')[0] == "moon"                                    # "Good Night"
+    page.keyboard.press("Escape")                                                             # Esc closes it; the choices stay
+    dialog_closed(page)
+    page.fill('[data-k="g-name"]', "Shopping")                                                # the chip follows the name while automatic
+    assert chip_of(page, '[data-k="g-look"]')[0] == "cart"
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    assert (group(harness, "Shopping")["icon"], group(harness, "Shopping")["color"]) == (None, None)
+    assert chip_of(page, ".gp-card[data-id] .gp-ic")[0] == "cart"
+
+
+def test_the_picker_works_from_the_keyboard(shell, page, harness):
+    open_fun(shell, page)
+    page.focus('[data-k="g-look"]')
+    page.keyboard.press("Enter")
+    page.wait_for_selector(PICKER)
+    assert page.evaluate("document.activeElement.closest('#dlg') !== null")                    # focus is inside the dialog
+    assert page.evaluate("document.activeElement.dataset.key") == ""                          # on the picked icon: Automatic
+    page.keyboard.press("ArrowRight")                                                         # arrows walk the icons and pick
+    assert chip_of(page, '[data-k="g-look"]')[0] == "moon"                                    # (the first icon)
+    page.keyboard.press("ArrowRight")
+    assert chip_of(page, '[data-k="g-look"]')[0] == "bed"
+    page.keyboard.press("ArrowDown")                                                          # into the next section, nearest column
+    down = page.evaluate("document.activeElement.dataset.key")
+    assert down in ("phone", "game", "social", "video") and page.evaluate("document.activeElement.getAttribute('aria-checked')") == "true"
+    page.keyboard.press("Escape")
+    dialog_closed(page)
+    assert page.evaluate("document.activeElement.dataset.k") == "g-look"
+
+
+def test_a_new_group_can_pick_its_look_before_it_is_saved(shell, page, harness):
+    open_groups(shell, page)
+    page.click("button.gp-new")
+    page.wait_for_selector('[data-k="g-editor"]:not([hidden])')
+    assert chip_of(page, '[data-k="g-look"]')[0] == "folder"
+    page.fill('[data-k="g-name"]', "Owls")
+    assert chip_of(page, '[data-k="g-look"]')[0] == "folder"                                  # (no word of it suggests an icon)
+    page.fill('[data-k="g-name"]', "Night schedule")
+    assert chip_of(page, '[data-k="g-look"]')[0] == "moon"
+    page.click('[data-k="g-look"]')
+    page.wait_for_selector(PICKER)
+    page.click(f'{PICKER} .gl-ic[aria-label="Maps"]')
+    page.click(f'{PICKER} .gl-hue[aria-label="Teal"]')
+    page.click("#dlg .dlg-f button:has-text('Done')")
+    dialog_closed(page)
+    tick_blocker(page, "time_limit")
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    saved = next(g for g in harness.db.list_groups() if g["name"] == "Night schedule")
+    assert (saved["icon"], saved["color"]) == ("map", "teal")
+
+
+def test_a_look_change_is_free_while_locked_in_the_page(shell, page, harness):
+    lock(harness)
+    open_fun(shell, page)
+    page.click('[data-k="g-look"]')
+    page.wait_for_selector(PICKER)
+    page.click(f'{PICKER} .gl-ic[aria-label="Shield"]')
+    page.click(f'{PICKER} .gl-hue[aria-label="Slate"]')
+    page.click("#dlg .dlg-f button:has-text('Done')")
+    dialog_closed(page)
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    assert not page.locator("dialog[open] .ch-phrase").count()                                # no challenge
+    assert (group(harness)["icon"], group(harness)["color"]) == ("shield", "slate")
+    assert notice(page) == "✓ Group Fun saved"
 
 
 def test_a_group_that_chose_its_ways_shows_them_ticked(shell, page, harness):

@@ -10,7 +10,8 @@ rules (src/rule_forms.py reads them, same code as Add / Edit), ways as plain fla
 Draft's guard asks for the challenge (a ticket) when the save would loosen something.
 
 Disable / Enable and Remove group are R18's `draft_set_group_disabled` / `draft_remove_group` (webapi/blocking.py).
-The group's icon and colour of the designer's mock have no PC data: left out.
+The group's icon and colour (src/group_look.py) are looks only: `draft_set_group` takes them as an optional `look`, checks
+them against the lists the page's picker offers, and they are never part of what the guard compares - picking is free.
 
 Classification: `draft_set_group` is `loosen` (it can take a member out or lighten a way); the rest only read.
 """
@@ -18,6 +19,7 @@ import re
 from datetime import datetime
 
 import block_method
+import group_look
 import rule_forms
 import search
 from blocker import hosts, site_block
@@ -125,15 +127,16 @@ def _card(b, group: dict) -> dict:
     own = [blocking._group_rule(group, r) for r in group["rules"]]
     return {"id": group["id"], "name": group["name"], "disabled": bool(group.get("disabled")), "count": len(names),
             "names": names[:MAX_NAMES], "chips": blocking._chips(own, b.now, b.usage, own),
-            "ways": _ways_text(group), "status": _status(b, group)}
+            "ways": _ways_text(group), "status": _status(b, group), **group_look.look(group)}
 
 
 @core.read
 def groups_list(ctx):
-    """The Groups tab: {now, groups: [{id, name, disabled, count, names, chips, ways, status}]}, by name. `names`: the
-    first members (the card says "N members · a, b, c"); chips: [{t, k, r}] as in the Overview; status: {k, text,
-    until?, title?} with k unsaved / disabled / empty / allowed / pending / blocked. The unsaved draft is shown, with
-    "Not applied (unsaved)" on what is still waiting for Save."""
+    """The Groups tab: {now, groups: [{id, name, disabled, count, names, chips, ways, status, icon, color, icon_picked,
+    color_picked}]}, by name. `names`: the first members (the card says "N members · a, b, c"); chips: [{t, k, r}] as
+    in the Overview; status: {k, text, until?, title?} with k unsaved / disabled / empty / allowed / pending / blocked;
+    icon / color: the picked icon key and hue, or else the automatic ones (the *_picked flags say which). The unsaved
+    draft is shown, with "Not applied (unsaved)" on what is still waiting for Save."""
     db, now = ctx.db, ctx.now()
     d = drafts.draft_of(ctx)
     usage = db.usage_lookup(now)
@@ -150,25 +153,28 @@ def groups_list(ctx):
 @core.read
 def group_get(ctx, group_id=None):
     """One group for the editor (`group_id` None: the starting values of a new group):
-    {id, name, disabled, rules: [rule dict], ways: {app, site}, members: [{id, name, kind, type, icon, sub, targets,
-    hosted, item_way, way, overrides: {rule_type: rule dict}}], now, new}. `ways` is what the group chose for its members ("how
-    members are blocked", None = each member keeps the way it was set when it was added). `member.way` is what that
-    member does on its own in this group (an app's replaces the group's, a site's is added on top); `item_way` the
-    member's own setting (what applies while the group has not chosen). Reads the draft (unsaved groups too)."""
+    {id, name, disabled, icon, color, icon_picked, color_picked, auto_color, rules: [rule dict], ways: {app, site}, members:
+    [{id, name, kind, type, icon, sub, targets, hosted, item_way, way, overrides: {rule_type: rule dict}}], now, new}.
+    icon / color: the picked ones or the automatic ones (a new group: a folder, the first automatic colour); auto_color:
+    the colour it has while none is picked (the picker's "Automatic").
+    `ways` is what the group chose for its members ("how members are blocked", None = each member keeps the way it was
+    set when it was added). `member.way` is what that member does on its own in this group (an app's replaces the
+    group's, a site's is added on top); `item_way` the member's own setting (what applies while the group has not
+    chosen). Reads the draft (unsaved groups too)."""
     now = ctx.now()
     d = drafts.draft_of(ctx)
     with drafts.lock:
         d.refresh_if_clean()
         if group_id is None:
-            return {"id": None, "name": "", "disabled": False, "rules": [], "ways": dict(NEW_WAYS), "members": [],
-                    "now": blocking._iso(now), "new": True}
+            return {"id": None, "name": "", "disabled": False, **group_look.look({}), "auto_color": group_look.auto_hue(None),
+                    "rules": [], "ways": dict(NEW_WAYS), "members": [], "now": blocking._iso(now), "new": True}
         g = d.groups.get(_id(group_id))
         if g is None:
             raise ApiError("That group isn't there (any more).")
         members = sorted((_member(g, d.items[i], now) for i in g["members"] if i in d.items),
                          key=lambda m: m["name"].lower())
-        return {"id": g["id"], "name": g["name"], "disabled": bool(g.get("disabled")),
-                "rules": [_clean_rule(r) for r in g["rules"]],
+        return {"id": g["id"], "name": g["name"], "disabled": bool(g.get("disabled")), **group_look.look(g),
+                "auto_color": group_look.auto_hue(g["id"]), "rules": [_clean_rule(r) for r in g["rules"]],
                 "ways": {"app": g.get("app_block") or None, "site": g.get("site_block") or None},
                 "members": members, "now": blocking._iso(now), "new": False}
 
@@ -315,8 +321,24 @@ def _group_name(value) -> str:
     return " ".join(value.split())
 
 
+def _look(value) -> dict | None:
+    """The look the page sent -> {icon?, color?} to set, or None for "not given". A field that is missing stays as it was;
+    None is automatic; anything but a key / hue of group_look is refused (the page is untrusted)."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - {"icon", "color"}:
+        raise ApiError("Bad request: the look must say an icon and a colour.")
+    out = {}
+    for field, allowed in (("icon", group_look.KEYS), ("color", group_look.HUES)):
+        if field in value:
+            if value[field] is not None and not (isinstance(value[field], str) and value[field] in allowed):
+                raise ApiError(f"Bad request: that {field} isn't one Lockdown has.")
+            out[field] = value[field]
+    return out
+
+
 @core.loosen
-def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=None):
+def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=None, look=None):
     """Create (`group_id` None) or change a group in the draft - "Done" in the group editor.
       name             the group's name (required)
       rules            the group's blockers as FORMS (what the rail's rail.forms() holds); at least one
@@ -327,6 +349,9 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
       pending_targets  [{kind: app|site|category, name, display, path, overrides, way}] new members, put on the blocklist
                        with the group the way the Add tab would (an existing item with that name is used instead; the same
                        member twice is refused; a category must be one of yours)
+      look             {icon, color}: a key of group_look.KEYS / a hue of group_look.HUES, null = automatic, a field left
+                       out stays as it was; the whole argument left out changes nothing. Looks only: never asks for the
+                       challenge, also while Anti-Bypass is locked.
     Everything is read again here (rule_forms for the blockers). A mistake comes back as result {saved: false, errors:
     [{rule_type, field, message, member?}]} and nothing changes. Otherwise the draft changes and result is {saved: true,
     added, name}; if the save would loosen a block (a raised shared limit, a member taken out, a member's extra rule
@@ -341,6 +366,7 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
         raise ApiError("Bad request: new members must be a list.")
     if not isinstance(ways, dict) or set(ways) - {"app_block", "site_block"}:
         raise ApiError("Bad request: ways must say how apps and sites are blocked.")
+    picked = _look(look)
     now = ctx.now()
 
     def edit(d):
@@ -407,7 +433,8 @@ def draft_set_group(ctx, group_id, name, rules, members, ways, pending_targets=N
             member_ways[item["id"]] = way
         new_ways = {"app_block": app_way, "site_block": site_way,
                     "member_blocks": {i: w for i, w in member_ways.items() if w}}
-        d.set_group(gid, name, group_rules, member_rules, new_ways)
+        now_look = None if picked is None else {**{k: d.groups.get(gid, {}).get(k) for k in ("icon", "color")}, **picked}
+        d.set_group(gid, name, group_rules, member_rules, new_ways, now_look)
         return {"saved": True, "added": gid is None, "name": name}
     return drafts.run_edit(ctx, edit)
 

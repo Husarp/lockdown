@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS block_groups (
     app_block TEXT,               -- how its app members are blocked (blocker.apps flags); NULL = as each is set
     site_block TEXT,              -- how its site members are blocked (blocker.site_block flags); NULL = the same
     member_blocks TEXT,           -- JSON {item_id: flags}: what a member adds on top of the group's way
+    icon TEXT,                    -- the picked icon key (group_look.KEYS); NULL = automatic, from the name
+    color TEXT,                   -- the picked colour (group_look.HUES); NULL = automatic, from the id
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -247,6 +249,7 @@ MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path",
               ("emergency_unlocks", "alerts", "INTEGER"),
               ("block_groups", "app_block", "TEXT"), ("block_groups", "site_block", "TEXT"),
               ("block_groups", "member_blocks", "TEXT"),
+              ("block_groups", "icon", "TEXT"), ("block_groups", "color", "TEXT"),
               ("block_rules", "daily_limit_days", "TEXT"), ("group_rules", "daily_limit_days", "TEXT"),
               ("emergency_unlocks", "tier", "TEXT")]
 MIGRATIONS += [(t, c, "INTEGER") for t in ("block_rules", "group_rules")
@@ -275,10 +278,11 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 8   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 9   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
 #                      6: a daily time limit per weekday (0.84.12); 7: emergency_unlocks.tier (emergency kinds)
 #                      8: a member app's own way replaces the group's (was: added on top) - same schema
+#                      9: a group's icon and colour (looks only)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -507,7 +511,8 @@ class Database:
     def list_groups(self) -> list[dict]:
         """All groups: {id, name, rules: [...], members: {item_id: {rule_type: extra rule on top of the group's}},
         app_block / site_block (how its members are blocked, None = as each member is set), member_blocks
-        ({item_id: what that member adds on top of the group's way}) - block_method."""
+        ({item_id: what that member adds on top of the group's way}) - block_method; icon / color: what was picked
+        (None = automatic) - group_look."""
         groups = {r["id"]: {**dict(r), "rules": [], "members": {}} for r in self.conn.execute(
             "SELECT * FROM block_groups ORDER BY name COLLATE NOCASE")}
         for r in self.conn.execute("SELECT * FROM group_rules ORDER BY id"):
@@ -530,18 +535,21 @@ class Database:
 
     @_write
     def add_group(self, name: str, rules: list[dict], members: dict[int, dict] | None = None,
-                  ways: dict | None = None) -> int:
-        """ways: {app_block, site_block, member_blocks} - how members are blocked (None: as each member is set)."""
+                  ways: dict | None = None, look: dict | None = None) -> int:
+        """ways: {app_block, site_block, member_blocks} - how members are blocked (None: as each member is set).
+        look: {icon, color} - the picked ones (None / missing: automatic)."""
+        look = look or {}
         with self.conn:
-            cur = self.conn.execute("INSERT INTO block_groups (name, app_block, site_block, member_blocks) "
-                                    "VALUES (?, ?, ?, ?)", (name, *self._ways(ways or {})))
+            cur = self.conn.execute("INSERT INTO block_groups (name, app_block, site_block, member_blocks, icon, color) "
+                                    "VALUES (?, ?, ?, ?, ?, ?)",
+                                    (name, *self._ways(ways or {}), look.get("icon") or None, look.get("color") or None))
             self._write_group(cur.lastrowid, rules, members or {})
         return cur.lastrowid
 
     @_write
     def update_group(self, group_id: int, name: str, rules: list[dict], members: dict[int, dict],
-                     disabled: bool = False, ways: dict | None = None):
-        """ways: as for add_group; None keeps what the group has (a caller that only renames it changes nothing
+                     disabled: bool = False, ways: dict | None = None, look: dict | None = None):
+        """ways, look: as for add_group; None keeps what the group has (a caller that only renames it changes nothing
         else)."""
         with self.conn:
             self.conn.execute("UPDATE block_groups SET name = ?, disabled = ? WHERE id = ?",
@@ -549,6 +557,9 @@ class Database:
             if ways is not None:
                 self.conn.execute("UPDATE block_groups SET app_block = ?, site_block = ?, member_blocks = ? "
                                   "WHERE id = ?", (*self._ways(ways), group_id))
+            if look is not None:
+                self.conn.execute("UPDATE block_groups SET icon = ?, color = ? WHERE id = ?",
+                                  (look.get("icon") or None, look.get("color") or None, group_id))
             self.conn.execute("DELETE FROM group_rules WHERE group_id = ?", (group_id,))
             self.conn.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
             self._write_group(group_id, rules, members)
