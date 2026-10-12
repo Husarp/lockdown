@@ -136,13 +136,6 @@ def test_program_file_resolves_shortcuts():
         applist.program_file(r"C:\x\notes.txt", read)
 
 
-def test_typed_program_names():
-    from gui.target_picker import typed_program
-    assert typed_program("game.jar") and typed_program("start.bat") and typed_program("Game.exe")
-    assert typed_program(r"C:\Tools\tool.py") and not typed_program("tienda.com.py")   # .py is Paraguay too
-    assert not typed_program("reddit.com") and not typed_program("")
-
-
 def test_a_program_files_block_events_are_app_events():
     assert alerts.is_app_event({"hostname": "discord.exe", "reason": "schedule"})
     assert alerts.is_app_event({"hostname": "game.jar", "reason": "limit"}, {"item_type": "app"})
@@ -364,18 +357,16 @@ def test_the_tray_learns_which_processes_are_the_file():
 def test_a_java_game_open_when_its_block_begins_is_asked_to_close_and_says_so(jworld, monkeypatch):
     """The tray asks the game's windows to close (they are javaw.exe's: by the processes the service publishes) and
     shows the notice - a block event for game.jar used to be taken for a site's."""
-    from gui import app as appmod
     from test_visit_notices import Tray
     w = jworld(at(FRIDAY, "18:58"))
     add_jar(w, [block_during("19:00", "20:00")])
     game, other = java(w, r"C:\Games\Block Game\game.jar"), java(w, r"C:\Tools\ide.jar")
     w.run(1)
-    tray, asked = Tray(w, monkeypatch), []
-    monkeypatch.setattr(appmod.win, "close_windows", lambda pids: asked.append(set(pids)))
+    tray = Tray(w, monkeypatch)
     while not w.gui.block_events_after(0):      # 19:00: blocked - the tray hears of it within a second
         w.step()
     tray.poll()
-    assert asked == [{game}] and tray.closed == []
+    assert tray.closed_windows == [{game}] and tray.closed == []
     assert tray.shown == ["Block Game is blocked until 20:00."]
     w.run(0.5)
     assert not w.alive(game) and w.alive(other)

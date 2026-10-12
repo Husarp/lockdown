@@ -596,16 +596,13 @@ def test_a_ready_list_save_sends_its_off_words_with_the_other_lists(env):
     assert sorted(keywords.settings(env.db)["off"]) == ["nsfw", "seks", "xxx"]
 
 
-def test_download_text_matches_the_old_windows(env):
-    pytest.importorskip("customtkinter")
-    try:
-        from gui.protection_tab import download_text as old
-    except Exception as error:      # a machine without a usable Tk
-        pytest.skip(f"the old window's module can't be imported here: {error}")
-    for p in ({"done": 500, "total": 0, "part": 1, "parts": 1}, {"done": 5000, "total": 9000, "part": 1, "parts": 1},
-              {"done": 12_900_000, "total": 47_000_000, "part": 2, "parts": 3},
-              {"done": 3_000_000, "total": 0, "part": 1, "parts": 2}):
-        assert api.download_text(p) == old(p)
+def test_download_text_says_how_much_of_how_many():
+    cases = [({"done": 500, "total": 0, "part": 1, "parts": 1}, "0 KB"),
+             ({"done": 5000, "total": 9000, "part": 1, "parts": 1}, "4 of 8 KB"),
+             ({"done": 12_900_000, "total": 47_000_000, "part": 2, "parts": 3}, "12.3 of 44.8 MB (part 2 of 3)"),
+             ({"done": 3_000_000, "total": 0, "part": 1, "parts": 2}, "2.9 MB (part 1 of 2)")]
+    for p, text in cases:
+        assert api.download_text(p) == text
 
 
 # ---------------------------------------------------------------- Check a site

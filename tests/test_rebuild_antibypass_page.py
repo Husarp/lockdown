@@ -504,7 +504,7 @@ def test_the_off_card_reports_since_when(api, ctx):
     assert data(api.antibypass_get())["lockdown"] == {"off": True, "since": "2026-10-11 15:42:17"}
 
 
-# ---------------------------------------------------------------- describe (the old window's words)
+# ---------------------------------------------------------------- describe (the old window's words, kept)
 
 def test_describe_is_the_old_windows_line():
     base = {**ab.DEFAULTS}
@@ -515,18 +515,11 @@ def test_describe_is_the_old_windows_line():
         "Loosening a block needs: typing your own phrase · only Sunday 18:00-20:00"
 
 
-def test_describe_and_the_protects_list_still_match_the_old_window():
-    """The new page repeats two small things from gui/antibypass_page.py (it can't import customtkinter): keep them equal."""
-    import json
-    import re
-    from pathlib import Path
-    old = pytest.importorskip("gui.antibypass_page")
-    cfgs = [ab.DEFAULTS, {**ab.DEFAULTS, "phrase": True, "grid": True, "complex": True, "length": 120},
-            {**ab.DEFAULTS, "phrase": True, "custom_phrase": "my own"}, {**ab.DEFAULTS, "hours": True},
-            {**ab.DEFAULTS, "phrase": True, "hours": True, "windows": [{"days": [0, 1, 2], "start": "09:00", "end": "17:00"}]}]
-    for cfg in cfgs:
-        assert page.describe(cfg) == old.describe(cfg)
-    js = (Path(__file__).resolve().parents[1] / "src" / "ui" / "js" / "pages" / "antibypass.js").read_text(encoding="utf-8")
-    block = js[js.index("export const PROTECTS = ["):]
-    block = block[:block.index("];")]
-    assert [json.loads(m) for m in re.findall(r'^  (".*"),$', block, re.M)] == old.PROTECTS
+def test_describe_more_settings():
+    base = {**ab.DEFAULTS}
+    assert page.describe({**base, "phrase": True, "custom_phrase": "my own"}) == \
+        "Loosening a block needs: typing your own phrase"
+    assert page.describe({**base, "hours": True}) == "Loosening a block needs: only Sunday 18:00-20:00"
+    assert page.describe({**base, "phrase": True, "hours": True,
+                          "windows": [{"days": [0, 1, 2], "start": "09:00", "end": "17:00"}]}) == \
+        "Loosening a block needs: typing a 60-character phrase · only Monday–Wednesday 09:00-17:00"

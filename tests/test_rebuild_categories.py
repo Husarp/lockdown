@@ -78,22 +78,6 @@ def test_the_list_starts_with_the_built_ins(api):
     assert rows[0]["color"] == "#27AE60" and rows[0]["color_light"] == "#1E7A46"      # dark / light variants
 
 
-def test_same_list_and_storage_as_the_old_window(ctx):
-    """gui/categories.py imports tkinter, so its few lines are repeated: this keeps both in step."""
-    legacy = pytest.importorskip("gui.categories")
-    assert page.KEY == legacy.KEY and page.NEW_COLORS == legacy.NEW_COLORS
-    assert [(k, n) for k, n, _c in page.BUILTIN] == [(k, n) for k, n, _c in legacy.BUILTIN]
-    key = legacy.add(ctx.db, "Reading", "#2f9fd8")
-    legacy.set_color(ctx.db, "neutral", "#123456")
-    mine = {c["key"]: c for c in page.load(ctx.db)}
-    assert mine[key]["name"] == "Reading" and mine[key]["color"] == "#2f9fd8" and not mine[key]["builtin"]
-    assert mine["neutral"]["color"] == mine["neutral"]["color_light"] == "#123456"
-    assert [c["key"] for c in legacy.load(ctx.db)] == [c["key"] for c in page.load(ctx.db)]
-    # and the other way round: what this module writes, the old window reads
-    key2 = data(core.build_api(ctx).category_add("Chores", "#d4a017"))["key"]
-    assert key2 in [c["key"] for c in legacy.load(ctx.db)]
-
-
 # ---------------------------------------------------------------- free: status "free" writes at once
 
 def test_when_free_add_assign_and_remove_are_written(ctx, api):

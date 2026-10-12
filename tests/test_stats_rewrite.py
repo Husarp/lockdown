@@ -1,7 +1,6 @@
 """0.84.0 rewrote the Dashboard's slow statistics (SQL aggregates, an index for time saved, one grouped query for
 reminder counts). Each is checked here against the 0.83.x implementation, copied verbatim, on random data:
 the results must be identical, not just close."""
-import inspect
 import random
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
@@ -191,13 +190,11 @@ def test_fast_timestamp_parsing_is_the_same_as_strptime():
         stats._minute("2026-10-01T10:00")
 
 
-def test_screen_time_works_out_minutes_once_and_reuses_the_ranges_rows(tmp_path):
+def test_sessions_and_longest_focus_can_take_the_minute_summary_that_is_already_there(tmp_path):
     """Review (perf #8): sessions and longest focus each rebuilt the per-minute summary of the same rows (about 40%
-    of Screen Time), and the heatmap read 7 days of minutes again although the 7 / 30-day range had them."""
-    import types
-    from datetime import date as _date, timedelta as _td
+    of Screen Time): given the summary of the range's rows they give the same answer without rebuilding it."""
+    from datetime import date as _date
     from db import Database
-    from gui import screen_time
     from synthdata import build
     today = _date(2026, 10, 1)
     db = Database(tmp_path / "t.db")
@@ -208,8 +205,3 @@ def test_screen_time_works_out_minutes_once_and_reuses_the_ranges_rows(tmp_path)
         minutes = stats.minute_summary(rows)
         assert stats.sessions(rows, minutes) == stats.sessions(rows)
         assert stats.longest_focus(rows, minutes) == stats.longest_focus(rows)
-        c = types.SimpleNamespace(db=db, start=start, end=end, today=today, rows=rows)
-        first = today - _td(days=6)
-        assert screen_time.week_of(c, first) == stats.activity(db, first, today + _td(days=1)), name
-    src = inspect.getsource(screen_time.OverviewView.update_view)
-    assert src.count("stats.minute_summary(") == 1 and "stats.activity(" not in src

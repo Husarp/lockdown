@@ -166,8 +166,8 @@ def start(log):
     run("sc", "start", SERVICE)
 
 
-# The new window needs the WebView2 Runtime (Windows 11 has it; some Windows 10 PCs don't). The old window doesn't,
-# so a failure here is only a warning.
+# The window needs the WebView2 Runtime (Windows 11 has it; some Windows 10 PCs don't). A failure here is only a
+# warning: the install goes on, and Lockdown itself says so if the window can't start.
 WEBVIEW2_CLIENT = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 WEBVIEW2_KEYS = (("HKLM", rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT}"),
                  ("HKLM", rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT}"),
@@ -210,7 +210,7 @@ def run_bootstrapper(path: Path) -> int:
 
 def webview2_step(log, present=None, download=None, run_it=None) -> str:
     """Make sure the WebView2 Runtime is there. Returns "present", "installed" or "failed"; never raises
-    (the old window works without it, so a failure is a line in the log, not an aborted install)."""
+    (a failure is a line in the log, not an aborted install)."""
     if (present or webview2_present)():
         return "present"
     log("Installing the WebView2 Runtime (needed for the new window)...")
@@ -427,7 +427,7 @@ def headings(mode: str, current) -> tuple[str, str]:
     return f"Lockdown {VERSION} Setup", "Blocks sites and apps, tracks your screen time"
 
 
-# ---------- look: Lockdown's dark theme (src/gui/theme.py) ----------
+# ---------- look: Lockdown's dark theme (the same colours as the app's) ----------
 
 BG, SURFACE, SURFACE2, BORDER, TRACK = "#101418", "#181D23", "#202730", "#2B333D", "#262D36"
 TEXT, MUTED, CONSOLE = "#E9EDF2", "#8D9AA8", "#0B0E12"

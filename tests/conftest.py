@@ -2,7 +2,7 @@
 
 Lockdown is a Windows app: several modules touch the Windows API the moment they are imported
 (`ctypes.WinDLL("kernel32")`, `import winreg`, pywin32, COM/UI Automation, pystray's win32 backend,
-customtkinter). On Windows this file does NOTHING - the real modules are used and production behaviour
+pywebview). On Windows this file does NOTHING - the real modules are used and production behaviour
 is untouched. Everywhere else it installs inert fakes *before* any test imports `src/`, so the logic
 tests (rules, anti-bypass, DB, reminders, ...) collect and run. Any fake Windows call just returns 0 /
 raises OSError ("not found"), the same as a Windows box where the thing is missing.
@@ -26,13 +26,12 @@ def _has_module(name):
         return False
 
 
-HAS_TK = _has_module("tkinter") and _has_module("customtkinter")
-
+HAS_TKINTER = _has_module("tkinter")   # (only installer/setup.py uses it)
 
 
 # --------------------------------------------------------------------------- generic inert fakes
 class _AnyMeta(type):
-    """Class-level attribute access on a fake class returns another fake (ctk.CTkFrame, tk.END, ...)."""
+    """Class-level attribute access on a fake class returns another fake (pystray.Menu, win32con.WM_USER, ...)."""
 
     def __getattr__(cls, name):
         if name.startswith("__") and name.endswith("__"):
@@ -182,26 +181,13 @@ def _install_windows_fakes():
 
 
 def _install_tk_fakes():
-    """No Tk here: let GUI modules *import* (their pure helpers/constants are tested) - building a widget
-    does nothing, so a test that needs a real widget must skip itself when tkinter is missing."""
-    for name in ("tkinter", "tkinter.font", "tkinter.ttk", "tkinter.filedialog", "tkinter.colorchooser",
-                 "tkinter.messagebox", "customtkinter",
-                 "customtkinter.windows", "customtkinter.windows.widgets",
-                 "customtkinter.windows.widgets.scaling", "customtkinter.windows.widgets.scaling.scaling_tracker",
-                 "PIL.ImageTk"):
-        top = name.split(".")[0]
-        if name == "PIL.ImageTk":
-            if not _has_module("tkinter"):
-                _install(name)
-                import PIL
-                PIL.ImageTk = sys.modules[name]
-        elif top == "tkinter" and not _has_module("tkinter"):
-            _install(name)
-        elif top == "customtkinter" and not _has_module("customtkinter"):
-            _install(name)
+    """No tkinter here: installer/setup.py (the only user left) can still be *imported* by its tests, which test the
+    install steps, not the window - the one that needs a real window skips itself when tkinter is missing."""
+    for name in ("tkinter", "tkinter.font"):
+        _install(name)
 
 
 if not IS_WINDOWS:
     _install_windows_fakes()
-    if not HAS_TK:
+    if not HAS_TKINTER:
         _install_tk_fakes()

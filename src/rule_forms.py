@@ -2,7 +2,7 @@
 
 The new window's blocker editors (js/rules/editors.js) hold what the owner typed as plain text: a *form*. This module is
 the AUTHORITY on what a form means. It parses and checks it - same ranges and the same messages as the old Tk editors
-in gui/rule_editors.py, which stay as they are - and builds the rule dict the Draft stores. js/rules/summary.js is a
+(gone now; ported from src/gui/rule_editors.py) - and builds the rule dict the Draft stores. js/rules/summary.js is a
 display-only copy, so the page can show an error and a one-line summary while the owner types; the cases in
 tests/fixtures/rule_cases.json keep the two in step. Nothing here decides whether a change LOOSENS a block: that is
 antibypass's job (rule_looser, via the Draft) and is never repeated in the page.
@@ -43,7 +43,7 @@ RULE_NAMES = {"scheduled": "By time", "time_limit": "Time limit", "switch_limit"
 RULE_SUBTITLES = {"scheduled": "allowed only inside these windows - or blocked inside them",
                   "time_limit": "a cap on how long per day / week", "switch_limit": "a cap on how often it's opened",
                   "permanent": "blocked all the time, until removed", "temporary": "blocked for a while from now"}
-# What a member of a group can be given on top of the group's rules (gui/groups.py CUSTOMIZABLE)
+# What a member of a group can be given on top of the group's rules
 CUSTOMIZABLE = ("scheduled", "time_limit", "switch_limit", "temporary")
 
 DURATIONS = {"15 min": 15, "30 min": 30, "1 hour": 60, "2 hours": 120, "3 hours": 180,
@@ -342,7 +342,7 @@ def form_from_rule(rule: dict | None, shared: bool = False, rule_type: str | Non
 # ---------------------------------------------------------------- the words (what the rail and the sentence say)
 
 def summary(rule: dict) -> str:
-    """One line describing a rule, shown on a blocker's rail row (gui/rule_editors.summary for a rule dict)."""
+    """One line describing a rule, shown on a blocker's rail row."""
     t = rule["rule_type"]
     if t == "scheduled":
         sched = load_schedule(rule["schedule"])

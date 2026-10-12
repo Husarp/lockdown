@@ -6,8 +6,8 @@ deleting one - is a loosening change: while Anti-Bypass is locked it goes throug
 (`ctx.guard.request`). Only recolouring is free (a colour blocks nothing). The page never says "confirmed": the change
 is a closure built here from validated input, kept under a ticket until Python has checked the challenge.
 
-The categories live in the same setting as the old window's (gui/categories.py KEY, same JSON), so both windows see the
-same list. That module imports tkinter, so the little bit of it we need is repeated here; a test keeps the two equal.
+The categories live in the setting `stats.categories` (KEY below), the same JSON the old window wrote, so a list made
+there is still read here.
 """
 import json
 import os

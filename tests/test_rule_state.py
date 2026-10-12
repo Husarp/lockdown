@@ -63,6 +63,5 @@ def test_hours_with_an_allowance_left_are_orange_not_red():
 
 @pytest.mark.parametrize("state, kind", [("blocked", "danger"), ("soon", "warn"), ("allowed", "ok")])
 def test_the_colours_the_states_map_to(state, kind):
-    from gui.blocking import CHIP_STATES
-    from gui.components import CHIP_STYLES
-    assert CHIP_STATES[state] == kind and kind in CHIP_STYLES
+    from webapi.blocking import CHIP_STATES
+    assert CHIP_STATES[state] == kind

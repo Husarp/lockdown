@@ -230,31 +230,3 @@ def test_paused_alerts_hold_the_break_prompt_and_end_a_strict_break(tmp_path):
     assert not [s for s in ui.shown if s[1:2] == ("break",)] and ui.shown[-1] == ("break_end",)
     run(e, t, 1)
     assert ui.shown[-1][0] == "break_start"                             # due again once it's over
-
-
-def test_leaving_the_bedtime_emergency_question_open_is_no_free_pause(tmp_path, monkeypatch):
-    """Review fix: the bedtime screen's Emergency button asks to confirm. Leaving that question open used to keep
-    the bedtime screen away for good without spending a use (the engine still thought it was on screen). Now the
-    click counts as a dismiss: the screen comes back on its escalation, and "Pause" later still works (and
-    closes it)."""
-    from types import SimpleNamespace
-
-    from gui import reminders_ui
-    db, ui, e = _bedtime(tmp_path)
-    asked = []
-    monkeypatch.setattr(reminders_ui, "ConfirmDialog", lambda *a, **kw: asked.append(kw))
-    screen = reminders_ui.ReminderUI(SimpleNamespace(db=db, after=lambda ms, fn: None))
-    screen.engine = e
-    e.tick(BED, 0, False)
-    screen._answer("sleep", "emergency")                                # the question is up, left unanswered
-    assert len(asked) == 1 and emergency.uses_left(db, BED)[0] == 3
-    t = run(e, BED, 16)
-    assert len(overlays(ui)) == 2                                       # back on the 15-min escalation
-    asked[0]["on_yes"]()                                                # answered at last: one use, paused
-    assert emergency.uses_left(db, t)[0] == 2 and "sleep" in ui.closed and "sleep" not in e.open
-    run(e, t, 19)
-    assert len(overlays(ui)) == 2
-    db.set_setting("emergency.uses", "1")                               # none left now: no question, a dismiss
-    e.answer("sleep", "dismiss")
-    screen._answer("sleep", "emergency")
-    assert len(asked) == 1 and "No emergency unlocks left." in ui.toasts

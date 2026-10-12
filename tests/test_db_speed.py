@@ -441,12 +441,6 @@ def test_list_items_hands_out_copies(tmp_path):
     assert again[0]["rules"][0]["rule_type"] == "permanent"
 
 
-def test_status_poll_counts_items_without_loading_them():
-    source = (Path(__file__).resolve().parents[1] / "src" / "gui" / "app.py").read_text(encoding="utf-8")
-    poll = source[source.index("def _poll_status(self):"):source.index("def _poll_status_once")]
-    assert "list_items()" not in poll and "item_count()" in poll
-
-
 def test_schema_changes_come_with_a_schema_version_bump():
     """A change to SCHEMA / MIGRATIONS / INDEXES without bumping SCHEMA_VERSION is silently never applied to an
     existing database (the migration pass is skipped). Change both - then update the pinned hash here."""
@@ -457,7 +451,8 @@ def test_schema_changes_come_with_a_schema_version_bump():
               5: "378a5d0d1e176d1b",                          # 5: how a group's members are blocked (0.84.11)
               6: "8cc40a7d06ab4b25",                          # 6: a daily time limit per weekday (0.84.12)
               7: "ab86b080a859e00b",                          # 7: emergency_unlocks.tier (emergency kinds)
-              8: "ab86b080a859e00b"}
+              8: "ab86b080a859e00b",
+              9: "4cc8c906e5383f2d"}                          # 9: a group's icon and colour (block_groups.icon / color)
     assert pinned.get(SCHEMA_VERSION) == hashlib.sha256(text.encode()).hexdigest()[:16], \
         (SCHEMA_VERSION, hashlib.sha256(text.encode()).hexdigest()[:16])
 

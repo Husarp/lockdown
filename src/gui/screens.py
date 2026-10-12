@@ -2,10 +2,9 @@
 
 The message goes on ONE monitor - the primary one - sized to exactly that monitor and centred on it; any other
 monitor gets a plain dark cover, so nothing is half-visible there. All rectangles are (left, top, right, bottom)
-in physical pixels, as Windows reports them (rcMonitor; the process is per-monitor DPI aware - customtkinter sets
-that), which is also what Tk's own `wm geometry` takes. customtkinter's `geometry()` would multiply the size by
-the display scaling a second time (a 150% screen got a cover 1.5x too big that spilled onto the next monitor and
-put the text off-centre), so covers are placed with `wm_geometry` and the rect as it is.
+in physical pixels, as Windows reports them (rcMonitor; the process is per-monitor DPI aware). They are used as
+they are: scaling them by the display scaling a second time (the old Tk window did) gave a 150% screen a cover 1.5x
+too big that spilled onto the next monitor and put the text off-centre.
 """
 import math
 import sys
@@ -102,7 +101,7 @@ def monitors() -> list[Monitor]:
             if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
                 scale = 1.0
                 x, y = wintypes.UINT(), wintypes.UINT()
-                # MDT_EFFECTIVE_DPI, the same reading customtkinter scales its widgets by
+                # MDT_EFFECTIVE_DPI: the display scaling the owner chose
                 if shcore is not None and shcore.GetDpiForMonitor(hmon, 0, ctypes.byref(x), ctypes.byref(y)) == 0:
                     scale = (x.value + y.value) / (2 * 96)
                 r = info.rcMonitor

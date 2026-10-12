@@ -4,11 +4,7 @@ Before, a group with a shared limit and a member with its own limit on top showe
 the Dashboard (the group's limit, its allowance, each member's own limit), each with used / left times that
 could no longer be spent ("20m left" on a member its group had already blocked)."""
 from datetime import datetime
-from types import SimpleNamespace
 
-import pytest
-
-from db import Database
 from rules import (TIME_FMT, Usage, allowance_note, block_end, blocked_text, counted_rules, describe_rule,
                    effective_rules, make_schedule, usage_targets)
 
@@ -44,7 +40,7 @@ def _used(groups, *uses):
 
 
 def _rows(now, groups, usage):
-    from gui.dashboard import limit_entries
+    from webapi.dashboard import limit_entries
     return [(e["name"], e["blocked"]) for e in limit_entries(now, [YOUTUBE, TWITCH], groups, usage)]
 
 
@@ -70,7 +66,7 @@ def test_the_line_says_the_block_that_lasts_longest():
     assert block_end(rules, at(16), Usage({})) is None
 
 
-# ---------- Dashboard ----------
+# ---------- Dashboard (webapi/dashboard.py) ----------
 
 def test_nothing_blocked_shows_each_limit_with_its_times():
     groups = _fun([GROUP_2H], OWN_1H)
@@ -101,7 +97,7 @@ def test_a_member_blocked_longer_by_its_own_limit_keeps_its_own_row():
 def test_a_loose_item_s_limit_row_says_when_the_item_is_allowed_again():
     night = {"rule_type": "scheduled", "schedule": make_schedule("block", [(EVERY_DAY, "22:00", "07:00")])}
     item = {**_item(3, "Game"), "rules": [night, {"rule_type": "time_limit", "daily_limit_min": 60}]}
-    from gui.dashboard import limit_entries
+    from webapi.dashboard import limit_entries
     rows = limit_entries(at(23), [item], [], _used([], (item, at(10), 60 * 60)))   # its limit ends at 00:00
     assert [(e["name"], e["blocked"]) for e in rows] == [("Game", "Blocked (until Tue 07:00)")]
 
@@ -120,7 +116,7 @@ def test_a_group_s_allowance_and_limit_blocked_together_are_one_row():
 def test_a_loose_item_blocked_by_its_hours_drops_its_limit_times():
     night = {"rule_type": "scheduled", "schedule": make_schedule("block", [(EVERY_DAY, "22:00", "07:00")])}
     item = {**_item(3, "Game"), "rules": [night, {"rule_type": "time_limit", "daily_limit_min": 60}]}
-    from gui.dashboard import limit_entries
+    from webapi.dashboard import limit_entries
     rows = limit_entries(at(23), [item], [], _used([], (item, at(10), 10 * 60)))
     assert [(e["name"], e["blocked"]) for e in rows] == [("Game", "Blocked (until Tue 07:00)")]
 
@@ -132,23 +128,18 @@ def test_an_emergency_unlock_shows_the_times_again():
     assert [b for _, b in _rows(at(12), groups, usage)] == [None, None]
 
 
-# ---------- Blocking list ----------
+# ---------- Blocking list (webapi/blocking.py) ----------
 
 def test_a_limit_chip_on_something_blocked_has_no_used_time():
-    from gui.blocking import _paint_chip
+    from webapi.blocking import _chips
     groups = _fun([GROUP_2H], OWN_1H)
     usage = _used(groups, (YOUTUBE, at(10), 40 * 60), (TWITCH, at(10), 80 * 60))
     rules = effective_rules(YOUTUBE, groups)
-    painted = []
-    chip = SimpleNamespace(configure=lambda **kw: painted.append(kw["text"].strip()))
-    for rule in rules:
-        _paint_chip(chip, rule, at(12), usage, siblings=rules)
-    assert painted == ["→ Fun · Limit (group): 2h 00m today", "→ Fun · Limit (own): 1h 00m today"]
-    painted.clear()
+    assert [c["t"] for c in _chips(rules, at(12), usage, rules)] == \
+        ["→ Fun · Limit (group): 2h 00m today", "→ Fun · Limit (own): 1h 00m today"]
     usage = _used(groups, (YOUTUBE, at(10), 40 * 60))                 # not blocked: the times are there
-    for rule in rules:
-        _paint_chip(chip, rule, at(12), usage, siblings=rules)
-    assert painted == ["→ Fun · Limit (group): 40m / 2h 00m today", "→ Fun · Limit (own): 40m / 1h 00m today"]
+    assert [c["t"] for c in _chips(rules, at(12), usage, rules)] == \
+        ["→ Fun · Limit (group): 40m / 2h 00m today", "→ Fun · Limit (own): 40m / 1h 00m today"]
 
 
 def test_the_texts_without_used_times():
@@ -158,82 +149,3 @@ def test_the_texts_without_used_times():
                  "allowance_min": 15}
     assert allowance_note(allowance, at(23), Usage({}), used=False) == "+ 15 min allowed during blocked hours"
     assert "left until 07:00" in allowance_note(allowance, at(23), Usage({}))
-
-
-def test_the_status_says_until_when_once():
-    from gui.blocking import status_of
-    groups = _fun([GROUP_2H], OWN_1H)
-    draft = SimpleNamespace(saved_items={1: YOUTUBE, 2: TWITCH}, saved_groups={7: groups[0]},
-                            item_not_applied=lambda i: False)
-    page = SimpleNamespace(draft=draft, app=SimpleNamespace(service_running=True))
-    usage = _used(groups, (TWITCH, at(10), 120 * 60))
-    assert status_of(page, YOUTUBE, at(12), usage)["text"] == "● Blocked (until Tue 00:00)"
-    assert status_of(page, YOUTUBE, at(12), Usage({}))["text"] == "● Allowed now"
-
-
-# ---------- web view ----------
-
-def test_the_web_view_shows_blocked_once_per_group(tmp_path, monkeypatch):
-    import webview_app
-    monkeypatch.setattr(webview_app, "now_from_db", lambda _db: at(12))
-    db = Database(tmp_path / "t.db")
-    yt = db.add_item("YouTube", ["yt.exe"], "app")
-    tw = db.add_item("Twitch", ["tw.exe"], "app")
-    solo = db.add_item("Game", ["game.exe"], "app", rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])
-    gid = db.add_group("Fun", [GROUP_2H], {yt: {}, tw: {}})
-    db.add_usage([(f"group:{gid}", "day:2026-09-14")], 120 * 60, MON.date())
-    db.add_usage([(f"item:{solo}", "day:2026-09-14")], 10 * 60, MON.date())
-    rows = {r["n"]: (r["blocked"], r["blockedBy"]) for r in webview_app._rules_for_ui(db)}
-    assert rows == {"YouTube": ("Blocked (until Tue 00:00)", "Fun"), "Twitch": ("Blocked (until Tue 00:00)", "Fun"),
-                    "Game": ("", "")}
-
-
-@pytest.fixture
-def tk_root():
-    import customtkinter as ctk
-    try:
-        root = ctk.CTk()
-    except Exception as e:   # (no display)
-        pytest.skip(f"no Tk display: {e}")
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
-def test_the_dashboard_card_paints_one_blocked_line(tk_root):  # (needs a display; skipped without one)
-    from gui.components import Rows
-    from gui.dashboard import DashboardPage, _limit_row
-    page = SimpleNamespace(limits=SimpleNamespace(note=SimpleNamespace(configure=lambda **kw: None)),
-                           limit_rows=Rows(tk_root, _limit_row))
-    groups = _fun([GROUP_2H], OWN_1H)
-    usage = _used(groups, (YOUTUBE, at(10), 40 * 60), (TWITCH, at(10), 80 * 60))
-    DashboardPage._limits(page, at(12), [YOUTUBE, TWITCH], groups, usage)
-    rows = page.limit_rows.items[:page.limit_rows.packed]
-    assert [(r.name.cget("text").strip(), r.text.cget("text"), r.left.cget("text")) for r in rows] == \
-        [("Fun (group)", "", "Blocked (until Tue 00:00)")]
-    DashboardPage._limits(page, at(12), [YOUTUBE, TWITCH], groups, _used(groups, (YOUTUBE, at(10), 40 * 60)))
-    rows = page.limit_rows.items[:page.limit_rows.packed]
-    assert [(r.name.cget("text").strip(), r.left.cget("text")) for r in rows] == \
-        [("YouTube (own, in Fun)", "20 m left"), ("Fun (group)", "1 h 20 m left")]   # (stats.hm)
-
-
-def test_the_web_view_names_the_group_only_when_it_blocks_every_member(tmp_path, monkeypatch):
-    import webview_app
-    db = Database(tmp_path / "t.db")
-    yt = db.add_item("YouTube", ["yt.exe"], "app")
-    tw = db.add_item("Twitch", ["tw.exe"], "app")
-    night = {"rule_type": "scheduled", "schedule": make_schedule("block", [(EVERY_DAY, "22:00", "07:00")]),
-             "allowance_min": 15, "allowance_shared": 0}                  # each member has its own 15 min
-    db.add_group("Fun", [night], {yt: {}, tw: {}})
-    groups, items = db.list_groups(), {i["display_name"]: i for i in db.list_items()}
-    usage = _used(groups, (items["YouTube"], at(22, 30), 15 * 60))        # only YouTube's is used up
-    monkeypatch.setattr(webview_app, "now_from_db", lambda _db: at(23))
-    monkeypatch.setattr(db, "usage_lookup", lambda _now: usage)
-    rows = {r["n"]: (r["blocked"], r["blockedBy"]) for r in webview_app._rules_for_ui(db)}
-    assert rows == {"YouTube": ("Blocked (until Tue 07:00)", ""), "Twitch": ("", "")}
-    usage = _used(groups, (items["YouTube"], at(22, 30), 15 * 60), (items["Twitch"], at(22, 30), 15 * 60))
-    monkeypatch.setattr(db, "usage_lookup", lambda _now: usage)
-    assert {r["n"]: r["blockedBy"] for r in webview_app._rules_for_ui(db)} == {"YouTube": "Fun", "Twitch": "Fun"}
-    usage.unlocks = {f"item:{tw}": at(23, 10)}                            # an emergency unlock frees one
-    assert {r["n"]: (r["blocked"], r["blockedBy"]) for r in webview_app._rules_for_ui(db)} == \
-        {"YouTube": ("Blocked (until Tue 07:00)", ""), "Twitch": ("", "")}

@@ -409,7 +409,7 @@ def test_the_allowance_notice_names_the_allowance_that_limits_it():
 
 
 def test_the_dashboard_limit_warning_is_the_limit_with_least_left():
-    from gui.dashboard import upcoming
+    from webapi.dashboard import upcoming
     groups = _fun([{"rule_type": "time_limit", "daily_limit_min": 120}],
                   {"time_limit": {"rule_type": "time_limit", "daily_limit_min": 60}})
     m = Meter(groups)
@@ -419,25 +419,10 @@ def test_the_dashboard_limit_warning_is_the_limit_with_least_left():
     assert [e["left"] for e in rows] == [600]
 
 
-def test_the_web_view_shows_both_blocked_hours_and_the_tightest_allowance(tmp_path, monkeypatch):
-    import webview_app
-    monkeypatch.setattr(webview_app, "now_from_db", lambda _db: at(10))
-    db = Database(tmp_path / "t.db")
-    yt = db.add_item("YouTube", ["yt.exe"], "app")
-    db.add_group("Fun", [_night("15:00", "18:00", 20)], {yt: {"scheduled": _night("13:00", "14:00", 5)}})
-    row = next(r for r in webview_app._rules_for_ui(db) if r["n"] == "YouTube")
-    assert [(w["from"], w["to"]) for w in row["windows"]] == [("15:00", "18:00"), ("13:00", "14:00")]
-    assert (row["allowOn"], row["allowMin"]) == (True, 5)
-
-
-def test_a_member_extra_needs_no_group_rule_of_its_kind_and_an_old_temporary_one_is_cleared():
-    from gui.groups import CUSTOMIZABLE, _live
+def test_a_member_extra_needs_no_group_rule_of_its_kind():
+    from rule_forms import CUSTOMIZABLE
     assert set(CUSTOMIZABLE) == {"scheduled", "time_limit", "switch_limit", "temporary"}
-    over = {"temporary": {"rule_type": "temporary", "temp_until": "2020-01-01 00:00:00"},
-            "time_limit": {"rule_type": "time_limit", "daily_limit_min": 60}}
-    assert _live(over) == {"time_limit": over["time_limit"]}
-    later = {"temporary": {"rule_type": "temporary", "temp_until": "2999-01-01 00:00:00"}}
-    assert _live(later) == later
+    over = {"time_limit": {"rule_type": "time_limit", "daily_limit_min": 60}}
     # a group with only blocked hours, YouTube 1 h of its own: it applies, and it fills nothing of the group's
     groups = _fun([_night("22:00", "07:00", 0)], {"time_limit": over["time_limit"]})
     m = Meter(groups)

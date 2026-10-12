@@ -144,15 +144,13 @@ def test_the_agent_has_no_flags_it_cannot_do():
     assert not hasattr(agent, "handles") and not hasattr(agent, "NOT_YET") and not hasattr(agent, "hand_over")
 
 
-# ---------------------------------------------------------------- theme constants
+# ---------------------------------------------------------------- theme constants (the saved values)
 
-def test_gui_theme_still_has_the_same_constants():
-    from gui import theme
-    assert theme.THEME_KEY == "ui.theme" and theme.ACCENT_KEY == "ui.accent" and theme.SIZE_KEY == "ui.scale"
-    assert theme.THEMES == {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "system"}
-    assert theme.ACCENTS["Orange"] == "#DB5126" and len(theme.ACCENTS) == 8
-    assert theme.ACCENTS is ui_theme.ACCENTS and theme.THEMES is ui_theme.THEMES
-    assert theme.BG == ("#EFF1F4", "#101418") and theme.APP_ICON == ui_theme.APP_ICON
+def test_the_saved_theme_keys_and_values_are_unchanged():
+    assert ui_theme.THEME_KEY == "ui.theme" and ui_theme.ACCENT_KEY == "ui.accent" and ui_theme.SIZE_KEY == "ui.scale"
+    assert ui_theme.THEMES == {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "system"}
+    assert ui_theme.ACCENTS["Orange"] == "#DB5126" and len(ui_theme.ACCENTS) == 8
+    assert (ui_theme.BG_LIGHT, ui_theme.BG_DARK) == ("#EFF1F4", "#101418")
 
 
 def test_background_per_theme(tmp_path, monkeypatch):

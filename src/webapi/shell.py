@@ -121,7 +121,7 @@ PAGES = ("main", "overlay", "corner", "challenge")
 def page_ready(ctx, name):
     """A window's page has loaded and its link to Python works (the cover and the corner: and it has drawn what is up).
     Only then does the agent show that window: one shown before is an empty dark rectangle - the full-screen cover a
-    black screen with no way out - and a main page that never says it works hands the run to the old window."""
+    black screen with no way out - and a main page that never says it works makes the agent log it, tell the owner and start again."""
     if name not in PAGES:
         raise ApiError("Bad request: unknown page.")
     hook = getattr(ctx, "on_page_ready", None)

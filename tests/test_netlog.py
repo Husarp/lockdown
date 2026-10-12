@@ -49,7 +49,7 @@ def test_logger_counts_new_connections(tmp_path, monkeypatch):
 
 
 def test_site_to_block():
-    from gui.network import site_to_block
+    from webapi.network import site_to_block
     assert site_to_block("rr3---sn-4g5e.googlevideo.com") == "googlevideo.com"
     assert site_to_block("www.bbc.co.uk") == "bbc.co.uk"
     assert site_to_block("www.youtube.com") == "youtube.com"

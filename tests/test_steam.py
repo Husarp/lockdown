@@ -1,6 +1,6 @@
 from blocker import apps
-from gui.app_browser import matches
 from monitor import steam
+from resident.catalog import AppCatalog
 
 
 def test_manifest_and_library_folders(tmp_path):
@@ -35,10 +35,17 @@ def test_steam_game_folder_is_the_whole_game():
     assert apps.helper_folder(r"D:\SteamLibrary\steamapps\common\PEAK\PEAK.exe") == r"d:\steamlibrary\steamapps\common\peak"
 
 
-def test_app_search_words_and_running_first():
+def test_app_search_words_and_running_first(tmp_path):
     found = [{"name": "Lethal Company", "exe": "lethal company.exe", "running": False},
              {"name": "Discord", "exe": "discord.exe", "running": True},
              {"name": "Company of Heroes", "exe": "reliccoh.exe", "running": True}]
-    assert [a["name"] for a in matches(found, "company")] == ["Company of Heroes", "Lethal Company"]
-    assert [a["name"] for a in matches(found, "lethal comp")] == ["Lethal Company"]
-    assert [a["name"] for a in matches(found, "")][0] in ("Company of Heroes", "Discord")
+    catalog = AppCatalog(tmp_path / "cat.json", list_apps=lambda: [{"path": "", "steam": False, **a} for a in found],
+                         running_now=lambda: {a["exe"]: "" for a in found if a["running"]})
+    catalog.load_now()
+
+    def matches(text):
+        return [a["name"] for a in catalog.search("all", text)["apps"]]
+
+    assert matches("company") == ["Company of Heroes", "Lethal Company"]
+    assert matches("lethal comp") == ["Lethal Company"]
+    assert matches("")[0] in ("Company of Heroes", "Discord")

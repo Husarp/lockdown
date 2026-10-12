@@ -9,8 +9,8 @@ youtube.com / googlevideo.com whatever asks. Now a site's notice needs a browser
 front on another monitor) showing that site around the time of the visit; every hit is still recorded.
 
 These drive the real path: the service's Enforcer.on_visit (what the listener calls) writes the block events, the
-tray's UsageTracker.tick and WordGuard.tick see the windows in front, and LockdownApp._poll_block_events /
-_check_visits / _alert decide - only Windows (the windows in front, the browser's address bar) is faked."""
+tray's UsageTracker.tick and WordGuard.tick see the windows in front, and the agent's BlockEventWorker (its
+_check_visits) / Alerter decide - only Windows (the windows in front, the browser's address bar) is faked."""
 import time
 import types
 from datetime import timedelta
@@ -20,6 +20,7 @@ import pytest
 from db import Database
 from monitor import usage as usage_mod
 from monitor.word_guard import WordGuard
+from resident import workers
 from tests.test_app_limit_enforcement import FRIDAY, World, at
 
 YOUTUBE = ["youtube.com", "m.youtube.com", "youtu.be", "googlevideo.com"]   # the popular-sites target
@@ -27,26 +28,48 @@ FIREFOX = r"C:\Program Files\Mozilla Firefox\firefox.exe"
 WORDS_OFF = {"enabled": False, "action": "close"}
 
 
+class WorldClock:
+    """The workers' three clocks (trusted time, the PC clock, the pacing clock) on the world's."""
+
+    def __init__(self, w: World):
+        self.w = w
+
+    def now(self, db):
+        return self.w.now
+
+    def wall(self):
+        return self.w.ts
+
+    def mono(self):
+        return self.w.ts
+
+
 class Tray:
-    """The tray agent's blocked-visit side: the real LockdownApp methods on a stand-in, its own connection."""
+    """The agent's blocked-visit side: the real BlockEventWorker and Alerter (resident/workers.py) with the world's
+    clocks, its own connection; only the notice and the closing of windows are recorded."""
 
     def __init__(self, w: World, monkeypatch):
-        from gui import app as appmod
         self.w = w
         self.db = Database(w.path)
         self.shown: list[str] = []
         self.closed: list[str] = []
-        self.last_event_id = self.db.last_block_event_id()
-        self.visits = {}
-        self.last_alert = {}
-        self._ALERT_KEY = appmod.LockdownApp._ALERT_KEY
-        self.after = lambda *a: None
-        self._show = lambda message, **k: self.shown.append(message)
-        for name in ("_poll_block_events", "_check_visits", "_alert", "_save_last_alert"):
-            setattr(self, name, types.MethodType(getattr(appmod.LockdownApp, name), self))
-        monkeypatch.setattr(appmod, "now_from_db", lambda db: w.now)
-        monkeypatch.setattr(appmod.win, "close_app", lambda exe: self.closed.append(exe))
+        self.closed_windows: list[set] = []
+        win = types.SimpleNamespace(close_app=self.closed.append,
+                                    close_windows=lambda pids: self.closed_windows.append(set(pids)))
+        self.hub = workers.Hub(w.path, clock=WorldClock(w), win=win)
+        self.hub.notify.show = lambda message, action=None, actions=None, sticky=False: self.shown.append(message)
+        self.alerter = workers.Alerter(self.hub)
+        self.worker = workers.BlockEventWorker(self.hub, self.alerter)
+        self.worker.setup()
         self.tracker = usage_mod.UsageTracker()
+
+    @property
+    def visits(self):
+        return self.worker.visits
+
+    @property
+    def last_alert(self):
+        return self.alerter.last_alert
 
     def front(self, url: str | None, exe: str = "firefox.exe", others=()):
         """One tick of the tray's tracker with this in front (a browser on `url`)."""
@@ -55,7 +78,7 @@ class Tray:
 
     def poll(self, seconds: float = 1):
         self.w.ts += seconds
-        self._poll_block_events()
+        self.worker.tick()
 
 
 @pytest.fixture

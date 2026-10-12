@@ -83,6 +83,18 @@ def roll_up(db):
 
 # ---------------------------------------------------------------- Switches: the old numbers, from stats
 
+def name_of(kind, name, items):
+    """The name an app is shown by (what the old window's gui/appinfo.name_of did): its blocklist name, else the exe
+    name without .exe, first letter upper case."""
+    if kind != "app":
+        return name
+    for item in items:
+        if item["item_type"] == "app" and item["target"].lower() == name:
+            return item["display_name"]
+    stem = name[:-4] if name.endswith(".exe") else name
+    return stem[:1].upper() + stem[1:]
+
+
 def old(db, rng):
     start, end = stats.range_dates(rng, TODAY)
     return stats.switch_summary(stats.switches(db, start, end), NOW)
@@ -98,8 +110,7 @@ def test_the_switches_tab_says_what_switch_summary_says(fresh, rng):
     assert int(cards["short"]["value"]) == want["short"]
     assert cards["visit"]["value"] == stats.ms(want["avg_visit"])
     items = fresh.ctx.db.list_items()
-    from gui import appinfo
-    top = [appinfo.name_of(kind, name, items) for kind, name in want["short_top"]]
+    top = [name_of(kind, name, items) for kind, name in want["short_top"]]
     assert cards["short"]["sub"] == (f"mostly {' and '.join(top)}" if top else "")
     peak = max(want["per_hour"], key=want["per_hour"].get)
     assert d["peak"] == f"Peak between {peak:02d}:00 and {peak + 1:02d}:00 - {want['per_hour'][peak]} switches."
@@ -109,7 +120,7 @@ def test_the_switches_tab_says_what_switch_summary_says(fresh, rng):
         text, tone = st.VISIT_STYLES[stats.visit_style(count, avg)]
         assert (row["kind"], row["name"], row["count"], row["avg"], row["style"], row["tone"]) == \
             (kind, name, count, f"avg {stats.ms(avg)}", text, tone)
-        assert row["display"] == appinfo.name_of(kind, name, items)
+        assert row["display"] == name_of(kind, name, items)
 
 
 def test_the_switch_labels_follow_the_range(fresh):

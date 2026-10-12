@@ -1,12 +1,9 @@
 """R19: the rule editors' forms -> rule dicts (src/rule_forms.py) and the Api's `rules_validate` (webapi/rules.py).
 
 tests/fixtures/rule_cases.json holds the cases (inputs -> expected rule dicts, errors and summary sentences), written by
-hand from what the legacy Tk editors (src/gui/rule_editors.py) do. This file runs them against Python; the same file
-runs against the page's display copy in tests/ui/js/summary.test.mjs, which keeps the two in step. Where the legacy
-editors have pure helpers (parse_duration, format_duration, _minutes, LimitEditor._read, summary) they are called too,
-so a form gives exactly what the old editor would have saved."""
+hand from what the old Tk editors did (that window is gone). This file runs them against Python; the same file
+runs against the page's display copy in tests/ui/js/summary.test.mjs, which keeps the two in step."""
 import json
-import random
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -114,83 +111,21 @@ def test_the_names_the_page_shows_are_the_same_here():
     assert [[k, v] for k, v in rf.UNITS.items()] == meta["units"]
 
 
-# ---------------------------------------------------------------- the same as the legacy editors
+# ---------------------------------------------------------------- limits and starting values
 
-@pytest.fixture(scope="module")
-def legacy():
-    """gui/rule_editors.py (customtkinter; the test conftest fakes it where it is missing) - only its pure helpers."""
-    from gui import rule_editors
-    return rule_editors
-
-
-def test_the_constants_are_the_legacy_ones(legacy):
-    assert rf.DURATIONS == legacy.DURATIONS and rf.UNITS == legacy.UNITS
-    assert rf.MAX_TEMPORARY_MIN == legacy.MAX_TEMPORARY_MIN
-    assert rf.PERIOD_LABELS == legacy.PERIOD_LABELS and rf.PERIOD_MAX_MIN == legacy.PERIOD_MAX_MIN
-    assert rf.RULE_NAMES == legacy.RULE_NAMES and rf.RULE_SUBTITLES == legacy.RULE_SUBTITLES
-    assert list(rf.RULE_TYPES) == list(legacy.EDITORS) == list(legacy.RULE_NAMES)
+def test_the_period_limits_and_names():
+    assert rf.MAX_TEMPORARY_MIN == 43200
+    assert rf.PERIOD_LABELS == {"day": "per day", "week": "per week", "month": "per month"}
+    assert rf.PERIOD_MAX_MIN == {"day": 1440, "week": 10080, "month": 44640}
 
 
-def _outcome(fn, *args):
-    try:
-        return "ok", fn(*args)
-    except ValueError as e:
-        return "error", str(e)
-
-
-def _noise(rng, n=400):
-    alphabet = "0123456789  hHmM:.-+x'\""
-    return ["".join(rng.choice(alphabet) for _ in range(rng.randint(0, 7))) for _ in range(n)]
-
-
-def test_parse_and_format_duration_are_the_legacy_ones(legacy):
-    texts = [t for t, _ in FIXTURE["durations"]] + _noise(random.Random(19))
-    for text in texts:
-        assert _outcome(rf.parse_duration, text) == _outcome(legacy.parse_duration, text), repr(text)
-    for minutes in (None, 0, 1, 59, 60, 61, 90, 1440, 10000):
-        assert rf.format_duration(minutes) == legacy.format_duration(minutes)
-
-
-def test_amount_boxes_read_like_the_legacy_ones(legacy):
-    """Time-limit boxes (LimitEditor._read) and minute boxes (_minutes): same number or same message."""
-    rng = random.Random(7)
-    texts = [t for t, _ in FIXTURE["durations"]] + _noise(rng) + ["24h", "25h", "168h", "169h", "744h", "745h", "1m", "0m"]
-    for text in texts:
-        for period in ("day", "week", "month"):
-            assert _outcome(rf._read_limit, text, period, "x") == _outcome(legacy.LimitEditor._read, text, period), (text, period)
-        assert _outcome(rf._read_limit, text, "day", "x", "Friday") == _outcome(legacy.LimitEditor._read, text, "day", "Friday")
-    for text in ("", "0", "5", "1440", "1441", "-3", "abc", " 12 ", "1.5", "007"):
-        for low, high in ((0, 1440), (1, 1440)):
-            assert _outcome(rf._minutes, text, low, high, "Allowance", "f") == _outcome(legacy._minutes, text, low, high, "Allowance")
-
-
-class _Editor:
-    """What the legacy summary() needs of an editor: value()."""
-
-    def __init__(self, rule):
-        self.rule = rule
-
-    def value(self):
-        return self.rule
-
-
-def test_summaries_are_the_legacy_ones(legacy):
-    for case in FIXTURE["forms"]:
-        if "rule" in case:
-            rule = case["rule"]
-            assert rf.summary(rule) == legacy.summary(rule["rule_type"], _Editor(rule)), case["id"]
-    bad = _Editor(None)
-    bad.value = lambda: (_ for _ in ()).throw(ValueError("x"))
-    assert legacy.summary("time_limit", bad) == rf.BAD_SETTINGS
-
-
-def test_the_legacy_hours_default_and_load_match(legacy):
-    """HoursEditor.load(None): allow only, all days 09:00-17:00, allowance 0; the others' starting values likewise."""
+def test_the_starting_values_of_a_new_editor():
+    """A new "hours" editor: allow only, all days 09:00-17:00, allowance 0; the others' starting values likewise."""
     assert rf.default_form("scheduled") == {"rule_type": "scheduled", "mode": "allow", "allowance": "0",
                                             "windows": [{"days": list(range(7)), "start": "09:00", "end": "17:00"}]}
-    assert rf.default_form("time_limit")["day"] == legacy.format_duration(30)
+    assert rf.default_form("time_limit")["day"] == rf.format_duration(30)
     assert rf.default_form("switch_limit")["day"] == "10" and rf.default_form("switch_limit")["gap"] == "5"
-    assert rf.default_form("temporary")["choice"] == str(legacy.DURATIONS["1 hour"])
+    assert rf.default_form("temporary")["choice"] == str(rf.DURATIONS["1 hour"])
 
 
 # ---------------------------------------------------------------- per-weekday limits round-trip with rules.day_limits

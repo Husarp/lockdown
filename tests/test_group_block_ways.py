@@ -333,54 +333,6 @@ def test_an_older_database_gets_the_columns_and_its_groups_unchanged(tmp_path):
     assert _way(db, yt) == "dns,back"
 
 
-# ---------------------------------------------------------------- the editor's tick boxes (needs a display)
-
-def test_the_member_window_greys_the_group_s_way_and_offers_only_more(monkeypatch):
-    from test_overlay_screens import _tk_root
-    ctk, root = _tk_root()
-    try:
-        from gui.groups import WayBoxes
-        boxes = WayBoxes(root, "site", locked={"dns", "close"})
-        assert boxes.boxes["dns"].cget("state") == "disabled" and boxes.boxes["dns"].get()
-        assert boxes.boxes["back"].cget("state") == "disabled"          # closing the tab already covers it
-        assert boxes.value() is None                                      # nothing of its own
-        apps = WayBoxes(root, "app", locked={"internet"})
-        apps.boxes["close"].select()
-        apps._ticked("close")
-        assert apps.value() == "close" and apps.boxes["minimize"].cget("state") == "disabled"
-        apps.boxes["background"].select()
-        assert apps.value() == "close,background"
-        group = WayBoxes(root, "app")
-        group.set("close")
-        assert group.value() == "close"
-        group.set(None)
-        assert group.value() is None                                     # not chosen: each as it is set
-    finally:
-        root.destroy()
-
-
-def test_the_item_editor_says_when_a_group_s_way_applies_instead(tmp_path):
-    """Review: the item's own "When blocked" isn't what a group that chose its way uses - the editor says so."""
-    import types
-
-    from test_overlay_screens import _tk_root
-    ctk, root = _tk_root()
-    try:
-        from gui.blocking import AddTab
-        db = Database(tmp_path / "t.db")
-        yt = db.add_item("YouTube", ["youtube.com"], "site", rules=[], block_type="dns,close")
-        db.add_group("Evening", [{"rule_type": "permanent"}], {yt: {}}, {"site_block": "dns"})
-        db.add_group("Other", [{"rule_type": "permanent"}], {yt: {}}, {"app_block": "internet"})
-        page = types.SimpleNamespace(draft=Draft(db), app=types.SimpleNamespace(db=db),
-                                     show_tab=lambda *a: None, confirm=lambda *a: None)
-        tab = AddTab(root, page)
-        tab.edit(yt)
-        assert tab.info.cget("text") == ("Also in groups: Evening, Other (edit those in the Groups tab) - when "
-                                         "Evening blocks it, that group's way of blocking applies")
-    finally:
-        root.destroy()
-
-
 # ---------------------------------------------------------------- a member app's own way (T3)
 
 def test_an_app_member_s_own_way_is_instead_of_the_group_s_and_defaults_to_it(tmp_path):
@@ -487,53 +439,6 @@ def test_an_own_way_moved_to_the_challenge_in_the_draft(tmp_path):
     d.set_group(gid, g["name"], g["rules"], g["members"],
                 {"app_block": "close", "site_block": g["site_block"], "member_blocks": {game: "minimize"}})
     assert d.loosening() == ["Loosen group Evening"]
-
-
-def test_the_member_window_offers_a_program_file_only_close_and_minimise():
-    from test_overlay_screens import _tk_root
-    ctk, root = _tk_root()
-    try:
-        from gui.groups import WayBoxes
-        boxes = WayBoxes(root, "app", hosted=True)
-        boxes.set("close,internet,background")
-        assert boxes.value() == "close"
-        assert boxes.boxes["internet"].cget("state") == "disabled"
-        assert boxes.boxes["background"].cget("state") == "disabled"
-        boxes.set("minimize,internet")
-        assert boxes.value() == "minimize"
-        plain = WayBoxes(root, "app")
-        plain.set("minimize,internet")
-        assert plain.value() == "minimize,internet"
-    finally:
-        root.destroy()
-
-
-def test_the_member_window_gives_an_app_its_own_way_and_a_site_only_more(monkeypatch):
-    from test_overlay_screens import _tk_root
-    ctk, root = _tk_root()
-    try:
-        import gui.groups
-        from gui.groups import CustomizeMember
-        monkeypatch.setattr(gui.groups, "CUSTOMIZABLE", ())      # (the rule editors need the real theme)
-        got = []
-        game = {"item_id": 2, "name": "Game", "item": _items()[2], "overrides": {}, "way": None}
-        win = CustomizeMember(root, game, [], lambda o, w: got.append(w), "close")
-        win._ok()
-        assert got == [None]                                  # switch off: the group's way
-        win = CustomizeMember(root, game, [], lambda o, w: got.append(w), "close")
-        win.own.select()
-        win.way.set("minimize")
-        win._ok()
-        assert got[-1] == "minimize"
-        jar = {"item_id": 3, "name": "g", "item": {**_items()[2], "target": "game.jar"}, "overrides": {},
-               "way": "close,internet"}
-        win = CustomizeMember(root, jar, [], lambda o, w: got.append(w), "internet")
-        assert win.way.hosted and win.way.value() == "close"
-        site = {"item_id": 1, "name": "YT", "item": _items()[1], "overrides": {}, "way": None}
-        win = CustomizeMember(root, site, [], lambda o, w: got.append(w), "dns")
-        assert win.own is None
-    finally:
-        root.destroy()
 
 
 # ---------------------------------------------------------------- backups from before an app's own way replaced the group's

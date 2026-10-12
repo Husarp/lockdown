@@ -1,7 +1,7 @@
 """Text typed before 0.70.1, when a letter typed with AltGr arrived as the wrong one.
 
 Tk handed the character over as one byte in the keyboard's codepage and tkinter read that byte as Western
-European, so on a Polish keyboard "pamiętaj" was saved as "pamiêtaj". New typing is fine (gui/shortcuts), but
+European, so on a Polish keyboard "pamiętaj" was saved as "pamiêtaj". New typing was fixed in the old Tk window (and the web page has no such problem), but
 whatever was saved before stayed wrong, so it is put back once - only when the text carries a character that
 practically cannot be typed on purpose here (a superscript 3, an inverted question mark, an oe ligature...),
 which is what makes the mix-up recognisable.

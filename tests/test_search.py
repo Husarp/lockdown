@@ -1,5 +1,5 @@
 import search
-from gui.app_browser import matches
+from resident.catalog import AppCatalog
 
 
 def test_small_typos_are_fine():
@@ -19,10 +19,18 @@ def test_rank_puts_exact_matches_first():
     assert search.rank(items, "discord", lambda s: s) == ["Discord", "Discrd Nitro", "Disco Elysium"]   # 0, 1, 2 typos
 
 
-def test_steam_games_listed_under_steam():
+def matches(tmp_path, apps, text):
+    """The app picker's list for `text` (resident.catalog), as app names."""
+    catalog = AppCatalog(tmp_path / "cat.json", list_apps=lambda: [{"path": "", "steam": False, **a} for a in apps],
+                         running_now=lambda: {a["exe"]: "" for a in apps if a.get("running")})
+    catalog.load_now()
+    return [a["name"] for a in catalog.search("all", text)["apps"]]
+
+
+def test_steam_games_listed_under_steam(tmp_path):
     apps = [{"name": "PEAK", "exe": "peak.exe", "running": False, "steam": True},
             {"name": "Discord", "exe": "discord.exe", "running": True},
             {"name": "Steam", "exe": "steam.exe", "running": False},
             {"name": "Lethal Company", "exe": "lethal company.exe", "running": True, "steam": True}]
-    assert [a["name"] for a in matches(apps, "steam")] == ["Steam", "Lethal Company", "PEAK"]
-    assert [a["name"] for a in matches(apps, "lethl")] == ["Lethal Company"]
+    assert matches(tmp_path, apps, "steam") == ["Steam", "Lethal Company", "PEAK"]
+    assert matches(tmp_path, apps, "lethl") == ["Lethal Company"]

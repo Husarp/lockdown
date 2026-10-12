@@ -56,9 +56,10 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   dismissing asks half as often for the rest of the day, and reminders due around a break ride along in it.
   A strict break minimises your windows; apps on your "Allowed during breaks" list (Lockdown + Settings by
   default) stay usable.
-- **New window:** a faster window in a new look - the window Lockdown opens in. If it can't start on a PC (no
-  WebView2, its page never loads), the old window opens instead for that run; the reason is in the Lockdown log and
-  `%TEMP%\lockdown-newui.log`.
+- **The window:** a web page in a native window (Edge WebView2; the installer adds the runtime where Windows lacks
+  it). If it can't start on a PC (no WebView2, its page never loads), Lockdown writes the reason to its log and
+  `%TEMP%\lockdown-newui.log`, shows a message and tries once more; the tray agent keeps running either way. The old
+  Tk window is gone.
 - **Anti-Bypass** (Phase 7): loosening a block (removing it, higher limits, switching a protection list off, more
   emergency unlocks, quitting from the tray, ...) needs the challenges you turn on - typing a random phrase (no
   pasting; optionally word by word in a 3×3 grid of boxes picked at random - macros can't type blindly)
@@ -224,9 +225,9 @@ Set `LOCKDOWN_DATA_DIR` to use a different data folder (e.g. for testing).
 `python scripts/bench_stats.py` times the Dashboard / Screen Time data work on a big synthetic database (a year of
 minutes, 6 000 blocked items); `--src <other checkout>/src` measures another version for comparison.
 
-Design: `design/Lockdown Dashboard & Screen Time.dc.html` (Claude Design). Colours/fonts live in `src/gui/theme.py`;
-fonts (Inter, Barlow Condensed - SIL Open Font License, licences next to them) are in `assets/fonts`, the Lucide
-sidebar icons (rendered from the design) in `assets/icons`.
+Design: `design/Lockdown Dashboard & Screen Time.dc.html` (Claude Design). Colours and the system font stack live in
+`src/ui/css/tokens.css`; the installer's fonts (Inter, Barlow Condensed - SIL Open Font License, licences next to them)
+are in `assets/fonts`.
 
 ## Known limitations
 

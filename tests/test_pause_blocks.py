@@ -8,7 +8,6 @@ the same while. It is kept in trusted time in the database: the service and the 
 survives a restart, ends on the dot, and a clock change can't stretch it. It is neither the whole-app off switch
 nor an emergency unlock (no use is spent).
 """
-import types
 from datetime import datetime, timedelta
 
 import pytest
@@ -238,58 +237,6 @@ def test_a_warning_says_your_blocks_are_back_on_soon(tmp_path):
     assert out == ["Your blocks are back on in 4 min (22:30): Game will be blocked again."]
 
 
-# ---------------------------------------------------------------- the challenge, and resuming
-
-def fake_app(db, now=NOW):
-    from gui import app as appmod
-    me = types.SimpleNamespace(db=db, asked=[], refreshed=0)
-    me.refresh_pause = lambda: setattr(me, "refreshed", me.refreshed + 1)
-    for name in ("pause_blocks", "resume_blocks", "guard"):
-        setattr(me, name, types.MethodType(getattr(appmod.LockdownApp, name), me))
-    return me, appmod
-
-
-def test_starting_it_needs_the_challenge_resuming_never_does(tmp_path, monkeypatch):
-    db = Database(tmp_path / "t.db")
-    me, appmod = fake_app(db)
-    monkeypatch.setattr(appmod, "now_from_db", lambda d: NOW)
-    shown = []
-
-    class Challenge:
-        def __init__(self, app, changes, proceed, cancel):
-            shown.append(changes)
-            self.proceed = proceed
-
-        def __getattr__(self, name):
-            return lambda *a, **k: None
-    monkeypatch.setattr(appmod, "ChallengeWindow", Challenge)
-    me.challenge, me.deiconify = None, lambda: None
-    antibypass.save(db, {**antibypass.settings(db), "phrase": True})
-    done = []
-    me.pause_blocks(60, True, lambda: done.append(1))
-    assert len(shown) == 1 and "Pause all your blocks for 1 h (until 23:00)" in shown[0][0]
-    assert "silence all notifications" in shown[0][0]
-    assert pause.state(db, NOW) is None and not done                # nothing yet: the phrase isn't typed
-    me.challenge.proceed()                                          # passed
-    assert pause.state(db, NOW) == {"started": NOW, "until": NOW + timedelta(hours=1), "silent": True}
-    assert done == [1]
-    me.challenge = None
-    me.resume_blocks()                                              # free: no challenge
-    assert len(shown) == 1 and pause.state(db, NOW) is None
-
-
-def test_with_a_locked_mode_on_it_always_asks(tmp_path, monkeypatch):
-    db = Database(tmp_path / "t.db")
-    me, appmod = fake_app(db)
-    monkeypatch.setattr(appmod, "now_from_db", lambda d: NOW)
-    asked = []
-    me.guard = lambda changes, proceed, cancel=None, force=False: asked.append(force)
-    me.pause_blocks(30, False)
-    modes.start(db, "work", NOW, NOW + timedelta(hours=2), locked=True)
-    me.pause_blocks(30, False)
-    assert asked == [False, True]
-
-
 # ---------------------------------------------------------------- silencing the notifications
 
 def test_silenced_bedtime_breaks_and_reminders_then_back(tmp_path):
@@ -320,24 +267,6 @@ def test_a_pause_without_silence_keeps_the_reminders(tmp_path):
     pause.start(db, NOW, 60, silent=False)
     run(e, NOW, 21)
     assert any(s[1] == "custom:water" for s in ui.shown)
-
-
-def test_the_windows_notices_and_popups_are_silenced(tmp_path, monkeypatch):
-    from gui import app as appmod
-    db = Database(tmp_path / "t.db")
-    sent = []
-    me = types.SimpleNamespace(db=db, toaster=types.SimpleNamespace(send=lambda *a, **k: sent.append(a[0]),
-                                                                   works=lambda: True))
-    show = types.MethodType(appmod.LockdownApp._show, me)
-    clock = [NOW]
-    monkeypatch.setattr(appmod, "now_from_db", lambda d: clock[0])
-    monkeypatch.setattr(appmod.win, "is_fullscreen", lambda: False)
-    db.set_setting("notify.format", "toast")
-    pause.start(db, NOW, 30, silent=True)
-    assert show("Game will be blocked in 5 min.") is False
-    assert show("Your time is up.", force=True) is False            # urgent ones too
-    clock[0] = NOW + timedelta(minutes=30)
-    assert show("Game will be blocked in 5 min.") is True and sent == ["Game will be blocked in 5 min."]
 
 
 # ---------------------------------------------------------------- the tray

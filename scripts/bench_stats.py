@@ -42,7 +42,7 @@ def main():
     sys.path.insert(0, args.src)
     sys.path.insert(1, str(ROOT / "tests"))
     if sys.platform != "win32":
-        import conftest  # noqa: F401  (inert Windows / Tk fakes so the modules import)
+        import conftest  # noqa: F401  (inert Windows fakes so the modules import)
     from synthdata import build
     db_mod = importlib.import_module("db")
     stats = importlib.import_module("stats")
@@ -50,7 +50,10 @@ def main():
     modes = importlib.import_module("modes")
     reminders = importlib.import_module("reminders")
     rules = importlib.import_module("rules")
-    dashboard = importlib.import_module("gui.dashboard")
+    try:
+        dashboard = importlib.import_module("webapi.dashboard")
+    except ImportError:               # an older checkout (--src) still has the Tk window's Dashboard
+        dashboard = importlib.import_module("gui.dashboard")
     try:
         retention = importlib.import_module("retention")
     except ImportError:
@@ -77,7 +80,7 @@ def main():
         (lambda s, e: stats.per_day(stats.activity(db, s, e)))
 
     def dashboard_refresh():
-        """The data side of DashboardPage.refresh (gui/dashboard.py), as each version does it."""
+        """The data side of the Dashboard refresh (webapi/dashboard.py; DashboardPage.refresh in older code), as each version does it."""
         first = stats.first_activity(db)
         items, groups = db.list_items(), db.list_groups()
         usage = db.usage_lookup(now)

@@ -4,7 +4,6 @@ The page is untrusted, so the checks that matter are the refusals: no folder but
 page, no older release, no download from anywhere but this repository, and an update never sets EXITED_KEY."""
 import ast
 import inspect
-import re
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -419,15 +418,3 @@ def test_the_agent_calls_attach_and_quits_without_the_exited_flag():
     used = {n.id for n in ast.walk(ast.parse(flow_text)) if isinstance(n, ast.Name)} | \
            {n.attr for n in ast.walk(ast.parse(flow_text)) if isinstance(n, ast.Attribute)}
     assert "EXITED_KEY" not in used                       # (only the docstring mentions it)
-
-
-# ---------------------------------------------------------------- the page's text is the old window's
-
-def test_what_lockdown_can_do_is_the_old_windows_text_word_for_word():
-    old = ast.literal_eval(re.search(r"^FEATURES = (\[.*?\n\])\n", (SRC / "gui" / "about_page.py").read_text(encoding="utf-8"),
-                                     re.S | re.M).group(1))
-    js = (SRC / "ui" / "js" / "pages" / "about.js").read_text(encoding="utf-8")
-    for heading, lines in old:
-        assert f'"{heading}"' in js
-        for line in lines:
-            assert '"' + line.replace('"', '\\"') + '"' in js, line

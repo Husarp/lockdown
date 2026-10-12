@@ -227,43 +227,14 @@ def test_group_and_member_per_weekday():
 
 # ---------- what it shows ----------
 
-def test_dashboard_and_web_view_show_todays_amount(tmp_path, monkeypatch):
-    from gui.dashboard import upcoming
-    import webview_app
-    monkeypatch.setenv("LOCKDOWN_DATA_DIR", str(tmp_path))
+def test_dashboard_shows_todays_amount(tmp_path):
+    from webapi.dashboard import upcoming
     db = Database(tmp_path / "config.db")
     item_id = db.add_item("Game", ["game.exe"], "app", rules=[per_day(WEEKDAYS_3H_WEEKEND_2H)])
     sat = at(SAT, 12)
     usage = Usage({(f"item:{item_id}", "day:2026-09-19"): 100 * 60})
     out = upcoming(sat, db.list_items(), db.list_groups(), usage)
     assert [(e["kind"], e["left"]) for e in out] == [("limit", 20 * 60)]       # 2 h - 1h40, not 3 h - 1h40
-    monkeypatch.setattr(webview_app, "now_from_db", lambda db: sat)
-    api = webview_app.Api.__new__(webview_app.Api)
-    api.window, api.db = None, db
-    row = api.get_state()["rules"][0]
-    assert row["limitType"] == "daily" and row["limit"] == 120
-    # toggling it in the web view keeps the per-weekday amounts
-    assert api.save_rule({**row, "enabled": False})["ok"]
-    assert day_limits(db.list_items()[0]["rules"][0]) == WEEKDAYS_3H_WEEKEND_2H
-
-
-
-def test_the_web_view_keeps_a_weekday_limit_whatever_it_shows_today(tmp_path, monkeypatch):
-    """A Sunday without a daily limit shows the weekly one (or "off"): toggling the item there must not turn the
-    per-weekday amounts into that."""
-    import webview_app
-    db = Database(tmp_path / "t.db")
-    db.add_item("Game", ["game.exe"], "app", rules=[per_day([180] * 6 + [None], weekly_limit_min=900)])
-    db.add_item("Chat", ["chat.exe"], "app", rules=[per_day([180] * 6 + [None])])
-    monkeypatch.setattr(webview_app, "now_from_db", lambda db: at(SUN, 12))
-    api = webview_app.Api.__new__(webview_app.Api)
-    api.window, api.db = None, db
-    rows = api.get_state()["rules"]
-    assert {r["n"]: (r["limitType"], r["limit"]) for r in rows} == {"Game": ("weekly", 900), "Chat": ("off", 0)}
-    for row in rows:
-        assert api.save_rule({**row, "enabled": False})["ok"]
-    game, chat = ({i["display_name"]: i["rules"][0] for i in db.list_items()}[n] for n in ("Game", "Chat"))
-    assert day_limits(game) == day_limits(chat) == [180] * 6 + [None] and game["weekly_limit_min"] == 900
 
 
 # ---------- Anti-Bypass ----------
@@ -308,52 +279,3 @@ def test_a_groups_and_a_members_weekday_amounts_are_guarded():
     assert ab.draft_changes({1: yt}, {1: yt}, {5: group}, {5: member_sat}, NOW) == ["Loosen group Fun"]
     member_less = {**group, "members": {1: {"time_limit": per_day([60] * 5 + [30, 30])}}}
     assert ab.draft_changes({1: yt}, {1: yt}, {5: group}, {5: member_less}, NOW) == []
-
-
-# ---------- the editor ----------
-
-@pytest.fixture
-def tk_root():
-    import customtkinter as ctk
-    try:
-        root = ctk.CTk()
-    except Exception as e:   # (no display)
-        pytest.skip(f"no Tk display: {e}")
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
-def test_the_editor_round_trips_a_weekday_grid(tk_root):
-    from gui.rule_editors import LimitEditor, summary
-    editor = LimitEditor(tk_root)
-    assert editor.value()["daily_limit_min"] == 30 and editor.same.get()       # default: one amount
-    editor.same.deselect()
-    editor._same_changed()                                                    # every day starts with 30m
-    assert [e.get() for e in editor.day_entries] == ["30m"] * 7
-    editor.fill.delete(0, "end")
-    editor.fill.insert(0, "3h")
-    editor._fill(range(5))
-    editor.fill.delete(0, "end")
-    editor.fill.insert(0, "2h")
-    editor._fill(range(5, 7))
-    rule = editor.value()
-    assert rule["daily_limit_min"] is None and day_limits(rule) == WEEKDAYS_3H_WEEKEND_2H
-    assert summary("time_limit", editor) == "per day 3h Mon–Fri, 2h Sat–Sun"   # (written as the boxes are)
-    editor.day_entries[SUN].delete(0, "end")                                  # Sunday: no limit
-    assert day_limits(editor.value())[SUN] is None
-    editor.load(per_day(WEEKDAYS_3H_WEEKEND_2H, weekly_limit_min=600))
-    assert not editor.same.get() and editor.value()["weekly_limit_min"] == 600
-    assert day_limits(editor.value()) == WEEKDAYS_3H_WEEKEND_2H
-    editor.load({"rule_type": "time_limit", "daily_limit_min": 45})
-    assert editor.same.get() and editor.value()["daily_limit_min"] == 45 and editor.value()["daily_limit_days"] is None
-    editor.same.deselect()
-    editor._same_changed()
-    for e in editor.day_entries:                                              # every day the same again: one amount
-        e.delete(0, "end")
-        e.insert(0, "1h")
-    assert editor.value()["daily_limit_min"] == 60 and editor.value()["daily_limit_days"] is None
-    editor.day_entries[SAT].delete(0, "end")
-    editor.day_entries[SAT].insert(0, "25h")
-    with pytest.raises(ValueError, match="on Saturday"):
-        editor.value()

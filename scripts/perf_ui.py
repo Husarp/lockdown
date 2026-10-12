@@ -19,7 +19,7 @@ What it does
   4. prints the table + which numbers are over their target, writes perf-report.json. Exit code 1 if anything is over
      its hard limit (so a script can gate on it).
 New pages need nothing here: see the top of tests/ui/perfkit.py. The Windows window itself is measured by
-`Lockdown.exe --new-ui --selftest REPORT` (src/resident/selftest.py).
+`Lockdown.exe --selftest REPORT` (src/resident/selftest.py).
 """
 import argparse
 import json

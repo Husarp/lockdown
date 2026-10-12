@@ -3,8 +3,8 @@ category - not a second entry in every menu."""
 import json
 
 from db import Database
-from gui import categories
 from importer import distracting
+from webapi import categories
 
 GAMES = ["terraria.exe", "undertale.exe", "peak.exe"]
 
@@ -60,7 +60,7 @@ def test_your_own_games_category_is_not_a_second_one(tmp_path):
     names = [c["name"] for c in categories.load(db)]
     assert names.count("Games") == 1
     assert "Watching" in names
-    assert categories.colors_of(categories.load(db))["games"] == "#ff15ff"   # your colour is kept
+    assert {c["key"]: c["color"] for c in categories.load(db)}["games"] == "#ff15ff"   # your colour is kept
 
 
 def test_the_starter_list_puts_games_in_games(tmp_path):
