@@ -19,6 +19,7 @@ a:hover { text-decoration: underline; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+html:not([data-kbd]) :focus-visible { outline: none; }   /* (keyboard only - bridge.js sets data-kbd) */
 ::selection { background: var(--brand-soft); color: var(--on-brand-soft); }
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
@@ -187,6 +188,7 @@ button { cursor: pointer; }
 .aic { width: var(--app-icon); height: var(--app-icon); border-radius: var(--r-sm); flex: none; display: inline-grid; place-items: center;
   background: var(--c, var(--surface-3)); color: var(--fg, #fff); font-size: calc(var(--app-icon) * .5); font-weight: 700; line-height: 1; overflow: hidden; }
 .aic img { width: 100%; height: 100%; object-fit: contain; }
+.aic:has(> img) { background: transparent; }   /* a real icon (or the letter tile image) needs no colour behind it */
 .aic-sm { width: var(--app-icon-sm); height: var(--app-icon-sm); font-size: calc(var(--app-icon-sm) * .5); border-radius: var(--r-xs); }
 .aic-lg { width: calc(40px * var(--s)); height: calc(40px * var(--s)); font-size: calc(18px * var(--s)); border-radius: var(--r-md); }
 .aic-stack { display: flex; }

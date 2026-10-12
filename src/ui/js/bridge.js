@@ -155,3 +155,13 @@ export function createBridge(env = {}) {
 
 export const ld = createBridge();
 export default ld;
+
+// Focus rings only for the keyboard: Chromium also shows :focus-visible when the window gets focus back from another
+// app, which outlined the last-clicked tab / sidebar item. A key that moves focus turns the rings on, a click off.
+if (typeof document !== "undefined") {
+  const root = document.documentElement;
+  addEventListener("keydown", (e) => {
+    if (e.key === "Tab" || e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") root.dataset.kbd = "";
+  }, true);
+  addEventListener("pointerdown", () => { delete root.dataset.kbd; }, true);
+}
