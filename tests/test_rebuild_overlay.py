@@ -1004,7 +1004,7 @@ def test_the_overlay_window_ignores_the_close_button_but_not_the_agent_quitting(
 
     class Events:
         def __init__(self):
-            self.closing, self.minimized, self.restored = HandlerList(), HandlerList(), HandlerList()
+            self.closing, self.minimized, self.restored, self.maximized = HandlerList(), HandlerList(), HandlerList(), HandlerList()
 
     class HandlerList(list):
         def __iadd__(self, fn):

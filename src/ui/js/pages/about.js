@@ -4,7 +4,7 @@
 // never sends an address, a path or a file name - open_path takes "data" / "app", the rest take nothing.
 import { ld } from "../bridge.js";
 import { esc, ic, setText, sw, toast } from "../ui.js";
-import { downloadView, openUpdateDialog } from "../update.js";
+import { downloadView, openUpdateDialog, setDownload } from "../update.js";
 
 export const freshMs = 5000;
 export const events = ["update", "download_progress"];
@@ -38,12 +38,17 @@ export const FEATURES = [
 
 const PLACES = [["data", "Your settings, blocks and history", true], ["app", "The program", true], ["log", "The log", false]];
 const IDLE_NOTE = "Nothing is sent but the request itself - no account, no identifier.";
-const CHECK_GIVE_UP_MS = 20000;       // a check that never answers: stop waiting (once, after a click - not a poll)
+const CHECK_GIVE_UP_MS = 20000;       // a check that never answers: stop waiting (once, after a click)
+const CHECK_FOLLOW_MS = 3000;         // no `update` push this long after update_check answered: ask Python (about_get)
+const CHECK_POLL_MS = 1500;           // ... and again this often while its check is still out (only until it answers)
+const NO_ANSWER = { kind: "unreachable", installable: false, text: "GitHub didn't answer in time. Try again in a minute." };
 
 let root;
 let d = null;                          // the last about_get answer
 let checking = false;
 let giveUp = 0;
+let follow = 0;
+let since = 0;                         // the number of finished checks when Check now was clicked (about_get's seq)
 const q = (k) => root.querySelector(`[data-a="${k}"]`);
 
 function field(label, desc, control) {
@@ -102,6 +107,7 @@ export function patch({ event, payload }) {
   if (event === "download_progress") d.download = { ...d.download, ...payload };
   if (event === "update" && payload.outcome) {
     d.outcome = payload.outcome;
+    if (payload.seq > 0) d.seq = payload.seq;
     d.found = payload.outcome.kind === "installable" || payload.outcome.kind === "page"
       ? { version: payload.outcome.version, size: payload.outcome.size || 0, installable: !!payload.outcome.installable } : null;
     setChecking(false);
@@ -168,14 +174,36 @@ function render() {
 function setChecking(on) {
   checking = on;
   clearTimeout(giveUp);
-  if (on) giveUp = setTimeout(() => { checking = false; if (d) render(); }, CHECK_GIVE_UP_MS);
+  clearTimeout(follow);
+  if (on) giveUp = setTimeout(() => { setChecking(false); if (d) { d.outcome = NO_ANSWER; render(); } }, CHECK_GIVE_UP_MS);
+}
+
+/** The `update` push did not come (or this click started no check of its own): ask Python what the check found. */
+function followUp(ms) {
+  clearTimeout(follow);
+  follow = setTimeout(async () => {
+    if (!checking) return;
+    try {
+      const fresh = await ld.call("about_get");
+      if (!checking) return;                          // (the push came meanwhile)
+      if (fresh.checking) { followUp(CHECK_POLL_MS); return; }
+      d = fresh;
+      if (!(fresh.seq > since) && !fresh.outcome) d.outcome = NO_ANSWER;   // (no check ran at all: say so, never wait)
+      setChecking(false);
+      render();
+    } catch (_) { followUp(CHECK_POLL_MS); }
+  }, ms);
 }
 
 async function check() {
+  since = d.seq || 0;
   setChecking(true);
   render();
   try {
-    await ld.call("update_check");                    // the outcome arrives as an `update` push
+    const { started } = (await ld.call("update_check")) || {};
+    // The outcome comes as an `update` push. started=false: a check is already out - its answer is ours too, ask for it
+    // straight away rather than wait for a push that may have gone already.
+    if (checking) followUp(started ? CHECK_FOLLOW_MS : 0);
   } catch (err) {
     setChecking(false);
     render();
@@ -185,7 +213,9 @@ async function check() {
 
 async function run(name) {
   try {
-    d.download = { ...d.download, ...(await ld.call(name)) };
+    const dl = await ld.call(name);
+    d.download = { ...d.download, ...dl };
+    setDownload(dl);                                  // (update.js follows the download even if no push comes)
     render();
   } catch (err) { toast(err.message || "That didn't work."); }
 }

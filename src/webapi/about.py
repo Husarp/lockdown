@@ -56,6 +56,7 @@ def about_get(ctx):
         "auto": updates.auto_on(db), "notify": updates.notify_on(db), "every_hours": updates.EVERY_HOURS,
         "found": update_flow.public(updates.available(db)) if repo else None,
         "outcome": flow.outcome, "download": flow.status(),
+        "checking": flow.checking, "seq": flow.seq,      # (the page asks this when a check's `update` push never came)
         "paths": {"data": str(paths.DATA_DIR), "app": str(paths.APP_DIR), "log": str(paths.LOG_PATH)},
     }
 

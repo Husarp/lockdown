@@ -394,7 +394,7 @@ class FakeWebview:
                 self.append(fn)
                 return self
         w = SimpleNamespace(title=title, url=url, kw=kw, calls=[], destroyed=threading.Event(),
-                            events=SimpleNamespace(closing=HL(), minimized=HL(), restored=HL(),
+                            events=SimpleNamespace(closing=HL(), minimized=HL(), restored=HL(), maximized=HL(),
                                                    shown=threading.Event(), loaded=threading.Event()))
         w.events.shown.set()
         w.show = lambda: w.calls.append("show")

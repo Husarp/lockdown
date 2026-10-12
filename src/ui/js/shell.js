@@ -269,6 +269,15 @@ async function boot() {
   $("tb-pause").addEventListener("click", () => router.go("antibypass", { focus: "pause" }));
   document.addEventListener("visibilitychange", syncHidden);
   ld.on("visible", syncHidden);
+  // A click or a key while the page thinks its window is hidden: it is on screen (Python missed a "restored"). Wake the
+  // page now and tell Python, or no push would come - Check now and the update progress would wait for nothing.
+  const seen = () => {
+    if (ld.hostVisible) return;
+    ld.push([["visible", { visible: true }]]);
+    ld.call("window_seen").catch(() => {});
+  };
+  window.addEventListener("pointerdown", seen, true);
+  window.addEventListener("keydown", seen, true);
   syncHidden();                                   // (the agent loads the window hidden: no animation until it is shown)
   ld.on("status", (delta, whole) => {
     if (delta) syncClockFrom(delta);

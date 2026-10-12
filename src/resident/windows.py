@@ -62,6 +62,9 @@ def create(base_url: str, background: str, js_api=None, overlay_background: str 
     win.overlay.events.closing += lambda: win.quitting      # Alt+F4 does nothing (the agent really quitting is allowed)
     win.main.events.minimized += lambda: set_visible(win, False)
     win.main.events.restored += lambda: set_visible(win, True)
+    # (back from the taskbar to a MAXIMISED window pywebview says "maximized", not "restored": without this the publisher
+    # stayed hidden - no pushes, the page paused - while the window was on screen)
+    win.main.events.maximized += lambda: set_visible(win, True)
     return win
 
 
@@ -75,7 +78,8 @@ def attach_publisher(win: Windows, log=None):
 
 def set_visible(win: Windows, visible: bool):
     """The main window is now shown (True) or hidden / minimised (False): the publisher stops or resumes pushing.
-    pywebview has no "hidden" event, so show_main / close_means_hide call this themselves."""
+    pywebview has no "hidden" event, so show_main / close_means_hide call this themselves (and the page's
+    window_seen: someone clicked or typed in it, so it is on screen)."""
     if win.publisher is not None:
         win.publisher.set_visible(visible)
 

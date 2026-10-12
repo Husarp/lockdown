@@ -63,10 +63,12 @@ def public(found: dict | None) -> dict | None:
             "installable": updates.can_install(found) and asset_ok(found.get("asset"))}
 
 
-def outcome(found: dict | None) -> dict:
-    """What a check found, in the About page's words (the same ones as the old window)."""
+def outcome(found: dict | None, error: str = "") -> dict:
+    """What a check found, in the About page's words (the same ones as the old window). `error`: why the check itself
+    failed (else the reason the updates module kept is shown)."""
     if not found:
-        why = f" ({updates.last_error})" if updates.last_error else ""
+        why = error or updates.last_error
+        why = f" ({why})" if why else ""
         return {"kind": "unreachable", "installable": False,
                 "text": f"Couldn't ask GitHub just now - no connection, or no release published yet.{why}"}
     version, size = str(found.get("version")), int(found.get("size") or 0)
@@ -172,6 +174,16 @@ class UpdateFlow:
     def _push_progress(self):
         self.publish("download_progress", self.status())
 
+    @property
+    def checking(self) -> bool:
+        """Is an About check out right now? (about_get: the page asks when no `update` push came)"""
+        return self._checking
+
+    @property
+    def seq(self) -> int:
+        """Counts the finished About checks: the page knows an outcome is newer than its click."""
+        return self._seq
+
     def opened(self):
         """The main window was opened: look for an update now if the last check is old enough (the worker decides)."""
         if self.on_open:
@@ -206,7 +218,7 @@ class UpdateFlow:
             if self.on_change:
                 self.on_change()
         except Exception as error:
-            self.outcome = outcome(None)
+            self.outcome = outcome(None, f"{type(error).__name__}: {error}"[:200])
             self._seq += 1
             self.publish("update", {"seq": self._seq, "found": None, "outcome": self.outcome})
             self._log(error)

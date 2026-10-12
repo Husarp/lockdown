@@ -354,3 +354,5 @@ button { cursor: pointer; }
 .dot.pulse::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--k, var(--ok)); animation: pulse 2s ease-out infinite; }
 @keyframes pulse { from { transform: scale(1); opacity: .5; } to { transform: scale(2.8); opacity: 0; } }
 html[data-hidden] *, html[data-hidden] *::before, html[data-hidden] *::after { animation-play-state: paused !important; }
+/* (paused, the dialog's fade-in would hold it at opacity 0: a dark backdrop with nothing on it) */
+html[data-hidden] .dialog[open] { animation: none; }

@@ -129,6 +129,15 @@ def page_ready(ctx, name):
         hook(name)
 
 
+@core.ui
+def window_seen(ctx):
+    """The main page was clicked or typed in while it believed its window was hidden: the window IS on screen, so the
+    publisher sends again (a missed "restored" would otherwise leave it silent - no update answer, no progress)."""
+    hook = getattr(ctx, "on_window_seen", None)
+    if hook is not None:
+        hook()
+
+
 CLIENT_ERRORS_PER_MIN = 20
 CLIENT_ERRORS_PER_RUN = 500
 _client_errors = {"minute": -1e9, "count": 0, "total": 0, "dropped": 0}

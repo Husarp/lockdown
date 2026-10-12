@@ -28,6 +28,7 @@ DIRTY_PAGES = {
     "usage_tick": ("dashboard", "screentime"),
     "icon_ready": ("dashboard", "screentime", "blocking"),
     "download_progress": ("about",),
+    "update": ("about",),            # (a check's answer missed while hidden: About asks again when shown)
     "protection_progress": ("blocking",),
 }
 

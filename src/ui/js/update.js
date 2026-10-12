@@ -15,8 +15,15 @@ const state = {
   dl: { state: "idle", version: "", done: 0, total: 0, error: "", file_down: false },
 };
 let host = null;        // {banners, go} from the shell
-let dialog = null;      // {handle, s, n, bar, notes, later, go} while the update dialog is open
+let dialog = null;      // {handle, s, n, bar, notes, go} while the update dialog is open
 let epoch = 0;          // counts the pushes that named a release: an older update_state answer must not undo them
+let lastPush = 0;       // when the last download_progress push from Python came (Date.now())
+let asking = false;     // (true while followDownload hands its own answer to ld.push: that is not a push from Python)
+let follow = 0;         // the timer that asks Python itself while a download runs and no push comes
+
+// A download (or the installer starting) with no download_progress push for this long: ask Python (update_state) and
+// show its answer as if it had been pushed - the bar moves and the dialog never waits for a push that was lost.
+export const FOLLOW_MS = 1500;
 
 export const updateState = () => state;
 export const megabytes = (bytes) => (bytes / 1048576).toFixed(1);
@@ -70,7 +77,6 @@ function paintDialog() {
   const busy = dl.state === "downloading" || dl.state === "installing";
   dialog.go.textContent = dl.state === "failed" ? "Try again" : "Restart & update";
   dialog.go.disabled = busy || dl.state === "idle";
-  dialog.later.disabled = dl.state === "installing";
 }
 
 async function goClicked() {
@@ -85,6 +91,30 @@ async function goClicked() {
 export function setDownload(dl) {
   state.dl = { ...state.dl, ...dl };
   paintDialog();
+  followDownload();
+}
+
+/** While a download / install runs: no push for FOLLOW_MS -> one update_state, fed through ld.push (the dialog and
+ *  the About page take it like any push). Only runs while something is running; stops by itself after. */
+function followDownload() {
+  clearTimeout(follow);
+  follow = 0;
+  const busy = state.dl.state === "downloading" || state.dl.state === "installing";
+  if (!busy) return;
+  follow = setTimeout(async () => {
+    follow = 0;
+    if (Date.now() - lastPush < FOLLOW_MS) { followDownload(); return; }
+    const asked = Date.now();
+    try {
+      const st = await ld.call("update_state");
+      if (lastPush <= asked && st && st.download) {
+        asking = true;
+        try { ld.push([["download_progress", st.download]]); } finally { asking = false; }
+        return;                                       // (setDownload has planned the next one, if still running)
+      }
+    } catch (_) { /* asked again below */ }
+    followDownload();
+  }, FOLLOW_MS);
 }
 
 /** Open the update dialog: starts the download (nothing is installed until "Restart & update"). */
@@ -110,8 +140,8 @@ export async function openUpdateDialog() {
   });
   if (!handle) return;
   const q = (k) => body.querySelector(`[data-up="${k}"]`);
-  const [later, go] = handle.el.querySelectorAll(".dlg-f button");
-  dialog = { handle, s: q("s"), n: q("n"), bar: q("bar"), notes: q("notes"), later, go };
+  const go = handle.el.querySelectorAll(".dlg-f button")[1];
+  dialog = { handle, s: q("s"), n: q("n"), bar: q("bar"), notes: q("notes"), go };
   body.querySelector('[data-up="more"] button').addEventListener("click", () => ld.call("open_url").catch(() => {}));
   paintDialog();
   loadNotes(f.version, q("more"));
@@ -142,7 +172,8 @@ export async function refreshUpdate() {
 }
 
 /** `shellHost` = {banners, go}. Listens to the pushes, asks Python once what is waiting, and tells it when the window
- *  is shown (it then checks for an update if the last check is old). Nothing here runs a timer. */
+ *  is shown (it then checks for an update if the last check is old). No timer runs here, except while a download or
+ *  the installer start is under way and its pushes don't come (followDownload). */
 export function initUpdate(shellHost) {
   host = shellHost;
   ld.on("status", (delta, whole) => {
@@ -156,7 +187,7 @@ export function initUpdate(shellHost) {
     if ("found" in p) setFound(p.found);
     if (p.open_dialog) refreshUpdate().then(() => openUpdateDialog()).catch(() => {});
   });
-  ld.on("download_progress", (p) => setDownload(p));
+  ld.on("download_progress", (p) => { if (!asking) lastPush = Date.now(); setDownload(p); });
   ld.on("visible", (p) => { if (p && p.visible) ld.call("update_opened").catch(() => {}); });
   refreshUpdate().catch(() => {});
   if (ld.isVisible()) ld.call("update_opened").catch(() => {});

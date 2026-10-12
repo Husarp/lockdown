@@ -267,6 +267,7 @@ def _run(argv: list[str], events, state: dict) -> int:
         if windows.page_ready(win, name):
             diag.note(f"{name} page ready after {time.monotonic() - started:.1f} s")
     ctx.on_page_ready = page_said_ready
+    ctx.on_window_seen = lambda: windows.set_visible(win, True)   # (Api window_seen: clicked while thought hidden)
     lock = threading.Lock()
 
     def fall_back(reason: str):
