@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { REFRESH_MS, RANGES, TABS, defaultsOf, needsLoad, tabFromOpts } from "../../../src/ui/js/pages/screentime.js";
-import { barsData, donutData, heatData, timelineData, trendData } from "../../../src/ui/js/pages/screentime/overview.js";
+import { donutData, heatData, timelineData, trendData } from "../../../src/ui/js/pages/screentime/overview.js";
 import { chipText, create, targetOf } from "../../../src/ui/js/pages/screentime/apps.js";
 import { syncRows } from "../../../src/ui/js/pages/screentime/kit.js";
 import { tabs } from "../../../src/ui/js/pages/screentime/index.js";
@@ -43,10 +43,8 @@ test("a tab asks again only when it is ready and stale, for another range, or ol
 });
 
 test("the Overview hands the charts what they take", () => {
-  const points = [{ label: "1", value: 5, tip: "t", avg: 4, unlocks: 0 }];
+  const points = [{ label: "1", date: "2026-10-01", weekday: 3, value: 5, tip: "t", avg: 4, unlocks: 0 }];
   assert.deepEqual(trendData({ points, goal: 300 }), { points, goal: 300 });
-  const bars = [{ label: "Mon", value: 5, tip: "t", today: false, unlocks: 0 }];
-  assert.deepEqual(barsData({ bars, goal: 300, goal_label: "5 h" }), { bars, goal: 300, goalLabel: "5 h" });
   assert.deepEqual(heatData({ rows: [{ label: "Mon", minutes: [1] }] }), { rows: [{ label: "Mon", minutes: [1] }] });
   assert.deepEqual(timelineData({ segments: [{ start: 1, len: 2, kind: "idle" }], start_hour: 6, colors: { idle: "x" }, names: { idle: "Idle" }, note: "n" }),
     { segments: [{ start: 1, len: 2, kind: "idle" }], startHour: 6, colors: { idle: "x" }, names: { idle: "Idle" } });

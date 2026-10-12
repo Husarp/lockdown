@@ -128,7 +128,8 @@ def test_every_tab_and_range_renders_without_errors(shell, page, harness, name, 
             assert re.search(r"\d", stat(page, "active"))
             assert page.locator('[data-card="trend"] svg.ch path.ch-line').count() == 1
             assert page.locator('[data-card="heat"] svg.ch rect.ch-h0, [data-card="heat"] svg.ch rect.ch-h1, [data-card="heat"] svg.ch rect.ch-h2').count() > 100
-            assert page.locator('[data-card="bars"] svg.ch path.ch-bar').count() == (30 if r == "30 days" else 7)
+            assert page.locator('[data-card="trend"] svg.ch line.ch-day, [data-card="trend"] svg.ch line.ch-week').count() == (7 if r == "7 days" else 30)
+            assert page.locator('[data-card="bars"]').count() == 0                  # (the "Last 7 days" card is gone: the trend says it)
             assert page.locator('[data-card="donut"] svg.ch circle').count() >= 5
             assert page.locator('[data-card="timeline"]').is_visible() == (r in ("Today", "Yesterday"))
         elif r != "Yesterday" or name == "apps":              # (the synthetic data has few websites yesterday)
@@ -164,6 +165,24 @@ def test_the_overview_says_what_stats_says(shell, page, harness):
     assert page.text_content('[data-card="donut"] svg text.ch-big') == d["donut"]["center"]
 
 
+def test_hovering_a_trend_day_shows_the_four_lines_of_the_api_text(shell, page, harness):
+    """Date, screen time, the week so far, and one line per emergency unlock that started that day (the synthetic history has
+    one 14:00-14:20 three days ago); the chart adds nothing of its own."""
+    harness.db.set_setting("screentime.range", "30 days")
+    open_st(shell, page, width=1280, height=900)
+    tip = harness.api.screentime_get("overview", "30 days")["data"]["trend"]["points"][26]["tip"]
+    box = page.evaluate("(() => { const r = document.querySelectorAll('[data-card=\"trend\"] .ch-hit')[26].getBoundingClientRect(); return [r.x + r.width / 2, r.y + 40]; })()")
+    page.mouse.move(*box)
+    page.wait_for_selector(".ch-tip:not([hidden])")
+    lines = page.inner_text(".ch-tip").split("\n")
+    assert "\n".join(lines) == tip and len(lines) == 4
+    assert re.fullmatch(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{1,2} [A-Z][a-z]{2}", lines[0]) and lines[1].startswith("Screen time ")
+    assert lines[2].startswith("Week average ") and lines[3] == "Emergency unlock 14:00\u201314:20"
+    page.mouse.move(*[page.evaluate("(() => { const r = document.querySelectorAll('[data-card=\"trend\"] .ch-hit')[29].getBoundingClientRect(); return r.x + r.width / 2; })()"), box[1]])
+    page.wait_for_function("document.querySelector('.ch-tip').textContent.includes('so far')")
+    assert page.inner_text(".ch-tip").split("\n")[1].endswith(" so far") and "used" not in page.inner_text(".ch-tip")
+
+
 def test_the_empty_database_shows_the_tracking_started_card_on_every_tab(shell, page, harness):
     for table in ("activity", "daily_activity", "switch_events"):
         harness.db.conn.execute(f"DELETE FROM {table}")
@@ -181,48 +200,48 @@ def test_the_empty_database_shows_the_tracking_started_card_on_every_tab(shell, 
 def test_a_range_change_updates_the_charts_in_place(shell, page, harness):
     open_st(shell, page)
     page.evaluate("""() => { const q = (s) => document.querySelector(s);
-        window.__keep = { trend: q('[data-card="trend"] svg.ch'), heat: q('[data-card="heat"] svg.ch'), bars: q('[data-card="bars"] svg.ch'),
-          bar: q('[data-card="bars"] path.ch-bar'), cell: q('[data-card="heat"] rect.ch-h0, [data-card="heat"] rect.ch-h1'),
+        window.__keep = { trend: q('[data-card="trend"] svg.ch'), heat: q('[data-card="heat"] svg.ch'),
+          grid: q('[data-card="trend"] line.ch-grid'), cell: q('[data-card="heat"] rect.ch-h0, [data-card="heat"] rect.ch-h1'),
           line: q('[data-card="trend"] path.ch-line'), donut: q('[data-card="donut"] svg.ch') }; }""")
     before = stat(page, "active")
     go_range(page, "Yesterday")                       # same shapes: not one SVG node is made again
     same = page.evaluate("""() => { const q = (s) => document.querySelector(s), k = window.__keep;
-        return k.trend === q('[data-card="trend"] svg.ch') && k.heat === q('[data-card="heat"] svg.ch') && k.bars === q('[data-card="bars"] svg.ch') &&
-          k.bar === q('[data-card="bars"] path.ch-bar') && k.line === q('[data-card="trend"] path.ch-line') && k.donut === q('[data-card="donut"] svg.ch') &&
-          k.bar.isConnected && k.cell.isConnected; }""")
+        return k.trend === q('[data-card="trend"] svg.ch') && k.heat === q('[data-card="heat"] svg.ch') &&
+          k.grid === q('[data-card="trend"] line.ch-grid') && k.line === q('[data-card="trend"] path.ch-line') && k.donut === q('[data-card="donut"] svg.ch') &&
+          k.grid.isConnected && k.cell.isConnected; }""")
     assert same
     assert stat(page, "active") != before                                        # (it did update)
     go_range(page, "7 days")
-    go_range(page, "30 days")                         # 30 bars: the bar nodes are made again, the <svg> stays
-    assert page.evaluate("window.__keep.bars === document.querySelector('[data-card=\"bars\"] svg.ch') && window.__keep.trend.isConnected")
+    go_range(page, "30 days")                         # 30 days: the trend's nodes are made again, the <svg> stays
+    assert page.evaluate("window.__keep.trend.isConnected")
     go_range(page, "Today")
     assert page.evaluate("window.__keep.trend === document.querySelector('[data-card=\"trend\"] svg.ch')")
 
 
 def test_the_overview_paints_the_numbers_and_the_trend_first_and_the_other_charts_a_frame_later(shell, page, harness):
-    """One long task used to build all five charts. Now render() writes the four numbers and the trend, and the heatmap, bars,
+    """One long task used to build all five charts. Now render() writes the four numbers and the trend, and the heatmap,
     donut, timeline and streaks follow right after the frame that painted those (data-charts says "pending" until then)."""
     open_st(shell, page)
     r = page.evaluate("""async () => {
         const mod = await import('/js/pages/screentime/overview.js');
         const a = await window.ld.call('screentime_get', 'overview', '30 days');
         const content = document.querySelector('[data-pane="overview"] .st-content');
-        const bars = () => document.querySelectorAll('[data-card="bars"] path.ch-bar').length;
+        const donut = () => document.querySelector('[data-card="donut"] svg text.ch-big').textContent;
         const frame = () => new Promise((res) => requestAnimationFrame(() => res()));
         await frame(); await frame(); await frame();
-        const before = { bars: bars(), active: document.querySelector('[data-card="active"] .v').textContent };
+        const before = { donut: donut(), active: document.querySelector('[data-card="active"] .v').textContent };
         mod.render(a);
-        const now = { state: content.dataset.charts, bars: bars(), active: document.querySelector('[data-card="active"] .v').textContent,
-          title: document.querySelector('[data-card="bars"] h3').textContent };
+        const now = { state: content.dataset.charts, donut: donut(), active: document.querySelector('[data-card="active"] .v').textContent,
+          days: document.querySelectorAll('[data-card="trend"] line.ch-day, [data-card="trend"] line.ch-week').length };
         await frame();
-        const one = { state: content.dataset.charts, bars: bars() };
+        const one = { state: content.dataset.charts, donut: donut() };
         await frame(); await frame();
-        const done = { state: content.dataset.charts, bars: bars(), title: document.querySelector('[data-card="bars"] h3').textContent };
-        return { before, now, one, done, active: a.cards[0].value }; }""")
-    assert r["now"]["state"] == "pending" and r["now"]["active"] == r["active"]            # the numbers are there at once
-    assert r["now"]["bars"] == r["before"]["bars"] == 7 and r["now"]["title"] == "Last 7 days"     # the bars are not
-    assert r["one"]["state"] == "pending" and r["one"]["bars"] == 7                         # (the frame paints what was written)
-    assert r["done"] == {"state": "done", "bars": 30, "title": "Last 30 days"}
+        const done = { state: content.dataset.charts, donut: donut() };
+        return { before, now, one, done, active: a.cards[0].value, center: a.donut.center }; }""")
+    assert r["now"]["state"] == "pending" and r["now"]["active"] == r["active"] and r["now"]["days"] == 30     # the numbers and the trend are there at once
+    assert r["now"]["donut"] == r["before"]["donut"] != r["center"]                          # the donut is not
+    assert r["one"]["state"] == "pending" and r["one"]["donut"] == r["before"]["donut"]      # (the frame paints what was written)
+    assert r["done"] == {"state": "done", "donut": r["center"]}
 
 
 def test_two_replies_in_a_row_cost_one_second_step(shell, page, harness):
@@ -237,8 +256,9 @@ def test_two_replies_in_a_row_cost_one_second_step(shell, page, harness):
         new MutationObserver(() => { if (content.dataset.charts === 'done') done++; }).observe(content, { attributes: true, attributeFilter: ['data-charts'] });
         mod.render(a); mod.render(b);
         for (let i = 0; i < 6; i++) await frame();
-        return { done, bars: document.querySelectorAll('[data-card="bars"] path.ch-bar').length }; }""")
-    assert r == {"done": 1, "bars": 30}                                                      # (the newest reply is the one drawn)
+        return { done, days: document.querySelectorAll('[data-card="trend"] line.ch-day, [data-card="trend"] line.ch-week').length,
+          donut: document.querySelector('[data-card="donut"] svg text.ch-big').textContent, want: b.donut.center }; }""")
+    assert r["done"] == 1 and r["days"] == 30 and r["donut"] == r["want"]                    # (the newest reply is the one drawn)
 
 
 def test_the_charts_of_a_render_are_laid_out_without_a_forced_layout_per_chart(shell, page, harness):

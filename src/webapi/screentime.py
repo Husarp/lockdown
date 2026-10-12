@@ -10,7 +10,8 @@ range activity at all. Every number comes from small pre-summed pieces:
   minute rows. Nothing expires by the clock: what is kept is dropped by `forget` / `forget_all` (retention's roll-up
   calls the latter) and `warm` fills it in the background when the agent starts and after each midnight, so the first
   visit doesn't pay for it either;
-- the daily totals (`stats.daily_active`, which also counts days retention has rolled up) for the trend and the bars;
+- the daily totals (`stats.daily_active`, which also counts days retention has rolled up) for the trend (30 days plus the
+  days before them that the first week's average needs);
 - one grouped query for the switch / visit counts of the Apps and Websites tables.
 Sessions and the longest focus are put together from the digests exactly as stats.sessions / stats.longest_focus would
 give them on the whole range (a session or a run in one app that goes over midnight is joined), and a test compares them.
@@ -48,6 +49,7 @@ WARM_DELAY_SEC = 3.0            # `start_warmup` waits this long, so the window 
 WARM_CATALOG_WAIT_SEC = 120.0   # ... and then waits (at most) this long for the app catalog, whose names the tables use
 WARM_RETRY_SEC = 600.0          # ... and tries again this long after a failure
 NAMES_CACHE_SEC = 600
+WEEK_LEAD_DAYS = 6              # days read before the trend's 30: a week average from a Monday can reach back that far
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 DAY_MIN = 1440
 log = logging.getLogger("lockdown.screentime")
@@ -406,8 +408,18 @@ def _minutes(seconds: float) -> float:
     return round(seconds / 60, 1)
 
 
-def _unlocks_per_day(db, first: date) -> Counter:
-    return Counter(u["started"].date() for u in db.unlocks_since(datetime.combine(first, datetime.min.time())))
+def _unlocks_by_day(db, first: date) -> dict:
+    """{day: [(started, until), ...]} of the emergency unlocks that STARTED on each day from `first` on, earliest first."""
+    out: dict = {}
+    for u in db.unlocks_since(datetime.combine(first, datetime.min.time())):
+        out.setdefault(u["started"].date(), []).append((u["started"], u["until"]))
+    return out
+
+
+@core.internal
+def unlock_span(started: datetime, until: datetime) -> str:
+    """An emergency unlock as local clock times, "14:05–14:25" (one past midnight shows its real end: "23:50–00:20")."""
+    return f"{started:%H:%M}–{until:%H:%M}"
 
 
 # ---------------------------------------------------------------- Overview
@@ -440,20 +452,42 @@ def _sessions_and_focus(days: list, digests: list) -> tuple:
     return sessions, best
 
 
+def _trend_tip(day: date, today: date, totals: dict, first_day: date | None, unlocks: list) -> str:
+    """The hover text of one day, four lines or more: the date; its screen time; the average of its week so far (Monday to
+    that day - the days before Lockdown recorded anything don't count, a recorded day with nothing counts as 0, and a week
+    that has no recorded day yet has no such line); one line per emergency unlock that started that day."""
+    secs = totals.get(day, 0)
+    lines = [f"{DAY_NAMES[day.weekday()][:3]}, {day.day} {MONTHS[day.month - 1]}",
+             f"Screen time {stats.hm(secs)}" + (" so far" if day == today else "")]
+    start = day - timedelta(days=day.weekday())
+    if first_day is not None and first_day > start:
+        start = first_day
+    n = (day - start).days + 1
+    if n > 0:
+        lines.append(f"Week average {stats.hm(sum(totals.get(start + timedelta(days=i), 0) for i in range(n)) / n)}")
+    lines += [f"Emergency unlock {unlock_span(a, b)}" for a, b in unlocks]
+    return "\n".join(lines)
+
+
 def _trend(req) -> dict:
     """The trend line: 7 days for the 7-day range, else 30; the dashed 7-day average, the goal, unlock rings, and the
-    "vs last week" words (down = green = improving)."""
+    "vs last week" words (down = green = improving). Every point carries its date and weekday (0 = Monday) so the chart
+    can draw the day and week lines, and the tooltip text (`tip`, lines joined with a newline)."""
     span = 7 if req.range == "7 days" else 30
     today = req.today
-    totals = req.memo("totals30", lambda: _daily_totals(req, today - timedelta(days=29), today))
+    totals = req.memo("totals", lambda: _daily_totals(req, today - timedelta(days=29 + WEEK_LEAD_DAYS), today))
     days = [today - timedelta(days=span - 1 - i) for i in range(span)]
     values = [totals.get(d, 0) for d in days]
-    unlocks = req.memo("unlocks", lambda: _unlocks_per_day(req.db, today - timedelta(days=29)))
+    unlocks = req.memo("unlocks", lambda: _unlocks_by_day(req.db, today - timedelta(days=29)))
+    first = stats.first_activity(req.db)
+    first_day = first.date() if first else None
     points = []
     for i, d in enumerate(days):
         window = values[max(0, i - 6):i + 1]
-        points.append({"label": str(d.day), "value": _minutes(values[i]), "tip": _day_tip(d, values[i]),
-                       "avg": _minutes(sum(window) / len(window)), "unlocks": unlocks.get(d, 0)})
+        day_unlocks = unlocks.get(d, [])
+        points.append({"label": str(d.day), "date": d.isoformat(), "weekday": d.weekday(), "value": _minutes(values[i]),
+                       "tip": _trend_tip(d, today, totals, first_day, day_unlocks),
+                       "avg": _minutes(sum(window) / len(window)), "unlocks": len(day_unlocks)})
     last7 = sum(totals.get(today - timedelta(days=i), 0) for i in range(7)) / 7
     prev7 = sum(totals.get(today - timedelta(days=i), 0) for i in range(7, 14)) / 7
     avg_text = f"avg {stats.hm(last7)} a day"
@@ -469,22 +503,6 @@ def _trend(req) -> dict:
     goal = req.goal
     return {"title": f"Trend - last {span} days", "note": note, "tone": tone, "points": points,
             "goal": _minutes(goal) if goal else 0, "goal_label": f"{goal / 3600:g} h" if goal else ""}
-
-
-def _bars(req) -> dict:
-    """The last 7 days (30 for the 30-day range) as bars: the note is the average of the days that have data."""
-    n = 30 if req.range == "30 days" else 7
-    today = req.today
-    totals = req.memo("totals30", lambda: _daily_totals(req, today - timedelta(days=29), today))
-    days = [today - timedelta(days=n - 1 - i) for i in range(n)]
-    values = [totals.get(d, 0) for d in days]
-    unlocks = req.memo("unlocks", lambda: _unlocks_per_day(req.db, today - timedelta(days=29)))
-    bars = [{"label": DAY_NAMES[d.weekday()][:3] if n == 7 else str(d.day), "value": _minutes(v), "tip": _day_tip(d, v),
-             "today": d == today, "unlocks": unlocks.get(d, 0)} for d, v in zip(days, values)]
-    with_data = [v for v in values if v]
-    goal = req.goal
-    return {"title": f"Last {n} days", "note": f"avg {stats.hm(sum(with_data) / len(with_data))}" if with_data else "",
-            "bars": bars, "goal": _minutes(goal) if goal else 0, "goal_label": f"{goal / 3600:g} h" if goal else ""}
 
 
 def _heat(req, digests: dict) -> dict:
@@ -609,7 +627,7 @@ def _overview(req) -> dict:
              {"key": "sessions", "label": "Sessions", "value": str(len(sessions)),
               "sub": f"avg {stats.hm(avg)} each" if sessions else ""}]
     return {"cards": cards, "trend": _trend(req), "timeline": _timeline(req), "heat": _heat(req, digests),
-            "bars": _bars(req), "donut": _donut(req, in_range, active),
+            "donut": _donut(req, in_range, active),
             "streaks": _streaks(req, digests[req.today].active)}
 
 
@@ -892,7 +910,7 @@ def warm(ctx, catalog_wait: float = 0.0):
     if stats.first_activity(req.db) is None:
         return
     digests = req.digests(req.days)
-    _daily_totals(req, req.today - timedelta(days=29), req.today)
+    _daily_totals(req, req.today - timedelta(days=29 + WEEK_LEAD_DAYS), req.today)
     _streaks(req, digests[req.today].active)
     catalog = shared._catalog(ctx)
     if catalog_wait and not catalog.loaded.is_set():

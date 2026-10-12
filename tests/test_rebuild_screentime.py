@@ -2,7 +2,7 @@
 
 What is checked: every range's numbers equal what the old window's `stats` functions give on the same rows (totals,
 sessions with the 5-minute gap - also across midnight, the longest focus, the heatmap, the categories split, the
-timeline, the trend and bars, the top-40 / 60 s tables and their switch counts); the Calendar tab reads no range
+timeline, the trend, the top-40 / 60 s tables and their switch counts); the Calendar tab reads no range
 activity at all; a finished day is read once and kept; the trend notes; the start-up answer; the CSV export; and that
 every tab x range answers in well under 50 ms on a 730-day database after retention.
 """
@@ -183,10 +183,9 @@ def test_the_timeline_is_for_today_and_yesterday_only(fresh):
 
 
 @pytest.mark.parametrize("rng", RANGES)
-def test_trend_and_bars_equal_the_daily_totals(fresh, rng):
+def test_trend_equals_the_daily_totals(fresh, rng):
     db = fresh.ctx.db
     span = 7 if rng == "7 days" else 30
-    n = 30 if rng == "30 days" else 7
     d = get(fresh.api, "overview", rng)
     daily = stats.daily_active(db, TODAY - timedelta(days=29), TODAY + timedelta(days=1))
     days = [TODAY - timedelta(days=span - 1 - i) for i in range(span)]
@@ -197,25 +196,86 @@ def test_trend_and_bars_equal_the_daily_totals(fresh, rng):
     assert [p["avg"] for p in trend["points"]] == [round(sum(vals[max(0, i - 6):i + 1]) / len(vals[max(0, i - 6):i + 1]) / 60, 1)
                                                    for i in range(span)]
     assert [p["label"] for p in trend["points"]] == [str(x.day) for x in days]
+    assert [p["date"] for p in trend["points"]] == [x.isoformat() for x in days]
+    assert [p["weekday"] for p in trend["points"]] == [x.weekday() for x in days]
     assert trend["goal"] == 300.0 and trend["goal_label"] == "5 h"
-    bars = d["bars"]
-    bdays = [TODAY - timedelta(days=n - 1 - i) for i in range(n)]
-    bvals = [daily.get(x.isoformat(), 0) for x in bdays]
-    assert bars["title"] == f"Last {n} days"
-    assert [b["value"] for b in bars["bars"]] == [round(v / 60, 1) for v in bvals]
-    assert [b["label"] for b in bars["bars"]] == ([x.strftime("%a") for x in bdays] if n == 7 else [str(x.day) for x in bdays])
-    assert [b["today"] for b in bars["bars"]] == [False] * (n - 1) + [True]
-    with_data = [v for v in bvals if v]
-    assert bars["note"] == f"avg {stats.hm(sum(with_data) / len(with_data))}"
-    assert bars["bars"][-1]["tip"] == f"Sunday 11 Oct  {stats.hm(bvals[-1])}"
+    assert "bars" not in d                                  # (the "Last 7 days" card is gone)
 
 
-def test_unlock_days_are_marked_on_the_trend_and_the_bars(fresh):
+def test_unlock_days_are_marked_on_the_trend(fresh):
     d = get(fresh.api, "overview", "30 days")
     unlock_days = {3, 17}                                   # synthdata: unlocks 3, 17, 40 and 55 days back
     marked = {TODAY - timedelta(days=i) for i in range(30) if d["trend"]["points"][29 - i]["unlocks"]}
     assert marked == {TODAY - timedelta(days=i) for i in unlock_days}
-    assert [i for i, b in enumerate(d["bars"]["bars"]) if b["unlocks"]] == [29 - 17, 29 - 3]
+
+
+def tips(d):
+    """{iso date: the tip's lines} of a reply's trend."""
+    return {p["date"]: p["tip"].split("\n") for p in d["trend"]["points"]}
+
+
+def minutes_on(db, day, minutes):
+    for m in range(minutes):
+        put(db, day, f"{6 + m // 60:02d}:{m % 60:02d}")
+
+
+def test_the_trend_tooltip_has_the_date_the_usage_and_the_week_average_so_far(tmp_path):
+    """Sunday 11 Oct is today and the 30 days begin on Sat 12 Sep. Recording started on Wed 9 Sep - before the window - so
+    the average of Sat 12 Sep needs the three days before it, and counts 9..12 Sep only (the days before the first recorded
+    one don't count; a recorded day with nothing on it, Fri 11 Sep, counts as 0)."""
+    ctx, api, db = blank(tmp_path)
+    for day, minutes in ((date(2026, 9, 9), 60), (date(2026, 9, 10), 120), (date(2026, 9, 12), 180),
+                         (date(2026, 9, 14), 30), (date(2026, 9, 15), 150), (date(2026, 9, 16), 60),
+                         (date(2026, 10, 5), 60), (date(2026, 10, 7), 120), (date(2026, 10, 11), 30)):
+        minutes_on(db, day, minutes)
+    t = tips(get(api, "overview", "30 days"))
+    assert t["2026-09-12"] == ["Sat, 12 Sep", "Screen time 3 h 00 m", "Week average 1 h 30 m"]       # 360 min over 4 days
+    assert t["2026-09-13"] == ["Sun, 13 Sep", "Screen time 0 m", "Week average 1 h 12 m"]           # 360 min over 5 days
+    assert t["2026-09-14"] == ["Mon, 14 Sep", "Screen time 30 m", "Week average 30 m"]              # a new week starts over
+    assert t["2026-09-15"][2] == "Week average 1 h 30 m" and t["2026-09-16"][2] == "Week average 1 h 20 m"
+    assert t["2026-10-06"] == ["Tue, 6 Oct", "Screen time 0 m", "Week average 30 m"]
+    assert t["2026-10-07"][2] == "Week average 1 h 00 m"
+    assert t["2026-10-11"] == ["Sun, 11 Oct", "Screen time 30 m so far", "Week average 30 m"]       # today: so far
+    assert get(api, "overview", "7 days")["trend"]["points"][-1]["tip"] == "\n".join(t["2026-10-11"])
+
+
+def test_the_week_average_is_left_out_for_days_before_anything_was_recorded(tmp_path):
+    ctx, api, db = blank(tmp_path)
+    minutes_on(db, date(2026, 10, 10), 40)                  # Sat: the first day with data
+    minutes_on(db, TODAY, 20)
+    t = tips(get(api, "overview", "7 days"))
+    assert t["2026-10-05"] == ["Mon, 5 Oct", "Screen time 0 m"] and t["2026-10-09"] == ["Fri, 9 Oct", "Screen time 0 m"]
+    assert t["2026-10-10"] == ["Sat, 10 Oct", "Screen time 40 m", "Week average 40 m"]
+    assert t["2026-10-11"] == ["Sun, 11 Oct", "Screen time 20 m so far", "Week average 30 m"]
+
+
+def test_the_trend_tooltip_lists_every_emergency_unlock_that_started_that_day(tmp_path):
+    ctx, api, db = blank(tmp_path)
+    minutes_on(db, date(2026, 10, 1), 10)
+    at = lambda day, hh, mm: datetime(2026, 10, day, hh, mm)
+    db.add_unlock([1], ["x"], at(8, 14, 5), at(8, 14, 25))
+    db.add_unlock([1], ["x"], at(8, 9, 0), at(8, 9, 20))                # (added later, but it is listed first)
+    db.add_unlock([1], ["x"], at(9, 23, 50), at(10, 0, 20))             # past midnight: shows its real end
+    d = get(api, "overview", "7 days")
+    t = tips(d)
+    assert t["2026-10-08"][3:] == ["Emergency unlock 09:00–09:20", "Emergency unlock 14:05–14:25"]
+    assert t["2026-10-09"][3:] == ["Emergency unlock 23:50–00:20"]
+    assert t["2026-10-10"] == ["Sat, 10 Oct", "Screen time 0 m", "Week average 0 m"]       # (it started the day before)
+    assert [p["unlocks"] for p in d["trend"]["points"]] == [0, 0, 0, 2, 1, 0, 0]
+    assert "Emergency unlock" not in "".join(t["2026-10-07"])
+    assert st.unlock_span(at(8, 9, 5), at(8, 9, 7)) == "09:05–09:07"
+
+
+def test_the_trend_reads_36_days_of_totals_in_one_go(tmp_path, monkeypatch):
+    """The first Monday-to-day average of the 30 days needs up to 6 days before them: one read of 36 days, not two."""
+    ctx, api, db = blank(tmp_path)
+    minutes_on(db, TODAY - timedelta(days=33), 10)
+    calls = []
+    real = stats.daily_active
+    monkeypatch.setattr(stats, "daily_active", lambda *a, **k: calls.append(a[1:]) or real(*a, **k))
+    t = tips(get(api, "overview", "30 days"))
+    assert calls.count((TODAY - timedelta(days=35), TODAY + timedelta(days=1))) == 1
+    assert t["2026-09-12"][-1] == "Week average 2 m"        # (Sat 12 Sep: 10 min on Tue 8 Sep, before the window, over 8..12 Sep)
 
 
 def week_db(tmp_path, this_week_min, last_week_min, goal="5"):
@@ -278,7 +338,7 @@ def test_trend_note_without_a_previous_week_and_when_equal(tmp_path):
 def test_no_goal_means_no_goal_line(tmp_path):
     ctx, api, db = week_db(tmp_path, 60, 60, goal="0")
     d = get(api, "overview", "7 days")
-    assert d["trend"]["goal"] == 0 and d["bars"]["goal"] == 0 and d["trend"]["goal_label"] == ""
+    assert d["trend"]["goal"] == 0 and d["trend"]["goal_label"] == ""
     assert [s["key"] for s in d["streaks"]] == ["no_unlock"]
 
 
@@ -663,7 +723,7 @@ def test_a_day_that_ended_minutes_ago_is_not_kept_yet(tmp_path):
     assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "2 m"
     put(db, yesterday, "23:59", exe="chrome.exe")                         # (the tracker's last batch lands)
     assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "3 m"
-    assert get(api, "overview", "7 days")["bars"]["bars"][-2]["value"] == 3.0 and get(api, "overview", "7 days")["trend"]["points"][-2]["value"] == 3.0
+    assert get(api, "overview", "7 days")["trend"]["points"][-2]["value"] == 3.0
     assert yesterday not in ctx.st_cache.days and yesterday not in ctx.st_cache.totals and ctx.st_cache.streaks == {}
     clock[0] = datetime(2026, 10, 12, 0, 3, 1)                            # three minutes later: it is over for good
     assert get(api, "overview", "Yesterday")["cards"][0]["value"] == "3 m"
@@ -697,7 +757,7 @@ def test_a_roll_up_by_retention_drops_what_is_kept(tmp_path):
     retention.roll_up_day(db, day)
     assert ctx.st_cache.days == {} and ctx.st_cache.totals == {} and ctx.st_cache.streaks == {}
     after = get(api, "overview", "7 days")
-    assert after["bars"] == before["bars"] and after["trend"] == before["trend"] and card(after, "active") == card(before, "active")
+    assert after["trend"] == before["trend"] and card(after, "active") == card(before, "active")
     other, other_api, other_db = blank(tmp_path / "other")                # (every agent context is told, not just one)
     get(other_api, "overview", "7 days")
     put(db, day - timedelta(days=1), "10:00")
@@ -727,7 +787,7 @@ def test_warm_fills_the_cache_so_the_first_visit_reads_only_today(tmp_path, monk
     db.add_unlock([1], ["x"], datetime.combine(TODAY - timedelta(days=9), datetime.min.time()), datetime.combine(TODAY - timedelta(days=9), datetime.min.time()) + timedelta(hours=1))
     db.set_setting(st.GOAL_KEY, "5")
     st.warm(ctx)
-    assert len(ctx.st_cache.days) == 29 and len(ctx.st_cache.totals) == 29 and ctx.st_cache.streaks
+    assert len(ctx.st_cache.days) == 29 and len(ctx.st_cache.totals) == 35 and ctx.st_cache.streaks
     spans, totals = [], []
     real_rows, real_daily = st._activity_rows, stats.daily_active
     monkeypatch.setattr(st, "_activity_rows", lambda db_, a, b: spans.append((a, b)) or real_rows(db_, a, b))

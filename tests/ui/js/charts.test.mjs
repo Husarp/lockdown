@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   barChart, trendChart, timelineChart, heatmapChart, donutChart, hourBarChart,
-  layoutBars, layoutTrend, layoutTimeline, layoutHeatmap, layoutDonut, layoutHourBars, heatLevel,
+  layoutBars, layoutTrend, layoutTimeline, layoutHeatmap, layoutDonut, layoutHourBars, heatLevel, trendAxis, hourLabel,
 } from "../../../src/ui/js/charts.js";
 
 // ---- a tiny fake DOM: just what charts.js uses, and a count of every node made / removed / attribute written
@@ -49,6 +49,15 @@ function mount(make, data, width = 600) {
 }
 const days = (n, f = (i) => 3600 * (1 + (i % 6))) =>
   Array.from({ length: n }, (_, i) => ({ label: String(i + 1), value: f(i), tip: `day ${i + 1}`, today: i === n - 1, unlocks: i % 9 === 0 ? 1 : 0 }));
+// trend points: minutes, the day of the month as label, weekday 0 = Monday; the last day is a Sunday (11 Oct 2026) unless told otherwise
+const tdays = (n, f = (i) => 60 * (1 + (i % 6)), lastWeekday = 6) => {
+  const first = new Date(Date.UTC(2026, 9, 11 - (n - 1)));
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(first.getTime() + i * 86400000);
+    return { label: String(d.getUTCDate()), date: d.toISOString().slice(0, 10), weekday: (lastWeekday - (n - 1 - i) + 70) % 7, value: f(i),
+      tip: `day ${i + 1}`, unlocks: i % 9 === 0 ? 1 : 0, avg: i < 6 ? null : 120 };
+  });
+};
 const rows7 = (f = (r, h) => (r * 7 + h * 3) % 61) =>
   ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, r) => ({ label, minutes: Array.from({ length: 24 }, (_, h) => f(r, h)) }));
 
@@ -59,10 +68,13 @@ test("30-day bar chart: well under 200 elements", () => {
   assert.equal(m.count(), 1 + 30 * 4 + 2);
 });
 
-test("30-day trend chart: well under 200 elements", () => {
-  const points = days(30).map((d, i) => ({ ...d, avg: i < 6 ? null : 10000 }));
-  const m = mount(trendChart, { points, goal: 18000 });
+test("30-day trend chart: well under 200 elements (day lines and the hour axis included)", () => {
+  const m = mount(trendChart, { points: tdays(30), goal: 300 });
   assert.ok(m.count() <= 200, `trend ${m.count()}`);
+  const ticks = trendAxis(360).ticks.length;
+  assert.equal(m.count(), 6 + 2 * ticks + 4 * 30);
+  const worst = mount(trendChart, { points: tdays(30, () => 1440), goal: 1440 });         // (a 24 h day: the most lines)
+  assert.ok(worst.count() <= 200, `trend ${worst.count()}`);
 });
 
 test("7x24 heatmap: 168 cells + labels + legend, 200 elements at most", () => {
@@ -122,30 +134,92 @@ test("unlock marks: only days with an unlock get a mark and a tooltip line", () 
   assert.match(prims.filter((p) => p.a.class === "ch-hit")[0].a["data-tip"], /Emergency unlock used 1x/);
 });
 
-test("trend: a day with an emergency unlock gets a ring and the tip line, a day without gets none", () => {
+const xlabels = (prims) => prims.filter((p) => p.tag === "text" && p.a.class !== "ch-ylab").map((p) => p.text);
+const ylabels = (prims) => prims.filter((p) => p.a.class === "ch-ylab").map((p) => p.text);
+const vlines = (prims) => prims.filter((p) => p.a.class === "ch-day" || p.a.class === "ch-week");
+
+test("trend: a day with an emergency unlock gets a ring; the tip is Python's text, nothing is added", () => {
   const points = [
-    { label: "a", value: 3600, tip: "Mon", unlocks: 1 },
-    { label: "b", value: 7200, tip: "Tue", unlocks: 0 },
-    { label: "c", value: 1800, tip: "Wed" },
+    { label: "5", weekday: 0, value: 60, tip: "Mon\nEmergency unlock 14:05–14:25", unlocks: 1 },
+    { label: "6", weekday: 1, value: 120, tip: "Tue", unlocks: 0 },
+    { label: "7", weekday: 2, value: 30, tip: "Wed" },
   ];
   const { prims } = layoutTrend({ points }, 300, 180, 1);
-  const rings = prims.filter((p) => p.a.class === "ch-ring");
-  assert.deepEqual(rings.map((p) => +p.a.r > 0), [true, false, false]);
-  const hits = prims.filter((p) => p.a.class === "ch-hit").map((p) => p.a["data-tip"]);
-  assert.match(hits[0], /Emergency unlock used 1x/);
-  assert.ok(!/Emergency/.test(hits[1]) && !/Emergency/.test(hits[2]));
+  assert.deepEqual(prims.filter((p) => p.a.class === "ch-ring").map((p) => +p.a.r > 0), [true, false, false]);
+  assert.deepEqual(prims.filter((p) => p.a.class === "ch-hit").map((p) => p.a["data-tip"]), ["Mon\nEmergency unlock 14:05–14:25", "Tue", "Wed"]);
 });
 
 test("trend: line points follow the values, the average skips days without one, the goal line is at its y", () => {
-  const points = [{ label: "a", value: 0, avg: null }, { label: "b", value: 7200, avg: 3600 }, { label: "c", value: 3600, avg: 3600 }];
-  const { prims, geom } = layoutTrend({ points, goal: 3600, minPeak: 7200 }, 300, 180, 1);
-  assert.equal(geom.peak, 7200);
+  const points = [{ label: "a", value: 0, avg: null }, { label: "b", value: 120, avg: 60 }, { label: "c", value: 60, avg: 60 }];
+  const { prims, geom } = layoutTrend({ points, goal: 60, minPeak: 120 }, 300, 180, 1);
+  assert.equal(geom.peak, 120);
   assert.ok(geom.ys[1] < geom.ys[2] && geom.ys[2] < geom.ys[0]);
   const avg = prims.find((p) => p.a.class === "ch-avg").a.d;
   assert.ok(avg.startsWith("M") && (avg.match(/M/g) || []).length === 1 && !avg.includes(`${geom.xs[0]} `));
   const goal = prims.find((p) => p.a.class === "ch-goal");
   assert.ok(Math.abs(+goal.a.y1 - (geom.bottom - (geom.bottom - geom.top) * 0.5)) < 0.01);
   assert.deepEqual(layoutTrend({ points: [points[0]] }, 300, 180, 1).prims, []);
+});
+
+test("trend: a faint line at every day, a strong one at exactly the Mondays", () => {
+  const points = tdays(30);
+  const { prims, geom } = layoutTrend({ points }, 600, 180, 1);
+  const lines = vlines(prims);
+  assert.equal(lines.length, 30);
+  assert.deepEqual(lines.map((p) => p.a.class === "ch-week"), points.map((p) => p.weekday === 0));
+  assert.equal(lines.filter((p) => p.a.class === "ch-week").length, 4);                         // Mon 14, 21, 28 Sep and 5 Oct
+  lines.forEach((p, i) => assert.ok(p.a.x1 === p.a.x2 && Math.abs(+p.a.x1 - geom.xs[i]) < 0.01 && +p.a.y1 === geom.top && +p.a.y2 === geom.bottom));
+  assert.deepEqual(vlines(layoutTrend({ points: tdays(7) }, 600, 180, 1).prims).map((p) => p.a.class),
+    ["ch-week", "ch-day", "ch-day", "ch-day", "ch-day", "ch-day", "ch-day"]);                     // Mon 5 Oct .. Sun 11 Oct
+  const bare = tdays(7).map(({ weekday, ...p }) => p);                                           // (no weekday sent: no week lines, no letters)
+  assert.equal(vlines(layoutTrend({ points: bare }, 600, 180, 1).prims).filter((p) => p.a.class === "ch-week").length, 0);
+});
+
+test("trend: 7 days are labelled with the weekday letter, Mondays also with the date", () => {
+  assert.deepEqual(xlabels(layoutTrend({ points: tdays(7) }, 600, 180, 1).prims), ["M 5", "T", "W", "T", "F", "S", "S"]);
+  assert.deepEqual(xlabels(layoutTrend({ points: tdays(7, undefined, 2) }, 600, 180, 1).prims), ["T", "F", "S", "S", "M 9", "T", "W"]);       // a week that ends on a Wednesday
+});
+
+test("trend: 30 days are labelled at the week starts only, far apart", () => {
+  const points = tdays(30);
+  const { prims, geom } = layoutTrend({ points }, 600, 180, 1);
+  const texts = xlabels(prims);
+  assert.equal(texts.length, 30);
+  assert.deepEqual(texts.filter(Boolean), points.filter((p) => p.weekday === 0).map((p) => `M ${p.label}`));
+  const at = texts.map((t, i) => (t ? i : -1)).filter((i) => i >= 0);
+  at.slice(1).forEach((i, k) => assert.equal(i - at[k], 7));                                      // (a label every 7 days: no first / last label crowds one)
+  assert.ok(geom.xs[at[1]] - geom.xs[at[0]] > 60);
+});
+
+test("trend: the Y axis has hour labels, 30 min up to 2 h, 1 h up to 6 h, 2 h up to 12 h, else 4 h; the top is a whole step", () => {
+  const labelsOf = (peak) => ylabels(layoutTrend({ points: tdays(7, (i) => (i === 3 ? peak : 5)) }, 600, 180, 1).prims);
+  assert.deepEqual(labelsOf(50), ["0h", "30m", "1h"]);
+  assert.deepEqual(labelsOf(120), ["0h", "30m", "1h", "1h30", "2h"]);
+  assert.deepEqual(labelsOf(121), ["0h", "1h", "2h", "3h"]);
+  assert.deepEqual(labelsOf(300), ["0h", "1h", "2h", "3h", "4h", "5h"]);
+  assert.deepEqual(labelsOf(660), ["0h", "2h", "4h", "6h", "8h", "10h", "12h"]);
+  assert.deepEqual(labelsOf(900), ["0h", "4h", "8h", "12h", "16h"]);
+  assert.deepEqual(labelsOf(0), ["0h", "30m"]);
+  assert.deepEqual(trendAxis(50), { max: 60, ticks: [0, 30, 60] });
+  assert.deepEqual([0, 30, 59, 60, 90, 125, 600].map(hourLabel), ["0h", "30m", "59m", "1h", "1h30", "2h05", "10h"]);
+  assert.ok(trendAxis(1e6).ticks.length <= 14);                                                   // (a runaway value can't make hundreds of lines)
+});
+
+test("trend: the goal raises the top; the hour labels end left of where the plot starts and the grid reaches across", () => {
+  const { prims, geom } = layoutTrend({ points: tdays(30, () => 40), goal: 300 }, 600, 180, 1);
+  const ylabs = prims.filter((p) => p.a.class === "ch-ylab");
+  assert.equal(ylabs.at(-1).text, "5h");
+  assert.ok(ylabs.every((p) => p.a["text-anchor"] === "end" && +p.a.x < geom.left - 8));
+  const grid = prims.filter((p) => p.a.class === "ch-grid");
+  assert.equal(grid.length, ylabs.length);
+  assert.ok(grid.every((p) => +p.a.x1 > +ylabs[0].a.x && +p.a.x2 === 600 && p.a.y1 === p.a.y2));
+  assert.equal(+grid[0].a.y1, geom.bottom);
+  assert.equal(+grid.at(-1).a.y1, geom.top);
+  assert.ok(Math.abs(+prims.find((p) => p.a.class === "ch-goal").a.y1 - geom.top) < 0.01);        // (the goal is the top: 5 h)
+  assert.ok(Math.min(...geom.xs) > +ylabs[0].a.x && Math.max(...geom.xs) < 600);
+  const wide = layoutTrend({ points: tdays(30, () => 100) }, 600, 180, 1).geom.left;             // 1h30 labels are four letters: more room than "1h"
+  const slim = layoutTrend({ points: tdays(30, () => 40) }, 600, 180, 1).geom.left;              // 0h, 30m, 1h
+  assert.ok(wide > slim);
 });
 
 test("heatmap levels: 5 of them at 1 / 15 / 30 / 45 minutes", () => {
@@ -196,7 +270,7 @@ test("update() with the same shape rewrites attributes only: no nodes made or re
 });
 
 test("update() with identical data writes nothing", () => {
-  const data = { points: days(30).map((d) => ({ ...d, avg: 9000 })), goal: 18000 };
+  const data = { points: tdays(30), goal: 300 };
   const m = mount(trendChart, data);
   const writes = m.stats.attrWrites, made = m.stats.created;
   m.chart.update(JSON.parse(JSON.stringify(data)));
@@ -213,7 +287,7 @@ test("a changed shape (more days) rebuilds, a different value count does not bre
 });
 
 test("trend: the hover dot follows the day under the pointer and goes away on leave", () => {
-  const m = mount(trendChart, { points: days(10), goal: 0 });
+  const m = mount(trendChart, { points: tdays(10), goal: 0 });
   const dot = () => m.chart.svg.all().find((n) => n.attrs.class === "ch-dot");
   assert.equal(dot().attrs.r, "0");
   const hit = m.chart.svg.all().filter((n) => n.attrs.class === "ch-hit")[4];
@@ -252,7 +326,7 @@ test("colours come from CSS variables, none are hard-coded", () => {
   const css = f.head.children[0].textContent;
   assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(css), "the chart <style> has no hex colours");
   assert.ok(!/gradient|blur\(/.test(css));
-  for (const m2 of css.matchAll(/var\((--[\w-]+)/g)) assert.ok(/^--(brand|surface|surface-2|surface-3|line|text|text-2|text-3|cat-\w+|k-\w+|font|fs-\w+|fw-\w+|r-md|shadow-pop)$/.test(m2[1]), m2[1]);
+  for (const m2 of css.matchAll(/var\((--[\w-]+)/g)) assert.ok(/^--(brand|surface|surface-2|surface-3|line|line-strong|text|text-2|text-3|cat-\w+|k-\w+|font|fs-\w+|fw-\w+|r-md|shadow-pop)$/.test(m2[1]), m2[1]);
 });
 
 test("destroy removes the chart", () => {

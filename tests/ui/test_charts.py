@@ -71,6 +71,32 @@ def test_the_trend_dot_follows_the_pointer(charts_page):
     page.wait_for_function("+document.querySelector('#trend .ch-dot').getAttribute('r') === 0")
 
 
+def test_the_trend_draws_day_and_week_lines_in_the_theme_and_the_hour_labels_clear_of_the_plot(charts_page):
+    page = charts_page
+    stroke = lambda sel: page.evaluate("(s) => getComputedStyle(document.querySelector(s)).stroke", sel)
+    width = lambda sel: page.evaluate("(s) => parseFloat(getComputedStyle(document.querySelector(s)).strokeWidth)", sel)
+    assert page.locator("#trend line.ch-day").count() == 26 and page.locator("#trend line.ch-week").count() == 4
+    dark = (stroke("#trend .ch-day"), stroke("#trend .ch-week"))
+    assert dark[0] != dark[1] and width("#trend .ch-week") > width("#trend .ch-day")
+    page.evaluate("document.documentElement.dataset.theme = 'light'")
+    assert (stroke("#trend .ch-day"), stroke("#trend .ch-week")) != dark
+    boxes = page.evaluate("""() => { const b = (e) => e.getBoundingClientRect();
+        const labs = [...document.querySelectorAll('#trend .ch-ylab')].map(b), first = b(document.querySelector('#trend line.ch-day')), svg = b(document.querySelector('#trend svg'));
+        const xl = [...document.querySelectorAll('#trend text:not(.ch-ylab)')].filter((t) => t.textContent).map(b);
+        return { labs: labs.map((r) => [r.left, r.right]), plotLeft: first.left, svgLeft: svg.left, xl: xl.map((r) => [r.left, r.right]) }; }""")
+    assert len(boxes["labs"]) == 6 and all(boxes["svgLeft"] - 1 <= l and r < boxes["plotLeft"] - 4 for l, r in boxes["labs"]), boxes     # (0h .. 5h: inside the svg, left of the first day line)
+    xl = sorted(boxes["xl"])
+    assert len(xl) == 4 and all(a[1] + 6 < b[0] for a, b in zip(xl, xl[1:])), boxes                                     # (the week-start labels don't touch)
+
+
+def test_the_trend_tooltip_shows_every_line_of_the_text(charts_page):
+    page = charts_page
+    r = page.evaluate("(() => { const r = document.querySelectorAll('#trend .ch-hit')[9].getBoundingClientRect(); return [r.x + r.width / 2, r.y + 30]; })()")
+    page.mouse.move(*r)
+    page.wait_for_selector(".ch-tip:not([hidden])")
+    assert page.inner_text(".ch-tip").split("\n") == ["Day 10", "Screen time 193 m", "Week average 2 h 00 m", "Emergency unlock 14:05–14:25"]
+
+
 def test_a_data_update_changes_no_nodes_and_is_quick(charts_page):
     page = charts_page
     out = page.evaluate("""() => {

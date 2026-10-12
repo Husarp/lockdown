@@ -1,6 +1,6 @@
 // Lockdown charts: small SVG charts drawn from PRE-AGGREGATED arrays (Python does the summing). No library.
 //   barChart(el)       bars per day, today highlighted, over-goal tone, dashed goal line, emergency-unlock marks
-//   trendChart(el)     area + line trend, dashed average, goal, unlock rings, a dot that follows the pointer
+//   trendChart(el)     area + line trend, hour axis + gridlines, day / week-start lines, dashed average, goal, unlock rings, a dot that follows the pointer
 //   timelineChart(el)  one day as a coloured bar (category segments + idle) with hour labels
 //   heatmapChart(el)   days x 24 hours, 5 levels
 //   donutChart(el)     ring split into parts with the total in the middle
@@ -21,6 +21,10 @@ const CSS = `
 .ch{display:block;width:100%;overflow:visible;font-family:var(--font)}
 .ch text{font-size:var(--fs-cap);fill:var(--text-2);font-variant-numeric:tabular-nums}
 .ch .ch-axis{stroke:var(--line);stroke-width:1}
+.ch .ch-grid{stroke:var(--line);stroke-width:1}
+.ch .ch-day{stroke:var(--line);stroke-width:1;stroke-opacity:.6}
+.ch .ch-week{stroke:var(--line-strong);stroke-width:1.5}
+.ch .ch-ylab{fill:var(--text-3)}
 .ch .ch-bar{fill:var(--cat-neutral)}
 .ch .ch-bar.over{fill:var(--k-limit)}
 .ch .ch-bar.now{fill:var(--brand)}
@@ -261,17 +265,35 @@ export function layoutBars(data, W, H, s) {
 export const barChart = (el, opts) => createChart(el, { height: 170, label: "Bars per day", layout: (d, W, H, s) => layoutBars(d, W, H, s).prims }, opts);
 
 // ---------------------------------------------------------------- trend (area + line)
+/** An hour-axis label for minutes: 0h, 30m, 1h, 1h30, 2h. */
+export const hourLabel = (m) => (m === 0 ? "0h" : m < 60 ? `${m}m` : m % 60 === 0 ? `${m / 60}h` : `${Math.floor(m / 60)}h${hh(m % 60)}`);
+
+/** The trend's Y axis for a peak in minutes: a step of 30 min up to a 2 h peak, 1 h up to 6 h, 2 h up to 12 h, else 4 h; the
+ *  top is the peak rounded up to a whole step. Returns {max, ticks: [0, step, ... max]}. */
+export function trendAxis(peak) {
+  let step = peak <= 120 ? 30 : peak <= 360 ? 60 : peak <= 720 ? 120 : 240;
+  while (peak / step > 12) step *= 2;                 // (a runaway value must not make hundreds of lines)
+  const max = Math.ceil(peak / step) * step, ticks = [];
+  for (let v = 0; v <= max; v += step) ticks.push(v);
+  return { max, ticks };
+}
+
 /**
- * data = {points: [{label, value, tip, avg?: number|null, unlocks?}], goal?, minPeak?}
- * `avg` is the running average for that day (the dashed line skips points without one).
+ * data = {points: [{label, value, tip, weekday?, avg?: number|null, unlocks?}], goal?, minPeak?}
+ * Values are minutes. `label` is the day of the month, `weekday` 0 = Monday (Python decides both): a faint line is drawn at
+ * every day and a strong one at every Monday; 7 days are labelled "M T W T F S S" (Mondays "M 12"), more days only the
+ * Mondays. `avg` is the running average for that day (the dashed line skips points without one); `tip` the hover text.
+ * Elements: 6 + 2 * ticks + 4n  (n = points).
  */
 export function layoutTrend(data, W, H, s, state = {}) {
   const pts = data.points || [];
   const n = pts.length;
   if (n < 2) return { prims: [] };
-  const top = 14 * s, bottom = H - 20 * s, left = 3 * s, right = W - 3 * s;
   const goal = data.goal > 0 ? data.goal : 0;
-  const peak = Math.max(1, data.minPeak || 0, goal, ...pts.map((p) => p.value || 0));
+  const axis = trendAxis(Math.max(1, data.minPeak || 0, goal, ...pts.map((p) => p.value || 0)));
+  const peak = axis.max, ylabs = axis.ticks.map(hourLabel);
+  const gutter = Math.max(...ylabs.map((t) => t.length)) * 6.6 * s + 6 * s;      // (room for the hour labels, left of the plot)
+  const top = 14 * s, bottom = H - 20 * s, left = gutter + 14 * s, right = W - 14 * s;
   const y = (v) => bottom - ((bottom - top) * v) / peak;
   const xs = pts.map((_, i) => left + ((right - left) * i) / (n - 1));
   const ys = pts.map((p) => y(Math.max(0, p.value || 0)));
@@ -285,24 +307,27 @@ export function layoutTrend(data, W, H, s, state = {}) {
   const gy = goal ? y(goal) : bottom;
   const h = state.hover;
   const prims = [
-    P("line", { x1: 0, x2: n2(W), y1: n2(bottom), y2: n2(bottom), class: "ch-axis" }),
+    P("line", { x1: n2(gutter), x2: n2(W), y1: n2(bottom), y2: n2(bottom), class: "ch-axis" }),
+    ...axis.ticks.map((v) => P("line", { x1: n2(gutter), x2: n2(W), y1: n2(y(v)), y2: n2(y(v)), class: "ch-grid" })),
+    ...axis.ticks.map((v, i) => P("text", { x: n2(gutter - 6 * s), y: n2(y(v) + 4 * s), "text-anchor": "end", class: "ch-ylab" }, { text: ylabs[i] })),
+    ...pts.map((p, i) => P("line", { x1: n2(xs[i]), x2: n2(xs[i]), y1: n2(top), y2: n2(bottom), class: p.weekday === 0 ? "ch-week" : "ch-day" })),
     P("path", { d: `${line}L${n2(xs[n - 1])} ${n2(bottom)}L${n2(xs[0])} ${n2(bottom)}Z`, class: "ch-area" }),
-    P("line", { x1: 0, x2: n2(W), y1: n2(gy), y2: n2(gy), class: "ch-goal", visibility: goal ? "visible" : "hidden" }),
+    P("line", { x1: n2(gutter), x2: n2(W), y1: n2(gy), y2: n2(gy), class: "ch-goal", visibility: goal ? "visible" : "hidden" }),
     P("path", { d: avg, class: "ch-avg" }),
     P("path", { d: line, class: "ch-line" }),
   ];
   pts.forEach((p, i) => prims.push(P("circle", { cx: n2(xs[i]), cy: n2(ys[i]), r: p.unlocks ? n2(4 * s) : 0, class: "ch-ring" })));
   pts.forEach((p, i) => {
-    const show = i === 0 || i === n - 1 || (i % 7 === 0 && n - 1 - i > 2);
-    prims.push(P("text", { x: n2(xs[i]), y: n2(bottom + 14 * s), "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle" },
-      { text: show ? String(p.label ?? "") : "" }));
+    const text = p.weekday === 0 ? `M ${p.label}` : n <= 7 ? "MTWTFSS"[p.weekday] ?? "" : "";
+    prims.push(P("text", { x: n2(xs[i]), y: n2(bottom + 14 * s), "text-anchor": "middle" }, { text }));
   });
   prims.push(P("circle", { cx: h === null || h === undefined ? 0 : n2(xs[h]), cy: h === null || h === undefined ? 0 : n2(ys[h]),
     r: h === null || h === undefined ? 0 : n2(4 * s), class: "ch-dot" }));
-  const step = (right - left) / (n - 1);
-  pts.forEach((p, i) => prims.push(P("rect", { x: n2(Math.max(0, xs[i] - step / 2)), y: 0, width: n2(step), height: n2(H), class: "ch-hit",
-    "data-tip": (p.tip || "") + (p.unlocks ? `\nEmergency unlock used ${p.unlocks}x` : ""), "data-i": i })));
-  return { prims, geom: { top, bottom, peak, goalY: goal ? gy : null, xs, ys } };
+  pts.forEach((p, i) => {                             // (the hover areas meet halfway between two days)
+    const x0 = i ? (xs[i - 1] + xs[i]) / 2 : gutter, x1 = i < n - 1 ? (xs[i] + xs[i + 1]) / 2 : W;
+    prims.push(P("rect", { x: n2(x0), y: 0, width: n2(x1 - x0), height: n2(H), class: "ch-hit", "data-tip": p.tip || "", "data-i": i }));
+  });
+  return { prims, geom: { top, bottom, left, peak, goalY: goal ? gy : null, xs, ys, ticks: axis.ticks } };
 }
 export const trendChart = (el, opts) => createChart(el, { height: 180, hover: true, label: "Trend", layout: (d, W, H, s, st) => layoutTrend(d, W, H, s, st).prims }, opts);
 
