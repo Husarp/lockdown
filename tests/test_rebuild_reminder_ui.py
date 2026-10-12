@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from gui import toast as toasts
+
 import antibypass as ab
 import modes
 import pause
@@ -493,7 +495,17 @@ def make_notices(env, fmt, works=True):
 def test_windows_only(env):
     make_notices(env, "toast").show("Hello")
     assert [s["text"] for s in env.toaster.sent] == ["Hello"] and env.corner.cards() == []
-    assert env.toaster.sent[0]["scenario"] is None and env.toaster.sent[0]["expire"] == 10
+    assert env.toaster.sent[0]["scenario"] is None and env.toaster.sent[0]["expire"] == toasts.PASSING_EXPIRE_MIN
+
+
+def test_a_plain_notice_does_not_pile_up_but_one_with_buttons_or_over_a_game_stays(env):
+    n = make_notices(env, "toast")
+    n.show('"casino" is a blocked word - went back.')
+    n.show("Update ready", action=("Install", lambda: None))
+    env.win.fullscreen = True
+    n.show("Steam is blocked.")
+    assert [t["expire"] for t in env.toaster.sent] == [toasts.PASSING_EXPIRE_MIN, toasts.EXPIRE_MIN,
+                                                       toasts.HELD_EXPIRE_MIN]
 
 
 def test_lockdown_only(env):

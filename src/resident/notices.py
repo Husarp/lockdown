@@ -113,7 +113,8 @@ class Notices:
         if windows:
             self.last_toast = self.toaster.send(
                 message, buttons, scenario="reminder" if sticky and not full else None,
-                expire_min=toasts.HELD_EXPIRE_MIN if full else toasts.EXPIRE_MIN)
+                expire_min=toasts.HELD_EXPIRE_MIN if full     # (missed over a game: still there afterwards)
+                else toasts.EXPIRE_MIN if buttons or sticky else toasts.PASSING_EXPIRE_MIN)
         if card:
             self.corner.notice(message, buttons, sticky=sticky)
 

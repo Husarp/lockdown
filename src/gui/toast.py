@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 
 APP_ID = "com.husarp.lockdown"   # the identity main.py registers (name + icon): needed for the buttons to call back
 EXPIRE_MIN = 10                  # a passing notice leaves the notification centre after this
+PASSING_EXPIRE_MIN = 0.2         # a plain notice (no buttons, not sticky - "blocked word", "blocked"): pops up and is
+                                 # gone, never piles up in the notification centre (Windows drops it once expired)
 HELD_EXPIRE_MIN = 120            # ... one sent over a full-screen app: still there when the game is over
 
 

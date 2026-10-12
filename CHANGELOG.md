@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Passing notices don't pile up in the notification centre.** A plain notice (a blocked word, a blocked site or app) pops up and is gone after about 12 seconds; ones with buttons, and ones that came while a game was full-screen, stay as before.
 - **App and site icons without a coloured square behind them**, and **no stray outline on tabs and the sidebar**: the focus ring now shows only when you move around with the keyboard (it also lit up the last-clicked tab when you came back from another app).
 
 ## 0.88.0 - 2026-10-12 16:58
