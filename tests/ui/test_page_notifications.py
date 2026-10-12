@@ -288,7 +288,7 @@ def test_the_front_steps_are_parsed_by_python(shell, page, harness):
     page.fill('[data-k="front-steps"]', "10 min")
     page.press('[data-k="front-steps"]', "Tab")
     assert eventually(lambda: saved(harness, "notify.front.steps") == "10")
-    assert page.input_value('[data-k="front-steps"]') == "10"
+    page.wait_for_function("document.querySelector('[data-k=front-steps]').value === '10'")   # (the page shows Python's form)
 
 
 def test_bad_front_steps_go_back_to_the_last_value_with_pythons_words(shell, page, harness):
