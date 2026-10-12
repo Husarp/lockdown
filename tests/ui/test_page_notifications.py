@@ -1,7 +1,7 @@
 """R27: the Notifications page (js/pages/notifications.js) in Chrome against the real Python Api (see harness.py).
 
 What is checked: every part of the real page is there (7 reasons in a 4-column grid, the Messages section, cooldown, Show as,
-Upcoming Blocks, Weekly Summary), a change reaches Python through the draft and shows in the save bar, typing in a message box
+Upcoming Blocks, Weekly Summary, the warning for the app in front), a change reaches Python through the draft and shows in the save bar, typing in a message box
 makes no Api call until the 400 ms debounce / the box is left, nothing reloads the Blocking page, "remind me again every" is
 parsed by Python (an error puts the old text back), the weekly summary is saved directly, Discard puts the saved values back,
 and the console stays clean."""
@@ -39,20 +39,24 @@ def calls(harness, name):
 def test_the_page_shows_every_part(shell, page, harness):
     open_page(shell, page)
     heads = page.eval_on_selector_all(".nt .card-h h3", "els => els.map(e => e.textContent)")
-    assert heads == ["Blocked Visit Alerts", "Upcoming Blocks", "Weekly Summary"]
+    assert heads == ["Blocked Visit Alerts", "Upcoming Blocks", "Weekly Summary", "The app in front"]
     cells = page.eval_on_selector_all(".nt-cell span", "els => els.map(e => e.textContent)")
     assert cells == [label for label, _ in alerts.REASONS.values()]
     # a 4-column grid: the first four cells share a row, the next three the second
     tops = page.eval_on_selector_all(".nt-cell", "els => els.map(e => Math.round(e.getBoundingClientRect().top))")
     assert len(set(tops[:4])) == 1 and len(set(tops[4:])) == 1 and tops[4] > tops[0]
     for label in ("Don't repeat for the same site within", "Show as", "Warn me", "While I'm using it, remind me again every",
-                  "Notify me when a block starts", "Every", "Per-site override", "Send a test"):
+                  "Notify me when a block starts", "Every", "Per-site override", "Send a test",
+                  "Warn before the app in front gets blocked - even in games and muting modes", "Minutes before",
+                  "Play a short sound"):
         assert label in page.inner_text(".nt"), label
     assert page.locator('[data-seg="nfmt"] button').all_inner_texts() == [
         "Windows notifications (recommended)", "Lockdown pop-ups", "Both"]
     assert page.locator('[data-seg="nfmt"] [aria-pressed="true"]').inner_text().startswith("Windows")
     assert page.input_value('[data-k="cooldown"]') == "30"
     assert page.input_value('[data-k="repeat"]') == "Off"
+    assert page.is_checked('[data-k="front-on"]') and page.is_checked('[data-k="front-sound"]')
+    assert page.input_value('[data-k="front-steps"]') == "1"
     assert page.input_value('[data-k="dg-day"]') == "6" and page.input_value('[data-k="dg-time"]') == "19:00"
     assert page.locator(".nt-cell input:checked").count() == 7
 
@@ -258,6 +262,60 @@ def test_a_bad_repeat_goes_back_to_the_last_value_with_pythons_words(shell, page
     page.wait_for_function("document.querySelector('[data-k=repeat-err]').textContent.length > 0")
     assert page.input_value('[data-k="repeat"]') == "30s"
     assert saved(harness, "notify.warn.repeat_sec") == "30"
+
+
+# ---------------------------------------------------------------- the warning for the app in front
+
+def test_the_front_switches_save_through_the_draft(shell, page, harness):
+    open_page(shell, page)
+    before = len(calls(harness, "draft_set_setting"))
+    page.click('[data-k="front-on"]')
+    assert eventually(lambda: saved(harness, "notify.front.enabled") == "0")
+    page.click('[data-k="front-sound"]')
+    assert eventually(lambda: saved(harness, "notify.front.sound") == "0")
+    assert calls(harness, "draft_set_setting")[before:] == [["notify.front.enabled", "0"], ["notify.front.sound", "0"]]
+    page.click('[data-k="front-on"]')
+    assert eventually(lambda: saved(harness, "notify.front.enabled") == "1")
+
+
+def test_the_front_steps_are_parsed_by_python(shell, page, harness):
+    open_page(shell, page)
+    page.fill('[data-k="front-steps"]', "1,5")
+    page.press('[data-k="front-steps"]', "Enter")
+    assert eventually(lambda: saved(harness, "notify.front.steps") == "5, 1")
+    page.wait_for_function("document.querySelector('[data-k=front-steps]').value === '5, 1'")
+    assert calls(harness, "notify_front_steps_set") == [["1,5"]]
+    page.fill('[data-k="front-steps"]', "10 min")
+    page.press('[data-k="front-steps"]', "Tab")
+    assert eventually(lambda: saved(harness, "notify.front.steps") == "10")
+    assert page.input_value('[data-k="front-steps"]') == "10"
+
+
+def test_bad_front_steps_go_back_to_the_last_value_with_pythons_words(shell, page, harness):
+    open_page(shell, page)
+    page.fill('[data-k="front-steps"]', "5, 1")
+    page.press('[data-k="front-steps"]', "Tab")
+    assert eventually(lambda: saved(harness, "notify.front.steps") == "5, 1")
+    for bad in ("0", "45", "1, 2, 3, 4", "soon"):
+        page.fill('[data-k="front-steps"]', bad)
+        page.press('[data-k="front-steps"]', "Tab")
+        page.wait_for_function("document.querySelector('[data-k=front-steps]').value === '5, 1'")
+        assert "minutes" in page.inner_text('[data-k="front-steps-err"]')
+    assert saved(harness, "notify.front.steps") == "5, 1"
+    page.fill('[data-k="front-steps"]', "2")                          # a good value clears the error
+    page.press('[data-k="front-steps"]', "Tab")
+    page.wait_for_function("document.querySelector('[data-k=front-steps-err]').textContent === ''")
+    assert eventually(lambda: saved(harness, "notify.front.steps") == "2")
+
+
+def test_the_front_steps_show_what_is_saved_and_the_help_opens(shell, page, harness):
+    harness.db.set_setting("notify.front.steps", "15, 5, 1")
+    harness.db.set_setting("notify.front.enabled", "0")
+    open_page(shell, page)
+    assert page.input_value('[data-k="front-steps"]') == "15, 5, 1" and not page.is_checked('[data-k="front-on"]')
+    assert page.locator('[data-helptext="front"]').is_hidden()
+    page.click('[data-act="help"][data-help="front"]')
+    assert "true full screen" in page.inner_text('[data-helptext="front"]')
 
 
 # ---------------------------------------------------------------- weekly summary and the test button

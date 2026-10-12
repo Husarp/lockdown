@@ -222,6 +222,9 @@ def test_draft_set_setting_only_takes_notification_settings(env):
     ("notify.warn.repeat_sec", ["0", "5", "300", "86400"], ["1", "4", "86401", "-1", "off", "", "30s"]),
     ("notify.warn.enabled", ["1", "0"], ["2", "true", "", "on", "11"]),
     ("notify.started.enabled", ["1", "0"], ["yes", ""]),
+    ("notify.front.enabled", ["1", "0"], ["yes", "", "2"]),
+    ("notify.front.sound", ["1", "0"], ["on", "", "-1"]),
+    ("notify.front.steps", ["1", "5, 1", "30", "15, 5, 1"], ["", "0", "31", "5 1", "1,5", "1, 5", "1, 2, 3, 4", "soon", "5 min"]),
     ("notify.enabled.permanent", ["1", "0"], ["maybe", "-1"]),
     ("notify.format", ["toast", "inapp", "both"], ["", "popup", "Toast", "x" * 20]),
 ])

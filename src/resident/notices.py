@@ -9,6 +9,11 @@ pause) is already applied there, so by the time `show` runs the notice is wanted
 - A notice with buttons never goes only to the balloon: if Windows notifications can't be had (the tray balloon has no
   buttons) it becomes the corner card, so its buttons are kept.
 - A sticky notice shown by Windows is a "reminder" (stays on screen until answered) - only when nothing is full-screen.
+- The warning for the app in front (`front=True`, settings notify.front.*): ALWAYS the corner card, full-screen app or
+  not, Windows' Do Not Disturb / game mode or not - the card is ours, Windows cannot hold it. It never takes the focus
+  (the window is topmost and no-activate), so a borderless game keeps running and keeps its focus; nothing can draw over
+  an EXCLUSIVE full-screen game, there only the sound (`sound=True`: a short system sound, played without waiting) is
+  heard. While the corner's page is not ready it takes the ordinary road above.
 
 Taking a Windows notification out of the notification centre can be slow: it runs in a thread of its own."""
 import threading
@@ -32,12 +37,22 @@ def _spawn(fn):
     threading.Thread(target=fn, name="lockdown-toast", daemon=True).start()
 
 
+def play_sound():
+    """A short system sound, without waiting for it. Windows only; never raises."""
+    try:
+        import winsound
+        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+    except Exception:
+        pass
+
+
 class Notices:
     """hub.notify.show = Notices(hub, corner, toaster).show"""
 
-    def __init__(self, hub, corner, toaster, read_format=None, spawn=None, clock=time.monotonic):
+    def __init__(self, hub, corner, toaster, read_format=None, spawn=None, clock=time.monotonic, beep=None):
         self.hub, self.corner, self.toaster = hub, corner, toaster
         self.spawn = spawn or _spawn
+        self._beep = beep or play_sound
         self._read_format = read_format or self._read_setting
         self._clock = clock
         self._fmt = (None, -1e9)      # (value, read at)
@@ -74,8 +89,22 @@ class Notices:
         except Exception:
             return False
 
-    def show(self, message, action=None, actions=None, sticky=False):
+    def _front(self, message, buttons, sticky, sound) -> bool:
+        """The warning for the app in front: the corner card (our own window - over a game, through Do Not Disturb, and
+        no Windows notification besides), then the sound. False when the corner's page is not ready: the caller then
+        takes the ordinary road (the sound has been played all the same)."""
+        on_card = getattr(self.corner, "page_ok", True)
+        if on_card:
+            self.last_toast = None
+            self.corner.notice(message, buttons, sticky=sticky)
+        if sound:
+            self._beep()
+        return on_card
+
+    def show(self, message, action=None, actions=None, sticky=False, front=False, sound=False):
         buttons = list(actions or ([action] if action else []))
+        if front and self._front(message, buttons, sticky, sound):
+            return
         full = self._fullscreen()
         windows, card = route(self.fmt(), full, bool(buttons), self.toaster.works())
         if card and not getattr(self.corner, "page_ok", True):     # (the corner's page has not said it works yet)

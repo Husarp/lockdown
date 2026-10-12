@@ -5,7 +5,8 @@ runs here, each worker in a thread of its own with a database connection of its 
   publisher, the tray). Every other worker reads that snapshot instead of asking the database again.
 - BlockEventWorker (1 s): a blocked app was opened -> close/minimise its windows; a blocked site was opened -> say so
   (only if you were really opening it), through the Alerter (per-reason switch, cooldown, per-item override).
-- WatcherWorker (1 s): warnings before blocks start, "block started", Pomodoro phases, the weekly summary.
+- WatcherWorker (1 s): warnings before blocks start (and the one for the app in front, which gets through games and
+  muting modes), "block started", Pomodoro phases, the weekly summary.
 - MinimizeWorker (250 ms): apps blocked with "Minimize" are sent down when they come to the front; a strict break keeps
   everything down. Win32 only - it reads the snapshot and the reminder engine, not the database.
 - ReminderWorker: reminders.Engine ticks (every few seconds, sooner when something is due), driving a ReminderUI.
@@ -159,14 +160,18 @@ class Notifier:
     callers that must wait for it (reminders, the update notice) ask `dnd()`.
 
     `action`: (label, callback) for the one thing worth doing about this message ("See the week"). `actions` (a list of
-    them) and `sticky` (stays on screen until answered) are for the update notice. Returns False if it was held."""
+    them) and `sticky` (stays on screen until answered) are for the update notice. Returns False if it was held.
+
+    `front`: the warning for the app in front (settings notify.front.*): it counts as `force` (a muting mode does not
+    hold it; only a silent pause does) and the sink is told (`front=True`, `sound`) to put it on the corner card even
+    over a full-screen app, instead of leaving it to a Windows notification that Do Not Disturb / game mode holds."""
 
     def __init__(self, hub):
         self.hub = hub
-        self.show = self._remember        # R07 sets: show(message, action=None, actions=None, sticky=False)
+        self.show = self._remember        # R07 sets: show(message, action=None, actions=None, sticky=False[, front, sound])
         self.recent: deque = deque(maxlen=50)
 
-    def _remember(self, message, action=None, actions=None, sticky=False):
+    def _remember(self, message, action=None, actions=None, sticky=False, front=False, sound=False):
         self.recent.append((message, action, actions, sticky))
 
     def muted(self, force: bool = False) -> bool:
@@ -181,10 +186,14 @@ class Notifier:
         """Windows' Do Not Disturb is on."""
         return bool(self.hub.win.do_not_disturb())
 
-    def __call__(self, message: str, force: bool = False, action=None, *, actions=None, sticky: bool = False) -> bool:
-        if self.muted(force):
+    def __call__(self, message: str, force: bool = False, action=None, *, actions=None, sticky: bool = False,
+                 front: bool = False, sound: bool = False) -> bool:
+        if self.muted(force or front):
             return False
-        self.show(message, action=action, actions=actions, sticky=sticky)
+        if front:
+            self.show(message, action=action, actions=actions, sticky=sticky, front=True, sound=sound)
+        else:
+            self.show(message, action=action, actions=actions, sticky=sticky)
         return True
 
 
@@ -632,8 +641,12 @@ class WatcherWorker(Worker):
             self._slow_at = mono
             self._settings = {key: alerts.get(self.db, key) for key in alerts.DEFAULTS}
         self._announce_phase(snap)
+        sound = self._settings.get("notify.front.sound") == "1"
         for message in self.watcher.check(snap.items, snap.groups, snap.usage, snap.now, hub.in_use(), self._settings):
-            hub.notify(message, force=message in self.watcher.urgent)
+            if message in self.watcher.front:      # the app in front is about to be blocked: gets through games and mutes
+                hub.notify(message, force=True, front=True, sound=sound)
+            else:
+                hub.notify(message, force=message in self.watcher.urgent)
         if slow and digest.due(self.db, snap.now):       # the weekly summary
             db = self.db
             names = lambda kind, name: name_of(kind, name, snap.items)   # noqa: E731

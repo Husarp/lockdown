@@ -1073,6 +1073,99 @@ def test_the_weekly_summary_once_with_see_the_week(watch):
     assert digest.due(watch.db, watch.clock.t) is False
 
 
+# ---------------------------------------------------------------- the warning for the app in front
+
+def front_calls(watch):
+    """Replace hub.notify with a recorder that keeps the keywords too: (message, force, front/sound keywords)."""
+    got = []
+    watch.hub.notify = lambda message, force=False, action=None, **kw: got.append((message, force, kw))
+    return got
+
+
+def to_last_minute(watch):
+    """From 22:00 (10 min before Reddit's 22:10 block) to 22:09:05."""
+    watch.snap()
+    watch.watcher.tick()
+    watch.clock.advance(9 * 60 + 5)
+    watch.snap()
+    watch.watcher.tick()
+
+
+def test_the_app_in_front_is_warned_forced_on_the_front_road_with_the_sound(watch):
+    watch.db.set_setting("notify.warn.repeat_sec", "0")
+    watch.hub.in_use = lambda: {watch.item}
+    got = front_calls(watch)
+    to_last_minute(watch)
+    assert got == [("Reddit will be blocked in 10 min (22:10).", True, {}),                        # 10 min: the ordinary one
+                   ("Reddit will be blocked in 1 min (22:10).", True, {"front": True, "sound": True})]
+    for _ in range(3):                                                                              # once per step
+        step(watch, 5)
+    assert len(got) == 2
+
+
+def test_the_sound_follows_its_setting(watch):
+    watch.db.set_setting("notify.warn.repeat_sec", "0")
+    watch.db.set_setting("notify.front.sound", "0")
+    watch.hub.in_use = lambda: {watch.item}
+    got = front_calls(watch)
+    to_last_minute(watch)
+    assert got[-1][2] == {"front": True, "sound": False}
+
+
+def test_switched_off_the_front_road_is_never_used(watch):
+    watch.db.set_setting("notify.warn.repeat_sec", "0")
+    watch.db.set_setting("notify.front.enabled", "0")
+    watch.hub.in_use = lambda: {watch.item}
+    got = front_calls(watch)
+    to_last_minute(watch)
+    assert got == [("Reddit will be blocked in 10 min (22:10).", True, {})]                         # as before: nothing more
+
+
+def test_what_is_not_in_front_gets_no_front_warning(watch):
+    watch.db.set_setting("notify.warn.repeat_sec", "0")
+    got = front_calls(watch)
+    to_last_minute(watch)
+    assert all(kw == {} and force is False for _m, force, kw in got) and len(got) == 1
+
+
+def real_notifier(watch):
+    """The real Notifier (the `watch` fixture swaps it for a recorder) with a sink that records what it is told."""
+    shown = []
+    watch.hub.notify = workers.Notifier(watch.hub)
+    watch.hub.notify.show = lambda message, action=None, actions=None, sticky=False, front=False, sound=False: \
+        shown.append((message, front, sound))
+    return shown
+
+
+def test_the_front_warning_gets_through_a_muting_mode_and_asks_for_the_front_road(watch):
+    watch.db.set_setting("notify.warn.repeat_sec", "0")
+    watch.hub.in_use = lambda: {watch.item}
+    shown = real_notifier(watch)
+    modes.start(watch.db, "dnd", NOW, None)                       # Do Not Disturb: a mode that mutes
+    to_last_minute(watch)
+    assert watch.hub.snapshot.mode["mute"] is True
+    assert shown == [("Reddit will be blocked in 10 min (22:10).", False, False),     # (what you are using: forced too)
+                     ("Reddit will be blocked in 1 min (22:10).", True, True)]
+
+
+def test_a_muting_mode_holds_what_you_are_not_in_but_not_the_front_warning(watch):
+    shown = real_notifier(watch)
+    modes.start(watch.db, "dnd", NOW, None)
+    watch.snap()
+    assert watch.hub.notify("quiet") is False
+    assert watch.hub.notify("front", front=True, sound=True) is True                # (front counts as forced)
+    assert shown == [("front", True, True)]
+
+
+def test_a_silent_pause_still_holds_the_front_warning(watch):
+    watch.db.set_setting("notify.warn.repeat_sec", "0")
+    watch.hub.in_use = lambda: {watch.item}
+    shown = real_notifier(watch)
+    pause.start(watch.db, NOW, 30, silent=True)                   # nothing gets blocked meanwhile - and nothing is said
+    to_last_minute(watch)
+    assert shown == [] and watch.hub.notify("x", front=True) is False
+
+
 # ---------------------------------------------------------------- minimise and the strict break
 
 @pytest.fixture

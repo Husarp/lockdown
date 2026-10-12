@@ -514,6 +514,77 @@ def test_a_full_screen_app_gets_only_a_windows_notification_that_waits_long(env)
     assert env.toaster.sent[0]["expire"] == 120 and env.toaster.sent[0]["scenario"] is None
 
 
+def front_notices(env, fmt="toast", beeps=None):
+    beeps = [] if beeps is None else beeps
+    return notices.Notices(env.hub, env.corner, env.toaster, read_format=lambda: fmt, spawn=lambda fn: fn(),
+                           beep=lambda: beeps.append("beep")), beeps
+
+
+@pytest.mark.parametrize("fmt", ["toast", "inapp", "both"])
+@pytest.mark.parametrize("fullscreen, dnd", [(False, False), (True, False), (False, True), (True, True)])
+def test_the_front_warning_is_the_corner_card_even_over_a_game_or_do_not_disturb(env, fmt, fullscreen, dnd):
+    env.win.fullscreen, env.win.dnd = fullscreen, dnd
+    n, beeps = front_notices(env, fmt)
+    n.show("Steam will be blocked in 1 min (22:10).", front=True, sound=True)
+    assert [c["text"] for c in env.corner.cards()] == ["Steam will be blocked in 1 min (22:10)."]
+    assert env.toaster.sent == [] and n.last_toast is None            # no Windows notification besides: it would be a double
+    assert beeps == ["beep"]
+    assert "show" in env.log.kinds()                                  # the window was asked to show
+
+
+def test_the_front_warning_plays_no_sound_when_the_setting_is_off(env):
+    n, beeps = front_notices(env)
+    n.show("Steam will be blocked in 1 min.", front=True, sound=False)
+    assert len(env.corner.cards()) == 1 and beeps == []
+
+
+def test_an_ordinary_notice_never_plays_the_sound(env):
+    n, beeps = front_notices(env, "inapp")
+    n.show("Hello", sound=True)                                       # (sound belongs to the front kind only)
+    assert beeps == []
+
+
+def test_the_front_warning_takes_the_old_road_while_the_corner_page_is_not_ready(env):
+    env.corner._page_ok = False
+    env.win.fullscreen = True
+    n, beeps = front_notices(env, "inapp")
+    n.show("Steam will be blocked in 1 min.", front=True, sound=True)
+    assert env.corner.cards() == []                                   # (a card nobody would see)
+    assert [t["text"] for t in env.toaster.sent] == ["Steam will be blocked in 1 min."] and env.toaster.sent[0]["expire"] == 120
+    assert beeps == ["beep"]                                          # (the sound still gets through)
+
+
+def test_the_front_card_does_not_stay_forever_and_has_no_buttons(env):
+    front_notices(env)[0].show("Steam will be blocked in 1 min.", front=True)
+    card = env.corner.cards()[0]
+    assert card["kind"] == "notice" and card["sticky"] is False and card["buttons"] == [] and card["ms"] == 8000
+
+
+def test_the_sound_never_raises(monkeypatch):
+    import sys
+    import types
+    monkeypatch.setitem(sys.modules, "winsound", None)                # (no winsound, as off Windows: the import fails)
+    notices.play_sound()
+    calls = []
+
+    def boom(kind):
+        calls.append(kind)
+        raise RuntimeError("no sound card")
+
+    monkeypatch.setitem(sys.modules, "winsound", types.SimpleNamespace(MB_ICONEXCLAMATION=48, MessageBeep=boom))
+    notices.play_sound()
+    assert calls == [48]
+
+
+def test_the_sound_is_one_non_blocking_system_beep(monkeypatch):
+    import sys
+    import types
+    calls = []
+    monkeypatch.setitem(sys.modules, "winsound", types.SimpleNamespace(MB_ICONEXCLAMATION=48, MessageBeep=calls.append))
+    notices.play_sound()
+    assert calls == [48]                                              # (MessageBeep returns at once: it plays by itself)
+
+
 def test_a_sticky_notice_is_a_windows_reminder_on_the_desktop(env):
     make_notices(env, "toast").show("Update", actions=[("Install", lambda: None)], sticky=True)
     assert env.toaster.sent[0]["scenario"] == "reminder"
@@ -568,6 +639,15 @@ def test_a_muting_mode_holds_notices_unless_forced(env):
     assert notify("quiet please") is False and env.corner.cards() == []
     assert notify("you are about to be blocked", force=True) is True
     assert [c["text"] for c in env.corner.cards()] == ["you are about to be blocked"]
+
+
+def test_the_front_warning_gets_through_a_muting_mode_but_not_a_silent_pause(env):
+    notify = muted_env(env, mode_mute=True)
+    assert notify("quiet please") is False and env.corner.cards() == []
+    assert notify("Steam will be blocked in 1 min.", front=True, sound=False) is True
+    assert [c["text"] for c in env.corner.cards()] == ["Steam will be blocked in 1 min."]
+    notify = muted_env(env, pause_silent=True)
+    assert notify("again", front=True) is False
 
 
 def test_a_silent_pause_holds_everything_even_forced(env):

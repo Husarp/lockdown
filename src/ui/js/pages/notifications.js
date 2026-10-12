@@ -5,7 +5,8 @@
 // text is sent 400 ms after the last key or when the box is left, switches and menus at once) and shows in the save bar as
 // "Notification settings"; with Auto-save off they wait for Save changes. Python validates every value (webapi/draft.py).
 // Nothing here reloads the Blocking page. "Remind me again every" is parsed in Python (notify_repeat_set: "30s", "2 min",
-// Off). The weekly summary has no draft: digest_set saves it at once.
+// Off), and so are the "minutes before" of the warning for the app in front (notify_front_steps_set: "1", "5, 1").
+// The weekly summary has no draft: digest_set saves it at once.
 //
 // Page contract: mount() builds the static structure once, load() = one Api call (notifications_get) fills it. The seven
 // reasons are built on the first load and reused; a box you are typing in is never overwritten by a reload. A Discard
@@ -55,6 +56,7 @@ const STYLE = `<style>
 .nt .nt-help { padding: 0 var(--sp-4) var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
 .nt .nt-digest { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); }
 .nt .nt-repeat { width: calc(84px * var(--s)); text-align: center; }
+.nt .nt-steps { width: calc(110px * var(--s)); text-align: center; }
 .nt .nt-err { color: var(--k-block); font-size: var(--fs-sm); padding: 0 var(--sp-4) var(--sp-2); }
 .nt .nt-err:empty { display: none; }
 .nt .seg { flex: 0 1 auto; min-width: 0; }
@@ -65,6 +67,7 @@ const STYLE = `<style>
 const help = (key, label) => `<button class="icon-btn icon-btn-sm" type="button" data-act="help" data-help="${key}" aria-expanded="false" aria-label="More about ${esc(label)}">${ic("info")}</button>`;
 const HELP = {
   fmt: "Windows draws its notifications, so they never cover a game the way a pop-up window can. While a full-screen app is in front, Lockdown always uses them (whatever you pick here). Windows' \"Do not disturb when playing a game\" keeps them out of games entirely - they wait in the notification centre (the bell) and clear themselves later.",
+  front: "A small card in the corner of your screen, on top of a window or a borderless game - without taking focus, and not held back by Windows' Do not disturb or game mode - and a short sound. A game in true full screen can't be drawn over: there only the sound gets through. Write one time, or up to three (1 to 30 minutes), like 5, 1 for a warning at 5 minutes and another at 1.",
   digest: "Screen time compared with the week before, blocked visits, your top app and site, the days within your goal and your streaks.",
 };
 const helpRow = (key) => `<p class="nt-help" data-helptext="${key}" hidden>${esc(HELP[key])}</p>`;
@@ -98,6 +101,19 @@ function warnCard() {
   </section>`;
 }
 
+function frontCard() {
+  return `<section class="card" data-card="front">
+    <header class="card-h">${kic("k-limit", "bell")}<h3>The app in front</h3></header>
+    <div class="card-b" style="padding:0">
+      ${field("Warn before the app in front gets blocked - even in games and muting modes", "", `${sw(true, 'data-k="front-on" aria-label="Warn before the app in front gets blocked, even in games and muting modes"')}${help("front", "the warning for the app in front")}`)}
+      ${helpRow("front")}
+      ${field("Minutes before", "one or more, like 5, 1", `<input class="input nt-steps" data-k="front-steps" autocomplete="off" spellcheck="false" aria-label="Minutes before">`)}
+      <p class="nt-err" data-k="front-steps-err" role="alert"></p>
+      ${field("Play a short sound", "", sw(true, 'data-k="front-sound" aria-label="Play a short sound"'))}
+    </div>
+  </section>`;
+}
+
 function digestCard() {
   return `<section class="card" data-card="digest">
     <header class="card-h">${kic("k-ok", "chart")}<h3>Weekly Summary</h3></header>
@@ -112,7 +128,10 @@ function digestCard() {
 
 let root = null, page = null;
 let data = null, built = false, pending = false;     // pending: the draft has unsaved edits
-let lastRepeat = "Off";
+const textBoxes = {       // the boxes whose words Python parses: the newest answer only may change the box (answers can overtake each other)
+  "repeat": { method: "notify_repeat_set", fallback: "Write a time like 30s or 2 min, or Off.", last: "Off", seq: 0, done: 0, failed: 0 },
+  "front-steps": { method: "notify_front_steps_set", fallback: "Write up to 3 times from 1 to 30 minutes, like 1 or 5, 1.", last: "1", seq: 0, done: 0, failed: 0 },
+};
 const q = (k) => root.querySelector(`[data-k="${k}"]`);
 const focused = (node) => node === document.activeElement;
 
@@ -120,13 +139,14 @@ export function mount(host, p) {
   page = p;
   host.innerHTML = `${STYLE}<div class="page nt"><div class="page-h"><h1>Notifications</h1><button class="btn" type="button" data-act="test">${ic("bell")}Send a test</button></div>
     ${alertsCard()}
-    <div class="grid-2">${warnCard()}${digestCard()}</div></div>`;
+    <div class="grid-2">${warnCard()}${digestCard()}</div>
+    ${frontCard()}</div>`;
   root = host;
   root.addEventListener("change", onChange);
   root.addEventListener("input", onInput);
   root.addEventListener("focusout", onFocusOut);
   root.addEventListener("click", onClick);
-  root.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches('[data-k="repeat"]')) e.target.blur(); });
+  root.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches('[data-k="repeat"], [data-k="front-steps"]')) e.target.blur(); });
   root.addEventListener("seg", (e) => { if (e.detail.name === "nfmt") draftSetSetting("notify.format", e.detail.value, 0); });
 }
 
@@ -165,9 +185,15 @@ function fill(d) {
   const mins = root.querySelector('[data-card="warn"] .stepper input');
   if (!focused(mins) && mins.value !== String(w.minutes)) mins.value = String(w.minutes);
   const rep = q("repeat");
-  lastRepeat = w.repeat_text;
+  textBoxes.repeat.last = w.repeat_text;
   if (!focused(rep) && rep.value !== w.repeat_text) rep.value = w.repeat_text;
   q("repeat-err").textContent = "";
+  const f = d.front, steps = q("front-steps");
+  if (q("front-on").checked !== f.enabled) q("front-on").checked = f.enabled;
+  if (q("front-sound").checked !== f.sound) q("front-sound").checked = f.sound;
+  textBoxes["front-steps"].last = f.steps_text;
+  if (!focused(steps) && steps.value !== f.steps_text) steps.value = f.steps_text;
+  q("front-steps-err").textContent = "";
   if (q("started").checked !== d.started) q("started").checked = d.started;
   const g = d.digest;
   if (q("dg-on").checked !== g.enabled) q("dg-on").checked = g.enabled;
@@ -207,29 +233,26 @@ async function saveDigest() {
   }
 }
 
-let repeatSeq = 0;                                  // only the newest answer may change the box (answers can overtake each other)
-let repeatDone = 0, repeatFailed = 0;               // the newest call whose answer was taken as "saved", and the newest that failed
-
-async function commitRepeat() {
-  const box = q("repeat");
+async function commitText(k) {
+  const b = textBoxes[k], box = q(k), err = q(`${k}-err`);
   const text = box.value;
-  if (text.trim() === lastRepeat) { box.value = lastRepeat; return; }
-  const mine = ++repeatSeq;
+  if (text.trim() === b.last) { box.value = b.last; return; }
+  const mine = ++b.seq;
   try {
-    const r = await ld.call("notify_repeat_set", text);
+    const r = await ld.call(b.method, text);
     applyState(r);
-    if (mine > repeatDone) { repeatDone = mine; lastRepeat = r.text; }       // (an older answer still says what is saved)
-    if (mine !== repeatSeq) {
-      if (repeatFailed === repeatSeq && !focused(box)) box.value = lastRepeat;   // (the newer one failed before this answer came)
+    if (mine > b.done) { b.done = mine; b.last = r.text; }                   // (an older answer still says what is saved)
+    if (mine !== b.seq) {
+      if (b.failed === b.seq && !focused(box)) box.value = b.last;           // (the newer one failed before this answer came)
       return;
     }
     if (!focused(box)) box.value = r.text;                                   // (never over something being typed right now)
-    q("repeat-err").textContent = "";
-  } catch (err) {
-    if (mine !== repeatSeq) return;
-    repeatFailed = mine;
-    q("repeat-err").textContent = (err && err.message) || "Write a time like 30s or 2 min, or Off.";
-    if (!focused(box)) box.value = lastRepeat;
+    err.textContent = "";
+  } catch (e) {
+    if (mine !== b.seq) return;
+    b.failed = mine;
+    err.textContent = (e && e.message) || b.fallback;
+    if (!focused(box)) box.value = b.last;
   }
 }
 
@@ -241,7 +264,9 @@ function onChange(e) {
     case "cooldown": return draftSetSetting("notify.cooldown_min", t.value, 0);
     case "warn-on": return draftSetSetting("notify.warn.enabled", flagValue(t.checked), 0);
     case "started": return draftSetSetting("notify.started.enabled", flagValue(t.checked), 0);
-    case "repeat": return commitRepeat();
+    case "repeat": case "front-steps": return commitText(t.dataset.k);
+    case "front-on": return draftSetSetting("notify.front.enabled", flagValue(t.checked), 0);
+    case "front-sound": return draftSetSetting("notify.front.sound", flagValue(t.checked), 0);
     case "dg-on": case "dg-day": case "dg-time": return saveDigest();
     default:
   }

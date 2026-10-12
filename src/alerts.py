@@ -1,5 +1,6 @@
 """Alert settings, message formatting and the upcoming-block watcher (used by the tray agent)."""
 import math
+import re
 from datetime import datetime
 
 from blocker.apps import is_hosted
@@ -34,7 +35,10 @@ WARN_MINUTE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 60]
 DEFAULTS = {"notify.cooldown_min": "30", "notify.format": "toast",
             "notify.warn.enabled": "1", "notify.warn.minutes": "5",
             "notify.warn.repeat_sec": "0",   # "remind me again every", in seconds (0 = don't); see get
-            "notify.started.enabled": "1"}
+            "notify.started.enabled": "1",
+            # the warning for the app in front (get through games, muting modes, Do Not Disturb): on / minutes before
+            # (steps, largest first) / a short sound
+            "notify.front.enabled": "1", "notify.front.steps": "1", "notify.front.sound": "1"}
 for _r in REASONS:
     DEFAULTS[f"notify.enabled.{_r}"] = "1"
     DEFAULTS[f"notify.msg.{_r}"] = DEFAULT_MESSAGES[_r]
@@ -46,6 +50,40 @@ def get(db, key: str) -> str:
         minutes = db.get_setting("notify.warn.repeat_min")
         value = str(int(minutes) * 60) if minutes and minutes.isdigit() else None
     return DEFAULTS[key] if value is None else value
+
+
+FRONT_STEP_MIN, FRONT_STEP_MAX, FRONT_STEPS_MAX = 1, 30, 3
+FRONT_STEPS_HELP = (f"Write up to {FRONT_STEPS_MAX} times from {FRONT_STEP_MIN} to {FRONT_STEP_MAX} minutes, "
+                    "like 1 or 5, 1.")
+
+
+def parse_front_steps(text) -> list[int]:
+    """The "minutes before" of the warning for the app in front, as typed ("1", "5, 1", "5 min 1 min"): each step
+    from 1 to 30 whole minutes, at most 3, no repeats -> [5, 1] (largest first). Raises ValueError (with words for
+    the page) for anything else - the page is not trusted, so this is the one place that decides."""
+    if not isinstance(text, str) or len(text) > 60:
+        raise ValueError(FRONT_STEPS_HELP)
+    words = re.sub(r"\s*(?:minutes?|mins?|m)\b", " ", text.lower())
+    parts = [p for p in re.split(r"[\s,;]+", words) if p]
+    if not parts or not all(re.fullmatch(r"[0-9]{1,3}", p) for p in parts):
+        raise ValueError(FRONT_STEPS_HELP)
+    steps = sorted({int(p) for p in parts}, reverse=True)
+    if len(steps) > FRONT_STEPS_MAX or steps[-1] < FRONT_STEP_MIN or steps[0] > FRONT_STEP_MAX:
+        raise ValueError(FRONT_STEPS_HELP)
+    return steps
+
+
+def front_steps_text(steps: list[int]) -> str:
+    """[5, 1] -> "5, 1": the form that is saved."""
+    return ", ".join(str(s) for s in steps)
+
+
+def front_steps(value: str | None) -> list[int]:
+    """The saved steps; a value nobody could have saved through the page (hand-edited) counts as the default."""
+    try:
+        return parse_front_steps(value)
+    except ValueError:
+        return parse_front_steps(DEFAULTS["notify.front.steps"])
 
 
 def until_text(until: str | None, now: datetime) -> str:
@@ -149,6 +187,10 @@ class BlockWatcher:
         # a mode that mutes, or Do not disturb: being told the thing in front of you
         # is about to go is the one notice that is worth interrupting a game for.
         self.urgent: set[str] = set()
+        # the messages from the last check that are the warning for the app in front (a subset of `urgent`): the
+        # worker shows those on the corner card even over a game, with a sound (settings notify.front.*)
+        self.front: set[str] = set()
+        self.front_warned: dict[tuple, datetime] = {}   # (block key, step in minutes) -> when it was shown
 
     @staticmethod
     def _key(item: dict, rule: dict, when: datetime) -> tuple:
@@ -165,10 +207,16 @@ class BlockWatcher:
               settings: dict) -> list[str]:
         messages = []
         self.urgent = set()
+        self.front = set()
         warn_on = settings["notify.warn.enabled"] == "1"
         warn_sec = int(settings["notify.warn.minutes"]) * 60
         repeat_sec = int(settings.get("notify.warn.repeat_sec") or 0)
+        # the warning for the app in front: its steps in seconds, largest first ([] = off; a settings dict without
+        # the keys - older callers - is off too)
+        steps = [m * 60 for m in front_steps(settings.get("notify.front.steps"))] \
+            if settings.get("notify.front.enabled") == "1" else []
         upcoming: dict[tuple, dict] = {}
+        near: dict[tuple, dict] = {}          # the same blocks, but only what is in front, within the biggest step
         blocked: dict[int, tuple] = {}
         for item in items:
             rules = effective_rules(item, groups)
@@ -177,13 +225,34 @@ class BlockWatcher:
                 blocked[item["id"]] = (item, block)
                 continue
             nb = next_block(rules, now, usage, in_use=item["id"] in in_use)
-            if not nb or (nb[0] - now).total_seconds() > warn_sec:
+            if not nb:
                 continue
             when, rule = nb
+            left = (when - now).total_seconds()
+            if steps and item["id"] in in_use and left <= steps[0]:
+                entry = near.setdefault(self._key(item, rule, when),
+                                        {"when": when, "rule": rule, "names": [], "in_use": True})
+                entry["names"].append(item["display_name"])
+            if left > warn_sec:
+                continue
             entry = upcoming.setdefault(self._key(item, rule, when),
                                         {"when": when, "rule": rule, "names": [], "in_use": False})
             entry["names"].append(item["display_name"])
             entry["in_use"] |= item["id"] in in_use
+
+        replaced = set()                      # blocks whose normal warning the front warning of this check stands in for
+        for key, e in near.items():
+            left = (e["when"] - now).total_seconds()
+            reached = [s for s in steps if left <= s]
+            if all((key, s) in self.front_warned for s in reached):
+                continue
+            for s in reached:                 # (joining at 30 s with steps "5, 1": one warning, both steps are done)
+                self.front_warned[(key, s)] = now
+            text = self._warning(e, now)
+            self.front.add(text)
+            self.urgent.add(text)
+            messages.append(text)
+            replaced.add(key)
 
         if warn_on:
             spending = self._allowance_notices(items, groups, usage, now, in_use)
@@ -193,6 +262,8 @@ class BlockWatcher:
                 last = self.warned.get(key)
                 if last is None or (e["in_use"] and repeat_sec and (now - last).total_seconds() >= repeat_sec):
                     self.warned[key] = now
+                    if key in replaced:           # the front warning just shown is this block's notice: not twice
+                        continue
                     text = self._warning(e, now)
                     if e["in_use"]:               # what you are using is the thing about to be blocked
                         self.urgent.add(text)

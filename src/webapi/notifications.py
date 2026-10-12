@@ -6,7 +6,8 @@ Two kinds of setting live here, as in the old window:
   which accepts only `notify.*` keys from alerts.DEFAULTS, checks every value and shows "Notification settings" in the
   save bar), and wait for Save while Auto-save is off. Nothing here writes them behind the draft's back. The one box
   that needs parsing - "remind me again every" (30s, 2 min, Off) - goes through `notify_repeat_set`, which parses the
-  words in Python and hands the number on to that same method.
+  words in Python and hands the number on to that same method; so does the "minutes before" of the warning for the app
+  in front (5, 1), through `notify_front_steps_set`.
 - the weekly summary (`digest.*`) is saved at once (`digest_set`), like the old window.
 
 Nothing here can loosen a block: all of it is classified read / ui. "Show as" is picked up by the notice sink from the
@@ -36,7 +37,7 @@ def _options(options, current) -> list:
 def notifications_get(ctx):
     """Everything the page shows: {reasons: [{key, label, default}], enabled: {reason: bool}, messages: {reason: text},
     cooldown, cooldown_options, format, formats: [{key, label}], warn: {enabled, minutes, repeat_sec, repeat_text},
-    started, digest: {enabled, day, time, days, times, text}, draft: {dirty, autosave, change_summary}}.
+    front: {enabled, steps, steps_text, sound}, started, digest: {enabled, day, time, days, times, text}, draft: {dirty, autosave, change_summary}}.
     The notification settings are the DRAFT's (unsaved edits included), the weekly summary is the saved one."""
     db = ctx.db
     d = drafts.draft_of(ctx)
@@ -46,6 +47,7 @@ def notifications_get(ctx):
         state = drafts.state_of(d)
     cooldown, minutes = int(s["notify.cooldown_min"]), int(s["notify.warn.minutes"])
     repeat = int(s["notify.warn.repeat_sec"])
+    steps = alerts.front_steps(s["notify.front.steps"])
     time_ = digest.get(db, "digest.time")
     hours = [f"{h:02d}:00" for h in range(24)]
     return {
@@ -57,6 +59,8 @@ def notifications_get(ctx):
         "format": s["notify.format"], "formats": [{"key": k, "label": v} for k, v in alerts.FORMATS.items()],
         "warn": {"enabled": _flag(s["notify.warn.enabled"]), "minutes": minutes, "repeat_sec": repeat,
                  "repeat_text": reminders.seconds_text(repeat)},
+        "front": {"enabled": _flag(s["notify.front.enabled"]), "steps": steps,
+                  "steps_text": alerts.front_steps_text(steps), "sound": _flag(s["notify.front.sound"])},
         "started": _flag(s["notify.started.enabled"]),
         "digest": {"enabled": _flag(digest.get(db, "digest.enabled")), "day": int(digest.get(db, "digest.day")),
                    "time": time_, "days": DAY_NAMES, "times": sorted({*hours, time_}),
@@ -79,6 +83,22 @@ def notify_repeat_set(ctx, text):
     if reply.get("ok") and isinstance(reply.get("data"), dict):
         reply["data"]["seconds"] = seconds
         reply["data"]["text"] = reminders.seconds_text(seconds)
+    return reply
+
+
+@core.ui
+def notify_front_steps_set(ctx, text):
+    """The "minutes before" of the warning for the app in front: the words as typed ("1", "5, 1") parsed here (1 to 3
+    steps of 1-30 minutes), then saved as a draft setting exactly like the others. A free setting: it never loosens a
+    block. -> the draft state + {steps, text} (what the box should say now)."""
+    try:
+        steps = alerts.parse_front_steps(text)
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+    reply = drafts.draft_set_setting(ctx, "notify.front.steps", alerts.front_steps_text(steps))
+    if reply.get("ok") and isinstance(reply.get("data"), dict):
+        reply["data"]["steps"] = steps
+        reply["data"]["text"] = alerts.front_steps_text(steps)
     return reply
 
 

@@ -234,11 +234,17 @@ def run_edit(ctx, mutate, blocks: bool = True):
 
 
 # Number settings: whole digits only, within these limits (minutes: the old page offered 1-60 and 1-60; repeat seconds:
-# 0 = off, else MIN_INTERVAL_SEC to a day). Other keys: "1"/"0", a known format, or free text (the messages).
+# 0 = off, else MIN_INTERVAL_SEC to a day). Other keys: "1"/"0", a known format, the steps of the warning for the app in
+# front ("5, 1"), or free text (the messages).
 _NUMBER_RANGES = {"notify.cooldown_min": (1, 1440), "notify.warn.minutes": (1, 1440), "notify.warn.repeat_sec": (MIN_INTERVAL_SEC, 86400)}
 
 
 def _setting_ok(key: str, value: str) -> bool:
+    if key == "notify.front.steps":     # "5, 1": 1-3 steps of 1-30 minutes, in the one form that is saved
+        try:
+            return value == alerts.front_steps_text(alerts.parse_front_steps(value))
+        except ValueError:
+            return False
     if key in _NUMBER_RANGES:
         if not (value.isascii() and value.isdigit()):
             return False

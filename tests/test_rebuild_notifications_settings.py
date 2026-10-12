@@ -95,7 +95,7 @@ def test_the_methods_are_classified():
     kinds = dict(webapi.api_methods())
     assert kinds["notifications_get"] == "read" and kinds["settings_get"] == "read"
     assert kinds["reset_change_preview"] == "read"
-    for name in ("digest_set", "notify_repeat_set", "notify_test", "set_goal", "backup_export",
+    for name in ("digest_set", "notify_repeat_set", "notify_front_steps_set", "notify_test", "set_goal", "backup_export",
                  "backup_import_pick"):
         assert kinds[name] == "ui", name
     for name in ("reset_change_apply", "emergency_settings_save", "backup_import_apply"):
@@ -136,6 +136,7 @@ def test_the_notifications_page_data_has_everything(api):
     assert d["cooldown"] == 30 and d["cooldown_options"] == [1, 5, 15, 30, 60]
     assert d["format"] == "toast" and [f["key"] for f in d["formats"]] == ["toast", "inapp", "both"]
     assert d["warn"] == {"enabled": True, "minutes": 5, "repeat_sec": 0, "repeat_text": "Off"}
+    assert d["front"] == {"enabled": True, "steps": [1], "steps_text": "1", "sound": True}
     assert d["started"] is True
     assert d["digest"]["enabled"] is True and d["digest"]["day"] == 6 and d["digest"]["time"] == "19:00"
     assert d["digest"]["text"] == "Sunday at 19:00" and len(d["digest"]["days"]) == 7
@@ -209,6 +210,47 @@ def test_the_repeat_box_waits_in_the_draft_when_autosave_is_off(api, ctx):
     d = data(api.notify_repeat_set("45s"))
     assert d["dirty"] is True and saved(ctx, "notify.warn.repeat_sec") is None
     assert data(api.notifications_get())["warn"]["repeat_sec"] == 45
+
+
+def test_the_front_warning_switches_go_through_the_draft(api, ctx):
+    data(api.draft_set_setting("notify.front.enabled", "0"))
+    data(api.draft_set_setting("notify.front.sound", "0"))
+    assert saved(ctx, "notify.front.enabled") == "0" and saved(ctx, "notify.front.sound") == "0"
+    d = data(api.notifications_get())["front"]
+    assert d["enabled"] is False and d["sound"] is False and d["steps"] == [1]
+    for key in ("notify.front.enabled", "notify.front.sound"):
+        assert "isn't valid" in error(api.draft_set_setting(key, "yes"))
+
+
+def test_the_front_steps_box_is_parsed_in_python(api, ctx):
+    d = data(api.notify_front_steps_set("5, 1"))
+    assert d["steps"] == [5, 1] and d["text"] == "5, 1" and saved(ctx, "notify.front.steps") == "5, 1"
+    assert data(api.notify_front_steps_set("1,5"))["text"] == "5, 1"
+    assert data(api.notify_front_steps_set("10 min"))["steps"] == [10] and saved(ctx, "notify.front.steps") == "10"
+    assert data(api.notifications_get())["front"]["steps_text"] == "10"
+    for bad in ("0", "31", "1, 2, 3, 4", "soon", "", "1.5", "x" * 100, 5, None, ["1"]):
+        assert "minutes" in error(api.notify_front_steps_set(bad))
+    assert saved(ctx, "notify.front.steps") == "10"                      # nothing bad was saved
+
+
+def test_the_draft_takes_the_steps_only_in_the_form_python_saves(api, ctx):
+    for bad in ("5 1", "1,5", "1, 5", "0", "31", "1, 2, 3, 4", "", "abc", "5,1", " 5, 1"):
+        assert "isn't valid" in error(api.draft_set_setting("notify.front.steps", bad)), bad
+    assert saved(ctx, "notify.front.steps") is None
+    data(api.draft_set_setting("notify.front.steps", "15, 5, 1"))
+    assert saved(ctx, "notify.front.steps") == "15, 5, 1"
+
+
+def test_the_front_steps_wait_in_the_draft_when_autosave_is_off(api, ctx):
+    data(api.draft_set_autosave(False))
+    d = data(api.notify_front_steps_set("5, 1"))
+    assert d["dirty"] is True and saved(ctx, "notify.front.steps") is None
+    assert data(api.notifications_get())["front"]["steps"] == [5, 1]
+
+
+def test_a_hand_edited_steps_value_shows_the_default_not_an_error(api, ctx):
+    ctx.db.set_setting("notify.front.steps", "banana")
+    assert data(api.notifications_get())["front"]["steps_text"] == "1"
 
 
 def test_the_weekly_summary_is_saved_directly(api, ctx):
