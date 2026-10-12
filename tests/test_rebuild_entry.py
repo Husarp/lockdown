@@ -1,10 +1,11 @@
-"""R01: entry switch (new web window vs the old one), theme constants, import hygiene, the local asset server."""
+"""R01: the entry (always the web window), theme constants, import hygiene, the local asset server."""
 import http.client
 import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,61 +16,68 @@ from resident.assets import AssetServer
 SRC = Path(__file__).resolve().parents[1] / "src"
 
 
-# ---------------------------------------------------------------- the switch (flipped 2026-10-12: the new window)
+# ---------------------------------------------------------------- the entry: always the new window (no --legacy)
 
-@pytest.mark.parametrize("argv, setting, expected", [
-    (["--legacy"], "web", False),                  # --legacy (hidden: the automatic fallback) always wins
-    (["--legacy", "--new-ui"], "web", False),
-    (["--legacy"], None, False),
-    (["--new-ui"], None, True),
-    (["--new-ui"], "legacy", True),
-    ([], "web", True),
-    ([], "legacy", True),                           # a saved "legacy" from the removed switch no longer counts
-    ([], None, True),                               # nothing saved: the new window
-    ([], "", True),
-    ([], "junk", True),
-    (["--tray"], "legacy", True),
-    (["--tray"], None, True),
-    (["--watchdog"], "legacy", True),
+@pytest.fixture
+def entry(monkeypatch):
+    """main.run with the agent, the Windows identity, the autostart and the watchdog check replaced by recorders."""
+    import agent
+    calls = SimpleNamespace(agent=[], identity=[], watchdog=[], watchdog_starts=True)
+    monkeypatch.setattr(agent, "main", lambda argv, on_first_instance=None: calls.agent.append((list(argv), on_first_instance)) or 7)
+    monkeypatch.setattr(main, "set_identity", lambda: calls.identity.append(1))
+    monkeypatch.setattr(main, "watchdog_should_start", lambda: calls.watchdog.append(1) or calls.watchdog_starts)
+    return calls
+
+
+@pytest.mark.parametrize("flags", [
+    [], ["--tray"], ["--challenge", "Uninstall Lockdown"], ["--challenge", "Uninstall Lockdown", "--retried"],
+    ["--watchdog"], ["--retried"],
+    ["--legacy"], ["--new-ui"], ["--legacy", "--tray"], ["--new-ui", "--challenge", "x"], ["--legacy", "--new-ui"],
+    ["--something-new"],
 ])
-def test_use_new_ui_truth_table(argv, setting, expected):
-    assert main.use_new_ui(argv, setting) is expected
-    assert main.use_new_ui(argv, lambda: setting) is expected
+def test_every_start_goes_to_the_agent_and_old_flags_are_ignored(entry, flags):
+    argv = ["Lockdown.exe", *flags]
+    assert main.run(argv) == 7
+    assert entry.agent == [(argv, main.register_autostart_later)]      # (the whole argv, untouched)
+    assert entry.identity == [1]
 
 
-def test_the_setting_is_only_read_when_no_flag_decides():
-    def boom():
-        raise AssertionError("read although a flag decided")
-    assert main.use_new_ui(["--new-ui"], boom) is True
-    assert main.use_new_ui(["--legacy"], boom) is False
+def test_the_selftest_goes_to_the_agent_without_identity_or_autostart(entry):
+    argv = ["Lockdown.exe", "--selftest", "report.txt"]
+    assert main.run(argv) == 7
+    assert entry.agent == [(argv, None)] and entry.identity == [] and entry.watchdog == []
+    entry.agent.clear()
+    assert main.run(["Lockdown.exe", "--legacy", "--selftest", "report.txt"]) == 7      # (--legacy: ignored)
+    assert entry.agent[0][0][-2:] == ["--selftest", "report.txt"] and entry.identity == []
 
 
-def test_a_failing_setting_read_means_the_new_window():
-    def boom():
-        raise sqlite3.DatabaseError("no")
-    assert main.use_new_ui([], boom) is True
-    assert main.use_new_ui(["--legacy"], boom) is False
+def test_a_watchdog_run_that_must_not_start_does_nothing(entry):
+    entry.watchdog_starts = False
+    assert main.run(["Lockdown.exe", "--watchdog"]) == 0
+    assert entry.agent == [] and entry.identity == [] and entry.watchdog == [1]
+    entry.watchdog_starts = True
+    assert main.run(["Lockdown.exe", "--watchdog"]) == 7
+    assert len(entry.agent) == 1 and entry.identity == [1]
 
 
-@pytest.mark.parametrize("default", ["legacy", "web"])
-def test_engine_of(monkeypatch, default):
-    monkeypatch.setattr(ui_theme, "DEFAULT_ENGINE", default)
-    assert ui_theme.engine_of("web") == "web"
-    for other in ("legacy", None, "", "Web", "new", 1, True):      # a saved "legacy" is no choice any more
-        assert ui_theme.engine_of(other) == default
+def test_main_has_no_old_window_left_in_it():
+    text = (SRC / "main.py").read_text(encoding="utf-8")
+    for gone in ("customtkinter", "gui.app", "use_new_ui", "def challenge(", "def selftest(", "engine_of"):
+        assert gone not in text, gone
+    assert not hasattr(main, "use_new_ui") and not hasattr(main, "challenge") and not hasattr(main, "selftest")
+    assert not hasattr(ui_theme, "engine_of") and not hasattr(ui_theme, "DEFAULT_ENGINE")
 
 
-def test_the_default_window_is_the_new_one():
-    """Flipped 2026-10-12 (Adam: "we are switching to the new one"). The old window stays only as the automatic
-    fallback (agent.FALLBACK) and the hidden --legacy flag, until Adam confirms the new one works on his PC."""
-    assert ui_theme.DEFAULT_ENGINE == "web"
-    assert main.use_new_ui([], None) and main.use_new_ui([], "legacy") and not main.use_new_ui(["--legacy"], None)
-
-
-def test_legacy_flag_with_selftest_keeps_the_old_self_test():
-    argv = ["Lockdown.exe", "--legacy", "--selftest", "report.txt"]
-    assert main.use_new_ui(argv, "web") is False
-    assert argv[argv.index("--selftest") + 1] == "report.txt"
+def test_nothing_starts_the_old_window_with_a_flag_any_more():
+    """`--legacy` appears nowhere in the program, the scripts or the installer (main.py's docstring says it is ignored)."""
+    root = SRC.parent
+    found = []
+    for folder in ("src", "scripts", "installer"):
+        for path in (root / folder).rglob("*"):
+            if path.suffix in (".py", ".ps1", ".spec", ".js", ".mjs", ".html", ".css", ".md", ".sh", ".txt") \
+                    and "__pycache__" not in path.parts and "--legacy" in path.read_text(encoding="utf-8", errors="ignore"):
+                found.append(path.relative_to(root).as_posix())
+    assert found == ["src/main.py"]
 
 
 def _db_with(tmp_path, monkeypatch, engine):
@@ -86,20 +94,19 @@ def _db_with(tmp_path, monkeypatch, engine):
 
 
 def test_reading_the_setting_from_a_real_db(tmp_path, monkeypatch):
-    for saved in ("web", "legacy", None):           # (a saved "legacy" from the old switch: the new window all the same)
+    for saved in ("web", "legacy", None):
         _db_with(tmp_path, monkeypatch, saved)
-        assert main.use_new_ui([], main.read_engine_setting) is True
-    assert main.use_new_ui(["--legacy"], main.read_engine_setting) is False
+        assert main.read_engine_setting() == saved
 
 
-def test_missing_or_corrupt_db_means_the_new_window(tmp_path, monkeypatch):
+def test_missing_or_corrupt_db_reads_as_no_setting(tmp_path, monkeypatch):
     import paths
     monkeypatch.setattr(paths, "DB_PATH", tmp_path / "nope" / "config.db")
-    assert main.use_new_ui([], main.read_engine_setting) is True
+    assert main.read_engine_setting() is None
     bad = tmp_path / "config.db"
     bad.write_bytes(b"this is not a database" * 100)
     monkeypatch.setattr(paths, "DB_PATH", bad)
-    assert main.use_new_ui([], main.read_engine_setting) is True
+    assert main.read_engine_setting() is None
 
 
 def test_a_saved_old_window_choice_is_deleted_once(tmp_path, monkeypatch):
@@ -132,10 +139,9 @@ def test_the_clean_up_runs_with_the_autostart_and_a_failure_is_only_logged(monke
     assert any("old window choice" in line for line in logged)
 
 
-def test_agent_hands_unfinished_flags_back_to_the_old_window():
+def test_the_agent_has_no_flags_it_cannot_do():
     import agent
-    assert agent.handles(["--tray"]) and agent.handles([])
-    assert agent.handles(["--challenge", "x"]) and agent.handles(["--selftest", "r"])
+    assert not hasattr(agent, "handles") and not hasattr(agent, "NOT_YET") and not hasattr(agent, "hand_over")
 
 
 # ---------------------------------------------------------------- theme constants

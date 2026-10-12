@@ -6,8 +6,9 @@ dark screen again:
 - no window is shown before its page has said it works (Api `page_ready`): the full-screen cover (bedtime / strict
   break) and the corner wait for their page, and a cover whose page never comes is told another way (a Windows
   notification for bedtime) instead of a black screen with no way out;
-- the main window waits for its page too; a page that never says it works (or no WebView2, or a failing start) hands
-  the run to the old window (agent.FALLBACK), with the reason in the logs;
+- the main window waits for its page too; a page that never says it works (or no WebView2, or a failing start) is
+  logged, tried once more (a fresh process with --retried) and told in a message box (agent.start_failed); a second
+  try that fails too only shows the box;
 - every script error at start reaches the log (the pages' early error hook);
 - the new window is the default, a saved old-window choice no longer counts, the switch is gone (test_rebuild_entry.py,
   test_rebuild_notifications_settings.py).
@@ -454,80 +455,159 @@ def agent_env(tmp_path, monkeypatch):
             self.stopped = True
     import gui.tray
     monkeypatch.setattr(gui.tray, "Tray", Tray)
-    handed = []
-    monkeypatch.setattr(agent, "hand_over", lambda visible: handed.append(visible) or True)
+    retries, boxes, order = [], [], []
+    monkeypatch.setattr(agent, "_failed", [])
+
+    def start_retry(args):
+        retries.append(list(args))
+        order.append("retry")
+        return True
+
+    def message_box(text, title="Lockdown"):       # (never a real box in a test)
+        boxes.append(text)
+        order.append("box")
+    monkeypatch.setattr(agent, "start_retry", start_retry)
+    monkeypatch.setattr(agent, "message_box", message_box)
 
     def run(fake, argv=("Lockdown.exe",), ready_sec=1.0):
         monkeypatch.setitem(sys.modules, "webview", fake.module)
         monkeypatch.setattr(windows, "MAIN_READY_SEC", ready_sec)
         return agent.main(list(argv))
-    return SimpleNamespace(run=run, handed=handed, trays=trays, tmp=tmp_path)
+    return SimpleNamespace(run=run, retries=retries, boxes=boxes, order=order, trays=trays, tmp=tmp_path)
 
 
 def newui_log(env):
     return (env.tmp / "lockdown-newui.log").read_text(encoding="utf-8")
 
 
-def test_without_webview2_the_old_window_takes_over_at_once(agent_env):
+def test_without_webview2_the_start_is_tried_once_more_and_a_box_says_it(agent_env):
     fake = FakeWebview(renderer="mshtml")
     start = time.monotonic()
-    assert agent_env.run(fake) == agent.FALLBACK
-    assert time.monotonic() - start < 5 and agent_env.handed == [True]
+    assert agent_env.run(fake) == agent.FAILED
+    assert time.monotonic() - start < 5
+    assert agent_env.retries == [["--retried"]] and len(agent_env.boxes) == 1
     assert all(w.calls == [] for w in fake.created)                       # nothing was ever shown
     log = (agent_env.tmp / "lockdown.log").read_text(encoding="utf-8")
     assert "WebView2 was not found" in log and "'mshtml'" in log
+    box = agent_env.boxes[0]
+    assert "could not start" in box and "WebView2 was not found" in box and "trying once more" in box
+    assert "Blocking keeps working" in box and "lockdown.log" in box and "lockdown-newui.log" in box
+    assert "Restart the PC" not in box
 
 
-def test_a_main_page_that_never_says_ready_hands_over_after_the_wait(agent_env):
+def test_the_second_try_is_started_before_the_box_is_shown(agent_env):
+    assert agent_env.run(FakeWebview(renderer="mshtml")) == agent.FAILED
+    assert agent_env.order == ["retry", "box"]                            # (a modal box must not hold the retry up)
+
+
+def test_a_second_try_that_fails_too_shows_the_box_and_does_not_try_again(agent_env):
+    assert agent_env.run(FakeWebview(renderer="mshtml"), argv=("Lockdown.exe", "--retried")) == agent.FAILED
+    assert agent_env.retries == [] and len(agent_env.boxes) == 1
+    assert "Restart the PC" in agent_env.boxes[0] and "send the log" in agent_env.boxes[0]
+    assert "trying once more" not in agent_env.boxes[0]
+
+
+def test_a_second_try_that_cannot_be_started_says_restart_the_pc(agent_env, monkeypatch):
+    monkeypatch.setattr(agent, "start_retry", lambda args: False)
+    assert agent_env.run(FakeWebview(renderer="mshtml")) == agent.FAILED
+    assert len(agent_env.boxes) == 1 and "Restart the PC" in agent_env.boxes[0]
+
+
+def test_a_main_page_that_never_says_ready_is_tried_once_more_after_the_wait(agent_env):
     fake = FakeWebview()
-    assert agent_env.run(fake, ready_sec=0.5) == agent.FALLBACK
-    assert agent_env.handed == [True] and agent_env.trays and agent_env.trays[0].stopped
+    assert agent_env.run(fake, ready_sec=0.5) == agent.FAILED
+    assert agent_env.retries == [["--retried"]] and agent_env.trays and agent_env.trays[0].stopped
+    assert len(agent_env.boxes) == 1 and "did not say it was ready" in agent_env.boxes[0]
     assert all(w.calls == [] for w in fake.created)                       # no dark window was left on screen
     assert "did not say it was ready" in (agent_env.tmp / "lockdown.log").read_text(encoding="utf-8")
     assert "files served" in newui_log(agent_env) and "start " in newui_log(agent_env)
 
 
-def test_a_tray_start_hands_over_to_the_old_window_in_the_tray(agent_env, monkeypatch):
+def test_a_tray_start_is_tried_once_more_in_the_tray(agent_env, monkeypatch):
     monkeypatch.setattr(windows, "MAIN_READY_HIDDEN_SEC", 0.5)
     fake = FakeWebview()
-    assert agent_env.run(fake, argv=("Lockdown.exe", "--tray")) == agent.FALLBACK
-    assert agent_env.handed == [False]
+    assert agent_env.run(fake, argv=("Lockdown.exe", "--tray")) == agent.FAILED
+    assert agent_env.retries == [["--tray", "--retried"]] and len(agent_env.boxes) == 1
 
 
-def test_a_page_that_says_ready_is_shown_and_nothing_is_handed_over(agent_env):
+def test_a_watchdog_start_is_tried_once_more_but_shows_no_box(agent_env):
+    """Once a minute, nobody there: a box every minute would be a storm."""
+    assert agent_env.run(FakeWebview(renderer="mshtml"), argv=("Lockdown.exe", "--watchdog")) == agent.FAILED
+    assert agent_env.retries == [["--watchdog", "--retried"]] and agent_env.boxes == []
+
+
+def test_the_old_flags_do_not_stop_a_start_from_being_tried_once_more(agent_env):
+    assert agent_env.run(FakeWebview(renderer="mshtml"), argv=("Lockdown.exe", "--legacy", "--new-ui")) == agent.FAILED
+    assert agent_env.retries == [["--legacy", "--new-ui", "--retried"]] and len(agent_env.boxes) == 1
+
+
+def test_a_page_that_says_ready_is_shown_and_nothing_is_retried(agent_env):
     fake = FakeWebview(page_ready_after=0.3, limit=1.5)
     assert agent_env.run(fake, ready_sec=1.0) == 0
     main = fake.created[0]
     assert main.title == "Lockdown" and main.calls[:2] == ["show", "restore"]
-    assert agent_env.handed == []
+    assert agent_env.retries == [] and agent_env.boxes == []
     assert "main page ready after" in newui_log(agent_env)
 
 
-def test_a_failing_start_hands_over_too(agent_env, monkeypatch):
+def test_a_failing_start_is_tried_once_more_too(agent_env, monkeypatch):
     import gui.tray
 
     def broken(**kw):
         raise OSError("no tray here")
     monkeypatch.setattr(gui.tray, "Tray", broken)
-    assert agent_env.run(FakeWebview()) == agent.FALLBACK
+    assert agent_env.run(FakeWebview()) == agent.FAILED
+    assert agent_env.retries == [["--retried"]] and "no tray here" in agent_env.boxes[0]
     assert "the agent failed to start" in (agent_env.tmp / "lockdown.log").read_text(encoding="utf-8")
 
 
-def test_hand_over_starts_the_old_window_once_after_letting_go_of_the_port(monkeypatch):
+def test_retry_args_are_this_runs_own_plus_the_marker():
+    assert agent.retry_args(["Lockdown.exe"]) == ["--retried"]
+    assert agent.retry_args(["Lockdown.exe", "--tray"], visible=False) == ["--tray", "--retried"]
+    assert agent.retry_args(["Lockdown.exe", "--tray"], visible=True) == ["--retried"]      # (the window was asked for)
+    assert agent.retry_args(["Lockdown.exe", "--watchdog", "--x"], visible=True) == ["--x", "--retried"]
+
+
+def test_start_retry_lets_go_of_the_port_and_starts_the_delayed_helper(monkeypatch):
     import subprocess
     from gui import single_instance
-    monkeypatch.setattr(agent, "_handed_over", [])
     released, started = [], []
     monkeypatch.setattr(single_instance, "release", lambda: released.append(1))
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
-    assert agent.hand_over(False) is True
-    assert agent.hand_over(True) is False                                 # once per process
+    assert agent.start_retry(["--tray", "--retried"]) is True
     assert released == [1] and len(started) == 1
-    assert "--legacy" in started[0] and "--tray" in started[0] and started[0].startswith("ping -n 3 127.0.0.1")
-    monkeypatch.setattr(agent, "_handed_over", [])
-    started.clear()
-    agent.hand_over(True)
-    assert "--legacy" in started[0] and "--tray" not in started[0]
+    assert started[0].startswith("ping -n 3 127.0.0.1") and "--tray" in started[0] and "--retried" in started[0]
+    assert "--legacy" not in started[0]
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: (_ for _ in ()).throw(OSError("no shell")))
+    assert agent.start_retry(["--retried"]) is False
+
+
+def test_a_failed_start_is_handled_once_per_process(agent_env):
+    assert agent.start_failed(["Lockdown.exe"], "first", True) is True
+    assert agent.start_failed(["Lockdown.exe"], "second", True) is False
+    assert agent_env.retries == [["--retried"]] and len(agent_env.boxes) == 1 and "first" in agent_env.boxes[0]
+
+
+def test_the_box_names_a_long_reason_in_one_short_line():
+    text = agent.failure_text("The Lockdown window", "line one\nline  two " + "x" * 500, True)
+    assert "line one line two" in text and len(text.splitlines()[2]) <= 200 and text.splitlines()[2].endswith("...")
+
+
+def test_message_box_is_a_native_top_most_ok_box_on_windows_only(monkeypatch):
+    shown = []
+    fake_user32 = SimpleNamespace(MessageBoxW=lambda *args: shown.append(args) or 1)
+    monkeypatch.setattr(agent.ctypes, "windll", SimpleNamespace(user32=fake_user32), raising=False)
+    monkeypatch.setattr(agent, "sys", SimpleNamespace(platform="linux"))
+    agent.message_box("not here")
+    assert shown == []
+    monkeypatch.setattr(agent, "sys", SimpleNamespace(platform="win32"))
+    agent.message_box("it did not start")
+    assert len(shown) == 1
+    hwnd, text, title, flags = shown[0]
+    assert hwnd is None and text == "it did not start" and title == "Lockdown"
+    assert flags == 0x0 | 0x30 | 0x10000 | 0x40000                         # MB_OK | ICONWARNING | SETFOREGROUND | TOPMOST
+    monkeypatch.setattr(fake_user32, "MessageBoxW", lambda *args: (_ for _ in ()).throw(OSError("no desktop")))
+    agent.message_box("still no crash")
 
 
 def test_release_lets_another_instance_take_the_port(monkeypatch):
@@ -576,6 +656,7 @@ def test_the_bridge_leaves_reporting_to_the_early_hook():
 @pytest.fixture
 def challenge_env(tmp_path, monkeypatch):
     import random
+    import subprocess
     import antibypass as ab
     from resident import challenge_cli
     from webapi.guard import GuardService
@@ -583,34 +664,70 @@ def challenge_env(tmp_path, monkeypatch):
     ctx.guard = GuardService(lambda: ctx.db, rng=random.Random(3))
     ab.save(ctx.db, {**ab.settings(ctx.db), "phrase": True, "length": 30})        # (a challenge is needed)
     monkeypatch.setattr(webapi, "make_context", lambda: ctx)
-    legacy = []
-    monkeypatch.setattr(challenge_cli, "legacy_challenge", lambda text: legacy.append(text) or 0)
     monkeypatch.setattr(windows, "storage_dir", lambda: tmp_path)
     monkeypatch.setattr(challenge_cli, "READY_SEC", 0.3)
+    retries, boxes, order = [], [], []
+    answer = {"code": 0, "fails": False}
 
-    def run(fake):
+    def popen(cmd, **kw):                              # (the second try: a fresh `--challenge TEXT --retried` process)
+        if answer["fails"]:
+            raise OSError("cannot start")
+        retries.append(list(cmd))
+        order.append("retry")
+        return SimpleNamespace(wait=lambda: answer["code"])
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(agent, "message_box", lambda text, title="Lockdown": (boxes.append(text), order.append("box")))
+
+    def run(fake, argv=("Lockdown.exe", "--challenge", "Uninstall Lockdown")):
         monkeypatch.setitem(sys.modules, "webview", fake.module)
-        return challenge_cli.run(["Lockdown.exe", "--challenge", "Uninstall Lockdown"])
-    return SimpleNamespace(run=run, legacy=legacy, ctx=ctx)
+        return challenge_cli.run(list(argv))
+    return SimpleNamespace(run=run, retries=retries, boxes=boxes, order=order, answer=answer, ctx=ctx)
 
 
-def test_a_challenge_window_without_webview2_hands_over_to_the_old_challenge(challenge_env, tmp_path):
+def test_a_challenge_window_without_webview2_is_tried_once_more_by_a_fresh_process(challenge_env, tmp_path):
+    challenge_env.answer["code"] = 0                                       # (the second try passes the challenge)
     assert challenge_env.run(FakeWebview(renderer="mshtml", limit=5)) == 0
-    assert challenge_env.legacy == ["Uninstall Lockdown"]
-    assert "the old window's challenge answers instead" in (tmp_path / "lockdown.log").read_text(encoding="utf-8")
+    assert len(challenge_env.retries) == 1
+    cmd = challenge_env.retries[0]
+    assert cmd[-3:] == ["--challenge", "Uninstall Lockdown", "--retried"] and "--legacy" not in cmd
+    assert len(challenge_env.boxes) == 1 and "trying once more" in challenge_env.boxes[0]
+    assert "could not start" in challenge_env.boxes[0] and "lockdown-newui.log" in challenge_env.boxes[0]
+    assert challenge_env.order == ["retry", "box"]                         # (a modal box must not hold the retry up)
+    log = (tmp_path / "lockdown.log").read_text(encoding="utf-8")
+    assert "challenge window:" in log and "did not say it works" in log
 
 
-def test_a_challenge_page_that_never_says_ready_hands_over_too(challenge_env):
+def test_the_answer_of_the_second_try_is_the_answer(challenge_env):
+    challenge_env.answer["code"] = 1                                       # (cancelled / not passed there)
+    assert challenge_env.run(FakeWebview(renderer="mshtml", limit=5)) == 1
+    challenge_env.answer["code"] = 0
+    assert challenge_env.run(FakeWebview(renderer="mshtml", limit=5)) == 0
+
+
+def test_a_challenge_page_that_never_says_ready_is_tried_once_more_too(challenge_env):
     fake = FakeWebview(limit=5)
-    assert challenge_env.run(fake) == 0 and challenge_env.legacy == ["Uninstall Lockdown"]
+    assert challenge_env.run(fake) == 0 and len(challenge_env.retries) == 1
     assert fake.created[0].destroyed.is_set()
 
 
-def test_a_challenge_page_that_works_is_not_handed_over(challenge_env):
+def test_a_second_try_that_fails_too_answers_not_passed_and_does_not_try_again(challenge_env):
+    argv = ("Lockdown.exe", "--challenge", "Uninstall Lockdown", "--retried")
+    assert challenge_env.run(FakeWebview(renderer="mshtml", limit=5), argv=argv) == 1
+    assert challenge_env.retries == [] and len(challenge_env.boxes) == 1
+    assert "Restart the PC" in challenge_env.boxes[0] and "trying once more" not in challenge_env.boxes[0]
+
+
+def test_a_second_try_that_cannot_be_started_answers_not_passed(challenge_env):
+    challenge_env.answer["fails"] = True
+    assert challenge_env.run(FakeWebview(renderer="mshtml", limit=5)) == 1
+    assert len(challenge_env.boxes) == 1 and "Restart the PC" in challenge_env.boxes[0]
+
+
+def test_a_challenge_page_that_works_is_not_tried_again(challenge_env):
     fake = FakeWebview(limit=1.0)
     fake.start_hook = lambda: fake.api.page_ready("challenge")
     assert challenge_env.run(fake) == 1                                    # (closed without passing: 1, as before)
-    assert challenge_env.legacy == []
+    assert challenge_env.retries == [] and challenge_env.boxes == []
 
 
 def test_the_challenge_page_says_ready():

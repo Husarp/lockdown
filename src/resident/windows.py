@@ -6,7 +6,7 @@ No window is shown before its page has said it works (the Api's `page_ready`, af
 to Python answered). A window shown before that is a solid dark rectangle - for the full-screen cover, a black screen
 with no way out. `show_main` waits for the main page (it is shown the moment the page is ready); `watch_main` gives the
 page MAIN_READY_SEC (a start in the tray: MAIN_READY_HIDDEN_SEC) and otherwise calls `on_timeout(reason)` - the agent
-then hands this run over to the old window."""
+then logs it, tries once more and shows a message box (agent.start_failed)."""
 import queue
 import threading
 import time
@@ -91,7 +91,7 @@ def close_means_hide(win: Windows) -> bool:
 
 def show_main(win: Windows):
     """Bring the main window up (tray Open, a second launch). Before its page has said it works this only notes the wish:
-    the window comes up the moment the page is ready (or, if it never is, the old window takes over - watch_main)."""
+    the window comes up the moment the page is ready (or, if it never is, the agent gives up on this run - watch_main)."""
     with win.lock:
         if not win.ready["main"].is_set():
             win.show_wanted = True

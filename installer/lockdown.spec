@@ -33,9 +33,8 @@ WEB_UI = (collect_submodules("resident") + collect_submodules("webapi")
 gui = Analysis([os.path.join(SRC, "main.py")], pathex=[SRC],
                datas=[(os.path.join(ROOT, "assets"), "assets"), (os.path.join(SRC, "ui"), "ui")] + UIA_DLLS
                + collect_data_files("webview"),
-               hiddenimports=["gui.about_page", "gui.antibypass_page", "gui.display_settings", "comtypes.stream"]
-               + TOASTS + WEB_UI,
-               excludes=["pytest"])
+               hiddenimports=["comtypes.stream"] + TOASTS + WEB_UI,
+               excludes=["pytest", "customtkinter"])
 svc = Analysis([os.path.join(SRC, "service_win.py")], pathex=[SRC],
                hiddenimports=["win32timezone"], excludes=["pytest", "customtkinter", "PIL", "pystray", "uiautomation"])
 

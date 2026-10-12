@@ -1,9 +1,9 @@
-"""`Lockdown.exe --new-ui --selftest REPORT`: the build check of the new window, with real timings.
+"""`Lockdown.exe --selftest REPORT`: the build check of the window, with real timings.
 
-Run with a temporary data folder (main.py sets LOCKDOWN_DATA_DIR before anything is imported, as for the old
-self-test), so it never touches the running Lockdown, its autostart or its tasks. It boots the windows hidden,
-checks that the three windows and the page files exist, calls every `read` Api method once on the temporary
-database and - on Windows, where there is a real window - times what Adam feels:
+Run with a temporary data folder (main.py sets LOCKDOWN_DATA_DIR before anything is imported), so it never touches
+the running Lockdown, its autostart or its tasks. It boots the windows hidden, checks that the three windows and the
+page files exist, calls every `read` Api method once on the temporary database and - on Windows, where there is a
+real window - times what Adam feels:
 
     tray_icon_ms        agent start -> tray icon is up                        (BLUEPRINT: <= 1000)
     main_hydrated_ms    agent start -> the hidden main window has its data    (<= 3000)

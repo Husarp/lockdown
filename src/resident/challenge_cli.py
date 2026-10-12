@@ -5,8 +5,9 @@ Python decides everything (webapi/guard.py): the page only shows what GuardServi
   challenge on screen until it is closed, then answer 0 (passed) or 1. No Anti-Bypass challenge set = 0 at once.
 - `run(argv)`: the Windows glue - a small window with js/challenge.js (challenge.html), its own temporary WebView2
   profile (the resident agent may be running with the normal one), and an Api that has only the challenge methods.
-  If its page does not say it works within READY_SEC (or WebView2 is missing), the window goes and the old window's
-  challenge (`--legacy --challenge TEXT`, a process of its own) answers instead - the uninstaller is never stuck.
+  If its page does not say it works within READY_SEC (or WebView2 is missing), the window goes, the reason is logged and
+  `try_again` runs: ONE fresh `--challenge TEXT --retried` process answers instead (and a message box says so). A
+  second try that fails too answers 1 = not passed (the uninstaller then refuses, which is safe) - never stuck.
 - `ask_in_main(win, ctx, changes, action)`: tray Exit and friends - run the action now if Anti-Bypass is "free", else
   show the main window and push `challenge_open` so the page opens the challenge.
 """
@@ -19,7 +20,7 @@ WINDOW_SIZE, WINDOW_MIN = (700, 660), (540, 440)
 # The only Api methods the standalone window may call (the page is untrusted like any other).
 STANDALONE_METHODS = ("challenge_begin", "challenge_submit", "challenge_cancel", "get_theme", "antibypass_status",
                       "log_client_error", "page_ready")
-READY_SEC = 8           # the page must say it works within this, or the old window's challenge takes over
+READY_SEC = 8           # the page must say it works within this, or the challenge is tried once more
 
 
 def challenge_text(argv: list[str]) -> str:
@@ -87,9 +88,8 @@ def run(argv: list[str]) -> int:
             renderer = getattr(webview, "renderer", None)
             if renderer == "edgechromium" and ready.wait(READY_SEC):
                 return
-            gave_up.append(True)
-            diag.note(f"challenge window: its page did not say it works (renderer {renderer!r}, files served "
-                      f"{server.served}) - the old window's challenge answers instead", important=True)
+            gave_up.append(f"its page did not say it works (renderer {renderer!r}, files served {server.served})")
+            diag.note(f"challenge window: {gave_up[0]}", important=True)
             try:
                 box["win"].destroy()
             except Exception:
@@ -104,14 +104,26 @@ def run(argv: list[str]) -> int:
         code = exit_code(ctx, challenge_text(argv), show)
     finally:
         server.stop()
-    return legacy_challenge(challenge_text(argv)) if gave_up else code
+    return try_again(argv, gave_up[0]) if gave_up else code
 
 
-def legacy_challenge(text: str) -> int:
-    """The old window's challenge in a process of its own (`--legacy --challenge TEXT`); its exit code (0 = passed)."""
+def try_again(argv: list[str], reason: str) -> int:
+    """The challenge window could not start (the reason is in the logs already): ONE fresh `--challenge TEXT --retried`
+    process, started BEFORE the message box (a modal box must not hold it up), and its exit code is the answer (0 =
+    passed). A run that already is the second try, or one that can't be started, answers 1 = not passed."""
     import subprocess
+
+    import agent
     from paths import gui_command
-    return subprocess.run(gui_command("--legacy", "--challenge", text)).returncode
+    from resident import diag
+    retry = None
+    if agent.RETRIED not in argv:
+        try:
+            retry = subprocess.Popen(gui_command("--challenge", challenge_text(argv), agent.RETRIED))
+        except OSError as error:
+            diag.note(f"challenge window: the second try could not be started: {error!r}", important=True)
+    agent.message_box(agent.failure_text("The Anti-Bypass challenge window", reason, retry is not None))
+    return retry.wait() if retry is not None else 1
 
 
 def ask_in_main(win, ctx, changes: list[str], action, force: bool = False, cancel=None) -> bool:

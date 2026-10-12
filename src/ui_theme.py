@@ -1,6 +1,5 @@
-"""Theme constants shared by the old window (gui/theme.py) and the new web window: the settings keys, the theme and
-accent choices, and the window background per theme. Plain Python - no customtkinter, PIL or tkinter - so the new
-agent can read them without paying for those imports."""
+"""Theme constants: the settings keys, the theme and accent choices, and the window background per theme. Plain
+Python - no customtkinter, PIL or tkinter - so the agent can read them without paying for those imports."""
 import sqlite3
 
 from paths import ASSETS
@@ -13,18 +12,9 @@ THEMES = {"Dark": "dark", "AMOLED": "amoled", "Light": "light", "System": "syste
 ACCENTS = {"Orange": "#DB5126", "Red": "#D1342F", "Pink": "#D63F8C", "Purple": "#7C4DDB", "Blue": "#2F6FEB",
            "Teal": "#12948A", "Green": "#23945A", "Yellow": "#C99A0E"}
 
-# Which window Lockdown opens in: the new one (flipped 2026-10-12). The old window is only the automatic fallback when
-# the new one can't start (agent.py), and the hidden --legacy flag. The "Try the new window" switch is gone: a saved
-# ui.engine = "legacy" from it no longer keeps anyone on the old window (main.py also deletes the key once).
+# The saved window choice of the removed "Try the new window" switch: Lockdown has only the new window now, and
+# main.py deletes this key once (forget_engine_choice).
 ENGINE_KEY = "ui.engine"
-DEFAULT_ENGINE = "web"
-
-
-def engine_of(value) -> str:
-    """"web" or "legacy" for a saved ui.engine value: "web" as saved, anything else (a saved "legacy" too) =
-    DEFAULT_ENGINE."""
-    return "web" if value == "web" else DEFAULT_ENGINE
-
 
 # The page background (design token BG) per theme - the web window is painted with it before the page loads.
 BG_LIGHT, BG_DARK, BG_AMOLED = "#EFF1F4", "#101418", "#000000"

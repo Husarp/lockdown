@@ -65,7 +65,9 @@ class Show:
 
 def test_challenge_text():
     assert challenge_cli.challenge_text(["--challenge", "Uninstall Lockdown"]) == "Uninstall Lockdown"
-    assert challenge_cli.challenge_text(["--new-ui", "--challenge", " Uninstall Lockdown ", "--x"]) == "Uninstall Lockdown"
+    assert challenge_cli.challenge_text(["--legacy", "--challenge", " Uninstall Lockdown ", "--x"]) == "Uninstall Lockdown"
+    assert challenge_cli.challenge_text(["--challenge", "Uninstall Lockdown", "--retried"]) == "Uninstall Lockdown"
+    assert challenge_cli.challenge_text(["--challenge", "--retried"]) == challenge_cli.DEFAULT_TEXT
     assert challenge_cli.challenge_text(["--challenge"]) == challenge_cli.DEFAULT_TEXT
     assert challenge_cli.challenge_text(["--challenge", "--tray"]) == challenge_cli.DEFAULT_TEXT
 

@@ -200,8 +200,8 @@ def test_autostart_runs_off_the_ui_thread(monkeypatch):
 
 def test_main_does_not_register_autostart_synchronously():
     source = (SRC / "main.py").read_text(encoding="utf-8")
-    entry = source[source.index('if __name__ == "__main__":'):]
-    assert "register_autostart_later()" in entry and "register_autostart()" not in entry
+    entry = source[source.index("def run(argv"):]
+    assert "register_autostart_later" in entry and "register_autostart()" not in entry
 
 
 # ---------- dashboard ----------

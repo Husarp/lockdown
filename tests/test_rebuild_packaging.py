@@ -23,8 +23,16 @@ def test_spec_bundles_ui_folder_and_imports():
                  "pythonnet", "clr", "agent"):
         assert f'"{name}"' in SPEC, name
     assert 'collect_submodules("resident")' in SPEC and 'collect_submodules("webapi")' in SPEC
-    # the legacy app is still bundled
-    assert "gui.about_page" in SPEC and "UIA_DLLS" in SPEC
+    assert "UIA_DLLS" in SPEC and "TOASTS" in SPEC
+
+
+def test_spec_no_longer_names_the_old_windows_pages():
+    """The old customtkinter window is not started any more: its pages are no hidden imports, and the program is
+    built without customtkinter (the service already was)."""
+    for name in ("gui.about_page", "gui.antibypass_page", "gui.display_settings", "gui.app"):
+        assert name not in SPEC, name
+    assert '"customtkinter"' in SPEC.split("gui = Analysis(")[1].split("svc = Analysis(")[0]
+    assert "--legacy" not in SPEC
 
 
 def registry(values):
@@ -89,10 +97,11 @@ def test_install_runs_webview2_step_last_without_aborting(setup, monkeypatch):
     assert steps == list(range(len(setup.INSTALL_WEIGHTS) + 1))
 
 
-def test_build_runs_and_checks_both_self_tests():
-    """While both windows ship, build.ps1 runs the old window's self-test (--legacy) and the new one's (--new-ui),
-    each with its own report, and fails the build unless both reports start with OK."""
+def test_build_runs_and_checks_the_one_self_test():
+    """build.ps1 runs `Lockdown.exe --selftest REPORT` once (selftest.txt) and fails the build unless the report
+    starts with OK. No --legacy / --new-ui flags any more."""
     script = (ROOT / "scripts" / "build.ps1").read_text(encoding="utf-8")
-    assert '"--legacy"' in script and '"--new-ui"' in script and '"--selftest"' in script
-    assert "selftest.txt" in script and "selftest-new.txt" in script
+    assert '"--selftest"' in script and "--legacy" not in script and "--new-ui" not in script
+    assert script.count("selftest.txt") == 1 and "selftest-new.txt" not in script
+    assert script.count("Start-Process") == 1
     assert 'StartsWith("OK")' in script and "throw" in script

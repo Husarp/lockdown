@@ -1,17 +1,16 @@
-"""GUI + tray agent entry point: .venv\\Scripts\\pythonw.exe src\\main.py [--tray | --watchdog | --challenge TEXT]
+"""Lockdown entry point: .venv\\Scripts\\pythonw.exe src\\main.py [--tray | --watchdog | --challenge TEXT | --selftest REPORT]
 
+Everything goes to the web window's agent (src/agent.py); this file only does what must happen before it.
 --tray: start hidden in the tray (used when starting with Windows).
 --watchdog: run every minute by a scheduled task - starts the tray agent hidden if it was closed any other way than
             tray Exit (e.g. killed in Task Manager); does nothing (quickly) when it's running.
 --challenge TEXT: only show the Anti-Bypass challenge for TEXT; exit code 0 = passed (used by the uninstaller).
---selftest REPORT: build check - every page built with a temporary data folder, result written to REPORT.
---legacy: the old customtkinter window (hidden flag: kept only as the new window's automatic fallback - agent.py hands a
-            run to it when the new window can't start - and for the build's self-test of it). Without it Lockdown opens
-            in the new web window (src/agent.py; ui_theme.DEFAULT_ENGINE). --new-ui still means the new window. A saved
-            ui.engine = "legacy" from the removed "Try the new window" switch no longer counts (the key is deleted).
+--selftest REPORT: build check - the windows and every Api read method with a temporary data folder, result written
+            to REPORT.
+--retried: added by the agent to the one second try after a window that could not start (agent.py).
+Any other flag is ignored (an old shortcut with --legacy or --new-ui just opens the window).
 """
 import os
-import queue
 import subprocess
 import sys
 import tempfile
@@ -24,7 +23,7 @@ if "--selftest" in sys.argv:   # (before paths is imported: it reads the data fo
 
 from gui import single_instance  # noqa: E402
 from paths import ASSETS, command_line, gui_command  # noqa: E402
-from ui_theme import ENGINE_KEY, engine_of  # noqa: E402   # (the saved window choice; the default: ui_theme.DEFAULT_ENGINE)
+from ui_theme import ENGINE_KEY  # noqa: E402   # (the saved window choice of the removed switch, deleted once: forget_engine_choice)
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WATCHDOG_TASK = "Lockdown Agent Watchdog"
@@ -36,21 +35,6 @@ def read_engine_setting() -> str | None:
     """The saved ui.engine by a plain read-only query (fast, no migrations); None when there is no readable DB."""
     from ui_theme import read_setting
     return read_setting(ENGINE_KEY)
-
-
-def use_new_ui(argv: list[str], db_setting) -> bool:
-    """New web window or the old one? --legacy wins, then --new-ui, then the setting (a value, or a function that
-    reads it - only called when no flag decided; only a saved "web" counts, see ui_theme.engine_of). Anything unclear
-    (or unreadable) means the default window: the new one."""
-    if "--legacy" in argv:
-        return False
-    if "--new-ui" in argv:
-        return True
-    try:
-        value = db_setting() if callable(db_setting) else db_setting
-    except Exception:
-        value = None
-    return engine_of(value) == "web"
 
 
 def set_identity():
@@ -86,8 +70,8 @@ def _log(message: str):
 
 
 def forget_engine_choice():
-    """One-off clean-up (0.86): the "Try the new window" switch is gone and a saved ui.engine decides nothing any more
-    (ui_theme.engine_of): the key is deleted. A plain query; a write only when the key is there."""
+    """One-off clean-up (0.86): the "Try the new window" switch is gone and a saved ui.engine decides nothing any more:
+    the key is deleted. A plain query; a write only when the key is there."""
     import sqlite3
     from contextlib import closing
     import paths
@@ -124,81 +108,17 @@ def watchdog_should_start() -> bool:
     return True
 
 
-def challenge(text: str) -> int:
-    import customtkinter as ctk
-    import antibypass
-    from db import Database
-    from gui import theme
-    from gui.antibypass_page import ChallengeWindow
-    from trusted_time import now_from_db
-    db = Database()
-    if antibypass.status(antibypass.settings(db), now_from_db(db)) == "free":
+def run(argv: list[str]) -> int:
+    """Every start goes to the agent (the window, the tray, the challenge, the self-test); flags it does not know
+    (--legacy, --new-ui from an old shortcut) are ignored."""
+    import agent
+    if "--selftest" in argv:
+        return agent.main(argv)
+    if "--watchdog" in argv and not watchdog_should_start():
         return 0
-    theme.apply()
-    root = ctk.CTk()
-    root.db = db
-    from gui import shortcuts
-    shortcuts.install(root)
-    root.withdraw()
-    passed = []
-    ChallengeWindow(root, [text], lambda: passed.append(True), root.destroy)
-    try:
-        while not passed:
-            root.update()
-            time.sleep(0.02)
-    except ctk.tkinter.TclError:   # window closed (cancel)
-        pass
-    return 0 if passed else 1
-
-
-def selftest(report: str) -> int:
-    """Build check (scripts/build.ps1): start the app hidden with a temporary data folder, build every page, write
-    "OK" or the error to `report`, quit. Doesn't touch the running Lockdown, autostart or tasks."""
-    import traceback
-    try:
-        from gui.app import PAGES, LockdownApp
-        from gui import theme
-        missing = [p.name for p in [theme.APP_ICON] + [theme.ASSETS / "fonts" / f for f in theme.FONT_FILES]
-                   if not p.exists()]
-        if missing:
-            raise FileNotFoundError(f"missing from the build: {missing}")
-        import uiautomation as auto   # reading the browser's address bar needs Windows UI Automation
-        auto.GetRootControl().Name
-        app = LockdownApp(queue.Queue(), start_hidden=True)
-        for name, _spec, _icon in PAGES:
-            app.show_page(name)
-            app.update()
-        app.tray.stop()
-        app.destroy()
-        result = f"OK - {len(PAGES)} pages"
-    except Exception:
-        result = traceback.format_exc()
-    with open(report, "w", encoding="utf-8") as f:
-        f.write(result)
-    return 0 if result.startswith("OK") else 1
+    set_identity()
+    return agent.main(argv, on_first_instance=register_autostart_later)
 
 
 if __name__ == "__main__":
-    new_ui = use_new_ui(sys.argv, read_engine_setting)
-    if new_ui:
-        import agent
-        new_ui = agent.handles(sys.argv)   # (a flag the agent can't do yet stays with the old window)
-    if "--selftest" in sys.argv:
-        if new_ui:
-            sys.exit(agent.main(sys.argv))
-        sys.exit(selftest(sys.argv[sys.argv.index("--selftest") + 1]))
-    if "--watchdog" in sys.argv and not watchdog_should_start():
-        sys.exit(0)
-    set_identity()
-    if new_ui:   # (--tray / --watchdog / --challenge too: the agent handles them)
-        sys.exit(agent.main(sys.argv, on_first_instance=register_autostart_later))
-    if "--challenge" in sys.argv:
-        sys.exit(challenge(sys.argv[sys.argv.index("--challenge") + 1]))
-    events: queue.Queue = queue.Queue()
-    if not single_instance.acquire(events):
-        sys.exit(0)  # already running - it will show its window (no heavy GUI import on this path)
-    register_autostart_later()
-    # Heavy import (customtkinter, PIL, COM, every page) happens only for the instance that actually runs the UI -
-    # a click while the tray agent is already running exits above without paying it, so "open" is near-instant.
-    from gui.app import LockdownApp
-    LockdownApp(events, start_hidden="--tray" in sys.argv or "--watchdog" in sys.argv).mainloop()
+    sys.exit(run(sys.argv))

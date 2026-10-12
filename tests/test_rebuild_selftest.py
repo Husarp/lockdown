@@ -141,9 +141,9 @@ def test_agent_main_runs_the_selftest_without_the_single_instance_lock(tmp_path,
     seen = []
     monkeypatch.setattr(selftest, "run", lambda report, **kw: seen.append(report) or 0)
     monkeypatch.setattr(single_instance, "acquire", lambda *a: pytest.fail("the self-test must not take the lock"))
-    assert agent.handles(["--new-ui", "--selftest", "r.txt"])
-    assert agent.main(["--new-ui", "--selftest", "r.txt"]) == 0
-    assert seen == ["r.txt"]
+    assert agent.main(["Lockdown.exe", "--selftest", "r.txt"]) == 0
+    assert agent.main(["Lockdown.exe", "--new-ui", "--selftest", "r2.txt"]) == 0       # (an old flag: ignored)
+    assert seen == ["r.txt", "r2.txt"]
 
 
 def test_the_page_timing_script_is_one_expression():

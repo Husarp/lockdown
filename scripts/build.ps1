@@ -1,7 +1,7 @@
 # Builds the installer: build\LockdownSetup.exe (and the program folder build\dist\Lockdown).
 #   1. Lockdown.exe + LockdownService.exe (PyInstaller, installer\lockdown.spec)
-#   2. self-test: the built app starts hidden with a temporary data folder and builds every page (a tray icon
-#      shows for a moment; skip with -NoSelfTest)
+#   2. self-test: the built app starts hidden with a temporary data folder, boots the windows and calls every Api read
+#      method (a tray icon shows for a moment; skip with -NoSelfTest)
 #   3. LockdownSetup.exe = the setup program + the program folder zipped inside it
 # No admin needed. Run from any folder:  & "<project folder>\scripts\build.ps1"
 param([switch]$NoSelfTest)
@@ -19,16 +19,14 @@ if ($LASTEXITCODE) { throw "Writing the version resource failed" }
 if ($LASTEXITCODE) { throw "Building the program failed" }
 
 if (-not $NoSelfTest) {
-    # While both windows ship, check both: the old one (--legacy) and the new one (--new-ui). Each writes a report
-    # that starts with "OK" when every page / window came up.
-    foreach ($check in @(@{ Flag = "--legacy"; File = "selftest.txt" }, @{ Flag = "--new-ui"; File = "selftest-new.txt" })) {
-        $report = "$Build\$($check.File)"
-        Remove-Item $report -ErrorAction SilentlyContinue
-        Start-Process "$Build\dist\Lockdown\Lockdown.exe" -ArgumentList $check.Flag, "--selftest", "`"$report`"" -Wait
-        $result = Get-Content $report -Raw -ErrorAction SilentlyContinue
-        if (-not $result -or -not $result.StartsWith("OK")) { throw "Self-test ($($check.Flag)) failed:`n$result" }
-        Write-Output "Self-test ($($check.Flag)): $($result.Split("`n")[0])"
-    }
+    # The built app starts with a temporary data folder and writes a report that starts with "OK" when every window /
+    # Api method came up (the report also lists the timings).
+    $report = "$Build\selftest.txt"
+    Remove-Item $report -ErrorAction SilentlyContinue
+    Start-Process "$Build\dist\Lockdown\Lockdown.exe" -ArgumentList "--selftest", "`"$report`"" -Wait
+    $result = Get-Content $report -Raw -ErrorAction SilentlyContinue
+    if (-not $result -or -not $result.StartsWith("OK")) { throw "Self-test failed:`n$result" }
+    Write-Output "Self-test: $($result.Split("`n")[0])"
 }
 
 $zip = "$Build\payload.zip"

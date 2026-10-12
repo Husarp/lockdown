@@ -1,14 +1,15 @@
-"""The resident Lockdown agent with the new web window - the window Lockdown opens in (ui_theme.DEFAULT_ENGINE; the old
-customtkinter one only with --legacy, or as the fallback below).
+"""The resident Lockdown agent with the web window - the only window Lockdown has.
 
 Starts the local asset server, makes the three windows hidden, shows the tray icon, starts the background workers
 (resident/workers.py) and runs the pywebview loop. Heavy modules (pywebview, pystray, PIL) are imported inside the
-functions that need them, so `import agent` stays quick and never loads customtkinter.
+functions that need them, so `import agent` stays quick.
 
 Never stuck on a dark screen: no window is shown before its page has said it works (resident/windows.py). If the main
 page does not within windows.MAIN_READY_SEC (WebView2 missing or failing, the page's files not reaching it, a script
-error), or the agent fails to start, the reason is logged and this run is handed to the old window (`hand_over`):
-main() returns FALLBACK. Start-up notes: %TEMP%\\lockdown-newui.log, the important ones in the Lockdown log too
+error), or the agent fails to start, `start_failed` runs: the reason is logged, ONE second try is started (a fresh
+process with the same arguments plus `--retried`, unless this run already is the second try) and a Windows message box
+says what happened and where the logs are. main() returns FAILED. The blocking itself never needed the window (the
+Lockdown service does it). Start-up notes: %TEMP%\\lockdown-newui.log, the important ones in the Lockdown log too
 (resident/diag.py)."""
 import ctypes
 import os
@@ -18,16 +19,12 @@ import threading
 import time
 
 TRAY_ARGS = ("--tray", "--watchdog")
-NOT_YET = ()   # flags the agent can't do (main.py then keeps the old window for them): none left
-FALLBACK = 3          # main()'s exit code: the new window could not be used - the old one was started for this run
-HAND_OVER_SEC = 10    # after a fallback this process is gone within this, even if the window loop does not end
-_hand_over_lock = threading.Lock()
-_handed_over: list = []
-
-
-def handles(argv: list[str]) -> bool:
-    """Can the agent do everything argv asks for? (A flag listed in NOT_YET makes main.py keep the old window.)"""
-    return not any(a in argv for a in NOT_YET)
+RETRIED = "--retried"   # added to the arguments of the second try: a run that has it does not try again
+FAILED = 3              # main()'s exit code: the new window could not be used
+HAND_OVER_SEC = 10      # after a failure this process is gone within this, even if the window loop does not end
+MB_OK, MB_ICONWARNING, MB_SETFOREGROUND, MB_TOPMOST = 0x0, 0x30, 0x10000, 0x40000
+_failed_lock = threading.Lock()
+_failed: list = []
 
 
 def _log(message: str):
@@ -66,28 +63,68 @@ def _tray_exit(win, tray, ctx):
     challenge_cli.ask_in_main(win, ctx, [EXIT_TEXT], quit_now)
 
 
-def hand_over(visible: bool) -> bool:
-    """The old window takes over this run: a fresh `--legacy` process (nothing of this one is left in it; `--tray` too
-    when nobody asked to see the window), started by the same small delayed helper the old window's restart uses, once
-    this process has let go of the single-instance port. Once per process; True if it was started now."""
-    with _hand_over_lock:
-        if _handed_over:
-            return False
-        _handed_over.append(True)
+def message_box(text: str, title: str = "Lockdown"):
+    """A native Windows message box (OK button, on top of everything); returns when it is closed. Windows only - on
+    any other system, and when it can't be shown, nothing happens. Tests replace this function."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.user32.MessageBoxW(None, text, title, MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST)
+    except (OSError, AttributeError):
+        pass
+
+
+def failure_text(what: str, reason: str, trying_again: bool) -> str:
+    """What the message box says: `what` could not start, why (one short line), where the logs are, that blocking
+    keeps working, and what happens next."""
+    import paths
+    from resident import diag
+    reason = " ".join(str(reason).split())
+    if len(reason) > 200:
+        reason = reason[:197] + "..."
+    next_step = ("Lockdown is trying once more." if trying_again
+                 else "Restart the PC. If it keeps happening, send the log files named above.")
+    return (f"{what} could not start.\n\n{reason}\n\nBlocking keeps working: the Lockdown service does not need "
+            f"the window.\n\nLogs:\n{paths.LOG_PATH}\n{diag.path()}\n\n{next_step}")
+
+
+def retry_args(argv: list[str], visible: bool = True) -> list[str]:
+    """The arguments of the second try: this run's own, plus --retried. The tray flags are left out when somebody asked
+    to see the window (so the second try opens it)."""
+    return [a for a in argv[1:] if not (visible and a in TRAY_ARGS)] + [RETRIED]
+
+
+def start_retry(args: list[str]) -> bool:
+    """A fresh process of this app with `args` (nothing of this one is left in it), started by the same small delayed
+    helper the restart uses, once this process has let go of the single-instance port. True if it was started."""
     import subprocess
     from gui import single_instance
     from paths import command_line, gui_command
     from resident import diag
     single_instance.release()
-    args = ["--legacy"] + ([] if visible else ["--tray"])
     try:
         subprocess.Popen(f'ping -n 3 127.0.0.1 >nul & start "" {command_line(gui_command(*args))}', shell=True,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except OSError as error:
-        diag.note(f"the old window could not be started: {error!r}", important=True)
+        diag.note(f"the second try could not be started: {error!r}", important=True)
         return False
-    diag.note(f"the old window takes over this run ({' '.join(args)})", important=True)
+    diag.note(f"the window is tried once more ({' '.join(args)})", important=True)
     return True
+
+
+def start_failed(argv: list[str], reason: str, visible: bool) -> bool:
+    """The window could not be used (the reason is in the logs already). Once per process: start the second try (unless
+    this run already is one), THEN show the message box - a modal box must not hold the second try up. True if a
+    second try was started. A `--watchdog` run (once a minute, nobody there) gets no box: it would come back every
+    minute."""
+    with _failed_lock:
+        if _failed:
+            return False
+        _failed.append(True)
+    retrying = RETRIED not in argv and start_retry(retry_args(argv, visible))
+    if "--watchdog" not in argv:
+        message_box(failure_text("The Lockdown window", reason, retrying))
+    return retrying
 
 
 def _start_note(argv: list[str]) -> str:
@@ -104,9 +141,6 @@ def _start_note(argv: list[str]) -> str:
 
 def main(argv: list[str], on_first_instance=None) -> int:
     """`on_first_instance`: called once this process is the running agent (main.py: register autostart + watchdog)."""
-    if not handles(argv):
-        _log("The new UI does not handle these flags yet")
-        return 2
     set_dpi_awareness()
     if "--challenge" in argv:   # the uninstaller's challenge: its own small window, no single-instance lock
         from resident import challenge_cli
@@ -135,12 +169,13 @@ def main(argv: list[str], on_first_instance=None) -> int:
     if state["reason"] is None:
         return code
     win = state["win"]
-    hand_over(not any(a in argv for a in TRAY_ARGS) or bool(win is not None and win.show_wanted))
-    return FALLBACK
+    visible = not any(a in argv for a in TRAY_ARGS) or bool(win is not None and win.show_wanted)
+    start_failed(argv, state["reason"], visible)
+    return FAILED
 
 
 def _run(argv: list[str], events, state: dict) -> int:
-    """The agent itself. `state["reason"]` is set when it gave up on the new window (main() then hands over)."""
+    """The agent itself. `state["reason"]` is set when it gave up on the new window (main() then runs start_failed)."""
     from resident import diag, windows
     from resident.assets import AssetServer
     server = AssetServer(log=diag.note)
@@ -160,8 +195,8 @@ def _run(argv: list[str], events, state: dict) -> int:
     lock = threading.Lock()
 
     def fall_back(reason: str):
-        """The new window can't be used: say why, close it all down; main() starts the old window for this run. If the
-        window loop does not end, this process goes anyway after HAND_OVER_SEC."""
+        """The new window can't be used: say why, close it all down; main() then runs start_failed (the second try
+        and the message box). If the window loop does not end, this process does that and goes after HAND_OVER_SEC."""
         with lock:
             if state["reason"] is not None or win.quitting:
                 return
@@ -170,8 +205,8 @@ def _run(argv: list[str], events, state: dict) -> int:
 
         def leave():
             diag.note("the window loop did not end - leaving now", important=True)
-            hand_over(not any(a in argv for a in TRAY_ARGS) or win.show_wanted)
-            os._exit(FALLBACK)
+            start_failed(argv, reason, not any(a in argv for a in TRAY_ARGS) or win.show_wanted)
+            os._exit(FAILED)
         timer = state["leave"] = threading.Timer(HAND_OVER_SEC, leave)
         timer.daemon = True
         timer.start()
@@ -214,7 +249,7 @@ def _run(argv: list[str], events, state: dict) -> int:
     pool = workers.Workers(hub=hub, reminder_ui=ui, log_sink=_log)   # (the background jobs: only the process that owns the port runs them)
 
     def ready():   # (runs once the GUI loop is up)
-        # first: whatever happens below, the main page is watched - never ready in time, and the old window takes over
+        # first: whatever happens below, the main page is watched - never ready in time, and fall_back runs
         windows.watch_main(win, not any(a in argv for a in TRAY_ARGS), fall_back, describe)
         import webview
         diag.note(f"window loop up: renderer {getattr(webview, 'renderer', None)}, {base_url}")
