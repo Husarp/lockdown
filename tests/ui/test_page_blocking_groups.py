@@ -66,6 +66,11 @@ def members(page):
     return page.eval_on_selector_all(LIST, f"els => ({BY_PLACE})(els).map(e => e.querySelector('.name b').textContent)")
 
 
+def app_row(page, name):
+    """The row of the installed APP of that name (a bundled website can have the same name: Spotify)."""
+    return page.locator(f'{LIST}:has(.name b:text-is("{name}")):has(.name span:has-text(".exe"))').first
+
+
 def member_row(page, name):
     return page.locator(f'{LIST}:has(.name b:text-is("{name}"))').first
 
@@ -417,11 +422,13 @@ def test_typing_finds_listed_things_and_apps_with_icons_and_clearing_goes_back_t
     open_fun(shell, page)
     page.fill('[data-k="g-search"]', "spot")
     wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'Spotify')")
-    row = member_row(page, "Spotify")
+    row = app_row(page, "Spotify")
     assert row.locator("img").get_attribute("data-icon") == "app:spotify.exe"
     assert row.locator("input").is_checked() is False
     assert page.inner_text('[data-k="g-mhint"]') == "Showing everything that matches - tick to add."
-    assert members(page) == ["Spotify"]
+    found = members(page)                                                    # (the bundled website, other sites that fit, the app)
+    assert found.count("Spotify") == 2 and found[0] == "Spotify" and len(found) > 2
+    assert member_row(page, "Spotify").locator(".name span").inner_text() == "spotify.com · Music & audio"
     # something on the blocklist shows too, ticked when it is a member
     page.fill('[data-k="g-search"]', "tube")
     wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'YouTube')")
@@ -439,7 +446,7 @@ def test_ticking_a_found_app_adds_it_and_unticking_a_member_takes_it_out(shell, 
     open_fun(shell, page)
     page.fill('[data-k="g-search"]', "spot")
     wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'Spotify')")
-    member_row(page, "Spotify").locator("label.check").click()
+    app_row(page, "Spotify").locator("label.check").click()
     assert page.inner_text('[data-k="g-mcount"]') == "4 members"
     page.fill('[data-k="g-search"]', "")
     wait_for(page, f"document.querySelectorAll('{LIST}').length === 4")
@@ -527,8 +534,8 @@ def test_a_new_site_and_a_new_steam_game_made_in_the_editor_are_made_like_the_ad
                                      "steam": True})
     open_fun(shell, page)
     page.fill('[data-k="g-search"]', "tiktok.com")
-    wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'tiktok.com')")
-    page.press('[data-k="g-search"]', "Enter")
+    wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'TikTok')")
+    page.press('[data-k="g-search"]', "Enter")                                # (a listed site typed by its address: Enter adds it, all hosts)
     page.fill('[data-k="g-search"]', "counter")
     wait_for(page, "[...document.querySelectorAll('[data-k=\"g-mlist\"] > .vl-row:not([hidden]) .name b')].some(b => b.textContent === 'Counter-Strike 2')")
     member_row(page, "Counter-Strike 2").locator("label.check").click()

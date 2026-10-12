@@ -128,6 +128,8 @@ test("the dropdown's words", () => {
   assert.equal(sg.subText({ kind: "app", exe: "cs2.exe", steam: true }), "cs2.exe · Steam game");
   assert.equal(sg.subText({ kind: "app", exe: "d.exe", steam: false }), "d.exe");
   assert.equal(sg.subText({ kind: "site", host: "reddit.com" }), "reddit.com");
+  assert.equal(sg.subText({ kind: "site", host: "reddit.com", category: "Social" }), "reddit.com · Social");
+  assert.equal(typeof sg.attachSiteSuggest, "function");
   assert.equal(sg.anyMine([{ mine: false }, { mine: true }]), true);
   assert.equal(sg.anyMine([{}, { mine: false }]), false);
   assert.equal(sg.MAX_ROWS, 8);

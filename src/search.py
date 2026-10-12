@@ -33,19 +33,22 @@ def distance(a: str, b: str, limit: int) -> int:
     return prev[-1]
 
 
-def score(query: str, text: str) -> int | None:
-    """How well `text` matches (0 = every word found exactly; higher = more typos), or None if it doesn't."""
-    words = _WORD.findall(normalize(query))
-    if not words:
-        return 0
-    text = normalize(text)
-    tokens = _WORD.findall(text)
+def words_of(text: str) -> list[str]:
+    """The words of a text, as score() reads them (letters and digits, capitals and accents dropped)."""
+    return _WORD.findall(normalize(text))
+
+
+def score_prepared(words: list[str], text: str, tokens: list[str]) -> int | None:
+    """score() for a text that is already normalized (`text`) and split (`tokens`), against the `words` of a query -
+    for a long list that is searched again and again, so it is prepared once."""
     total = 0
     for q in words:
         if q in text:
             continue
         allowed = typos_allowed(q)
         if not allowed:
+            return None
+        if sum(c not in text for c in set(q)) > allowed:     # (each letter that is nowhere in the text costs an edit of its own)
             return None
         n = len(q)
         best = min((distance(q, cand, allowed) for t in tokens
@@ -54,6 +57,15 @@ def score(query: str, text: str) -> int | None:
             return None
         total += best
     return total
+
+
+def score(query: str, text: str) -> int | None:
+    """How well `text` matches (0 = every word found exactly; higher = more typos), or None if it doesn't."""
+    words = words_of(query)
+    if not words:
+        return 0
+    text = normalize(text)
+    return score_prepared(words, text, _WORD.findall(text))
 
 
 def rank(items: list, query: str, text_of, tie=None) -> list:

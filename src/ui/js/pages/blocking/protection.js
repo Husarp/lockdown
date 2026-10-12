@@ -422,10 +422,23 @@ function checkAct() {
   run(call, { done: () => check(lastCheck) });
 }
 
+let pickedSite = "";            // the site picked from the suggestions under "site to allow": allowed with all its host names
+
 function allow() {
   const text = els.aHost.value;
   if (!text.trim()) return;
-  run(() => ld.call("protection_allow", text), { err: els.aErr, done: () => { els.aHost.value = ""; } });
+  const whole = pickedSite !== "" && pickedSite === text.trim().toLowerCase();
+  run(() => ld.call("protection_allow", text, whole), { err: els.aErr, done: () => { els.aHost.value = ""; pickedSite = ""; } });
+}
+
+/** The suggestions of sites under "site to allow" (js/suggest.js), loaded when the box is first used. */
+function wireAllowSuggest() {
+  els.aHost.addEventListener("focus", async () => {
+    try {
+      const { attachSiteSuggest } = await import("../../suggest.js");
+      attachSiteSuggest(els.aHost, (m) => { els.aHost.value = m.host; pickedSite = m.host; els.aHost.focus(); });
+    } catch (_) { /* no suggestions: the box still takes a typed site */ }
+  }, { once: true });
 }
 
 function createList() {
@@ -521,6 +534,7 @@ export function mount(host, t) {
     e.preventDefault();
     ({ preview, create: createList, check: () => check(), allow })[go]();
   });
+  wireAllowSuggest();
   els.cUrl.addEventListener("input", () => { previewed = null; pending = null; early = null; els.cGo.hidden = true; });
   wireIconReady(ld.on, host);
   ld.on("protection_progress", onProgress);

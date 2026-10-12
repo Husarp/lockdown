@@ -168,6 +168,14 @@ test("withSite puts a site on top once, withoutSite takes it out", () => {
   assert.ok(!seen.has("a.com"));
 });
 
+test("a site picked from the suggestions puts all its host names in, the main one on top, the ones already there skipped", () => {
+  const entries = [["old.reddit.com", ""]], seen = new Set(["old.reddit.com"]);
+  assert.equal(ml.withSiteHosts(entries, seen, ["reddit.com", "old.reddit.com", "redd.it"], "Reddit"), 2);
+  assert.deepEqual(entries.map((e) => e[0]), ["reddit.com", "redd.it", "old.reddit.com"]);
+  assert.deepEqual(entries[0], ["reddit.com", "Reddit"]);
+  assert.equal(ml.withSiteHosts(entries, seen, ["reddit.com", "redd.it"], "Reddit"), 0);          // (all there already)
+});
+
 test("countText of a list", () => {
   assert.equal(ml.countText(0), "0 sites");
   assert.equal(ml.countText(1), "1 site");

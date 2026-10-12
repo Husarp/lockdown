@@ -9,6 +9,7 @@
 //
 //   openManualList(key, {onSaved})   onSaved(result) after a save.
 import { ld } from "./bridge.js";
+import { attachSiteSuggest } from "./suggest.js";
 import { CANCELLED, guarded } from "./challenge.js";
 import { openDialog } from "./dialog.js";
 import { el, esc, ic, setText, toast } from "./ui.js";
@@ -27,6 +28,14 @@ export function withSite(entries, seen, host, name) {
   seen.add(host);
   entries.unshift([host, String(name).split(/\s+/).filter(Boolean).join(" ")]);
   return entries;
+}
+
+/** A site picked from the suggestions: all its host names go in, the main one on top (`entries`/`seen` as for withSite).
+ *  -> how many were new. */
+export function withSiteHosts(entries, seen, hostNames, name) {
+  let added = 0;
+  for (const host of [...hostNames].reverse()) if (withSite(entries, seen, host, name)) added++;
+  return added;
 }
 
 /** Take the site `host` out (in place); false when it was not there. */
@@ -111,6 +120,16 @@ export async function openManualList(key, { onSaved } = {}) {
     addr.focus();
   }
 
+  const suggest = attachSiteSuggest(addr, (m) => {         // a site from the list brings all its host names
+    err.textContent = "";
+    if (withSiteHosts(entries, seen, m.hosts || [m.host], m.name)) {
+      name.value = addr.value = "";
+      vl.setRows(entries);
+      recount();
+    } else err.textContent = `${m.name} is in the list already.`;
+    addr.focus();
+  });
+  handle.el.addEventListener("close", () => suggest.destroy(), { once: true });
   holder.addEventListener("click", (e) => {
     const node = e.target.closest(".vl-row");
     if (!node || !e.target.closest('[data-act="x"]')) return;

@@ -217,7 +217,7 @@ def test_a_program_file_member_says_so(env):
 
 def test_the_search_finds_listed_items_apps_and_a_website(env):
     nothing = data(call(env, "group_member_search", ""))
-    assert nothing == {"items": [], "apps": [], "site": None, "loading": False}
+    assert nothing == {"items": [], "apps": [], "site": None, "sites": [], "loading": False}
     found = data(call(env, "group_member_search", "tube"))
     assert [i["name"] for i in found["items"]] == ["YouTube"] and found["items"][0]["icon"]["k"] == "site"
     apps = data(call(env, "group_member_search", "spot"))

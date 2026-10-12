@@ -121,14 +121,16 @@ def test_suggest_ranks_sites_and_apps_and_says_which_are_mine(env):
     env.db.add_history("redwood.example", "Redwood")
     got = data(call(env, "suggest", "redd"))
     assert [(r["kind"], r["name"]) for r in got][:1] == [("site", "Reddit")]
-    assert got[0] == {"kind": "site", "name": "Reddit", "host": "reddit.com", "mine": False}
+    assert got[0] == {"kind": "site", "name": "Reddit", "host": "reddit.com", "mine": False, "category": "Social",
+                      "hosts": ["reddit.com", "old.reddit.com", "new.reddit.com", "np.reddit.com", "redd.it"]}
     got = data(call(env, "suggest", "disc"))
     assert [r["name"] for r in got][:2] == ["Discord", "Disk Cleanup"] or got[0]["name"] == "Discord"
     discord = next(r for r in got if r["kind"] == "app" and r["exe"] == "discord.exe")
     assert discord["path"].endswith("discord.exe") and discord["steam"] is False and discord["running"] is False
     # sites you added before are "mine"
     mine = data(call(env, "suggest", "redwood"))
-    assert mine[0] == {"kind": "site", "name": "Redwood", "host": "redwood.example", "mine": True}
+    assert mine[0] == {"kind": "site", "name": "Redwood", "host": "redwood.example", "mine": True, "category": "",
+                       "hosts": ["redwood.example"]}
 
 
 def test_suggest_is_forgiving_about_typos_and_gives_at_most_eight(env):

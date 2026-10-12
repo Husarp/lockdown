@@ -320,10 +320,10 @@ def test_several_picks_get_the_same_blockers_and_one_notice(shell, page, env):
 def test_ticking_rows_in_the_list_selects_them(shell, page, env):
     open_add(shell, page)
     page.click('.ad-row:has(b:text-is("Facebook")) input')
-    page.click('.ad-row:has(b:text-is("Snapchat")) input')
-    assert pills(page) == ["Facebook", "Snapchat"]
+    page.click('.ad-row:has(b:text-is("Instagram")) input')
+    assert pills(page) == ["Facebook", "Instagram"]
     page.click('.ad-row:has(b:text-is("Facebook")) input')               # untick
-    assert pills(page) == ["Snapchat"]
+    assert pills(page) == ["Instagram"]
 
 
 def test_the_filter_narrows_the_list(shell, page, env):

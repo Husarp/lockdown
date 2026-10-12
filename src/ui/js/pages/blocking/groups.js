@@ -83,7 +83,7 @@ export function memberOfItem(item) {
 export function memberOfTarget(t) {
   const site = t.kind === "site", category = t.kind === "category";
   return { key: `n:${t.kind}:${t.name}`, id: null, name: t.display || t.name, kind: category ? "app" : t.kind, type: t.kind, icon: { k: t.kind, n: t.name },
-    sub: category ? "category · everything in it" : `${t.kind} · ${t.name}`, targets: [t.name], hosted: !site && !category && isHosted(t.name), itemWay: null, way: null, overrides: {},
+    sub: category ? "category · everything in it" : `${t.kind} · ${t.name}`, targets: t.hosts && t.hosts.length ? t.hosts : [t.name], hosted: !site && !category && isHosted(t.name), itemWay: null, way: null, overrides: {},
     target: { kind: t.kind, name: t.name, display: t.display || t.name, path: t.path || null } };
 }
 
@@ -102,8 +102,23 @@ export function memberRows(members, query, found) {
   if (!found) return [];
   const rows = found.items.map((item) => ({ key: `c:i:${item.id}`, k: "item", item }));
   if (found.site) rows.push({ key: `c:n:site:${found.site.host}`, k: "site", site: found.site });
+  for (const site of found.sites || []) rows.push({ key: `c:n:site:${site.host}`, k: "site", site });       // (popular sites of the bundled list: friendly name, all host names)
   for (const app of found.apps) rows.push({ key: `c:n:app:${app.exe}`, k: "app", app });
   return rows;
+}
+
+/** The grey line of a suggested site: its address, and its kind of site when the list knows it. */
+export const siteSub = (site) => (site.category ? `${site.host} · ${site.category}` : site.host);
+
+/** What Enter in the search box adds: the typed website address - a site of the bundled list (friendly name, all its host names)
+ *  when it is one, else the address itself. null when the text is no address of such a site. */
+export function enterSiteOf(found, text) {
+  if (!found) return null;
+  if (found.site) return { kind: "site", name: found.site.host, display: found.site.host };
+  const first = found.sites && found.sites[0];
+  const typed = text.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/^www\./, "").split(/[/?#:]/)[0];
+  if (first && first.hosts.includes(typed)) return { kind: "site", name: first.host, display: first.name, hosts: first.hosts };
+  return null;
 }
 
 const STATUS_CLASS = { unsaved: "chip-low", disabled: "chip-paused", allowed: "chip-ok", pending: "chip-low", blocked: "chip-block", empty: "chip-paused" };
@@ -409,7 +424,7 @@ function renderMemberRow(node, row) {
   let name, sub, icon, on;
   if (row.k === "member") { ({ name, sub, icon } = row.m); on = true; node.dataset.key = row.m.key; }
   else if (row.k === "item") { ({ name, sub, icon } = row.item); node.dataset.key = `i:${row.item.id}`; on = members.has(node.dataset.key); }
-  else if (row.k === "site") { name = row.site.host; sub = "Add this website"; icon = { k: "site", n: row.site.host }; node.dataset.key = `n:site:${row.site.host}`; on = members.has(node.dataset.key); }
+  else if (row.k === "site") { name = row.site.name || row.site.host; sub = row.site.name ? siteSub(row.site) : "Add this website"; icon = { k: "site", n: row.site.host }; node.dataset.key = `n:site:${row.site.host}`; on = members.has(node.dataset.key); }
   else { name = row.app.name; sub = row.app.exe + (row.app.steam ? " · Steam" : ""); icon = { k: "app", n: row.app.exe }; node.dataset.key = `n:app:${row.app.exe}`; on = members.has(node.dataset.key); }
   r.box.checked = on;
   r.box.setAttribute("aria-label", `Member ${name}`);
@@ -459,12 +474,14 @@ async function runSearch() {
     found = r;
   } catch (err) {
     if (my !== seq) return;
-    found = { items: [], apps: [], site: null, loading: false };
+    found = { items: [], apps: [], site: null, sites: [], loading: false };
     toast((err && err.message) || "The search didn't work.");
   }
   query = text;
   showMembers();
 }
+
+const enterSite = () => enterSiteOf(found, els.search.value);
 
 function onSearch() {
   clearTimeout(searchTimer);
@@ -498,7 +515,7 @@ function onTick(node, box) {
   } else if (row.k === "item") {
     if (!addMember(memberOfItem(row.item))) box.checked = false;
   } else if (row.k === "site") {
-    if (!addMember(memberOfTarget({ kind: "site", name: row.site.host, display: row.site.host }))) box.checked = false;
+    if (!addMember(memberOfTarget({ kind: "site", name: row.site.host, display: row.site.name || row.site.host, hosts: row.site.hosts }))) box.checked = false;
   } else if (!addMember(memberOfTarget({ kind: "app", name: row.app.exe, display: row.app.name, path: row.app.path }))) box.checked = false;
   showMembers(true);
 }
@@ -618,7 +635,8 @@ export function mount(host, t) {
   els.search.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    if (found && found.site && ed && !ed.members.has(`n:site:${found.site.host}`)) addTarget({ kind: "site", name: found.site.host, display: found.site.host });
+    const site = enterSite();
+    if (site && ed && !ed.members.has(`n:site:${site.name}`)) addTarget(site);
   });
   els.add.addEventListener("click", (e) => addMenu(e.currentTarget));
   els.mlist.addEventListener("change", (e) => {

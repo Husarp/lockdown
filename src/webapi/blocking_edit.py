@@ -22,13 +22,12 @@ from blocker.apps import (FLAGS as APP_FLAGS, PROTECTED, block_flags, exe_name, 
                           typed_path)
 from blocker.site_block import FLAGS as SITE_FLAGS, make_site_block_type, site_flags
 from gui.draft import RULE_FIELDS
-from importer.popular import POPULAR_SITES
 from paths import APP_DIR
 
 from . import categories
 from . import core
 from . import draft as drafts
-from . import shared
+from . import shared, sites as site_list
 from .core import ApiError
 
 SUGGEST_KINDS = ("all", "sites", "apps")
@@ -62,21 +61,14 @@ def _id(value, what="item") -> int:
 
 @core.internal
 def popular_hosts(host: str) -> tuple[str, list[str]] | None:
-    """(name, all its host names) of a popular site this host belongs to (gui/target_picker.popular_hosts)."""
-    for sites in POPULAR_SITES.values():
-        for name, names in sites.items():
-            if host in names:
-                return name, names
-    return None
+    """(name, all its host names) of the known site this host is - from the ~500 bundled sites (webapi/sites.py)."""
+    return site_list.lookup(host)
 
 
 @core.internal
 def guess_name(host: str) -> str:
     entry = popular_hosts(host)
     return entry[0] if entry else host.split(".")[-2].capitalize()
-
-
-POPULAR = [(name, names[0]) for sites in POPULAR_SITES.values() for name, names in sites.items()]
 
 
 # ---------------------------------------------------------------- suggestions
@@ -87,48 +79,55 @@ def _query(value) -> str:
     return value.strip()[:MAX_QUERY]
 
 
-def _sites(db) -> list[tuple]:
-    """(name, host, mine, group) for every site worth suggesting: the sites you used before (mine) first, then the popular
-    ones, one entry per host."""
+def _mine(db) -> list[tuple]:
+    """(name, host) of the sites you used before (mine), one entry per host."""
     seen, out = set(), []
     for h in db.history():
         if h["hostname"] not in seen:
             seen.add(h["hostname"])
-            out.append((h["display_name"], h["hostname"], True, 0))
-    for name, host in POPULAR:
-        if host not in seen:
-            seen.add(host)
-            out.append((name, host, False, 1))
+            out.append((h["display_name"], h["hostname"]))
     return out
 
 
 @core.read
 def suggest(ctx, query, kind="all", limit=SUGGEST_LIMIT):
-    """What fits the text typed, best first: your earlier sites (mine), the popular sites and the installed apps / Steam
-    games, ranked like every search (every word found, small typos fine, exact first - search.rank). The dropdown under
-    the search box asks for 8; the picker's list asks for up to 60 and may say `kind` "sites" or "apps". An empty text
-    lists them in a steady order (mine, apps, popular).
-    -> [{kind: "site", name, host, mine} | {kind: "app", name, exe, path, steam, running}]"""
+    """What fits the text typed, best first: your earlier sites (mine), the ~500 bundled popular sites and the installed
+    apps / Steam games, ranked like every search (every word found, small typos fine, exact first - search.rank); at the
+    same score a site whose name starts with the text comes first, then one whose address starts with it, then one with a
+    word of the name that starts with it, then the rest, then the more popular (webapi/sites.py). The dropdown under the
+    search box asks for 8; the picker's list asks for up to 60 and may say `kind` "sites" or "apps". An empty text lists
+    them in a steady order (mine, apps, popular).
+    -> [{kind: "site", name, host, mine, category, hosts: [all its host names]} | {kind: "app", name, exe, path, steam, running}]"""
     text = _query(query)
     if kind not in SUGGEST_KINDS:
         raise ApiError("Unknown kind.")
     if type(limit) is not int or not 1 <= limit <= MAX_LIST:
         raise ApiError("Bad request: how many.")
-    rows = []
+    rows = []          # (score, group, tier, position, row): mine, then sites, then apps at the same score and tier
     if kind != "apps":
-        for i, (name, host, mine, group) in enumerate(_sites(ctx.db)):
+        q = search.normalize(text).strip()
+        seen = set()
+        for i, (name, host) in enumerate(_mine(ctx.db)):
+            known = site_list.lookup_site(host)
+            seen.update({host, known["domains"][0]} if known else {host})      # (a bundled site you used is not shown twice)
             score = search.score(text, f"{name} {host}") if text else 0
             if score is not None:
-                rows.append((score, group if text else (0 if mine else 2), i,
-                             {"kind": "site", "name": name, "host": host, "mine": mine}))
+                rows.append((score, 0, site_list.tier(q, search.normalize(name), [host.removeprefix("www.")]) if text else 0, i,
+                             {"kind": "site", "name": name, "host": host, "mine": True,
+                             "category": known.get("category", "") if known else "",
+                             "hosts": list(known["domains"]) if known else [host]}))
+        for score, tier, i, row in site_list.suggest(text):
+            if row["host"] in seen:
+                continue
+            rows.append((score, 1 if text else 2, tier, i, row))
     if kind != "sites":
         for i, app in enumerate(shared._catalog(ctx).search("all", text, limit)["apps"]):
             score = search.score(text, f"{app['name']} {app['exe']}" + (" steam" if app["steam"] else "")) if text else 0
-            rows.append((score or 0, 2 if text else 1, i, {"kind": "app", "name": app["name"], "exe": app["exe"],
-                                                           "path": app["path"], "steam": app["steam"],
-                                                           "running": app["running"]}))
-    rows.sort(key=lambda r: r[:3])
-    return [r[3] for r in rows[:limit]]
+            rows.append((score or 0, 2 if text else 1, 3, i, {"kind": "app", "name": app["name"], "exe": app["exe"],
+                                                              "path": app["path"], "steam": app["steam"],
+                                                              "running": app["running"]}))
+    rows.sort(key=lambda r: r[:4])
+    return [r[4] for r in rows[:limit]]
 
 
 @core.ui

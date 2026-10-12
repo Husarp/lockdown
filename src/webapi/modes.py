@@ -29,12 +29,11 @@ import modes
 from blocker import hosts
 from blocker.apps import PROTECTED, block_flags, exe_name, in_folder, is_hosted, make_block_type, typed_path
 from blocker.site_block import make_site_block_type, site_flags
-from importer.popular import POPULAR_SITES
 from paths import APP_DIR
 from resident.tray_actions import locked_by_hand
 from rules import days_text, load_schedule, make_schedule, parse_hhmm, schedule_until
 
-from . import categories, core, shared
+from . import categories, core, shared, sites as site_list
 from .core import ApiError
 
 MAX_NAME = 40
@@ -388,11 +387,8 @@ def _ids(value, known: set, label, limit) -> list:
 
 
 def _popular(host: str):
-    for sites in POPULAR_SITES.values():
-        for name, hostnames in sites.items():
-            if host in hostnames:
-                return name, hostnames
-    return None
+    """(name, all its host names) of the known site this host is: the ~500 bundled sites (webapi/sites.py)."""
+    return site_list.lookup(host)
 
 
 def _guess_name(host: str) -> str:

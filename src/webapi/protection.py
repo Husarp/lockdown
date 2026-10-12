@@ -34,6 +34,7 @@ from blocker import protection
 from blocker.hosts import normalize_host
 
 from . import core
+from . import sites as site_list
 from .core import ApiError
 
 log = logging.getLogger("lockdown.protection")
@@ -621,18 +622,28 @@ def manual_save_entries(ctx, key, entries):
 # ---------------------------------------------------------------- allowed anyway
 
 @core.loosen
-def protection_allow(ctx, host):
-    """Allow a site (and its subdomains) although a list blocks it. Needs the challenge when it is locked."""
+def protection_allow(ctx, host, whole_site=False):
+    """Allow a site (and its subdomains) although a list blocks it. Needs the challenge when it is locked.
+    `whole_site` true (the page picked it from the suggestions): a site of the bundled list is allowed with ALL its host
+    names (youtube.com and googlevideo.com ...), in this one change - one challenge, not one per name."""
     host = _host(host)
+    names = [host]
+    if whole_site is True:
+        known = site_list.lookup(host)
+        if known:
+            names = list(known[1])
+    summary = (f"Allow {host} (and its subdomains) although a protection list blocks it" if len(names) == 1
+               else f"Allow {known[0]} ({len(names)} addresses, and their subdomains) although a protection list blocks it")
 
     def edit(cfg):
-        if host in cfg["allowed"]:
+        new = [n for n in names if n not in cfg["allowed"]]
+        if not new:
             return {"host": host}
-        if len(cfg["allowed"]) >= MAX_ALLOWED:
+        if len(cfg["allowed"]) + len(new) > MAX_ALLOWED:
             raise ApiError("The allowed list is full.")
-        cfg["allowed"] = cfg["allowed"] + [host]
+        cfg["allowed"] = cfg["allowed"] + new
         return {"host": host}
-    return _apply(ctx, edit, f"Allow {host} (and its subdomains) although a protection list blocks it")
+    return _apply(ctx, edit, summary)
 
 
 @core.tighten

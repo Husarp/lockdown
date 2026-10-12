@@ -29,6 +29,7 @@ from gui.draft import RULE_FIELDS
 from rules import TIME_FMT, block_end, blocked_text, item_block
 
 from . import blocking, blocking_edit, categories, core, shared
+from . import sites as site_list
 from . import draft as drafts
 from .core import ApiError
 
@@ -39,6 +40,7 @@ MAX_MEMBERS = 500
 MAX_PENDING = 100
 MAX_NAMES = 8                                   # member names on a list card, then "and N more" (the page adds it)
 MAX_FOUND = 30                                  # rows the member search gives back, per kind
+MAX_SITES = 8                                   # bundled popular sites the member search suggests
 NEW_WAYS = {"app": "close", "site": "dns"}      # a new group starts as an item does (close the app / can't load the site)
 APP_WORDS = (("close", "closed"), ("background", "background processes"), ("minimize", "minimised"),
              ("internet", "internet cut"))
@@ -189,15 +191,17 @@ def _clip(text) -> str:
 
 @core.read
 def group_member_search(ctx, query=""):
-    """What typing in the Members box finds: {items, apps, site, loading}.
+    """What typing in the Members box finds: {items, apps, site, sites, loading}.
       items  things already on your blocklist (the draft) that match, each {id, name, kind, type, icon, sub, targets, hosted, item_way}
               (best first);
       apps   installed apps / Steam games that match and are not on the list yet, each {name, exe, path, steam};
-      site   {host} when the text reads as a website address that is not on the list yet, else null.
-    Ticking an item adds it; ticking an app or the site makes a new blocklist item when the group is saved."""
+      sites  popular sites of the bundled list (webapi/sites.py, ranked like the Add tab's suggestions) that match and are not
+              on the list yet, each {name, host, hosts, category} - `hosts` are all its host names;
+      site   {host} when the text reads as a website address that is not on the list yet (and is not one of `sites`), else null.
+    Ticking an item adds it; ticking an app, a site or the typed site makes a new blocklist item when the group is saved."""
     query = _clip(query or "")
     if not query:
-        return {"items": [], "apps": [], "site": None, "loading": False}
+        return {"items": [], "apps": [], "site": None, "sites": [], "loading": False}
     d = drafts.draft_of(ctx)
     with drafts.lock:
         d.refresh_if_clean()
@@ -209,15 +213,36 @@ def group_member_search(ctx, query=""):
     listed = shared._catalog(ctx).search("all", query, limit=MAX_FOUND + len(tokens))
     apps = [{"name": a["name"], "exe": a["exe"], "path": a["path"], "steam": a["steam"]}
             for a in listed["apps"] if a["exe"] not in tokens][:MAX_FOUND]
-    site = None
+    bare = {t.removeprefix("www.") for t in tokens}
+
+    def listed_site(row):                  # a bundled site none of whose host names is on the blocklist yet
+        site = site_list.lookup_site(row["host"])
+        if site is None or bare & set(site["domains"]):
+            return None
+        return {"name": site["name"], "host": site["domains"][0], "hosts": list(site["domains"]), "category": site.get("category", "")}
+
+    sites = []
+    typed = None
     if "." in query and " " not in query:
         try:
             host = hosts.normalize_host(query)
         except ValueError:
             host = None
         if host and host not in tokens:
-            site = {"host": host}
-    return {"items": rows, "apps": apps, "site": site, "loading": bool(listed.get("loading"))}
+            typed = {"host": host}
+            known = site_list.lookup_site(host)
+            if known:                      # a bundled site typed by one of its addresses: the site row, with its friendly name
+                typed = None
+                one = listed_site({"host": host})
+                if one:
+                    sites.append(one)
+    for _score, _tier, _i, row in site_list.suggest(query):
+        if len(sites) >= MAX_SITES:
+            break
+        one = listed_site(row)
+        if one and one["host"] not in {s["host"] for s in sites}:
+            sites.append(one)
+    return {"items": rows, "apps": apps, "site": typed, "sites": sites, "loading": bool(listed.get("loading"))}
 
 
 # ---------------------------------------------------------------- saving a group (the page is untrusted)

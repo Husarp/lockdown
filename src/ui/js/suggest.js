@@ -6,6 +6,8 @@
 //   the window (the old window polled Win32 every 250 ms for that).
 // The caller debounces (120 ms) and calls update(text); the dropdown makes its own Api call, drops answers that came too
 // late, and paints with row nodes it keeps (never an innerHTML of the whole list).
+// `kind: "sites"` is the same dropdown for the boxes that take a site only (Site protection's "Allowed anyway", the list
+// dialog): no apps, no "Steam games" foot. attachSiteSuggest() wires one to such a box.
 import { ld } from "./bridge.js";
 import { iconKey, iconUrl, wireIconReady } from "./appicon.js";
 import { el, ic, setText } from "./ui.js";
@@ -16,13 +18,13 @@ export const MAX_NAME_CHARS = 30;
 /** A name cut to 30 letters with an ellipsis. */
 export const clip = (name, n = MAX_NAME_CHARS) => (name.length > n ? name.slice(0, n - 1) + "…" : name);
 export const headerText = (typed) => (typed ? `SUGGESTIONS · “${typed}”` : "SUGGESTIONS");
-export const subText = (m) => (m.kind === "app" ? m.exe + (m.steam ? " · Steam game" : "") : m.host);
+export const subText = (m) => (m.kind === "app" ? m.exe + (m.steam ? " · Steam game" : "") : m.category ? `${m.host} · ${m.category}` : m.host);
 export const anyMine = (rows) => rows.some((r) => r.mine);
 
-export function createSuggest({ input, onPick }) {
+export function createSuggest({ input, onPick, kind = "all" }) {
   const root = el(`<div class="sg" role="listbox" aria-label="Suggestions" hidden>` +
     `<div class="sg-h cap"></div><div class="sg-list"></div>` +
-    `<div class="sg-f"><span class="small muted">Steam games sit under Steam</span><button class="btn btn-sm btn-ghost" type="button" data-clear hidden>Clear my suggestions</button></div></div>`);
+    `<div class="sg-f"><span class="small muted"${kind === "sites" ? " hidden" : ""}>Steam games sit under Steam</span><button class="btn btn-sm btn-ghost" type="button" data-clear hidden>Clear my suggestions</button></div></div>`);
   const head = root.querySelector(".sg-h"), list = root.querySelector(".sg-list"), clear = root.querySelector("[data-clear]");
   const nodes = [];
   let rows = [], active = -1, seq = 0, text = "";
@@ -76,7 +78,7 @@ export function createSuggest({ input, onPick }) {
       const mine = ++seq;
       if (!text) return api.hide();
       let found;
-      try { found = await ld.call("suggest", text); } catch (_) { return; }
+      try { found = await (kind === "sites" ? ld.call("suggest", text, "sites") : ld.call("suggest", text)); } catch (_) { return; }
       if (mine !== seq || document.activeElement !== input) return;       // a later keystroke, or the box lost the focus meanwhile
       rows = found.slice(0, MAX_ROWS);
       if (!rows.length) return api.hide();
@@ -112,4 +114,23 @@ export function createSuggest({ input, onPick }) {
   input.addEventListener("blur", () => api.hide());
   const off = wireIconReady(ld.on, root);
   return api;
+}
+
+/** The suggestions of sites under a box that takes a site: Python's ranking, a pick calls `onPick(row)` ({name, host, hosts,
+ *  category, mine}). The dropdown sits under the box's parent (made a positioning context when it is not one). */
+export function attachSiteSuggest(input, onPick, { ms = 120 } = {}) {
+  const dd = createSuggest({ input, onPick, kind: "sites" });
+  const parent = input.parentNode;
+  if (getComputedStyle(parent).position === "static") parent.style.position = "relative";
+  parent.append(dd.el);
+  let timer = 0;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    if (!input.value.trim()) return dd.hide();
+    timer = setTimeout(() => dd.update(input.value), ms);
+  });
+  if (input.value.trim()) dd.update(input.value);                       // (attached late, while something was typed already)
+  const destroy = dd.destroy;
+  dd.destroy = () => { clearTimeout(timer); destroy(); };
+  return dd;
 }

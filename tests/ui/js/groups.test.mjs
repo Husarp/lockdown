@@ -50,6 +50,29 @@ test("untyped, the Members box shows only the ticked members by name; typed, wha
   assert.ok(!rows.some((r) => r.key.startsWith("m:")));
 });
 
+test("the listed sites of the search follow the typed address and come before the apps; a pick keeps all its host names", () => {
+  const yt = { name: "YouTube", host: "youtube.com", hosts: ["youtube.com", "googlevideo.com"], category: "Video & streaming" };
+  const found = { items: [], apps: [{ name: "Spotify", exe: "spotify.exe", path: "C:\\s.exe", steam: false }], site: { host: "tube.example" }, sites: [yt] };
+  const rows = g.memberRows(new Map(), "tube", found);
+  assert.deepEqual(rows.map((r) => [r.k, r.key]), [["site", "c:n:site:tube.example"], ["site", "c:n:site:youtube.com"], ["app", "c:n:app:spotify.exe"]]);
+  assert.equal(g.siteSub(yt), "youtube.com · Video & streaming");
+  assert.equal(g.siteSub({ host: "x.org" }), "x.org");
+  assert.deepEqual(g.memberRows(new Map(), "tube", { items: [], apps: [], site: null, loading: false }), []);          // (an older answer without `sites`)
+  const m = g.memberOfTarget({ kind: "site", name: yt.host, display: yt.name, hosts: yt.hosts });
+  assert.deepEqual(m.targets, ["youtube.com", "googlevideo.com"]);
+  assert.equal(g.duplicateOf(new Map([[m.key, m]]), ["googlevideo.com"]), m);                              // (typing another of its hosts is the same member)
+  assert.deepEqual(m.target, { kind: "site", name: "youtube.com", display: "YouTube", path: null });
+});
+
+test("Enter in the search box adds the typed address: a listed site with its friendly name and hosts, else the address itself", () => {
+  const tt = { name: "TikTok", host: "tiktok.com", hosts: ["tiktok.com", "tiktokcdn.com"], category: "Social" };
+  assert.deepEqual(g.enterSiteOf({ items: [], apps: [], site: null, sites: [tt] }, " https://www.TikTok.com/x "), { kind: "site", name: "tiktok.com", display: "TikTok", hosts: tt.hosts });
+  assert.deepEqual(g.enterSiteOf({ items: [], apps: [], site: { host: "example.org" }, sites: [] }, "example.org"), { kind: "site", name: "example.org", display: "example.org" });
+  assert.equal(g.enterSiteOf({ items: [], apps: [], site: null, sites: [tt] }, "tik"), null);              // (words, not an address)
+  assert.equal(g.enterSiteOf({ items: [], apps: [], site: null, sites: [tt] }, "reddit.com"), null);        // (the first suggestion is some other site)
+  assert.equal(g.enterSiteOf(null, "tiktok.com"), null);
+});
+
 test("a member for something new keeps what Python needs to make it", () => {
   const m = g.memberOfTarget({ kind: "app", name: "spotify.exe", display: "Spotify", path: "C:\\Spotify\\spotify.exe" });
   assert.equal(m.id, null);
