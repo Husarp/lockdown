@@ -14,6 +14,7 @@ START_MARKER = "# >>> Lockdown START (managed automatically - do not edit)"
 END_MARKER = "# <<< Lockdown END"
 REDIRECT_IP = "127.0.0.1"
 _last: tuple | None = None   # what apply() last saw (inputs + file size/time), to skip needless rebuilds
+repaired = False             # the last apply() put Lockdown's entries back after something else edited the file
 
 _HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
@@ -63,7 +64,8 @@ def apply(hostnames: list[str], hosts_path: Path = HOSTS_PATH, backup_path: Path
     """Make the hosts file's Lockdown section match `hostnames`. Returns True if it was rewritten.
     Skipped while neither the input nor the file (size + modification time) changed since the last check -
     so manual edits are still repaired."""
-    global _last
+    global _last, repaired
+    repaired = False
     stat = hosts_path.stat()
     key = (str(hosts_path), hash(tuple(hostnames)), stat.st_mtime_ns, stat.st_size)
     if key == _last:
@@ -72,6 +74,8 @@ def apply(hostnames: list[str], hosts_path: Path = HOSTS_PATH, backup_path: Path
     lines = text.splitlines()
     new_lines = build_lines(lines, hostnames)
     changed = new_lines != lines
+    # the same names as at the last check, yet the file no longer matched: something else edited it (the App log says so)
+    repaired = bool(changed and _last is not None and _last[:2] == key[:2])
     if changed:
         if not backup_path.exists():
             backup_path.parent.mkdir(parents=True, exist_ok=True)

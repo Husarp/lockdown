@@ -257,6 +257,12 @@ def _run(argv: list[str], events, state: dict) -> int:
     base_url = server.start()
     import webapi
     ctx = webapi.make_context()
+    import applog                  # the App log: this start (and an update, or a last run that was cut off), crashes, errors
+    from version import VERSION
+    applog.set_source("agent")
+    applog.install_crash_hooks()
+    applog.install_error_log()
+    applog.process_started(ctx.db, VERSION, extra=applog.args_text(argv[1:]))
     from resident import overlay
     win = windows.create(base_url, overlay.saved_background(), js_api=webapi.build_api(ctx),   # (the page's own --bg)
                          overlay_background=overlay.saved_background())
@@ -382,4 +388,5 @@ def _run(argv: list[str], events, state: dict) -> int:
     corner_publisher.stop()
     overlay_publisher.stop()
     server.stop()
+    applog.process_stopped(ctx.db)
     return 0

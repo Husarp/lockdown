@@ -32,6 +32,7 @@ PAGE_MODULES = [
     "blocking_edit",
     "notifications",
     "settings",
+    "applog_api",
 ]
 
 for _name in PAGE_MODULES:

@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 
+import applog
 from blocker import hosts
 from blocker.apps import PROTECTED, exe_name, make_block_type
 
@@ -208,6 +209,7 @@ def category_assign(ctx, kind, name, key):
     def action():
         _find(ctx.db, key)
         ctx.db.set_category(kind, name, key)
+        applog.record("change", f"Category: {name} moved to {found['name']}", ctx.db)
         return {"kind": kind, "name": name, "category": key}
     return ctx.guard.request([f"Move {name} to the {found['name']} category"], action)
 
@@ -223,6 +225,7 @@ def category_add_and_assign(ctx, kind, name, cat_name, color):
         _free_name(ctx.db, cat_name)
         key = _add(ctx.db, cat_name, color)
         ctx.db.set_category(kind, name, key)
+        applog.record("change", f"Category: {name} moved to the new category {cat_name}", ctx.db)
         return {"kind": kind, "name": name, "category": key, "color": color, "category_name": cat_name}
     return ctx.guard.request([f"Add the {cat_name} category and move {name} into it"], action)
 

@@ -33,7 +33,7 @@ import statistics
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,6 +133,23 @@ def summarize(samples) -> dict:
 
 # ---------------------------------------------------------------- databases
 
+APP_LOG_ROWS = 20_000          # the App log at its cap (applog.MAX_ROWS)
+
+
+def fill_app_log(path: Path, rows: int = APP_LOG_ROWS):
+    """The App log full: `rows` events of every kind over the last 90 days (Settings > App log reads this)."""
+    import sqlite3
+    kinds = ["change", "start", "updated", "crash", "challenge_passed", "problem", "stop", "antibypass_change", "mode"]
+    con = sqlite3.connect(path)
+    with con:
+        con.execute("DELETE FROM app_events")
+        con.executemany("INSERT INTO app_events (ts, source, kind, text) VALUES (?, ?, ?, ?)", [
+            ((NOW - timedelta(minutes=i * 6)).strftime("%Y-%m-%d %H:%M:%S"), "service" if i % 7 == 0 else "agent",
+             kinds[i % len(kinds)], f"Rule changed: item {i} - time limit {i % 90}m per day → {i % 90 + 5}m per day")
+            for i in range(rows)])
+    con.close()
+
+
 def build_db(path: Path, days: int, rolled: bool = False) -> dict:
     """A synthetic database: `days` of history, 40 blocked items, 20 000 network rows; optionally after the retention
     job (30+ days of detail, daily totals for the rest - what a real install looks like). -> facts about it."""
@@ -142,6 +159,7 @@ def build_db(path: Path, days: int, rolled: bool = False) -> dict:
     t = time.perf_counter()
     Database(path).close()
     build(path, NOW.date(), days=days, extra_items=ITEMS, network_rows=NETWORK_ROWS)
+    fill_app_log(path)
     rolled_rows = 0
     if rolled:
         import retention

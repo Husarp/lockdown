@@ -7,6 +7,7 @@ import json
 import sqlite3
 from datetime import date, timedelta
 
+import applog
 import block_method
 import emergency
 
@@ -59,6 +60,7 @@ def _rule(rule: dict) -> dict:
 def save(db, path: str):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(export(db), f, indent=1)
+    applog.record("backup_export", "A backup was saved (everything you set up, in one file)", db)
 
 
 def load(path: str) -> dict:
@@ -157,13 +159,16 @@ def restore(db, data: dict):
             time.sleep(0.05)
     db.conn = _NoCommit(conn)
     try:
-        _restore(db, data)
+        with applog.quiet():     # (one line below instead of a line per setting)
+            _restore(db, data)
         conn.commit()
     except BaseException:
         conn.rollback()
         raise
     finally:
         db.conn = conn
+    applog.record("backup_import", f"Backup imported: {len(data['items'])} sites and apps, {len(data.get('groups', []))} "
+                  f"groups, {len(data.get('categories', []))} category choices and the settings now replace the old ones", db)
 
 
 def _restore(db, data: dict):

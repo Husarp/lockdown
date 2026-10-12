@@ -16,6 +16,7 @@ import threading
 import time
 
 import antibypass
+import applog
 from rules import days_text
 
 from . import core
@@ -161,6 +162,7 @@ class GuardService:
             right = isinstance(typed, str) and typed == pending.phrase
             chars = len(pending.phrase)
         if not right:
+            applog.record("challenge_failed", f"Anti-Bypass challenge failed: what was typed didn't match ({self._for(pending)})", db)
             return fail("That doesn't match - try again.")
         with self._lock:
             if self._open is not pending:
@@ -168,15 +170,26 @@ class GuardService:
             took = self._mono() - pending.started
             if took < chars * MIN_MS_PER_CHAR / 1000:
                 pending.started = self._mono()      # (the clock starts over: a macro has to wait the full time again)
+                applog.record("challenge_failed", f"Anti-Bypass challenge failed: typed too fast ({self._for(pending)})", db)
                 return fail("Too fast - type it yourself.")
             self._ticket = self._open = None        # one use: whatever happens next, this ticket is gone
         if pending.dry:
+            applog.record("challenge_passed", "Anti-Bypass challenge passed (a practice run, nothing was changed)", db)
             return ok({"passed": True, "dry": True, "result": pending.action()})
         waiting = antibypass.unlock(db, now)
         if waiting:
+            applog.record("challenge_passed", f"Anti-Bypass challenge passed ({self._for(pending)}); the wait runs "
+                                              f"until {waiting:%H:%M}, nothing was changed yet", db)
             self._run_cancel(pending)               # a cooling-off period: nothing is done now, come back later
             return ok({"passed": True, "waiting_until": waiting.isoformat(timespec="seconds")})
+        applog.record("challenge_passed", f"Anti-Bypass challenge passed ({self._for(pending)})", db)
         return ok({"passed": True, "result": pending.action()})
+
+    @staticmethod
+    def _for(pending) -> str:
+        """What the challenge was for, for the App log: the first few lines it showed."""
+        shown = ", ".join(pending.changes[:3]) + (f" and {len(pending.changes) - 3} more" if len(pending.changes) > 3 else "")
+        return f"for: {shown}" if shown else "no change named"
 
     def cancel(self, ticket) -> Envelope:
         """The challenge was closed (Cancel, Esc, OK on a waiting / closed note): run the stored cancel."""

@@ -98,6 +98,8 @@ def latest_release(fetch=None) -> dict | None:
     except Exception as error:
         global last_error
         last_error = f"{type(error).__name__}: {error}"[:200]   # (shown on About and logged: why a check got no answer)
+        import applog
+        applog.problem(f"Update check got no answer ({last_error})", "update_check_failed", repeat_key="update check")
         return None
 
 
@@ -136,18 +138,24 @@ def download(url: str, dest, progress=None, opener=None):
     the tests. The caller runs this off the Tk thread."""
     request = urllib.request.Request(url, headers={"User-Agent": f"Lockdown/{VERSION}"})
     open_url = opener or (lambda r: urllib.request.urlopen(r, timeout=TIMEOUT))
-    with open_url(request) as response:
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        with open(dest, "wb") as out:
-            while True:
-                chunk = response.read(CHUNK)
-                if not chunk:
-                    break
-                out.write(chunk)
-                done += len(chunk)
-                if progress:
-                    progress(done, total)
+    import applog
+    try:
+        with open_url(request) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            with open(dest, "wb") as out:
+                while True:
+                    chunk = response.read(CHUNK)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        progress(done, total)
+    except Exception as error:
+        applog.problem(f"The update download failed ({type(error).__name__}: {str(error)[:120]})", "update_failed")
+        raise
+    applog.record("update_install", f"An update was downloaded ({Path(dest).name}, {done // 1048576} MB)")
     return dest
 
 
@@ -161,7 +169,13 @@ def install(path, run=None):
     the admin prompt. Raises OSError if it couldn't be started (or you said No), so the caller can say so.
     With INSTALLER_ARGS ("--update") the installer asks nothing - you already said Install here - shows only its
     progress, starts Lockdown again and closes by itself."""
-    (run or _run_elevated)(path)
+    import applog
+    applog.record("update_install", f"The installer of an update was started ({Path(path).name}); Lockdown closes for it")
+    try:
+        (run or _run_elevated)(path)
+    except Exception as error:
+        applog.problem(f"The installer could not be started ({error})", "update_failed")
+        raise
 
 
 INSTALLER_ARGS = "--update"
@@ -221,6 +235,13 @@ def remember(db, found: dict | None):
     """Keep the newest release found - only if it is newer than this version; anything else clears it."""
     if found and found.get("newer") and found.get("version"):
         keep = {k: found.get(k) for k in ("version", "url", "asset", "size")}
+        try:
+            known = (json.loads(db.get_setting(FOUND_KEY, "") or "null") or {}).get("version")
+        except (ValueError, AttributeError):
+            known = None
+        if known != keep["version"]:
+            import applog
+            applog.record("update_found", f"A newer version was found: {keep['version']} (this is {VERSION})", db)
         db.set_setting(FOUND_KEY, json.dumps(keep))
     elif found is not None:
         db.set_setting(FOUND_KEY, "")

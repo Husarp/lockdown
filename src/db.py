@@ -8,6 +8,8 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import applog
+import applog_changes
 import modes
 import pause
 from paths import DB_PATH
@@ -237,7 +239,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS block_rules_delete_count AFTER DELETE ON block_rules BEGIN
     INSERT INTO change_counter (name, n) VALUES ('items', 1) ON CONFLICT(name) DO UPDATE SET n = n + 1;
 END;
-"""
+""" + applog.DDL
 
 # Columns added after a table was first released: (table, column, definition)
 MIGRATIONS = [("blocked_items", "notify", "TEXT"), ("blocked_items", "app_path", "TEXT"),
@@ -278,11 +280,12 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 9   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 10   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
 #                      6: a daily time limit per weekday (0.84.12); 7: emergency_unlocks.tier (emergency kinds)
 #                      8: a member app's own way replaces the group's (was: added on top) - same schema
 #                      9: a group's icon and colour (looks only)
+#                      10: app_events, the App log (applog.py)
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -873,6 +876,21 @@ class Database:
         return value
 
     def set_setting(self, key: str, value: str):
+        """Save a setting. A setting that is a choice of yours (applog_changes.watched) also leaves a line in the App log
+        saying what changed, in words - this is the one place every such change passes, whichever page or process made it."""
+        watch = applog_changes.watched(key) and not applog.is_quiet()
+        old = self.get_setting(key) if watch else None
+        self._set_setting(key, value)
+        if watch and old != value:
+            applog_changes.setting_changed(self, key, old, value)
+
+    @_write
+    def add_app_event(self, source: str, kind: str, text: str):
+        """One line for the App log (applog.record)."""
+        with self.conn:
+            applog.insert(self.conn, applog.now_text(), source, kind, text)
+
+    def _set_setting(self, key: str, value: str):
         """On the window's connection only display settings (DEFERRABLE) may wait in memory for a lock; everything
         else - Anti-Bypass, modes, protection lists, limits, reminders ... - is written now, retried for up to
         WRITE_RETRY_SEC like any other structural write, so it can neither be lost nor land late on top of a newer

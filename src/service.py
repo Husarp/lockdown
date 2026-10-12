@@ -29,6 +29,7 @@ from logging.handlers import RotatingFileHandler
 
 import alerts
 import antibypass
+import applog
 from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection, site_block
 import keywords
 from blocker.listener import BlockListener
@@ -130,6 +131,8 @@ class Enforcer:
         if self.last_offset is not None and abs(offset - self.last_offset) > CLOCK_JUMP_SEC:
             log.warning("System clock changed by %+.0f s - ignored, Lockdown keeps its own time",
                         self.last_offset - offset)
+            applog.record("clock_changed", f"The Windows clock was changed by {self.last_offset - offset:+.0f} s - "
+                          "ignored, Lockdown keeps its own trusted time", self.db)
         self.last_offset = offset
         self.db.set_setting(OFFSET_KEY, f"{offset:.3f}")
         self.db.set_setting(LAST_TRUSTED_KEY, f"{self.clock.now_ts():.0f}")
@@ -144,6 +147,7 @@ class Enforcer:
             self.db.set_setting(ZONE_KEY, json.dumps(new))
         if message:
             log.warning(message)
+            applog.record("clock_changed", message, self.db)
 
     def enforce_once(self):
         now = self.update_clock()
@@ -210,6 +214,10 @@ class Enforcer:
         if hosts.apply(sorted(dns_blocks)):
             hosts.flush_dns()
             log.info("Hosts file updated: %d hostnames blocked", len(dns_blocks))
+            if hosts.repaired:
+                log.warning("The hosts file was edited by something else - Lockdown's entries were put back")
+                applog.record("hosts_repaired", "The hosts file was edited by something else (not by Lockdown): "
+                              "Lockdown's entries were put back", self.db)
         self.blocks, self.dns_blocks = blocks, dns_blocks
 
         kw = keywords.settings(self.db)
@@ -869,6 +877,13 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
         enforcer.enforce_once()
         return 0
     log.info("Service started")
+    from version import VERSION
+    applog.set_source("service")
+    applog.install_crash_hooks()
+    applog.install_error_log()
+    beat = enforcer.db.get_setting(HEARTBEAT_KEY)
+    applog.process_started(enforcer.db, VERSION, extra=(f"last seen alive {datetime.fromtimestamp(float(beat)):%Y-%m-%d %H:%M}"
+                                                        if beat and beat.replace('.', '', 1).isdigit() else ""))
     # the video hosts rule is built again on the first pass from the addresses saved, those still blocked only:
     # one left in place by a crash, or never added, can't outlast its block
     firewall.remove_video_block()
@@ -886,6 +901,7 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
             log.exception("Enforcement pass failed")
         stop.wait(INTERVAL_SEC)
     log.info("Service stopped")
+    applog.process_stopped(enforcer.db)
     return 0
 
 

@@ -11,6 +11,7 @@
 //
 // Page contract: mount() builds the static structure once, load() = one Api call (settings_get) fills it. The emergency
 // kinds are keyed rows, reused. Showing the page again reloads it, so the uses-left meters are never stale.
+import { appLogCard, loadAppLog, mountAppLog } from "../applog.js";
 import { ld } from "../bridge.js";
 import { CANCELLED, guarded } from "../challenge.js";
 import { loadCategories, colorOf, openCategoryEditor } from "../categories.js";
@@ -174,8 +175,9 @@ export function mount(host, p) {
   host.innerHTML = `${STYLE}<div class="page set"><div class="page-h"><h1>Settings</h1></div>
     <div class="banner k-block set-lock" data-k="lock" hidden>${ic("shield-check")}<span class="grow"><b>Locked</b> <span class="muted"></span></span><button class="btn btn-sm btn-primary" type="button" data-act="unlock">Unlock to edit</button></div>
     <div class="grid-2"><div class="stack">${appearanceCard()}${resetCard()}${categoriesCard()}</div>
-      <div class="stack">${emergencyCard()}${backupCard()}</div></div></div>`;
+      <div class="stack">${emergencyCard()}${backupCard()}</div></div>${appLogCard()}</div>`;
   root = host;
+  mountAppLog(host);
   q("reset-slot").replaceWith(confirmButton({ label: "Change", confirmLabel: "Confirm change", onConfirm: changeReset, cls: "btn btn-sm", ms: 4000 }));
   root.addEventListener("change", onChange);
   root.addEventListener("input", (e) => { if (e.target.closest(".set-reset .tp")) resetEdited = true; });
@@ -327,6 +329,7 @@ function fill(d) {
 }
 
 export async function load() {
+  loadAppLog().catch(() => {});                // (the App log card loads on its own; a failure there leaves the rest alone)
   fill(await ld.call("settings_get"));
   renderLock();
   loaded = true;

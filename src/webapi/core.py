@@ -120,6 +120,10 @@ def log_error(text: str):
                 f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')},000 ERROR Lockdown window: {text}\n")
         except OSError:
             pass
+    if "no answer from GitHub" not in text:      # (the update check writes that to the App log itself, with the reason)
+        lines = text.splitlines()
+        import applog
+        applog.record("problem", "Window error: " + (lines[0][:160] if len(lines) < 2 else f"{lines[0][:160]} ... {first}"))
 
 
 # ---------------------------------------------------------------- the context every method gets

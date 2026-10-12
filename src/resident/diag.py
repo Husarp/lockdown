@@ -34,6 +34,21 @@ def note(message: str, important: bool = False):
                 f.write(f"{stamp},000 WARNING Lockdown window: {message}\n")
         except OSError:
             pass
+        _app_log(message)
+
+
+def _app_log(message: str):
+    """The important notes also go to the App log: a window that could not start, or was tried again, is told as such."""
+    import applog
+    text = " ".join(str(message).split())
+    if "tried once more" in text or "second try" in text:
+        kind = "window_retry"
+    elif ("could not be used" in text or "could not start" in text or "failed to start" in text or "challenge window" in text
+          or "did not end" in text):
+        kind = "window_failed"
+    else:
+        kind = "problem"
+    applog.problem(text[:400], kind)
 
 
 class _PywebviewHandler(logging.Handler):

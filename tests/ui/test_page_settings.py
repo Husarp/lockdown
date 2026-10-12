@@ -99,7 +99,7 @@ def kind_ui(page):
 def test_the_page_shows_every_part(shell, page, harness):
     open_page(shell, page)
     heads = page.eval_on_selector_all(".set .card-h h3", "els => els.map(e => e.textContent)")
-    assert heads == ["Appearance", "When limits reset", "Categories", "Emergency unlock", "Backup & export"]
+    assert heads == ["Appearance", "When limits reset", "Categories", "Emergency unlock", "Backup & export", "App log"]
     text = page.inner_text(".set")
     for label in ("Theme", "Accent colour", "Interface size", "Daily goal", "Reduce motion", "Download icons for my sites",
                   "Reset at", "ends ",
@@ -122,7 +122,7 @@ def test_the_page_shows_every_part(shell, page, harness):
 
 def test_the_mocks_invented_settings_are_left_out(shell, page, harness):
     open_page(shell, page)
-    text = page.inner_text(".set")
+    text = page.inner_text(".set .grid-2")             # (the App log card below has its own "Updates" filter chip)
     for gone in ("Start with Windows", "Start in the tray", "Language", "Channel", "Site history", "Service", "Updates"):
         assert gone not in text, gone
 

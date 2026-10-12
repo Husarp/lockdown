@@ -452,7 +452,8 @@ def test_schema_changes_come_with_a_schema_version_bump():
               6: "8cc40a7d06ab4b25",                          # 6: a daily time limit per weekday (0.84.12)
               7: "ab86b080a859e00b",                          # 7: emergency_unlocks.tier (emergency kinds)
               8: "ab86b080a859e00b",
-              9: "4cc8c906e5383f2d"}                          # 9: a group's icon and colour (block_groups.icon / color)
+              9: "4cc8c906e5383f2d",                          # 9: a group's icon and colour (block_groups.icon / color)
+              10: "9f0d44666ca1d69e"}                         # 10: app_events, the App log (applog.py)
     assert pinned.get(SCHEMA_VERSION) == hashlib.sha256(text.encode()).hexdigest()[:16], \
         (SCHEMA_VERSION, hashlib.sha256(text.encode()).hexdigest()[:16])
 

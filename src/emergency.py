@@ -16,6 +16,7 @@ import json
 import secrets
 from datetime import datetime, timedelta
 
+import applog
 from rules import Usage, effective_rules
 
 # the single kind older versions had: only read while TIERS_KEY is missing or "" (it becomes the kind LEGACY_TIER)
@@ -208,6 +209,10 @@ def unlock(db, items: list[dict], now: datetime, alerts: bool = False, *, tier: 
     until = now + timedelta(minutes=chosen["minutes"])
     db.add_unlock([i["id"] for i in items], [i["display_name"] for i in items], now, until, alerts=alerts,
                   tier=chosen["id"])
+    what = ", ".join(i["display_name"] for i in items[:3]) + (f" and {len(items) - 3} more" if len(items) > 3 else "")
+    applog.record("emergency", f"Emergency unlock used for {chosen['minutes']} min until {until:%H:%M}: "
+                  + (what if items else "") + (" + bedtime and break alerts paused" if alerts and items else
+                                               "bedtime and break alerts paused" if alerts else ""), db)
     return until
 
 

@@ -336,6 +336,10 @@ def update_due_lists(db, now: datetime, folder: Path = LIST_DIR, log=None) -> bo
             if log:
                 log.info("Protection list %s updated: %d domains", key, count)
         except Exception as e:   # offline, site down: keep the old copy, try again in an hour
+            if "failed" not in cfg["info"].get(key, {}):     # (the App log says it once, not every hour it keeps failing)
+                import applog
+                applog.record("list_failed", f"Protection list {lists[key][0]} could not be downloaded "
+                              f"({type(e).__name__}: {str(e)[:120]}); the old copy stays, Lockdown tries again in an hour", db)
             cfg["info"].setdefault(key, {})["failed"] = now.isoformat(timespec="seconds")
             if log:
                 log.warning("Protection list %s not updated: %s", key, e)

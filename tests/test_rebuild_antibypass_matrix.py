@@ -46,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # ================================================================ the classification (every method, by hand)
 
-READ = """about_get antibypass_get antibypass_status appmenu_info apps_list blocking_overview_get blocklist_brief calendar_get
+READ = """about_get antibypass_get applog_get applog_text antibypass_status appmenu_info apps_list blocking_overview_get blocklist_brief calendar_get
 categories_list dashboard_get display_get draft_get_state emergency_get_candidates get_status get_theme group_get
 group_member_search groups_list host_normalize item_get manual_get mode_extra_check modes_brief modes_get
 network_block_target network_get network_graph notifications_get overlay_emergency_kinds pause_get pick_program_file
@@ -62,7 +62,7 @@ manual_remove manual_save_entries manual_set_enabled mode_delete mode_save mode_
 overlay_disable overlay_emergency pause_start protection_allow protection_remove_custom protection_set_list_enabled
 reminder_delete reminder_save_break reminder_save_custom reminder_save_sleep reminder_set_on reset_change_apply
 words_update"""
-UI = """backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
+UI = """applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
 corner_answer corner_ready corner_size digest_set display_set draft_discard draft_set_notify draft_set_setting
 log_client_error network_export_csv network_live_stop notify_front_steps_set notify_repeat_set notify_test open_path
 open_url overlay_ready
@@ -70,7 +70,7 @@ page_ready protection_preview protection_set_updates protection_update_now revea
 set_accent set_appearance set_goal set_icons_download set_scale suggest_clear_history ui_ready ui_setting update_check
 update_download update_install update_opened update_set_prefs window_seen"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
-COUNTS = {"read": 45, "tighten": 9, "loosen": 42, "ui": 44}            # 140 in all (R28; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen)
+COUNTS = {"read": 47, "tighten": 9, "loosen": 42, "ui": 45}            # 143 in all (R28; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log)
 # Loosen methods that are NOT a challenge: the emergency unlock's quota is their limit (BLUEPRINT 4: "not a challenge").
 QUOTA = ("emergency_unlock", "overlay_emergency")
 
@@ -79,7 +79,7 @@ def test_every_api_method_is_classified_here_and_the_count_is_known():
     table = {name: kind for kind, names in CLASSES.items() for name in names}
     assert sum(len(n) for n in CLASSES.values()) == len(table)              # (no name twice)
     assert dict(webapi.api_methods()) == table
-    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 140
+    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 143
 
 
 def test_every_public_function_of_a_webapi_module_is_an_api_method_or_marked_internal():
@@ -245,6 +245,8 @@ class Env:
         try:
             out = []
             for (table,) in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"):
+                if table == "app_events":      # (the App log only tells what happened - a passed challenge adds a line)
+                    continue
                 rows = con.execute(f'SELECT * FROM "{table}"').fetchall()
                 if table == "settings":
                     rows = [r for r in rows if r[0] not in ignore]
@@ -619,6 +621,7 @@ UI_ARGS = {
     "suggest_clear_history": [], "page_ready": ["main"], "ui_ready": [], "ui_setting": ["dash.cards", "x"],
     "update_check": [], "update_download": [], "update_install": [], "update_opened": [], "update_set_prefs": [False, False],
     "window_seen": [],
+    "applog_save": [],                                  # (no Save dialog in a test: it answers an error and changes nothing)
 }
 # What a tighten method may change, checked to be stricter (state before, state after).
 def _break_without_allow(db):

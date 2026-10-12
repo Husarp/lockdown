@@ -60,6 +60,30 @@ def tool(name: str) -> str:
     return str(TOOLS.get(name, name))
 
 
+_waiting_for_data: list = []    # App log lines from before the data folder exists (a fresh install)
+
+
+def app_log(kind: str, text: str):
+    """One line for the App log (src/applog.py), written by "installer". On a fresh install nothing is written before
+    the data folder has its permissions (the app runs as you and must be able to write the database): the lines wait for
+    flush_app_log(). Never raises."""
+    try:
+        import applog
+        import paths
+        if paths.DB_PATH.exists():
+            applog.record(kind, text, source="installer")
+        else:
+            _waiting_for_data.append((kind, text))
+    except Exception:
+        pass
+
+
+def flush_app_log():
+    waiting, _waiting_for_data[:] = list(_waiting_for_data), []
+    for kind, text in waiting:
+        app_log(kind, text)
+
+
 def run(*args, check=False) -> subprocess.CompletedProcess:
     return subprocess.run([tool(args[0]), *args[1:]], capture_output=True, text=True, creationflags=NO_WINDOW,
                           check=check)
@@ -254,6 +278,7 @@ def install(log, at=None):
     webview2_step(log)
     at(8)
     log(f"Lockdown {VERSION} is installed. Blocking is active.")
+    flush_app_log()
 
 
 def challenge_passed() -> bool:
@@ -352,23 +377,34 @@ def work(mode: str, post, delete_data: bool = False):
     touched = False   # (nothing was stopped yet: nothing to put back)
     try:
         if mode == "uninstall":
+            app_log("uninstall", "Uninstall started (from Apps & features)")
             log("Checking Anti-Bypass...")
             if not challenge_passed():
                 log("Not uninstalled: the Anti-Bypass challenge wasn't passed.")
+                app_log("uninstall", "Uninstall refused: the Anti-Bypass challenge was not passed")
                 post("done", "refused")
                 return
+            app_log("uninstall", "Uninstall: the Anti-Bypass challenge was passed")
             touched = True
             uninstall(log, delete_data, at)
+            app_log("uninstall", "Lockdown was uninstalled" + (" and its data deleted" if delete_data else " (its data is kept)"))
             post("done", "uninstalled")
         else:
+            was = installed_version()
+            app_log("install", f"{'Update' if mode == 'update' else 'Install'} started: Lockdown {VERSION} "
+                               f"({'installed now: ' + was if was else 'nothing installed yet'})")
             touched = True
             install(log, at)
+            app_log("install", f"Lockdown {VERSION} is {'updated' if was else 'installed'}")
+            flush_app_log()
             if mode == "update":   # an in-app update: Lockdown closed itself for it, so bring it back
                 log("Starting Lockdown again...")
                 launch_app()
             post("done", "installed")
     except Exception as e:   # show it rather than vanish
         log(f"Something went wrong: {e}")
+        app_log("problem", f"Setup failed ({mode}): {str(e)[:200] or type(e).__name__}")
+        flush_app_log()
         if touched:
             recover(log)
         post("failed", str(e) or type(e).__name__)

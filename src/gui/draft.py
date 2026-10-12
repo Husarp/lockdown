@@ -11,6 +11,8 @@ from datetime import timedelta
 
 import alerts
 import antibypass
+import applog
+import applog_changes
 from db import Database
 from rules import TIME_FMT
 from trusted_time import now_from_db
@@ -256,6 +258,11 @@ class Draft:
 
     def _save(self):
         now = now_from_db(self.db)
+        try:    # what is about to change, in words, for the App log (written once everything is saved)
+            lines = applog_changes.draft_lines(self.saved_items, self.items, self.saved_groups, self.groups,
+                                               self.is_unsaved, self.is_group_unsaved)
+        except Exception:
+            lines = []
         existing = self.db.item_ids()   # the service may have removed expired items meanwhile
         new_ids = {}
         for item_id, item in self.items.items():
@@ -293,6 +300,7 @@ class Draft:
         for key, value in self.settings.items():
             if value != self.saved_settings.get(key):
                 self.db.set_setting(key, value)
+        applog.record_changes(lines, self.db)
         self.reload()
         self._notify("saved")
 
