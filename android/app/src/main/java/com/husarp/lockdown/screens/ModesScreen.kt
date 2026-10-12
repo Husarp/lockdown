@@ -235,6 +235,24 @@ private fun ModeEditor(mode: Mode, onClose: () -> Unit) {
                 }
             }
 
+            // Popular sites that aren't on the blocklist can be blocked by the mode too (as a mode extra with all their host
+            // names): the suggestions follow what's typed; with nothing typed, the sites already picked this way show.
+            val siteHits = com.husarp.lockdown.ui.rememberSiteSuggestions(pick)
+            fun isSiteExtra(site: com.husarp.lockdown.engine.ListedSite) = draft.extra.any { it.kind == ItemType.SITE && it.targets == site.domains }
+            val siteRows = if (pick.isBlank()) draft.extra.filter { it.kind == ItemType.SITE }.map { com.husarp.lockdown.engine.ListedSite(it.name, it.targets) }
+                else siteHits.filter { s -> cfg.items.none { it.type == ItemType.SITE && s.main in it.target.split(' ') } }
+            if (siteRows.isNotEmpty()) Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
+                siteRows.forEach { s ->
+                    ListRow(title = s.name, subtitle = s.main + (if (s.category.isNotEmpty()) " · " + s.category else ""),
+                        leading = { com.husarp.lockdown.ui.ItemIcon(ItemType.SITE, s.main, s.name) }, trailing = {
+                        Checkbox(checked = isSiteExtra(s), onCheckedChange = { on ->
+                            draft = draft.copy(extra = if (on) draft.extra + com.husarp.lockdown.engine.ModeExtra(s.name, ItemType.SITE, s.domains)
+                                else draft.extra.filterNot { it.kind == ItemType.SITE && it.targets == s.domains })
+                        })
+                    })
+                }
+            }
+
             Card(color = cs.surfaceContainerLow) {
                 SwitchRowInline("Mute notifications", draft.mute) { draft = draft.copy(mute = it) }
                 val fresh = com.husarp.lockdown.guard.rememberFresh()      // re-read on every return from Android's settings

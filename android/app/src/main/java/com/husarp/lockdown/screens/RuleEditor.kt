@@ -137,15 +137,25 @@ fun AddItemSheet(onDone: () -> Unit, onEdit: (Item) -> Unit, onEditGroup: (Group
             ItemType.SITE -> {
                 var name by remember { mutableStateOf("") }
                 var host by remember { mutableStateOf("") }
-                Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(host, { host = com.husarp.lockdown.engine.Sites.joinDots(it) }, label = { Text("Hostname(s), space-separated") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                var byName by remember { mutableStateOf(false) }       // which box the suggestions follow: the last one typed in
+                var picked by remember { mutableStateOf(false) }       // a pick just filled both boxes: no suggestions until they're edited
+                val index = com.husarp.lockdown.ui.rememberSiteIndex()
+                val typed = if (picked) "" else if (byName) name else host.substringAfterLast(' ')
+                val suggestions = com.husarp.lockdown.ui.rememberSiteSuggestions(typed)
+                Column(Modifier.padding(top = 12.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(name, { name = it; byName = true; picked = false }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(host, { host = com.husarp.lockdown.engine.Sites.joinDots(it); byName = false; picked = false }, label = { Text("Hostname(s), space-separated") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    com.husarp.lockdown.ui.SiteSuggestions(suggestions) { s -> name = s.name; host = s.target; picked = true }
                     TextButton(onClick = {
                         // each hostname cleaned, not just the first ("www.a.com www.b.com" used to keep the second www.)
-                        val h = com.husarp.lockdown.engine.Sites.cleanList(host).joinToString(" ")
+                        val typedHosts = com.husarp.lockdown.engine.Sites.cleanList(host)
+                        // a host that is one of a list site's own gets its friendly name and all its hosts, as picking it would
+                        val known = index?.siteTyped(typedHosts)
+                        val h = ((if (known != null) typedHosts + known.domains else typedHosts).distinct()).joinToString(" ")
                         if (h.isNotEmpty()) {
-                            val item = Item(UUID.randomUUID().toString().take(8), name.ifBlank { h.substringBefore(" ") }, h, ItemType.SITE,
-                                rules = listOf(Rule(RuleType.PERMANENT)))
+                            val item = Item(UUID.randomUUID().toString().take(8),
+                                name.ifBlank { if (known != null && typedHosts.firstOrNull() in known.domains) known.name else h.substringBefore(" ") },
+                                h, ItemType.SITE, rules = listOf(Rule(RuleType.PERMANENT)))
                             Store.update { it.copy(items = it.items + item) }
                             onEdit(item)
                         }

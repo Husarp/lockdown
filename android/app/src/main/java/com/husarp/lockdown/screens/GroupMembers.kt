@@ -245,13 +245,21 @@ internal fun AddMembersPage(draft: Group, cfg: Config, newApps: List<Item>, onMe
                     }
                 }
             }
+            val index = com.husarp.lockdown.ui.rememberSiteIndex()
+            var picked by remember { mutableStateOf<com.husarp.lockdown.engine.ListedSite?>(null) }   // the suggestion just picked
+            val suggestions = com.husarp.lockdown.ui.rememberSiteSuggestions(if (picked != null) "" else newSite)
+            com.husarp.lockdown.ui.SiteSuggestions(suggestions) { s -> picked = s; newSite = s.main }
             Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(newSite, { newSite = it.filterNot(Char::isWhitespace) }, placeholder = { Text("Add a site (e.g. reddit.com)") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(newSite, { newSite = it.filterNot(Char::isWhitespace); picked = null }, placeholder = { Text("Add a site (e.g. reddit.com)") }, singleLine = true, modifier = Modifier.weight(1f))
                 TextButton(onClick = {
                     val h = com.husarp.lockdown.engine.Sites.clean(newSite)
                     if (h.isNotEmpty()) {
-                        onNewSite(Item(java.util.UUID.randomUUID().toString().take(8), h, h, ItemType.SITE))   // no own rule: the group's shared rule governs it
-                        newSite = ""
+                        // a picked (or typed) list site is added with its friendly name and all its hosts
+                        val known = picked ?: index?.siteTyped(listOf(h))
+                        val item = if (known != null) Item(java.util.UUID.randomUUID().toString().take(8), known.name, known.target, ItemType.SITE)
+                            else Item(java.util.UUID.randomUUID().toString().take(8), h, h, ItemType.SITE)
+                        onNewSite(item)   // no own rule: the group's shared rule governs it
+                        newSite = ""; picked = null
                     }
                 }) { Text("Add") }
             }

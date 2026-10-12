@@ -368,18 +368,28 @@ private fun CollapsibleWordList(
     }
 }
 
-/** A simple editable list of strings with an add field and per-row remove. */
+/** A simple editable list of strings with an add field and per-row remove. Typing a site shows the list's sites under
+ *  the field; picking one adds all its host names (like typing them - the page's Save asks for the challenge, an
+ *  exception loosens). [onAdd] gets one string at a time. */
 @Composable
 private fun ExceptionList(values: List<String>, clean: (String) -> String, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     var field by remember { mutableStateOf("") }
+    var picked by remember { mutableStateOf<com.husarp.lockdown.engine.ListedSite?>(null) }   // the suggestion just picked
+    val suggestions = com.husarp.lockdown.ui.rememberSiteSuggestions(if (picked != null) "" else field)
     Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
         values.forEach { v ->
             ListRow(title = v, trailing = { IconButton(onClick = { onRemove(v) }) { Icon(Icons.Filled.Close, "remove") } })
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(field, { field = clean(it) }, placeholder = { Text("Add…") }, singleLine = true, modifier = Modifier.weight(1f))
-            TextButton(onClick = { val t = clean(field).trim(); if (t.isNotEmpty()) { onAdd(t); field = "" } }) { Text("Add") }
+            OutlinedTextField(field, { field = clean(it); picked = null }, placeholder = { Text("Add…") }, singleLine = true, modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                val site = picked
+                if (site != null && clean(field) == site.main) site.domains.forEach(onAdd)
+                else { val t = clean(field).trim(); if (t.isNotEmpty()) onAdd(t) }
+                field = ""; picked = null
+            }) { Text("Add") }
         }
     }
+    com.husarp.lockdown.ui.SiteSuggestions(suggestions) { s -> picked = s; field = clean(s.main) }
 }
