@@ -60,6 +60,61 @@ POPULAR_SITES: dict[str, dict[str, list[str]]] = {
 }
 
 
+# --- the big bundled list (~500 sites, assets/sites/sites.json; made by scripts/make_sites.py) ---------------
+# Used for suggestions while typing and for site icons. It is data only: nothing here changes what is blocked.
+
+_SITES: list[dict] | None = None
+_SITE_BY_DOMAIN: dict[str, dict] = {}
+
+
+def sites_dir():
+    from paths import ASSETS
+    return ASSETS / "sites"
+
+
+def load_sites() -> list[dict]:
+    """The bundled sites in popularity order: {name, domains [main first], category, rank (1 = most popular),
+    icon (file name in sites_dir()/icons, only when one is bundled)}. Read once, then cached; [] if the file is missing."""
+    global _SITES
+    if _SITES is None:
+        import json
+        try:
+            raw = json.loads((sites_dir() / "sites.json").read_text(encoding="utf-8"))["sites"]
+        except (OSError, ValueError, KeyError):
+            raw = []
+        sites = [dict(s, rank=i) for i, s in enumerate(raw, 1)]
+        _SITE_BY_DOMAIN.clear()
+        for s in sites:
+            for d in s["domains"]:
+                _SITE_BY_DOMAIN[d] = s
+        _SITES = sites
+    return _SITES
+
+
+def __getattr__(name):   # popular.SITES: loaded on first use, not at import
+    if name == "SITES":
+        return load_sites()
+    raise AttributeError(name)
+
+
+def site_of(host: str) -> dict | None:
+    """The bundled site this host belongs to (the host itself or a parent domain of it; "www." ignored), or None.
+    The most specific listed domain wins, so mail.google.com is Gmail while news.google.com is Google."""
+    load_sites()
+    h = host.strip().lower().rstrip(".").removeprefix("www.")
+    while h:
+        found = _SITE_BY_DOMAIN.get(h)
+        if found:
+            return found
+        h = h.partition(".")[2]
+    return None
+
+
+def site_icon_path(site: dict):
+    """Path of the bundled icon (a 64x64 PNG) of a site from this list, or None if it has none."""
+    return sites_dir() / "icons" / site["icon"] if site.get("icon") else None
+
+
 def hosts_of(target: str) -> list[str] | None:
     """The full hostname list of the known site this item is, or None if it isn't one of them."""
     # (an old or imported item may say www.youtube.com: still YouTube, and still needs googlevideo.com)
