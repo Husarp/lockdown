@@ -90,3 +90,23 @@ def test_a_mode_and_a_blocker_agree_on_what_is_in_a_category(tmp_path):
     assert ("site", "tiktok.com") in from_blocker and ("site", "tiktok.com") in from_mode
     assert ("app", "discord.exe") in from_blocker and ("app", "discord.exe") in from_mode
     db.close()
+
+
+def test_a_category_block_says_it_comes_from_the_category(tmp_path):
+    from alerts import format_message, tag_reason
+    db = _db(tmp_path)
+    db.add_item("Distracting", ["distracting"], "category", rules=[{"rule_type": "permanent"}])
+    db.add_site("Reddit", ["reddit.com"], rules=[{"rule_type": "temporary",
+                                                  "temp_until": (NOW + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")}])
+    db.add_site("Imgur", ["imgur.com"], rules=[{"rule_type": "permanent"}])
+    db.set_category("site", "imgur.com", "distracting")
+    by_target = {b["item"]["target"]: b for b in db.blocks(NOW)}
+    assert by_target["discord.exe"]["category"] == "distracting"
+    assert "category" not in by_target["reddit.com"]        # blocked in its own right: its own reason, no category
+    assert "category" not in by_target["imgur.com"]
+    b = by_target["discord.exe"]
+    event = {"display_name": b["item"]["display_name"], "reason": tag_reason(b["reason"], b.get("category")),
+             "until": None}
+    assert format_message("{site} is permanently blocked.", event, NOW, categories={"distracting": "Distracting"}) \
+        == "discord.exe is permanently blocked. It's in Distracting."
+    db.close()

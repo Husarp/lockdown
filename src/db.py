@@ -610,7 +610,7 @@ class Database:
                         continue
                     if key not in done:
                         done.add(key)
-                        out.append({**b, "item": member})
+                        out.append({**b, "item": member, "category": b["item"]["target"]})
         state = modes.active(self, now)
         if modes.blocking(state):
             done = {b["item"]["id"] for b in out}

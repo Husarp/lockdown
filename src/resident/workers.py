@@ -493,8 +493,12 @@ class Alerter:
             self.last_alert[event["item_id"]] = wall
             self._dirty = True
             self._save_if_due(wall)
+            names = None
+            if alerts.reason_category(event["reason"]):
+                from webapi import categories
+                names = {c["key"]: c["name"] for c in categories.load(db)}
             message = alerts.format_message(alerts.get(db, f"notify.msg.{reason}"), event, hub.clock.now(db),
-                                            protection.list_names(db))
+                                            protection.list_names(db), names)
         hub.notify(message)
         return True
 
@@ -711,7 +715,8 @@ class MinimizeWorker(Worker):
         if block and (win.minimize_windows(pids) if pids else win.minimize_app(exe)):
             item = block["item"]
             until = block["until"].strftime(TIME_FMT) if block["until"] else None
-            self.alerter.alert({"item_id": item["id"], "display_name": item["display_name"], "reason": block["reason"],
+            reason = alerts.tag_reason(block["reason"], block.get("category"))
+            self.alerter.alert({"item_id": item["id"], "display_name": item["display_name"], "reason": reason,
                                 "until": until}, item["notify"])
 
     def _blocks(self, snap) -> dict:

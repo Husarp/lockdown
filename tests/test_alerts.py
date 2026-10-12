@@ -97,3 +97,26 @@ def test_unlock_end_warning():
     w = BlockWatcher()
     msgs = w.check(items, [], usage, datetime(2026, 9, 14, 12, 16), set(), SETTINGS)
     assert msgs == ["Emergency unlock ends in 4 min: Discord, YouTube will be blocked again."]
+
+
+# ---------- blocked because of a category ----------
+from alerts import reason_category, tag_reason, base_reason, DEFAULT_MESSAGES
+
+
+def test_a_category_block_names_the_category():
+    tagged = ev(tag_reason("permanent", "distracting"), None)
+    assert base_reason(tagged["reason"]) == "permanent" and reason_category(tagged["reason"]) == "distracting"
+    cats = {"distracting": "Distracting"}
+    assert format_message(DEFAULT_MESSAGES["permanent"], tagged, NOW, categories=cats) \
+        == "Reddit is permanently blocked. It's in Distracting."
+    assert format_message("{site}: {reason}", tagged, NOW, categories=cats) \
+        == "Reddit: permanently blocked (it's in Distracting)"
+    assert format_message(DEFAULT_MESSAGES["schedule"], ev("schedule@my-cat", "2026-09-14 23:30:00"), NOW,
+                          categories={"my-cat": "Time wasters"}) == "Reddit is blocked until 23:30. It's in Time wasters."
+    assert format_message("{site}", ev("limit@gone", None), NOW) == "Reddit. It's in gone."   # unknown key: shown as is
+
+
+def test_a_block_in_its_own_right_reads_as_before():
+    assert tag_reason("permanent", None) == "permanent"
+    assert format_message(DEFAULT_MESSAGES["permanent"], ev("permanent", None), NOW, categories={"x": "X"}) \
+        == "Reddit is permanently blocked."

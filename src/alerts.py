@@ -57,23 +57,48 @@ def until_text(until: str | None, now: datetime) -> str:
     return f"{DAY_NAMES[u.weekday()]} {u:%H:%M}"   # not strftime("%A"): that follows the system language
 
 
-def format_message(template: str, event: dict, now: datetime, lists: dict = LISTS) -> str:
-    """lists: the protection lists by key (built-in + your own), to name the list a site is on."""
+def tag_reason(reason: str, category: str | None) -> str:
+    """The reason a block event is stored with: "permanent" -> "permanent@distracting" when the site or app is blocked
+    because it is in the category Distracting (a blocked category item, db.blocks). Everything else is unchanged."""
+    return f"{reason}@{category}" if category else reason
+
+
+def reason_category(reason: str) -> str | None:
+    """"permanent@distracting" -> "distracting" (None when the block is not from a category)."""
+    return reason.split("@", 1)[1] if "@" in reason else None
+
+
+def format_message(template: str, event: dict, now: datetime, lists: dict = LISTS,
+                   categories: dict | None = None) -> str:
+    """lists: the protection lists by key (built-in + your own), to name the list a site is on.
+    categories: category key -> name; a block that comes from a category says so ("it's in Distracting") in {reason},
+    or at the end when the message has no {reason} in it."""
+    category = reason_category(event["reason"])
+    event = {**event, "reason": base_reason(event["reason"]) if category else event["reason"]}
     reason = REASONS.get(event["reason"], ("", event["reason"]))[1]
     if event["reason"].startswith("protection:"):   # which list: "on the scam list"
         key = event["reason"].split(":", 1)[1]
         reason = f"on the {lists[key][0].lower()} list" if key in lists else REASONS["protection"][1]
+    note = ""
+    if category:
+        note = f"it's in {(categories or {}).get(category, category)}"
+        if "{reason}" in template:
+            reason = f"{reason} ({note})"
     values = {"site": event["display_name"], "reason": reason,
               "until": until_text(event["until"], now)}
     try:
-        return template.format(**values)
+        text = template.format(**values)
     except (KeyError, IndexError, ValueError):  # user typed an unknown {placeholder}
-        return template
+        text = template
+    if note and "{reason}" not in template:
+        text += f"{' ' if text.endswith(('.', '!', '?')) else '. '}{note[:1].upper()}{note[1:]}."
+    return text
 
 
 def base_reason(reason: str) -> str:
-    """"protection:scam" -> "protection" (the settings are per kind of reason)."""
-    return reason.split(":", 1)[0]
+    """"protection:scam" -> "protection", "permanent@distracting" -> "permanent" (the settings are per kind of
+    reason)."""
+    return reason.split("@", 1)[0].split(":", 1)[0]
 
 
 def should_notify(event: dict, item_notify: str | None, enabled: bool, last_shown: float | None,

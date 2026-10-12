@@ -27,6 +27,7 @@ import time
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
+import alerts
 import antibypass
 from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection, site_block
 import keywords
@@ -349,7 +350,8 @@ class Enforcer:
             if self.visit_db is None:
                 self.visit_db = Database()
             item = block["item"]
-            self.visit_db.add_block_event(key, item["id"], item["display_name"], block["reason"], block["until"],
+            reason = alerts.tag_reason(block["reason"], block.get("category"))   # "permanent@distracting"
+            self.visit_db.add_block_event(key, item["id"], item["display_name"], reason, block["until"],
                                           now=self.clock.now())
 
     # ---------- counting app time when the tray app doesn't ----------
