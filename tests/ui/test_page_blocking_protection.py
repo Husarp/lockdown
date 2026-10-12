@@ -644,6 +644,43 @@ def test_allowed_anyway_chips_entry_and_errors(harness, shell, page):
     assert page.is_visible('[data-k="none"]')
 
 
+def test_allowed_site_blocked_words_switch(harness, shell, page):
+    set_cfg(harness, allowed=["old.example", "dict.example"], allowed_words=["dict.example"])
+    open_tab(shell, page)
+    lock(harness)
+    box = lambda host: page.locator(".pl-chip", has_text=host).locator('[data-act="allow-words"]')
+    assert box("old.example").is_checked() is False and box("dict.example").is_checked() is True     # existing: as saved (off)
+    assert page.locator('[data-k="a-words"]').is_checked()                                          # a new entry starts on
+    box("dict.example").uncheck()                                                                   # off: free
+    settle(page)
+    assert cfg(harness)["allowed_words"] == [] and page.locator("dialog[open]").count() == 0
+    box("old.example").check()                                                                      # on: loosens, asks
+    asks(page)
+    assert "Stop checking blocked words on old.example" in challenge_lines(page)
+    cancel_challenge(page)
+    settle(page)
+    assert cfg(harness)["allowed_words"] == [] and box("old.example").is_checked() is False         # snaps back
+    box("old.example").check()
+    type_challenge(page)
+    wait_for(page, "document.querySelectorAll('.pl-chip [data-act=\"allow-words\"]:checked').length === 1")
+    assert cfg(harness)["allowed_words"] == ["old.example"]
+
+
+def test_allowing_a_new_site_with_or_without_the_words_switch(harness, shell, page):
+    open_tab(shell, page)
+    unlock = lambda: ab.save(harness.db, {**ab.settings(harness.db), "phrase": False})
+    unlock()
+    page.fill('[data-k="a-host"]', "dictionary.example")
+    page.press('[data-k="a-host"]', "Enter")
+    wait_for(page, "document.querySelectorAll('.pl-chip').length === 1")
+    assert cfg(harness)["allowed_words"] == ["dictionary.example"]
+    page.locator('[data-k="a-words"]').uncheck()
+    page.fill('[data-k="a-host"]', "plain.example")
+    page.press('[data-k="a-host"]', "Enter")
+    wait_for(page, "document.querySelectorAll('.pl-chip').length === 2")
+    assert cfg(harness)["allowed"] == ["dictionary.example", "plain.example"] and cfg(harness)["allowed_words"] == ["dictionary.example"]
+
+
 # ---------------------------------------------------------------- live
 
 def test_a_download_progress_push_updates_one_row_only(harness, shell, page, push):

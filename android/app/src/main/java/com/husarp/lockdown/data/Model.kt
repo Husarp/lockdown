@@ -100,7 +100,12 @@ data class EmergencyCfg(
 data class ProtectionCfg(
     val enabled: List<String> = emptyList(),           // keys of the lists that are on
     val allowed: List<String> = emptyList(),           // domains excused (false positives)
-)
+    val allowedWords: List<String> = emptyList(),      // of those, the ones blocked words don't apply to ("Blocked words don't apply here"); none in older files
+) {
+    /** The allowed sites (lower case) whose address and title the blocked words skip - like a keyword exception. A name left
+     *  here after its site left [allowed] counts for nothing. */
+    fun wordsSkip(): Set<String> = allowedWords.map { it.lowercase() }.toSet() intersect allowed.map { it.lowercase() }.toSet()
+}
 
 @Serializable
 data class Guardrails(

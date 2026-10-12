@@ -36,7 +36,8 @@ LISTS = {
 }
 LIST_DIR = DATA_DIR / "protection"
 SETTINGS_KEY = "protection"   # JSON {"enabled": [keys], "allowed": [domains], "info": {key: {count, updated}},
-#                                     "update_now": timestamp, "custom": [{key, name, url}] (your own lists)}
+#                                     "update_now": timestamp, "custom": [{key, name, url}] (your own lists),
+#                                     "allowed_words": [the allowed domains that blocked words don't apply to]}
 PROGRESS_KEY = "protection.progress"   # JSON {key, part, parts, done, total} while the service downloads, else ""
 UPDATE_EVERY = timedelta(days=1)   # default for "update automatically"
 UPDATE_CHOICES = {"every 6 hours": 6, "every 12 hours": 12, "daily": 24, "weekly": 168}   # label -> hours
@@ -54,6 +55,8 @@ def settings(db) -> dict:
         cfg = {}
     cfg.setdefault("enabled", [k for k, v in LISTS.items() if v[3]])
     cfg.setdefault("allowed", [])
+    cfg["allowed_words"] = (sorted({h for h in cfg["allowed_words"] if isinstance(h, str)})   # (a backup / old file: any shape)
+                            if isinstance(cfg.get("allowed_words"), list) else [])
     cfg.setdefault("info", {})
     cfg.setdefault("custom", [])
     cfg.setdefault("manual", [])                                   # your own hand-made lists (sites you type)
@@ -68,6 +71,28 @@ def _lists_of(text: str | None) -> dict:
     except ValueError:
         cfg = {}
     return all_lists(cfg if isinstance(cfg, dict) else {})
+
+
+def words_skip(cfg: dict) -> frozenset[str]:
+    """The sites you allowed anyway AND chose "Blocked words don't apply here" for (a site left in allowed_words after
+    it was taken off allowed counts for nothing). Older settings have none: today's behaviour."""
+    words = cfg.get("allowed_words")
+    if not isinstance(words, list) or not isinstance(cfg.get("allowed"), list):
+        return frozenset()
+    return frozenset(words) & frozenset(cfg["allowed"])
+
+
+def _skip_of(text: str | None) -> frozenset[str]:
+    try:
+        cfg = json.loads(text or "{}")
+    except ValueError:
+        return frozenset()
+    return words_skip(cfg) if isinstance(cfg, dict) else frozenset()
+
+
+def words_skip_sites(db) -> frozenset[str]:
+    """words_skip for read-only use in the word check (twice a second): parsed once per saved text."""
+    return db.parsed(SETTINGS_KEY, _skip_of, "")
 
 
 def list_names(db) -> dict:

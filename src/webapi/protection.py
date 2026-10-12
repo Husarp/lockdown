@@ -5,8 +5,8 @@ These settings are saved straight away (they do not use the Blocking draft): the
 JSON "protection") and the words setting (keywords.py, JSON "words"). The page is untrusted. Everything that makes the
 protection weaker is decided HERE, with the checks the old window used, never in JS:
 
-- protection: a list switched off or removed while on, a site allowed anyway, a hand-made list that is on losing sites
-  -> `antibypass.protection_looser(old, new)`;
+- protection: a list switched off or removed while on, a site allowed anyway, "Blocked words don't apply here" turned on
+  for an allowed site, a hand-made list that is on losing sites -> `antibypass.protection_looser(old, new)`;
 - words: SafeSearch / YouTube / the check / a ready list / "your words" off, ready-list words turned off, your words
   removed, exceptions added, exceptions switched back ON -> `keywords.looser(old, new)`.
 A change that loosens waits under a challenge ticket (`ctx.guard.request`): the page gets the ticket, the change is a
@@ -192,7 +192,8 @@ def _digest(cfg: dict) -> str:
     """The canonical protection state for the grace: which lists are on, what is allowed, your URL lists and EVERY site of
     your own lists. Two states with the same digest are the same protection."""
     state = [sorted(cfg["enabled"]), sorted(cfg["allowed"]), sorted(cfg["custom"], key=lambda c: c["key"]),
-             sorted((m["key"], sorted(e["host"] for e in m["entries"])) for m in cfg["manual"])]
+             sorted((m["key"], sorted(e["host"] for e in m["entries"])) for m in cfg["manual"]),
+             sorted(protection.words_skip(cfg))]
     return hashlib.sha1(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
 
@@ -266,7 +267,8 @@ def _state(info: dict, enabled: bool, progress: dict | None, key: str) -> tuple[
 @core.read
 def protection_get(ctx):
     """{now, rev, auto, every_hours, intervals, lists: [{key, name, desc, custom, enabled, state, count, updated,
-    text, pct}], manual: [{key, name, count, enabled}], allowed, words}. `words` is words_get, so the page needs one call.
+    text, pct}], manual: [{key, name, count, enabled}], allowed, allowed_words, words}. `allowed_words` are the allowed sites
+    that blocked words don't apply to. `words` is words_get, so the page needs one call.
     `state`: downloading | updated | update_failed | failed | waiting | off (the old window's table); `updated` is when the
     list was last downloaded (the page counts "ago")."""
     db = ctx.db
@@ -288,7 +290,8 @@ def protection_get(ctx):
     return {"now": ctx.now().isoformat(timespec="seconds"), "rev": rev, "auto": bool(cfg["auto"]),
             "every_hours": cfg["every_hours"], "intervals": [[hours, label] for label, hours in
                                                               protection.UPDATE_CHOICES.items()],
-            "lists": lists, "manual": manual, "allowed": sorted(cfg["allowed"]), "words": words_get(ctx)}
+            "lists": lists, "manual": manual, "allowed": sorted(cfg["allowed"]),
+            "allowed_words": sorted(protection.words_skip(cfg)), "words": words_get(ctx)}
 
 
 @core.read
@@ -622,18 +625,23 @@ def manual_save_entries(ctx, key, entries):
 # ---------------------------------------------------------------- allowed anyway
 
 @core.loosen
-def protection_allow(ctx, host, whole_site=False):
+def protection_allow(ctx, host, whole_site=False, skip_words=True):
     """Allow a site (and its subdomains) although a list blocks it. Needs the challenge when it is locked.
     `whole_site` true (the page picked it from the suggestions): a site of the bundled list is allowed with ALL its host
-    names (youtube.com and googlevideo.com ...), in this one change - one challenge, not one per name."""
+    names (youtube.com and googlevideo.com ...), in this one change - one challenge, not one per name.
+    `skip_words` (on unless the page says false): the NEW entries also skip the blocked words - the same one change and
+    challenge. A site that was already allowed keeps its own choice (protection_allow_words changes it)."""
     host = _host(host)
     names = [host]
     if whole_site is True:
         known = site_list.lookup(host)
         if known:
             names = list(known[1])
+    skip = skip_words is not False
     summary = (f"Allow {host} (and its subdomains) although a protection list blocks it" if len(names) == 1
                else f"Allow {known[0]} ({len(names)} addresses, and their subdomains) although a protection list blocks it")
+    if skip:
+        summary += ", and blocked words don't apply to it"
 
     def edit(cfg):
         new = [n for n in names if n not in cfg["allowed"]]
@@ -642,17 +650,36 @@ def protection_allow(ctx, host, whole_site=False):
         if len(cfg["allowed"]) + len(new) > MAX_ALLOWED:
             raise ApiError("The allowed list is full.")
         cfg["allowed"] = cfg["allowed"] + new
+        if skip:
+            cfg["allowed_words"] = sorted({*cfg["allowed_words"], *new})
         return {"host": host}
     return _apply(ctx, edit, summary)
 
 
+@core.loosen
+def protection_allow_words(ctx, host, on):
+    """"Blocked words don't apply here" for a site on "Allowed anyway": on = the blocked words are not checked on that site
+    and its subdomains (needs the challenge when it is locked), off = they are (free)."""
+    host, on = _host(host), _flag(on)
+
+    def edit(cfg):
+        if host not in cfg["allowed"]:
+            raise ApiError("That site isn't on the allowed list any more.")
+        rest = [h for h in cfg["allowed_words"] if h != host]
+        cfg["allowed_words"] = sorted([*rest, host] if on else rest)
+        return {"host": host, "on": on}
+    return _apply(ctx, edit, f"Stop checking blocked words on {host}")
+
+
 @core.tighten
 def protection_unallow(ctx, host):
-    """Take a site off "Allowed anyway" (it is blocked by the lists again): stricter, so free."""
+    """Take a site off "Allowed anyway" (it is blocked by the lists again, and its blocked words are checked again):
+    stricter, so free."""
     host = _host(host)
 
     def edit(cfg):
         cfg["allowed"] = [a for a in cfg["allowed"] if a != host]
+        cfg["allowed_words"] = [a for a in cfg["allowed_words"] if a != host]
         return {"host": host}
     return _apply(ctx, edit, f"Stop allowing {host}")
 

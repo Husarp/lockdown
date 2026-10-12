@@ -54,6 +54,9 @@ export function checkText(r) {
   return { text: `${r.host} isn't on any list.`, tone: "ok", act: null };
 }
 
+/** Do blocked words skip this allowed site? `list` is Python's allowed_words (older data has none: no). */
+export const skipsWords = (list, host) => Array.isArray(list) && list.includes(host);
+
 /** "3 sites" / "1 site" / "0 sites". */
 export const siteCount = (n) => `${countFormat(n)} site${n === 1 ? "" : "s"}`;
 
@@ -98,7 +101,7 @@ const HELP = {
   youtube: ["YouTube Restricted Mode", "Hides mature videos on YouTube. Note: Restricted Mode also hides all comments, so turn this off if you want to read comments - SafeSearch above stays on either way."],
   words: ["Blocked words", "The address and title of the tab in front are checked twice a second. Whole words only (\"analysis\" is fine); a word ending in * also matches longer ones (porn* -> pornhub); small typos in searches don't matter here - the words must be spelled right."],
   action: ["When a page has one", "A tab with nothing to go back to is closed."],
-  allowed: ["Allowed anyway", "Sites a list blocks by mistake (their subdomains too). They open again within a minute."],
+  allowed: ["Allowed anyway", "Sites a list blocks by mistake (their subdomains too). They open again within a minute. \"Blocked words don't apply here\" also skips the Blocked words check on that site - handy for, say, a dictionary. Turning it on needs the Anti-Bypass challenge; off is free."],
 };
 const helpBtn = (id) => `<button class="icon-btn icon-btn-sm" type="button" data-help="${id}" aria-label="Help: ${esc(HELP[id][0])}" title="Help">${ic("info")}</button>`;
 
@@ -138,11 +141,12 @@ const STYLE = `<style>
 .pl-wrow .info { color: var(--text-2); font-size: var(--fs-sm); }
 .pl-card-b { padding: 0 0 var(--sp-3); }
 .pl-pad { padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
-.pl-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.pl-chip { padding-left: var(--sp-2); }
+.pl-chips { display: grid; gap: var(--sp-1); }
+.pl-chip { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; }
 .pl-chip .aic { background: transparent; }
-.pl-chip .ellip { max-width: calc(220px * var(--s)); }
+.pl-chip .ellip { font-weight: var(--fw-semibold); }
 .pl-chip .x { color: var(--text-2); }
+.pl-chip .pl-wordsopt, .pl-newopt { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); }
 .pl-cap { padding: var(--sp-2) var(--sp-4) 0; }
 </style>`;
 
@@ -221,6 +225,7 @@ function allowedCard() {
     <div class="pl-pad"><div class="pl-chips" data-k="chips"></div><p class="muted small" data-k="none">None.</p>
       <div class="pl-line"><input class="input" data-k="a-host" data-enter="allow" placeholder="site to allow" aria-label="Site to allow" autocomplete="off" spellcheck="false">
         <button class="btn btn-primary" type="button" data-act="allow">Allow</button></div>
+      <label class="pl-newopt">${sw(true, 'data-k="a-words" aria-label="Blocked words don\'t apply to the site you allow"')}Blocked words don't apply here</label>
       <p class="pl-msg pl-bad" data-k="a-err" role="alert" hidden></p></div></section>`;
 }
 
@@ -284,11 +289,19 @@ function updateMineRow(node, m) {
 }
 
 function createChip(host) {
-  const node = el(`<span class="pill pl-chip"><span class="aic aic-sm">${iconImg("site", host)}</span><span class="ellip"></span>
-    <button class="icon-btn icon-btn-sm x" type="button" data-act="unallow">${ic("x")}</button></span>`);
+  const node = el(`<div class="pl-chip"><span class="aic aic-sm">${iconImg("site", host)}</span><span class="ellip"></span>
+    <label class="pl-wordsopt">${sw(false, 'data-act="allow-words"')}Blocked words don't apply here</label>
+    <button class="icon-btn icon-btn-sm x" type="button" data-act="unallow">${ic("x")}</button></div>`);
   node.querySelector(".ellip").textContent = host;
-  node.querySelector("button").setAttribute("aria-label", `Stop allowing ${host}`);
+  node.querySelector('[data-act="unallow"]').setAttribute("aria-label", `Stop allowing ${host}`);
+  node.querySelector('[data-act="allow-words"]').setAttribute("aria-label", `Blocked words don't apply on ${host}`);
   return node;
+}
+
+/** Show whether blocked words are skipped on this allowed site (written only when it differs). */
+function updateChip(node, host) {
+  const on = skipsWords(data.allowed_words, host), box = node.querySelector('[data-act="allow-words"]');
+  if (box.checked !== on) box.checked = on;
 }
 
 function paintWords() {
@@ -319,7 +332,7 @@ function render() {
   reconcile(els.mineRows, d.manual, (m) => m.key, createMineRow, updateMineRow);
   if (els.mineEmpty.hidden !== d.manual.length > 0) els.mineEmpty.hidden = d.manual.length > 0;
   const hosts = d.allowed;
-  reconcile(els.chips, hosts, (h) => h, createChip, () => {});
+  reconcile(els.chips, hosts, (h) => h, createChip, updateChip);
   if (els.none.hidden !== hosts.length > 0) els.none.hidden = hosts.length > 0;
   paintWords();
 }
@@ -428,7 +441,7 @@ function allow() {
   const text = els.aHost.value;
   if (!text.trim()) return;
   const whole = pickedSite !== "" && pickedSite === text.trim().toLowerCase();
-  run(() => ld.call("protection_allow", text, whole), { err: els.aErr, done: () => { els.aHost.value = ""; pickedSite = ""; } });
+  run(() => ld.call("protection_allow", text, whole, els.aWords.checked), { err: els.aErr, done: () => { els.aHost.value = ""; pickedSite = ""; } });
 }
 
 /** The suggestions of sites under "site to allow" (js/suggest.js), loaded when the box is first used. */
@@ -482,6 +495,7 @@ function onChange(e) {
   const t = e.target, act = t.dataset && t.dataset.act;
   if (!act) return;
   if (act === "list-on") run(() => ld.call("protection_set_list_enabled", t.closest(".pl-row")._key, t.checked));
+  else if (act === "allow-words") run(() => ld.call("protection_allow_words", t.closest(".pl-chip")._key, t.checked));
   else if (act === "mine-on") run(() => ld.call("manual_set_enabled", t.closest(".pl-mine")._key, t.checked));
   else if (act === "auto" || act === "every") run(() => ld.call("protection_set_updates", els.auto.checked, +els.every.value));
   else if (act === "word-flag") run(() => ld.call("words_update", { [t.dataset.k]: t.checked }));
@@ -523,7 +537,7 @@ export function mount(host, t) {
   Object.assign(els, {
     rows: q("rows"), mineRows: q("mine-rows"), mineEmpty: q("mine-empty"), chips: q("chips"), none: q("none"), auto: q("auto"), every: q("every"),
     cName: q("c-name"), cUrl: q("c-url"), cGo: q("c-go"), cMsg: q("c-msg"), mName: q("m-name"), mErr: q("m-err"),
-    kHost: q("k-host"), kAct: q("k-act"), kMsg: q("k-msg"), aHost: q("a-host"), aErr: q("a-err"),
+    kHost: q("k-host"), kAct: q("k-act"), kMsg: q("k-msg"), aHost: q("a-host"), aErr: q("a-err"), aWords: q("a-words"),
   });
   host.addEventListener("click", onClick);
   host.addEventListener("change", onChange);

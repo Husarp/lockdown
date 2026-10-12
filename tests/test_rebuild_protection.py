@@ -334,8 +334,9 @@ def test_allowing_is_not_covered_by_a_grace_it_never_noted(env):
 def test_unallow_then_allow_again_within_ten_seconds_is_free(env):
     set_cfg(env, allowed=["x.example.com"])
     data(env, "protection_unallow", "x.example.com")
-    assert not asks(call(env, "protection_allow", "x.example.com"))
-    assert cfg(env)["allowed"] == ["x.example.com"]
+    assert asks(call(env, "protection_allow", "x.example.com"))                  # (with blocked words skipped: looser than before)
+    assert not asks(call(env, "protection_allow", "x.example.com", False, False))     # (exactly as it was)
+    assert cfg(env)["allowed"] == ["x.example.com"] and cfg(env)["allowed_words"] == []
 
 
 def test_the_words_grace_is_exact_too(env):

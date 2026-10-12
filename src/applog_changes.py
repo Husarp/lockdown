@@ -224,6 +224,9 @@ def _protection(old, new):
     added, removed = _split(a.get("allowed", []), b.get("allowed", []))
     out += [("change", f"Protection: site allowed anyway: {h}") for h in added]
     out += [("change", f"Protection: site no longer allowed anyway: {h}") for h in removed]
+    added, removed = _split(*(x if isinstance(x, list) else [] for x in (a.get("allowed_words"), b.get("allowed_words"))))
+    out += [("change", f"Protection: blocked words don't apply on allowed site {h}") for h in added]
+    out += [("change", f"Protection: blocked words apply again on allowed site {h}") for h in removed]
     ca = {c.get("key"): c for c in a.get("custom") or [] if isinstance(c, dict)}
     cb = {c.get("key"): c for c in b.get("custom") or [] if isinstance(c, dict)}
     out += [("change", f"Protection: connected your own list \"{c.get('name')}\"") for k, c in cb.items() if k not in ca]

@@ -5,6 +5,7 @@
   ("analysis" doesn't match "anal"); a word ending in "*" also matches longer words ("porn*" -> "pornhub");
   several words = that phrase. Accents are ignored ("ruchać" = "ruchac").
   Exceptions: a site (has a dot: that site and its subdomains aren't checked) or a word (never counts).
+  A site you allowed anyway (Blocking > Site protection) with "Blocked words don't apply here" is skipped the same way.
 - SafeSearch: the DNS filter sends Google / Bing / DuckDuckGo to their "safe" addresses; browser policies force it
   as well. YouTube Restricted Mode is a separate switch (it also hides all comments, so it's on its own).
 Standard library only (used by the service too)."""
@@ -127,12 +128,14 @@ def _host(address: str) -> str:
     return urlsplit(address if "://" in address else "http://" + address).hostname or ""
 
 
-def find(address: str | None, title: str | None, cfg: dict) -> str | None:
-    """The first blocked word in the tab's address / title, else None."""
+def find(address: str | None, title: str | None, cfg: dict, skip_sites=()) -> str | None:
+    """The first blocked word in the tab's address / title, else None. `skip_sites`: sites (and their subdomains) that
+    aren't checked besides the exceptions - the allowed sites that skip blocked words (protection.words_skip_sites)."""
     address = address if address and looks_like_address(address) else ""
     host = _host(address) if address else ""
     exceptions = [normalize(e) for e in cfg["exceptions"]] if cfg.get("exceptions_on", True) else []
-    if host and any(host == e or host.endswith("." + e) for e in exceptions if "." in e):
+    skipped = [*(e for e in exceptions if "." in e), *(normalize(s) for s in skip_sites)]
+    if host and any(host == e or host.endswith("." + e) for e in skipped):
         return None
     ignored = {e for e in exceptions if "." not in e}
     from_address, from_title = _words(unquote_plus(address)), _words(title or "")

@@ -59,7 +59,7 @@ category_add category_add_and_assign
 category_assign category_remove draft_remove_group draft_remove_item draft_save draft_set_autosave draft_set_disabled
 draft_set_group draft_set_group_disabled draft_submit_item emergency_settings_save emergency_unlock lockdown_switch_off
 manual_remove manual_save_entries manual_set_enabled mode_delete mode_save mode_start mode_stop overlay_answer
-overlay_disable overlay_emergency pause_start protection_allow protection_remove_custom protection_set_list_enabled
+overlay_disable overlay_emergency pause_start protection_allow protection_allow_words protection_remove_custom protection_set_list_enabled
 reminder_delete reminder_save_break reminder_save_custom reminder_save_sleep reminder_set_on reset_change_apply
 words_update"""
 UI = """applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
@@ -70,7 +70,7 @@ page_ready protection_preview protection_set_updates protection_update_now revea
 set_accent set_appearance set_goal set_icons_download set_scale suggest_clear_history ui_ready ui_setting update_check
 update_download update_install update_opened update_set_prefs window_seen"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
-COUNTS = {"read": 47, "tighten": 9, "loosen": 42, "ui": 45}            # 143 in all (R28; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log)
+COUNTS = {"read": 47, "tighten": 9, "loosen": 43, "ui": 45}            # 144 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log)
 # Loosen methods that are NOT a challenge: the emergency unlock's quota is their limit (BLUEPRINT 4: "not a challenge").
 QUOTA = ("emergency_unlock", "overlay_emergency")
 
@@ -79,7 +79,7 @@ def test_every_api_method_is_classified_here_and_the_count_is_known():
     table = {name: kind for kind, names in CLASSES.items() for name in names}
     assert sum(len(n) for n in CLASSES.values()) == len(table)              # (no name twice)
     assert dict(webapi.api_methods()) == table
-    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 143
+    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 144
 
 
 def test_every_public_function_of_a_webapi_module_is_an_api_method_or_marked_internal():
@@ -328,6 +328,12 @@ class Case:
         self.args, self.applied, self.setup, self.ignore = args, applied, setup, ignore
 
 
+def _allow_example(env):
+    cfg = protection.settings(env.db)
+    cfg["allowed"] = ["example.com"]
+    protection.save_settings(env.db, cfg)
+
+
 CASES = {
     "antibypass_save": Case(lambda e: [{"length": 30}], lambda e, r: ab.settings(_fresh(e))["length"] == 30),
     "antibypass_try": Case(lambda e: [], lambda e, r: "banner" in r),                 # (a dry run: see its own test)
@@ -381,6 +387,8 @@ CASES = {
     "overlay_disable": Case(lambda e: [], lambda e, r: r == {"choose": True}),
     "pause_start": Case(lambda e: [60, False], lambda e, r: pause.state(_fresh(e), NOW) is not None),
     "protection_allow": Case(lambda e: ["example.com"], lambda e, r: "example.com" in _prot(e)["allowed"]),
+    "protection_allow_words": Case(lambda e: ["example.com", True], lambda e, r: "example.com" in _prot(e)["allowed_words"],
+                                   _allow_example),
     "protection_remove_custom": Case(lambda e: ["custom1"], lambda e, r: not _prot(e)["custom"]),
     "protection_set_list_enabled": Case(lambda e: ["scam", False], lambda e, r: "scam" not in _prot(e)["enabled"]),
     "reminder_delete": Case(lambda e: ["r1"], lambda e, r: _rem(e, reminders.CUSTOM_KEY, []) == []),

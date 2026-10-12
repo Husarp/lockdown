@@ -44,6 +44,13 @@ test("checkText says what the old window said", () => {
   assert.deepEqual(pl.checkText({ host: "x.com", allowed_by: null, lists: [] }), { text: "x.com isn't on any list.", tone: "ok", act: null });
 });
 
+test("skipsWords: only a listed allowed site skips the blocked words; older data has none", () => {
+  assert.equal(pl.skipsWords(["a.com"], "a.com"), true);
+  assert.equal(pl.skipsWords(["a.com"], "b.com"), false);
+  assert.equal(pl.skipsWords(undefined, "a.com"), false);
+  assert.equal(pl.skipsWords("a.com", "a.com"), false);
+});
+
 test("counts and info lines", () => {
   assert.equal(pl.siteCount(0), "0 sites");
   assert.equal(pl.siteCount(1), "1 site");

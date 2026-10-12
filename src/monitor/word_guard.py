@@ -10,7 +10,7 @@ import threading
 import time
 
 import keywords
-from blocker import site_block
+from blocker import protection, site_block
 from blocker.hosts import normalize_host
 from db import Database
 from monitor import usage
@@ -146,17 +146,18 @@ class WordGuard(threading.Thread):
             while not self.stop_event.wait(TICK_SEC):
                 try:
                     now = time.monotonic()
-                    self.tick(keywords.settings_shared(db), sense_tab, act, now, blocked.get(db, now))   # (read-only)
+                    self.tick(keywords.settings_shared(db), sense_tab, act, now, blocked.get(db, now),
+                              protection.words_skip_sites(db))   # (read-only)
                 except Exception:
                     log.exception("Word check failed")
 
-    def tick(self, cfg: dict, sense, do, now: float, sites: dict | None = None):
-        """sites: {hostname: "close" / "back"} from blocked_sites().
+    def tick(self, cfg: dict, sense, do, now: float, sites: dict | None = None, skip_sites=()):
+        """sites: {hostname: "close" / "back"} from blocked_sites(). skip_sites: allowed sites that skip blocked words.
         sense() -> (window, address, title[, address bar hidden]) - sense_tab()."""
         tab = sense() if (cfg["enabled"] or sites) else None
         if tab:
             usage.note_shown(tab[1])   # (a blocked-visit notice needs it: sent back before the tracker saw it)
-        word = tab and cfg["enabled"] and keywords.find(tab[1], tab[2], cfg)
+        word = tab and cfg["enabled"] and keywords.find(tab[1], tab[2], cfg, skip_sites)
         action = cfg["action"] if word else (site_action(tab[1], sites or {}) if tab else None)
         if not action:
             self.last = None

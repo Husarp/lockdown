@@ -345,9 +345,16 @@ def emergency_looser(old: dict, new: dict) -> bool:
     return False
 
 
+def _words_skipped(cfg: dict) -> set:
+    return set(cfg.get("allowed_words") or []) & set(cfg["allowed"])
+
+
 def protection_looser(old: dict, new: dict) -> bool:
-    """Protection lists: a list switched off, a site allowed anyway, or a hand-made list that's on losing sites."""
+    """Protection lists: a list switched off, a site allowed anyway, "Blocked words don't apply here" turned on for an
+    allowed site, or a hand-made list that's on losing sites."""
     if not set(old["enabled"]) <= set(new["enabled"]) or not set(new["allowed"]) <= set(old["allowed"]):
+        return True
+    if not _words_skipped(new) <= _words_skipped(old):    # (an older settings shape has none: today's behaviour)
         return True
     old_manual = {m["key"]: {e["host"] for e in m["entries"]} for m in old.get("manual", [])}
     new_manual = {m["key"]: {e["host"] for e in m.get("entries", [])} for m in new.get("manual", [])}

@@ -219,12 +219,13 @@ fun ProtectionEditor(onClose: () -> Unit) {
     val d = rememberDraft(cfg.protection)
     val p = d.value
     fun set(f: (ProtectionCfg) -> ProtectionCfg) = d.update { old ->
-        f(old).let { it.copy(enabled = inSavedOrder(d.saved.enabled, it.enabled), allowed = inSavedOrder(d.saved.allowed, it.allowed)) }
+        f(old).let { it.copy(enabled = inSavedOrder(d.saved.enabled, it.enabled), allowed = inSavedOrder(d.saved.allowed, it.allowed),
+            allowedWords = inSavedOrder(d.saved.allowedWords, it.allowedWords.filter { w -> w in it.allowed })) }
     }
     fun save(then: () -> Unit) {
         val new = d.value
         val old = Store.config.protection
-        guard(AntiBypass.protectionLooser(old.enabled, old.allowed, new.enabled, new.allowed)) {
+        guard(AntiBypass.protectionLooser(old.enabled, old.allowed, old.allowedWords, new.enabled, new.allowed, new.allowedWords)) {
             Store.update { c -> c.copy(protection = new) }
             if (new.enabled != old.enabled) Protection.load(ctx)
             d.clear()
@@ -249,8 +250,11 @@ fun ProtectionEditor(onClose: () -> Unit) {
             }
             SectionLabel("Allowed exceptions")
             ExceptionList(p.allowed, clean = { it.filterNot(Char::isWhitespace) },
-                onAdd = { host -> set { it.copy(allowed = (it.allowed + host).distinct()) } },
-                onRemove = { host -> set { it.copy(allowed = it.allowed - host) } })
+                onAdd = { host, skip -> set { it.copy(allowed = (it.allowed + host).distinct(),
+                    allowedWords = if (skip) (it.allowedWords + host).distinct() else it.allowedWords) } },
+                onRemove = { host -> set { it.copy(allowed = it.allowed - host, allowedWords = it.allowedWords - host) } },
+                wordsSkip = p.wordsSkip(),
+                onWordsSkip = { host, on -> set { it.copy(allowedWords = if (on) (it.allowedWords + host).distinct() else it.allowedWords - host) } })
         }
         SaveBar(d.dirty, onDiscard = d::clear) { save {} }
     }
@@ -322,7 +326,7 @@ fun KeywordsEditor(onClose: () -> Unit) {
             )
             SectionLabel("Exceptions (a site or a word that's never blocked)")
             ExceptionList(kw.exceptions, clean = com.husarp.lockdown.engine.Sites::cleanIfSite,
-                onAdd = { w -> setKw { it.copy(exceptions = (it.exceptions + w).distinct()) } },
+                onAdd = { w, _ -> setKw { it.copy(exceptions = (it.exceptions + w).distinct()) } },
                 onRemove = { w -> setKw { it.copy(exceptions = it.exceptions - w) } })
         }
         SaveBar(d.dirty, onDiscard = d::clear) { save {} }
@@ -372,21 +376,36 @@ private fun CollapsibleWordList(
  *  the field; picking one adds all its host names (like typing them - the page's Save asks for the challenge, an
  *  exception loosens). [onAdd] gets one string at a time. */
 @Composable
-private fun ExceptionList(values: List<String>, clean: (String) -> String, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
+private fun ExceptionList(values: List<String>, clean: (String) -> String, onAdd: (String, Boolean) -> Unit, onRemove: (String) -> Unit,
+                          wordsSkip: Set<String>? = null, onWordsSkip: (String, Boolean) -> Unit = { _, _ -> }) {
     val cs = MaterialTheme.colorScheme
     var field by remember { mutableStateOf("") }
+    var newSkip by remember { mutableStateOf(true) }         // a new allowed site starts with "Blocked words don't apply here" on
     var picked by remember { mutableStateOf<com.husarp.lockdown.engine.ListedSite?>(null) }   // the suggestion just picked
     val suggestions = com.husarp.lockdown.ui.rememberSiteSuggestions(if (picked != null) "" else field)
     Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp)) {
         values.forEach { v ->
             ListRow(title = v, trailing = { IconButton(onClick = { onRemove(v) }) { Icon(Icons.Filled.Close, "remove") } })
+            if (wordsSkip != null) {      // (allowed sites only: blocked words can skip it)
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Blocked words don't apply here", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    Switch(checked = v.lowercase() in wordsSkip, onCheckedChange = { onWordsSkip(v, it) })
+                }
+            }
+        }
+        if (wordsSkip != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("New site: blocked words don't apply here", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Switch(checked = newSkip, onCheckedChange = { newSkip = it })
+            }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(field, { field = clean(it); picked = null }, placeholder = { Text("Add…") }, singleLine = true, modifier = Modifier.weight(1f))
             TextButton(onClick = {
                 val site = picked
-                if (site != null && clean(field) == site.main) site.domains.forEach(onAdd)
-                else { val t = clean(field).trim(); if (t.isNotEmpty()) onAdd(t) }
+                val skip = wordsSkip != null && newSkip
+                if (site != null && clean(field) == site.main) site.domains.forEach { onAdd(it, skip) }
+                else { val t = clean(field).trim(); if (t.isNotEmpty()) onAdd(t, skip) }
                 field = ""; picked = null
             }) { Text("Add") }
         }

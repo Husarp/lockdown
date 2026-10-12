@@ -47,6 +47,7 @@ GOAL_HOURS = range(0, 13)           # Off, 1 h ... 12 h
 NEW_KIND = {"uses": 1, "per": "week", "minutes": 20}      # "+ Add another kind" starts here
 IMPORT_TTL_SEC = 600                # a picked backup file is forgotten after 10 minutes
 MAX_BACKUP_BYTES = 32 * 1024 * 1024
+MAX_ALLOWED_WORDS = 2000            # (webapi.protection.MAX_ALLOWED: the allowed list is never longer)
 PAGES = ("dashboard", "blocking", "antibypass", "screentime", "netlog", "modes", "reminders", "notifications",
          "settings", "about")
 FILE_FILTER = "Lockdown backup (*.json)"
@@ -372,6 +373,19 @@ def _break_allow_ok(sets) -> bool:
                              and all(isinstance(e, str) and len(e) <= 260 for e in allow))
 
 
+def _protection_ok(sets) -> bool:
+    """The protection setting, when the backup has one: a JSON object whose "allowed_words" (the allowed sites that skip
+    blocked words), when present, is a list of at most MAX_ALLOWED_WORDS short texts. (A backup from before it existed has
+    none: no allowed site skips the words, as before.)"""
+    try:
+        p = json.loads(sets.get("protection") or "null")
+    except ValueError:
+        return True                                       # (unreadable settings are read as the defaults)
+    words = p.get("allowed_words") if isinstance(p, dict) else None
+    return words is None or (isinstance(words, list) and len(words) <= MAX_ALLOWED_WORDS
+                             and all(isinstance(h, str) and len(h) <= 260 for h in words))
+
+
 def _check_shape(data: dict):
     """A backup that would stop half-way is refused before anything is touched - every field restore() reads, of the
     kind it needs (backup.restore is also one transaction, so a file that still fails changes nothing)."""
@@ -384,7 +398,7 @@ def _check_shape(data: dict):
                   for i in items)
           and all(isinstance(c, dict) and all(isinstance(c.get(k), str) for k in ("kind", "name", "category"))
                   for c in cats))
-    ok = ok and all(_group_ok(g) for g in groups) and _break_allow_ok(sets)
+    ok = ok and all(_group_ok(g) for g in groups) and _break_allow_ok(sets) and _protection_ok(sets)
     if not ok:
         raise ApiError("That backup file is damaged, so it can't be imported.")
 

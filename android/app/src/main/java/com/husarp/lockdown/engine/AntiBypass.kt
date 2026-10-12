@@ -241,6 +241,15 @@ object AntiBypass {
                          newEnabled: List<String>, newAllowed: List<String>): Boolean =
         !newEnabled.toSet().containsAll(oldEnabled) || !oldAllowed.toSet().containsAll(newAllowed)
 
+    /** [protectionLooser], and "Blocked words don't apply here" turned on for an allowed site (a name left in the words
+     *  list after its site left [oldAllowed] / [newAllowed] counts for nothing). Turning it off is free. */
+    fun protectionLooser(oldEnabled: List<String>, oldAllowed: List<String>, oldWords: List<String>,
+                         newEnabled: List<String>, newAllowed: List<String>, newWords: List<String>): Boolean {
+        fun skipped(allowed: List<String>, words: List<String>) = words.map { it.lowercase() }.toSet() intersect allowed.map { it.lowercase() }.toSet()
+        return protectionLooser(oldEnabled, oldAllowed, newEnabled, newAllowed) ||
+            !skipped(oldAllowed, oldWords).containsAll(skipped(newAllowed, newWords))
+    }
+
     /** Blocked words weakened: a switch or a list turned off, a built-in word turned off, one of your words removed,
      *  or an exception added (or exceptions turned on). Adding words, turning things on, removing exceptions is free. */
     fun keywordsLooser(old: KeywordsCfg, new: KeywordsCfg): Boolean =

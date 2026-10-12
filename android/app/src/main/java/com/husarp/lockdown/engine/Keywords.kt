@@ -7,6 +7,7 @@ import java.text.Normalizer
  * Bad-word check, ported from the PC keywords.py. Built-in Adult (English) and Adult (Polish) lists, on by
  * default, plus your own words. Whole-word match; a trailing "*" also matches longer words; a multi-word
  * entry is a phrase; accents are ignored. Exceptions: a site (has a dot → skipped) or a word (never counts).
+ * A site you allowed anyway (Protection lists) with "Blocked words don't apply here" is skipped the same way (`skipSites`).
  */
 @Serializable
 data class KeywordsCfg(
@@ -73,13 +74,15 @@ object Keywords {
     private fun host(address: String): String =
         runCatching { java.net.URI(if ("://" in address) address else "http://$address").host ?: "" }.getOrDefault("")
 
-    /** The first blocked word found in the tab's address / title, or null. */
-    fun find(address: String?, title: String?, cfg: KeywordsCfg): String? {
+    /** The first blocked word found in the tab's address / title, or null. [skipSites]: sites (and their subdomains)
+     *  that aren't checked besides the exceptions - ProtectionCfg.wordsSkip(). */
+    fun find(address: String?, title: String?, cfg: KeywordsCfg, skipSites: Collection<String> = emptyList()): String? {
         if (!cfg.enabled) return null
         val addr = if (address != null && looksLikeAddress(address)) address else ""
         val h = if (addr.isNotEmpty()) host(addr) else ""
         val exceptions = if (cfg.exceptionsOn) cfg.exceptions.map { normalize(it) } else emptyList()
-        if (h.isNotEmpty() && exceptions.any { "." in it && (h == it || h.endsWith(".$it")) }) return null
+        val skipped = exceptions.filter { "." in it } + skipSites.map { normalize(it) }
+        if (h.isNotEmpty() && skipped.any { h == it || h.endsWith(".$it") }) return null
         val ignored = exceptions.filter { "." !in it }.toSet()
         val fromAddress = words(decodePlus(addr))
         val fromTitle = words(title ?: "")
