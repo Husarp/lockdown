@@ -2,6 +2,7 @@
 //   <img data-icon="app:chrome.exe" src="...">  - iconUrl("app", "chrome.exe") gives the src; until the real icon is
 //   in the disk cache the server answers with a letter tile, and pushes `icon_ready {key}` when it has the real one.
 //   wireIconReady(ld.on) swaps the src of every <img data-icon="<key>"> in the page (with a cache-buster).
+//   An icon that fails to load (a 404, a name the server refuses) becomes its letter tile, once - never a broken image.
 
 /** "/icon/app/chrome.exe.png", "/icon/site/example.com.png", "/icon/letter/Spotify.svg" (+ ?v= when given). */
 export function iconUrl(kind, name, version) {
@@ -34,3 +35,26 @@ export function wireIconReady(on, root = document, now = () => Date.now()) {
     }
   });
 }
+
+/** The one-shot error fallback: the <img> that failed shows the letter tile for its data-icon key (nothing if it
+ * already shows one, so this can never loop). Returns true when it swapped. */
+export function iconFallback(img) {
+  const parsed = img && img.dataset && img.dataset.icon ? parseKey(img.dataset.icon) : null;
+  if (!parsed) return false;
+  if (String(img.src).includes("/icon/letter/")) return false;
+  img.src = iconUrl("letter", parsed.name.replace(/[\/\\\x00-\x1f\x7f]/g, "_").slice(0, 64) || "?");
+  return true;
+}
+
+/** One delegated capture-phase `error` listener for the whole page (error events do not bubble), installed once. */
+export function installIconFallback(doc = typeof document === "undefined" ? null : document) {
+  if (!doc || doc.__iconFallback) return false;
+  doc.__iconFallback = true;
+  doc.addEventListener("error", (ev) => {
+    const img = ev.target;
+    if (img && img.tagName === "IMG") iconFallback(img);
+  }, true);
+  return true;
+}
+
+installIconFallback();

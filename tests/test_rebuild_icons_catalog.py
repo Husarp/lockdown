@@ -207,15 +207,90 @@ def test_a_crashing_extractor_leaves_the_letter_and_does_not_stop_the_thread(mad
 @pytest.mark.parametrize("rest", [
     "app/../secret.png", "app/..%2fsecret.exe.png", "app/a/b.exe.png", "app/..\\x.exe.png", "app/c:x.exe.png",
     "app/con:.exe.png", "app/.hidden.png", "app/x..exe.png", "app/.png", "app/x.exe", "app/x.exe.svg", "app/a\x00b.exe.png",
-    "app/<script>.exe.png", "app/a%b.exe.png", "app/" + "a" * 120 + ".exe.png", "app/a;b.exe.png", "app/a|b.exe.png",
+    "app/<script>.exe.png", "app/" + "a" * 120 + ".exe.png", "app/a|b.exe.png", "app/a*b.exe.png", "app/a?b.exe.png",
+    'app/a"b.exe.png', "app/a>b.exe.png", "app/a\x1fb.exe.png", "app/a\x7fb.exe.png", "app/a\u2028b.exe.png", "app/ x.exe.png",
+    "app/x.exe .png", "app/x.exe..png", "app/x:y.exe.png", "app/....png",
     "site/../x.png", "site/a b.com.png", "site/a_b.com.png", "site/.com.png", "site/a..com.png", "site/-a.com.png",
     "site/a.com-.png", "site/" + "a" * 260 + ".com.png", "site/ex%61mple.com.png", "site/a/b.png", "site/a.com.svg",
-    "letter/a/b.svg", "letter/<b>.svg", "letter/a:b.svg", "letter/" + "x" * 65 + ".svg", "letter/.svg", "letter/x.png",
+    "letter/a/b.svg", "letter/a\x00b.svg", "letter/a\nb.svg", "letter/" + "x" * 65 + ".svg", "letter/.svg",
+    "letter/x.png",
     "other/x.png", "x.png", "", "app", "app/",
 ])
 def test_odd_names_are_refused(made, rest):
     assert made.service.handle(rest, {}) is None
     assert made.service.queued == 0
+
+
+@pytest.mark.parametrize("exe", ["osu!.exe", "osu!(lazer)", "OSU!.EXE", "game [x86] #1.exe", "a%b.exe", "a;b,c=d.exe", "caf\u00e9.exe",
+                                 "tom's @home ~ $x^.exe", "a{b}.exe"])
+def test_names_with_punctuation_windows_allows_get_a_letter_tile_then_the_real_icon(made, exe):
+    made.paths[exe.lower()] = "C:\\Apps\\" + exe.lower()
+    s = made.service
+    r = s.handle(f"app/{exe}.png", {})
+    assert r is not None and r.content_type == "image/svg+xml" and s.queued == 1
+    s.run_pending()
+    assert made.ready == [f"app:{exe.lower()}"] and made.extracted == ["C:\\Apps\\" + exe.lower()]
+    assert s.handle(f"app/{exe}.png", {}).content_type == "image/png"
+
+
+def test_clean_exe_refuses_only_what_is_unsafe():
+    assert icons.clean_exe("Osu!.EXE") == "osu!.exe" and icons.clean_exe("osu!(lazer)") == "osu!(lazer)"
+    for bad in ("", "..", "a..b", "a/b", "a\\b", "c:", "x|y", "a*", "a?", 'a"', "a<", "a>", "a\x00", "a\n", "a\x7f", ".x", "x.",
+                " x", "x ", "a" * (icons.MAX_NAME + 1)):
+        assert icons.clean_exe(bad) is None, repr(bad)
+    assert icons.clean_exe("a" * icons.MAX_NAME) == "a" * icons.MAX_NAME
+
+
+def test_odd_names_over_http_are_still_refused_and_osu_is_served(made, tmp_path):
+    (tmp_path / "secret.png").write_bytes(b"SECRET")
+    server = AssetServer()
+    server.add_icon_routes(made.service)
+    server.start()
+    try:
+        for path in ("/icon/app/osu!.exe.png", "/icon/app/osu!(lazer).png", "/icon/app/osu%21%28lazer%29.png",
+                     "/icon/letter/osu!(lazer).svg", "/icon/letter/AT%26T%20%231.svg"):
+            status, r, body = get(server, path)
+            assert status == 200 and r.getheader("Content-Type") == "image/svg+xml" and b"<svg" in body, path
+        for path in ("/icon/app/a%2fb.exe.png", "/icon/app/..%2f..%2fsecret.png", "/icon/app/a%5cb.exe.png",
+                     "/icon/app/a%3ab.exe.png", "/icon/app/x%7cy.exe.png", "/icon/app/a%00b.exe.png", "/icon/app/%2e%2e.png",
+                     "/icon/letter/a%2fb.svg", "/icon/letter/%2e%2e%2fsecret.svg"):
+            status, _r, body = get(server, path)
+            assert status in (400, 403, 404) and b"SECRET" not in body, path
+    finally:
+        server.stop()
+
+
+@pytest.mark.parametrize("exe", ["lockdown.exe", "lockdownservice.exe", "lockdownsetup.exe"])
+def test_lockdowns_own_programs_get_the_assets_icon_without_a_catalog_lookup(tmp_path, exe):
+    asked, extracted, ready = [], [], []
+    s = icons.IconService(tmp_path / "i", on_ready=ready.append, path_of=lambda e: asked.append(e),
+                          extract=lambda p: extracted.append(p), old_dir=tmp_path / "none", start=False)
+    assert s.handle(f"app/{exe}.png", {}).content_type == "image/svg+xml"
+    s.run_pending()
+    assert asked == [] and extracted == [] and ready == [f"app:{exe}"]
+    r = s.handle(f"app/{exe}.png", {})
+    assert r.content_type == "image/png"
+    from io import BytesIO
+    from PIL import Image
+    image = Image.open(BytesIO(r.body))
+    assert image.size == (icons.OWN_ICON_SIZE, icons.OWN_ICON_SIZE) and image.mode == "RGBA"
+    assert Image.open(BytesIO(icons.own_icon())).getextrema()[3][1] > 0          # (not an empty picture)
+
+
+def test_the_own_icon_falls_back_to_the_ico_and_then_to_the_letter(tmp_path, monkeypatch):
+    import paths
+    from PIL import Image
+    Image.new("RGBA", (48, 48), (255, 0, 0, 255)).save(tmp_path / "lockdown.ico")
+    monkeypatch.setattr(paths, "ASSETS", tmp_path)
+    from io import BytesIO
+    assert Image.open(BytesIO(icons.own_icon())).size == (icons.OWN_ICON_SIZE, icons.OWN_ICON_SIZE)
+    (tmp_path / "lockdown.ico").unlink()
+    assert icons.own_icon() is None
+    s = icons.IconService(tmp_path / "i", path_of=lambda e: "C:\\x\\lockdown.exe", extract=lambda p: PNG,
+                          old_dir=tmp_path / "none", start=False)     # no asset: the normal lookup takes over
+    s.handle("app/lockdown.exe.png", {})
+    s.run_pending()
+    assert s.handle("app/lockdown.exe.png", {}).content_type == "image/png"
 
 
 def test_the_route_over_http_cannot_leave_the_cache_folder(made, tmp_path):
@@ -517,6 +592,17 @@ def test_path_for_uses_the_catalog_then_open_windows_then_the_owners_items(tmp_p
     assert c.path_for("Chrome.exe") == "C:\\chrome.exe" and c.path_for("live.exe") == "E:\\live.exe"
     assert c.path_for("oldgame.exe") == "D:\\Games\\oldgame.exe"
     assert c.path_for("nothing.exe") is None
+
+
+def test_a_program_once_seen_open_keeps_its_path_for_the_icon(tmp_path):
+    seen = [{"osu!.exe": "C:\\Users\\a\\AppData\\Local\\osulazer\\current\\osu!.exe"}, {}]
+    c = cat.AppCatalog(tmp_path / "c.json", list_apps=Scanner(APPS), running_now=lambda: seen.pop(0), db_path=tmp_path / "t.db")
+    c.load_now()
+    assert c.path_for("OSU!.exe").endswith("osu!.exe")           # (the first call scans the open windows)
+    c._running_lock.acquire()
+    c._rescan()                                                # (it closed: the windows are empty now)
+    assert c._running == {} and c.path_for("osu!.exe").endswith("osu!.exe")
+    assert c.path_for("never.exe") is None
 
 
 def test_icons_find_programs_through_the_catalog(tmp_path):

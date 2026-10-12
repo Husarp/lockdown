@@ -98,6 +98,7 @@ class AppCatalog:
         self._by_exe: dict[str, str] = {}      # exe -> path
         self._known: set = set()               # every exe in the catalog
         self._running: dict[str, str] = {}     # exe -> path of what is open now
+        self._seen: dict[str, str] = {}        # exe -> path of every program ever seen open (per-user installs such as osu!)
         self._running_at = 0.0
         self._running_lock = threading.Lock()
         self._extras: list[_Entry] = []        # running, but not in the catalog
@@ -194,9 +195,13 @@ class AppCatalog:
     # ------------------------------------------------------------------ questions
     def path_for(self, exe: str) -> str | None:
         """Where a program lives: the catalog's path, an open window's, or the path stored with one of the owner's
-        own app items. Reads the database - call it from a worker thread, never from the GUI thread."""
+        own app items, or where it was last seen open. Reads the database - call it from a worker thread, never from the
+        GUI thread."""
         exe = exe.lower()
-        path = self._by_exe.get(exe) or self._running.get(exe)
+        path = self._by_exe.get(exe) or self._running.get(exe) or self._seen.get(exe)
+        if path:
+            return path
+        path = self.running().get(exe)      # (an app installed per user, open right now: the first call scans the windows)
         if path:
             return path
         try:
@@ -233,6 +238,8 @@ class AppCatalog:
             self._extras = [_Entry({"name": PureWindowsPath(p).stem.replace("_", " ").title(), "exe": e, "path": p,
                                     "steam": False}) for e, p in found.items() if e not in known and not _hidden(e)]
             self._running = found
+            if len(self._seen) < 2000:
+                self._seen.update(found)
             self._running_at = time.monotonic()
         finally:
             self._running_lock.release()

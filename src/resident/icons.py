@@ -8,8 +8,9 @@ once, and ONE background thread then gets the real one (an exe's icon from Windo
 the page with `icon_ready {key}` ("app:chrome.exe" / "site:example.com") so it swaps the <img> src. Nothing here runs
 on the GUI thread; PIL is imported on that background thread only.
 
-The page is untrusted: only plain names are accepted (an exe name or a host name, no folders, no "..", no odd
-characters), and the page never says WHERE an exe is - the path comes from the app catalog or the owner's own list.
+The page is untrusted: only plain names are accepted (an exe name - anything Windows allows in a file name except
+path characters - or a host name; no folders, no "..", no control characters), and the page never says WHERE an exe is
+- the path comes from the app catalog or the owner's own list.
 """
 import hashlib
 import queue
@@ -30,17 +31,20 @@ MAX_FAILED = 2000        # remembered failures (the oldest go first)
 RETRY_SEC = 600          # an icon that could not be got (offline, no such program) is tried again after this long
 MAX_NAME = 100
 HOST_RE = re.compile(r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
-NAME_PUNCT = " ._-+()&'"
+BAD_NAME_CHARS = frozenset('\\/:*?"<>|')   # what Windows refuses in a file name (and what could leave the icon folder)
+OWN_EXES = frozenset({"lockdown.exe", "lockdownservice.exe", "lockdownsetup.exe"})   # get Lockdown's own icon
+OWN_ICON_SIZE = 32      # as the extracted icons
 KINDS = {"app": ".png", "site": ".png", "letter": ".svg"}
 
 
 def clean_exe(name: str) -> str | None:
-    """A program's file name as it is used for the icon (lower case), or None if it isn't a plain name: letters,
-    digits and . _ - + ( ) & ' and spaces; no folders, no "..", no colon, no control characters."""
+    """A program's file name as it is used for the icon (lower case), or None if it isn't a plain name: anything
+    Windows allows in a file name ("osu!.exe", "game (x86).exe"); no folders, no \\ / : * ? " < > |, no "..", no
+    control characters, no leading or trailing dot or space."""
     name = name.lower()
     if not (0 < len(name) <= MAX_NAME) or ".." in name or name[-1] in ". " or name[0] in ". ":
         return None
-    if not all(c.isalnum() or c in NAME_PUNCT for c in name):
+    if not name.isprintable() or any(c in BAD_NAME_CHARS for c in name):
         return None
     return name
 
@@ -101,7 +105,7 @@ class IconService:
             return None
         name = name[:-len(ext)]
         if kind == "letter":
-            if not name or len(name) > 64 or not all(c.isalnum() or c in NAME_PUNCT for c in name):
+            if not name or len(name) > 64 or not name.isprintable():   # (any text: it is XML-escaped; "/" cannot get here)
                 return None
             return Response(letter_svg(name), "image/svg+xml", cache="public, max-age=86400")
         name = clean_exe(name) if kind == "app" else clean_host(name)
@@ -192,6 +196,11 @@ class IconService:
             if old.is_file() and old.stat().st_size:
                 self._save(target, old.read_bytes())
                 return True
+        if kind == "app" and name in OWN_EXES:   # Lockdown's own program: its real icon, no catalog lookup
+            data = own_icon()
+            if data:
+                self._save(target, data)
+                return True
         if kind == "app":
             path = self.path_of(name)
             data = self.extract(path) if path else None
@@ -230,6 +239,22 @@ def fetch_favicon(host: str) -> bytes | None:
         return data
     except Exception:
         return None
+
+
+def own_icon() -> bytes | None:
+    """Lockdown's own icon (assets/lockdown.png, else lockdown.ico) as PNG bytes at the size of the other app icons."""
+    try:
+        from PIL import Image
+        from paths import ASSETS
+    except Exception:
+        return None
+    for file in ("lockdown.png", "lockdown.ico"):
+        try:
+            with Image.open(ASSETS / file) as image:
+                return _png(image.convert("RGBA").resize((OWN_ICON_SIZE, OWN_ICON_SIZE), Image.LANCZOS))
+        except Exception:
+            continue
+    return None
 
 
 def extract_exe_icon(path: str) -> bytes | None:
