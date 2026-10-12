@@ -22,8 +22,10 @@ PROTECTED = {"system", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "
 
 # What happens to a blocked app (blocked_items.block_type): a comma-separated set of flags,
 # e.g. "close,internet". close and minimize exclude each other; background (also close its background
-# processes) only goes with close. None = "close" (the default).
-FLAGS = ("close", "background", "minimize", "internet")
+# processes) only goes with close; grey ("Grey it": the app stays open, the whole screen goes grey while it is in
+# front - the agent does that, resident/grayscale.py) is the lightest way: closing and minimizing cover it, so it
+# goes with neither. None = "close" (the default).
+FLAGS = ("close", "background", "minimize", "grey", "internet")
 _LEGACY = {"kill": {"close"}, "both": {"close", "internet"}, "minimize": {"minimize"},
            "minimize_fw": {"minimize", "internet"}, "firewall": {"internet"}}   # 0.4-0.7 values
 
@@ -48,6 +50,13 @@ def kills_background(block_type: str | None) -> bool:
 
 def minimizes(block_type: str | None) -> bool:
     return "minimize" in block_flags(block_type)
+
+
+def greys(block_type: str | None) -> bool:
+    """"Grey it": the app is not closed or minimized, the screen goes grey while it is in front. (Closing or minimizing
+    cover it: a way that has either of them never greys.)"""
+    flags = block_flags(block_type)
+    return "grey" in flags and not flags & {"close", "minimize"}
 
 
 def firewalls(block_type: str | None) -> bool:
@@ -165,8 +174,11 @@ def interpreter(name: str | None) -> str | None:
 def hosted_way(block_type: str | None) -> str | None:
     """How a program file is blocked: closed or minimised only. Cutting the internet would cut it for javaw.exe /
     python.exe - every Java / Python program - and "its background processes" would be whatever runs from its
-    folder. None when nothing is left (a group that only cuts its members' internet)."""
+    folder. "Grey it" can't follow a file (the window in front is javaw.exe): a group that greys its members closes
+    a program file. None when nothing is left (a group that only cuts its members' internet)."""
     flags = block_flags(block_type) - {"internet", "background"}
+    if "grey" in flags:
+        flags = (flags - {"grey"}) or {"close"}
     return make_block_type(flags) if flags else None
 
 
@@ -486,15 +498,18 @@ def parents_of(path: str | None) -> tuple[str, ...]:
 
 def merge_blocks(old: dict | None, new: dict) -> dict:
     """Two blocks on the same exe (a second item for it, a category blocker, an old item saved as a full path):
-    one block that does everything either asks for, closing winning over minimising. The later one used to replace
-    the earlier - a "minimize" blocker could quietly undo a "close outside these hours" (0.84.1)."""
+    one block that does everything either asks for, closing winning over minimising and minimising over greying.
+    The later one used to replace the earlier - a "minimize" blocker could quietly undo a "close outside these
+    hours" (0.84.1)."""
     if old is None:
         return new
     flags = block_flags(old["item"].get("block_type")) | block_flags(new["item"].get("block_type"))
     if "close" in flags:
-        flags.discard("minimize")
+        flags -= {"minimize", "grey"}
     else:
         flags.discard("background")
+        if "minimize" in flags:
+            flags.discard("grey")
     base, other = (new, old) if kills(new["item"].get("block_type")) and not kills(old["item"].get("block_type")) \
         else (old, new)
     item = {**base["item"], "block_type": make_block_type(flags),

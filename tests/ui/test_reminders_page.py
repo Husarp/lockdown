@@ -150,6 +150,35 @@ def test_turning_an_important_sleep_off_while_locked_asks_for_the_challenge(shel
     assert sleep_saved(harness)["on"] is True
 
 
+def test_grey_screen_during_bedtime_is_a_switch_on_the_sleep_card(shell, page, harness):
+    open_page(shell, page)
+    assert page.locator(".rem :text('Grey screen during bedtime')").count() >= 1
+    assert not page.is_checked('[data-k="s-grey"]') and sleep_saved(harness)["grey"] is False
+    text = page.inner_text('[data-card="sleep"]')
+    assert "Color filters" in text and "separate" in text                         # (Windows' own colour filters)
+    page.click('[data-k="s-grey"]')                                                # on: free
+    wait_for(page, "document.querySelector('[data-k=\"s-grey\"]').checked === true")
+    assert sleep_saved(harness)["grey"] is True and not page.locator("#dlg[open]").count()
+    page.click('[data-k="s-grey"]')                                                # off again: bedtime is not Important, free
+    page.wait_for_timeout(300)
+    assert sleep_saved(harness)["grey"] is False and not page.locator("#dlg[open]").count()
+
+
+def test_turning_the_bedtime_grey_off_while_important_and_locked_asks_for_the_challenge(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "guarded": True, "grey": True})
+    lock(harness)
+    open_page(shell, page)
+    assert page.is_checked('[data-k="s-grey"]')
+    page.click('[data-k="s-grey"]')
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    assert "grey screen at bedtime" in page.inner_text("#dlg").lower()
+    assert sleep_saved(harness)["grey"] is True
+    page.keyboard.press("Escape")
+    page.wait_for_function("!document.querySelector('#dlg').open")
+    wait_for(page, "document.querySelector('[data-k=\"s-grey\"]').checked === true")      # the switch snapped back
+    assert sleep_saved(harness)["grey"] is True
+
+
 # ---------------------------------------------------------------- Breaks
 
 def test_break_seconds_boxes_and_options_are_saved(shell, page, harness):

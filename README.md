@@ -55,7 +55,9 @@ Windows app that blocks websites and apps, tracks all network activity, and make
   At most one interruption every 20 minutes (what falls due in between arrives together), a reminder you keep
   dismissing asks half as often for the rest of the day, and reminders due around a break ride along in it.
   A strict break minimises your windows; apps on your "Allowed during breaks" list (Lockdown + Settings by
-  default) stay usable.
+  default) stay usable. **Grey screen during bedtime** (Sleep card, off by default): the whole screen goes grey from
+  bedtime until wake-up time - not while an emergency unlock or a silent pause holds the alerts - and the colour
+  comes back after; turning it off while bedtime is Important goes through Anti-Bypass.
 - **The window:** a web page in a native window (Edge WebView2; the installer adds the runtime where Windows lacks
   it). If it can't start on a PC (no WebView2, its page never loads), Lockdown writes the reason to its log and
   `%TEMP%\lockdown-newui.log`, shows a message and tries once more; the tray agent keeps running either way. The old
@@ -109,7 +111,10 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
 - Apps are matched by exe name. The service checks running processes 4x per second: an app started while blocked
   is killed at once; one that was already open when its block began is asked to close (like clicking X) and
   force-closed after 10 s. "Minimize" keeps the app running but the tray agent minimizes it whenever it comes to the
-  front; "Block internet" adds a Windows Firewall rule. "Also close its background processes" (with Close app)
+  front; "Grey it" keeps it open too, but the whole screen goes grey while it is in front and the colour comes back
+  when you leave it (the tray agent does it with Windows' Magnification API, no admin needed; Windows' own Color
+  filters are a separate setting, never touched - Lockdown only undoes the grey it applied); "Block internet" adds a
+  Windows Firewall rule. "Also close its background processes" (with Close app)
   closes, once the app is gone, what it started and whatever runs from its install folder. Windows' own processes
   can't be blocked.
 - Groups (Blocking > Groups) hold shared rules; members inherit them, and a group daily limit is one total for
@@ -121,7 +126,7 @@ See [PLAN.md](PLAN.md) for the full plan and later phases.
   opens (because it is blocked) doesn't use up the group's openings. Extra limits only tighten - adding or
   tightening one is free, removing or relaxing one goes through Anti-Bypass. Warnings/reminders are set on the Notifications page.
 - **How a group's members are blocked (0.84.11):** the group editor's "How members are blocked" chooses it for all
-  members - apps: Close app (+ its background processes) / Minimize / Block internet; sites: Can't load it / Close
+  members - apps: Close app (+ its background processes) / Minimize / Grey it / Block internet; sites: Can't load it / Close
   the tab / Go back. A member's extra-limits window can add to that for that member only (the group's way is
   greyed there - a member can never be weaker than its group). A group with nothing ticked blocks each member the
   way it was set when it was added (every group from before 0.84.11). A block by the item's own rules keeps the

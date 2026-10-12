@@ -44,7 +44,8 @@ DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30,
                  "tiers": [{"from": "21:00", "every_sec": 15 * 60}, {"from": "00:00", "every_sec": 5 * 60},
                            {"from": "03:00", "every_sec": 60}],
                  "guarded": False,   # dismissing the bedtime screen needs the Anti-Bypass challenge
-                 "dismiss_wait": 0}  # seconds before the bedtime screen's Dismiss works (0 = at once)
+                 "dismiss_wait": 0,  # seconds before the bedtime screen's Dismiss works (0 = at once)
+                 "grey": False}      # the whole screen goes grey from bedtime to wake-up time (resident/grayscale.py)
 # Apps that stay usable during a strict break ("Allowed during breaks"): the break settings' "allow" list, program
 # (.exe) names. A list saved before it existed has none, so it reads as this default; the user can take either out.
 BREAK_ALLOW_DEFAULT = ("lockdown.exe", "systemsettings.exe")
@@ -298,6 +299,18 @@ def counts_many(db, whats, since: datetime) -> dict[str, dict[str, int]]:
     for what, result, n in rows:
         out.setdefault(what, {})[result] = n
     return out
+
+
+def bedtime_grey_wanted(s: dict, now: datetime) -> bool:
+    """Should the screen be grey now for bedtime (the phone's rule, engine/RemindersEngine.kt): the bedtime reminder is
+    on, "Grey screen during bedtime" is on, and `now` (trusted time) is from bedtime up to wake-up time. Bedtime and
+    wake-up time at the same minute: no window. Whether an emergency or a silent pause holds the alerts is the
+    caller's to ask (resident/snapshot.py)."""
+    if not s.get("on") or not s.get("grey"):
+        return False
+    bed, wake = parse_hhmm(s["bedtime"]), parse_hhmm(s["wake"])
+    bed_min, wake_min, minute = bed.hour * 60 + bed.minute, wake.hour * 60 + wake.minute, now.hour * 60 + now.minute
+    return bed_min <= minute < wake_min if bed_min <= wake_min else minute >= bed_min or minute < wake_min
 
 
 def loosens_reminder(old: dict, new: dict) -> bool:

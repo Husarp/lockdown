@@ -43,7 +43,7 @@ MAX_FOUND = 30                                  # rows the member search gives b
 MAX_SITES = 8                                   # bundled popular sites the member search suggests
 NEW_WAYS = {"app": "close", "site": "dns"}      # a new group starts as an item does (close the app / can't load the site)
 APP_WORDS = (("close", "closed"), ("background", "background processes"), ("minimize", "minimised"),
-             ("internet", "internet cut"))
+             ("grey", "greyed"), ("internet", "internet cut"))
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -249,8 +249,9 @@ def group_member_search(ctx, query=""):
 
 def _way(kind: str, value, who: str, own: bool = False, hosted: bool = False):
     """A way read from the page, tidied the way the tick boxes do (closing covers minimizing / going back; "its
-    background processes" only goes with closing). None / "" = nothing chosen. `own`: a member's own way - an app's
-    needs close, minimize or internet; a program file (`hosted`) is closed or minimised only."""
+    background processes" only goes with closing; closing covers "Grey it" too, minimizing covers it). None / "" = nothing
+    chosen. `own`: a member's own way - an app's needs close, minimize, grey or internet; a program file (`hosted`) is closed
+    or minimised only."""
     if value is None or value == "":
         return None
     if not isinstance(value, str) or len(value) > 60:
@@ -263,14 +264,16 @@ def _way(kind: str, value, who: str, own: bool = False, hosted: bool = False):
         if "close" in flags:
             flags.discard("back")
         return site_block.make_site_block_type(flags) or None
-    if hosted and flags & {"internet", "background"}:
+    if hosted and flags & {"internet", "background", "grey"}:
         raise ApiError(f"{who}: a program file is closed or minimised only.")
     if "close" in flags:
-        flags.discard("minimize")
+        flags -= {"minimize", "grey"}
     else:
         flags.discard("background")
+        if "minimize" in flags:
+            flags.discard("grey")
     if own and not flags:
-        raise ApiError(f"{who}: tick Close app, Minimize or Block internet for its own way.")
+        raise ApiError(f"{who}: tick Close app, Minimize, Grey it or Block internet for its own way.")
     return make_block_type(flags) or None
 
 

@@ -12,6 +12,7 @@ import applog
 import applog_changes
 import modes
 import pause
+from blocker.apps import greys
 from paths import DB_PATH
 from block_method import blocking_way
 from rules import RESET_KEY, TIME_FMT, LimitClock, Usage, effective_rules, item_block, rule_block
@@ -627,12 +628,22 @@ class Database:
                         out.append({**b, "item": member, "category": b["item"]["target"]})
         state = modes.active(self, now)
         if modes.blocking(state):
-            done = {b["item"]["id"] for b in out}
             until = state["phase"][1] if state["phase"] else state["until"]
             rule = {"rule_type": "mode", "group": None, "mode": state["mode"]["name"]}
+            by_mode = []
             for item in modes.targets(state["mode"], items, groups, self.categories()):
                 unlocked = usage.unlocks.get(f"item:{item['id']}")
-                if item["id"] is not None and (item["id"] in done or (unlocked and now < unlocked)):
+                if item["id"] is not None and unlocked and now < unlocked:
+                    continue
+                by_mode.append(item)
+            # an app its own rules only grey ("Grey it") is closed by a mode that blocks it: the mode's block replaces
+            # the grey one (any other way already in force is kept, as always)
+            closed = {i["id"] for i in by_mode if i["id"] is not None}
+            out = [b for b in out if not (b["item"]["id"] in closed and b["item"]["item_type"] == "app"
+                                          and greys(b["item"].get("block_type")))]
+            done = {b["item"]["id"] for b in out}
+            for item in by_mode:
+                if item["id"] is not None and item["id"] in done:
                     continue
                 out.append({"item": item, "reason": "mode", "until": until, "rule": rule})
         return out

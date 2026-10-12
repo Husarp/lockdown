@@ -20,6 +20,23 @@ test("Close and Minimize exclude each other; the background processes go with Cl
   assert.deepEqual(ways.toggleWay("category", ["close"], "minimize", true), ["minimize"]);
 });
 
+test("Grey it excludes Close and Minimize (they cover it) and goes with the internet cut", () => {
+  assert.deepEqual(ways.toggleWay("app", ["close", "background"], "grey", true), ["grey"]);
+  assert.deepEqual(ways.toggleWay("app", ["minimize"], "grey", true), ["grey"]);
+  assert.deepEqual(ways.toggleWay("app", ["close", "internet"], "grey", true), ["grey", "internet"]);
+  assert.deepEqual(ways.toggleWay("app", ["grey"], "close", true), ["close"]);
+  assert.deepEqual(ways.toggleWay("app", ["grey", "internet"], "minimize", true), ["minimize", "internet"]);
+  assert.deepEqual(ways.toggleWay("app", ["grey"], "background", true), ["grey"], "no Close: no background processes");
+  assert.deepEqual(ways.toggleWay("app", ["grey", "internet"], "grey", false), ["internet"]);
+  assert.deepEqual(ways.toggleWay("category", ["close"], "grey", true), ["grey"]);
+  assert.deepEqual(ways.toggleWay("file", ["close"], "grey", true), ["close"], "a program file is never greyed");
+  assert.deepEqual(ways.toggleWay("site", ["dns"], "grey", true), ["dns"]);
+  assert.equal(ways.waysProblem("app", ["grey"]), "");
+  assert.equal(ways.waysProblem("category", ["grey", "internet"]), "");
+  assert.equal(ways.wayText("app", "grey,internet"), "Grey it + Block internet");
+  assert.match(ways.APP_WAYS.find((w) => w[0] === "grey")[2], /Color filters/);
+});
+
 test("Close the tab and Go back exclude each other; Can't load it combines with either", () => {
   assert.deepEqual(ways.toggleWay("site", ["dns", "close"], "back", true), ["dns", "back"]);
   assert.deepEqual(ways.toggleWay("site", ["dns", "back"], "close", true), ["dns", "close"]);
@@ -48,7 +65,7 @@ test("the group of a target and the problems with its ways, in Python's words", 
   assert.equal(ways.groupOf({ kind: "app", file: true }), "file");
   assert.equal(ways.groupOf({ kind: "app", file: false }), "app");
   assert.equal(ways.waysProblem("app", ["close"]), "");
-  assert.equal(ways.waysProblem("app", ["background"]), "Tick at least one of Close app / Minimize / Block internet.");
+  assert.equal(ways.waysProblem("app", ["background"]), "Tick at least one of Close app / Minimize / Grey it / Block internet.");
   assert.equal(ways.waysProblem("file", ["internet"]), "Tick Close app or Minimize.");
   assert.equal(ways.waysProblem("site", []), "Tick at least one of Can't load it / Close the tab / Go back.");
   assert.equal(ways.enabled("app", ["minimize"], "background"), false);

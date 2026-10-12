@@ -473,6 +473,66 @@ def test_close_and_minimize_exclude_each_other_and_background_goes_with_close(sh
     assert page.get_attribute('[data-g="app"] [data-w="close"] .way-help', "title")      # the "?" tooltips
 
 
+def test_grey_it_is_offered_for_apps_and_categories_and_goes_with_neither_close_nor_minimize(shell, page, env):
+    open_add(shell, page)
+    page.click('[data-seg="adkind"] button:has-text("Installed apps")')
+    page.wait_for_selector('.ad-row:has(b:text-is("Discord"))')
+    page.click('.ad-row:has(b:text-is("Discord")) input')
+    assert page.eval_on_selector_all('[data-g="app"] [data-flag]', "els => els.map(e => e.dataset.flag)") == \
+        ["close", "background", "minimize", "grey", "internet"]
+    assert page.inner_text('[data-g="app"] [data-w="grey"] .ellip') == "Grey it"
+    help_text = page.get_attribute('[data-g="app"] [data-w="grey"] .way-help', "title")
+    assert "goes grey" in help_text and "Color filters" in help_text and "separate" in help_text      # (Windows' own colour filters)
+    page.check('[data-g="app"] [data-flag="grey"]')
+    assert ticked_ways(page, "app") == ["grey"]                            # (Close went: it covers Grey it)
+    assert page.is_disabled('[data-g="app"] [data-flag="background"]')
+    page.check('[data-g="app"] [data-flag="internet"]')
+    assert ticked_ways(page, "app") == ["grey", "internet"]
+    page.check('[data-g="app"] [data-flag="minimize"]')
+    assert ticked_ways(page, "app") == ["minimize", "internet"]
+    page.check('[data-g="app"] [data-flag="grey"]')
+    assert ticked_ways(page, "app") == ["grey", "internet"]
+    page.check('[data-g="app"] [data-flag="close"]')
+    assert ticked_ways(page, "app") == ["close", "internet"]
+
+
+def test_a_greyed_app_is_saved_with_its_way(shell, page, env):
+    open_add(shell, page)
+    page.click('[data-seg="adkind"] button:has-text("Installed apps")')
+    page.wait_for_selector('.ad-row:has(b:text-is("Spotify"))')
+    page.click('.ad-row:has(b:text-is("Spotify")) input')
+    page.check('[data-g="app"] [data-flag="grey"]')
+    tick(page, "time_limit")
+    set_limit(page, "1h")
+    submit(page)
+    on_overview(page)
+    assert items(env)["Spotify"]["block_type"] == "grey"
+    edit_via_overview(page, "Spotify")
+    assert ticked_ways(page, "app") == ["grey"]
+
+
+def test_switching_an_app_to_grey_while_locked_asks_for_the_challenge_and_back_to_close_is_free(shell, page, env):
+    lock(env)
+    open_add(shell, page)
+    edit_via_overview(page, "Discord")
+    page.check('[data-g="app"] [data-flag="grey"]')
+    submit(page)
+    page.wait_for_selector("#dlg[open] textarea.typed")
+    assert "Loosen Discord" in page.inner_text("#dlg")
+    assert items(env)["Discord"]["block_type"] in (None, "close")             # (nothing applied while the challenge is open)
+    cancel_challenge(page)
+    assert items(env)["Discord"]["block_type"] in (None, "close") and ticked_ways(page, "app") == ["grey"]    # (the form is kept)
+    submit(page)
+    type_challenge(page)
+    on_overview(page)
+    assert items(env)["Discord"]["block_type"] == "grey"
+    edit_via_overview(page, "Discord")
+    page.check('[data-g="app"] [data-flag="close"]')                           # grey -> close: stronger, free
+    submit(page)
+    on_overview(page)
+    assert items(env)["Discord"]["block_type"] == "close" and not page.is_visible("#dlg[open]")
+
+
 def test_a_sites_close_the_tab_and_go_back_exclude_each_other(shell, page, env):
     open_add(shell, page)
     pick_suggestion(page, "face", "Facebook")
@@ -598,6 +658,7 @@ def test_the_category_menu_lists_them_with_swatches_and_blocks_the_whole_categor
     page.click('#menu button:has-text("Games")')
     assert pills(page) == ["category · Games"] and page.is_visible('[data-g="category"]')
     assert ticked_ways(page, "category") == ["close"]
+    assert "grey" in page.eval_on_selector_all('[data-g="category"] [data-flag]', "els => els.map(e => e.dataset.flag)")
     tick(page, "time_limit")
     set_limit(page, "1h")
     submit(page)

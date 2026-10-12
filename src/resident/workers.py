@@ -9,6 +9,8 @@ runs here, each worker in a thread of its own with a database connection of its 
   muting modes), "block started", Pomodoro phases, the weekly summary.
 - MinimizeWorker (250 ms): apps blocked with "Minimize" are sent down when they come to the front; a strict break keeps
   everything down. Win32 only - it reads the snapshot and the reminder engine, not the database.
+- GreyWorker (250 ms): the screen goes grey while an app blocked with "Grey it" is in front, and for bedtime grayscale;
+  colour back when neither wants it (resident/grayscale.py). Reads the snapshot only.
 - ReminderWorker: reminders.Engine ticks (every few seconds, sooner when something is due), driving a ReminderUI.
 - UpdateWorker: the automatic "is there a newer Lockdown" check and its notice.
 - Also started here: the usage tracker and the bad-word check (monitor/), and the daily retention job.
@@ -37,7 +39,7 @@ import reminders
 import stats
 import updates
 from blocker import protection
-from blocker.apps import exe_name, is_hosted, minimizes
+from blocker.apps import exe_name, greys, is_hosted, minimizes, names_of
 from db import Database
 from resident import snapshot
 from rules import TIME_FMT
@@ -48,6 +50,7 @@ STATUS_SEC = 1.0           # one snapshot per second
 BLOCK_EVENT_SEC = 1.0
 WATCH_SEC = 1.0
 MINIMIZE_SEC = 0.25
+GREY_SEC = 0.25
 UPDATE_FIRST_SEC = 90      # let the agent settle before touching the network
 UPDATE_POLL_SEC = 60       # is a check due (updates.due decides: every EVERY_HOURS), has a snooze run out
 SETTINGS_SEC = 5           # the watcher reads the notification settings and the weekly summary's schedule this often
@@ -212,6 +215,7 @@ class Hub:
         self.open_page = lambda page: None         # the window glue: show this page ("See the week")
         self.install_update = None                 # R17: install_update(found) - else the notice opens the page
         self.in_use = lambda: frozenset()          # item ids in use right now (the usage tracker's set)
+        self.grey = None                           # resident/grayscale.GreyScreen: the screen's colour (made by Workers / the agent)
         self.status_worker = None                  # set by Workers (poke() = "build a snapshot now")
         self.engine = None                         # the reminder engine (set by the ReminderWorker)
         self.netlog_feed = None                    # R16: the Network Log page's live feed (webapi/network.py), set by the Api
@@ -758,6 +762,60 @@ class MinimizeWorker(Worker):
                 blocked()
 
 
+# ---------------------------------------------------------------- grey screen
+
+def grey_set(block_list) -> dict:
+    """process name -> block, for the apps that are blocked with "Grey it" (the app stays open; the screen goes grey while
+    it is in front). A program file (game.jar) is never greyed - the window in front is javaw.exe: the service closes it."""
+    out = {}
+    for b in block_list:
+        item = b["item"]
+        if item["item_type"] == "app" and greys(item["block_type"]) and not is_hosted(item["target"]):
+            for name in names_of(item["target"]):
+                out.setdefault(name, b)
+    return out
+
+
+class GreyWorker(Worker):
+    """The screen's colour: grey while the window in front belongs to an app blocked with "Grey it", and for bedtime
+    grayscale (the snapshot says when); colour back as soon as neither does. Both reasons go to ONE GreyScreen, which is grey
+    while any of them wants it - they never fight. Nothing is greyed while Lockdown is switched off, and a pause
+    ("Pause my blocks", an emergency unlock) lifts the block itself - or, for bedtime, holds it (snapshot._bedtime_grey).
+    Win32 only; no database reads: everything comes from the newest snapshot."""
+    label = "grey"
+    interval = GREY_SEC
+    uses_db = False
+
+    def __init__(self, hub: Hub, interval: float | None = None):
+        super().__init__(hub, interval)
+        self._set_for = None
+        self._set: dict = {}
+
+    def tick(self):
+        hub = self.hub
+        screen = hub.grey
+        if screen is None:
+            return
+        snap = hub.snapshot
+        off = snap is None or snap.off
+        apps = {} if off else self._apps(snap)
+        in_front = False
+        if apps:
+            hwnd, exe = hub.win.foreground()
+            in_front = bool(hwnd) and exe in apps
+        screen.want("app", in_front)
+        screen.want("bedtime", bool(not off and snap.bedtime_grey))
+
+    def _apps(self, snap) -> dict:
+        if snap is not self._set_for:
+            self._set_for, self._set = snap, grey_set(snap.block_list)
+        return self._set
+
+    def teardown(self):
+        if self.hub.grey is not None:
+            self.hub.grey.release()
+
+
 # ---------------------------------------------------------------- reminders
 
 class ReminderWorker(Worker):
@@ -964,6 +1022,7 @@ class Workers:
         self.watcher = WatcherWorker(self.hub)
         self.reminder_ui = reminder_ui or RecordingReminderUI()
         self.minimize = MinimizeWorker(self.hub, self.alerter, reminder_ui=self.reminder_ui)
+        self.grey = GreyWorker(self.hub)
         self.reminders = ReminderWorker(self.hub, self.reminder_ui)
         self.updates = UpdateWorker(self.hub)
         self.netlog = NetLogWorker(self.hub)
@@ -971,8 +1030,8 @@ class Workers:
         self.tracker, self.word_guard, self.retention = tracker, word_guard, retention
         self._startup = None
         self._stopping = False
-        self.workers = [self.status, self.block_events, self.watcher, self.minimize, self.reminders, self.updates,
-                        self.netlog]
+        self.workers = [self.status, self.block_events, self.watcher, self.minimize, self.grey, self.reminders,
+                        self.updates, self.netlog]
 
     def start(self):
         self.hub.status_worker = self.status

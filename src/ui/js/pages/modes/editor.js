@@ -203,7 +203,7 @@ export function createEditor(host, hooks) {
         picker = mod.createPicker({ compact: true, onChange: syncPick, onEnter: addPicked, notify: perr });
         picker.input.dataset.k = "p-text";
         q("picker").append(picker.el);
-        ways = createWays({ onChange: ({ group }) => { touched[group] = true; perr(""); } });
+        ways = createWays({ grey: false, onChange: ({ group }) => { touched[group] = true; perr(""); } });   // (a mode that blocks an app closes it: no Grey it here)
         q("ways").append(ways.el);
         ways.show([]);
         picker.input.addEventListener("input", syncPick);

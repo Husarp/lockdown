@@ -287,6 +287,7 @@ def _run(argv: list[str], events, state: dict) -> int:
 
         def leave():
             diag.note("the window loop did not end - leaving now", important=True)
+            hub.grey.release()      # (os._exit skips atexit: the colour comes back first)
             start_failed(argv, reason, not any(a in argv for a in TRAY_ARGS) or win.show_wanted)
             os._exit(FAILED)
         timer = state["leave"] = threading.Timer(HAND_OVER_SEC, leave)
@@ -324,6 +325,9 @@ def _run(argv: list[str], events, state: dict) -> int:
 
     from resident import reminder_ui, workers
     hub = workers.Hub(log_sink=_log)
+    from resident import grayscale     # the screen's colour: "Grey it" and bedtime grayscale (its thread; colour back on exit / crash)
+    hub.grey = grayscale.GreyScreen(log=lambda text: _log(f"WARNING {text}"))
+    grayscale.install_exit_hooks(hub.grey)
     ctx.hub = hub                         # (Api methods poke hub.status_worker after a change of the blocks)
     hub.netlog_ctx = ctx                  # R16: the Network Log's worker reads the last hour ahead
     ctx.window_visible = lambda: win.publisher.visible    # R16: the Network Log's live feed sleeps while the window is hidden

@@ -15,7 +15,7 @@ export const FEATURES = [
     "Block a site, an app or a whole category - and tick any number of blockers on it at once.",
     "By time (hours you pick, with minutes of allowance if you want a way out), a time limit per day / week / month, an opening limit, permanent, or temporary.",
     "Groups: one set of rules over several sites and apps, with a limit they share.",
-    "Choose what happens: an app is closed, minimised or cut off the internet; a site can't load, has its tab closed, or sends the browser back.",
+    "Choose what happens: an app is closed, minimised, greys the whole screen while it is in front, or is cut off the internet; a site can't load, has its tab closed, or sends the browser back.",
     "Disable something instead of deleting it - it keeps its rules and enforces nothing.",
   ]],
   ["Keeping yourself to it", [

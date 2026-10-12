@@ -166,7 +166,6 @@ def _ui_text() -> str:
 
 LEFT_OUT = {
     "island-and-phone-card": ["Island & phone", "On screen, top centre"],
-    "grey-screen-way": ["Grey screen"],
     "mute-it-way": ["Mute it"],
     "pause-limit-longest": ["Longest pause"],
     "pause-limit-per-day": ["Pause time per day"],
@@ -181,7 +180,6 @@ LEFT_OUT = {
     "settings-service-restart": ["Keeps rules running in the background"],
     "block-notice-full-screen": ["notice-card", "is blocked</h2>"],
     "bedtime-weekdays": ["Every night"],
-    "bedtime-grey-screen": ["Grey screen at bedtime", "Colours fade to grey"],
     "netlog-7-day-range": ["Kept for 7 days"],
 }
 

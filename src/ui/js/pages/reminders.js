@@ -81,6 +81,7 @@ function sleepCard() {
       ${field("Dismiss wait", "Dismiss on the bedtime screen works only after this many seconds. A shorter wait (or Off) needs the challenge; a longer one is free.",
         `${seg("wait", WAITS.map(([v, t]) => [String(v), t]), "")}${num("s-wait", 56)}<span class="muted small">s</span>`)}
       ${field("Turn on a mode", "at bedtime, until wake-up time", select("s-mode", "sleep", [["", "No mode"]]))}
+      ${field("Grey screen during bedtime", "The whole screen goes grey from bedtime until wake-up time, and gets its colour back after. Turning it off while this is Important needs the challenge. Windows may also have its own Color filters (Settings > Accessibility): Lockdown's grey is separate, and goes away when Lockdown gives the colour back.", flag("s-grey", "sleep", "Grey screen during bedtime"))}
       ${field("Heads-up says", "Your own words, or leave empty. {bedtime}, {wake} and {time} are filled in.", text("s-warn", "sleep", "Heads-up says"))}
       ${field("Bedtime says", "", text("s-text", "sleep", "Bedtime says"))}
       <p class="err" data-k="s-err" role="alert"></p>
@@ -142,7 +143,7 @@ function tierRow(every, after) {
 function sleepCfg() {
   return {
     on: q("s-on").checked, guarded: q("s-guarded").checked, bedtime: getTp(q("s-bed")), wake: getTp(q("s-wake")),
-    before: q("s-before").value, mode: q("s-mode").value, dismiss_wait: q("s-wait").value,
+    before: q("s-before").value, mode: q("s-mode").value, dismiss_wait: q("s-wait").value, grey: q("s-grey").checked,
     warn_text: q("s-warn").value, text: q("s-text").value,
     tiers: [...root.querySelectorAll("[data-tier]")].map((t) => ({ every: t.querySelector("input").value, after: getTp(t.querySelector(".tp")) })),
   };
@@ -274,6 +275,7 @@ function fillModes(list, current) {
 function fillSleep(s, modes) {
   putChecked(q("s-on"), s.on);
   putChecked(q("s-guarded"), s.guarded);
+  putChecked(q("s-grey"), s.grey);
   for (const [k, value] of [["s-bed", s.bedtime], ["s-wake", s.wake]]) {
     if (!q(k).contains(document.activeElement)) setTp(q(k), value);
   }

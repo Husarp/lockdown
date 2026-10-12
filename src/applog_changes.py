@@ -405,7 +405,8 @@ def _emergency_tiers(old, new):
 
 SLEEP_LABELS = {"on": "reminder", "bedtime": "bedtime", "wake": "wake-up", "before": "warn (min) before",
                 "repeat_sec": "repeat every (s)", "mode": "mode", "warn_text": "warning text", "text": "text",
-                "tiers": "bedtime steps", "guarded": "important", "dismiss_wait": "Dismiss waits (s)"}
+                "tiers": "bedtime steps", "guarded": "important", "dismiss_wait": "Dismiss waits (s)",
+                "grey": "grey screen"}
 BREAK_LABELS = {"on": "reminder", "every_sec": "every (s)", "length": "length (min)", "strict": "strict", "snooze_sec": "snooze (s)",
                 "max_snooze": "snoozes", "twenty": "20-20-20", "text": "text", "twenty_text": "20-20-20 text",
                 "guarded": "important", "allow": "apps allowed during breaks"}
@@ -413,7 +414,7 @@ CUSTOM_LABELS = {"on": "reminder", "text": "text", "kind": "kind", "every_sec": 
                  "window": "window", "snooze": "snooze (min)", "max_snooze": "snoozes", "check": "check", "packs": "quotes",
                  "quotes": "own quotes", "hours": "only between the hours", "per_day": "stop after (per day)",
                  "guarded": "important"}
-FLAGS = ("on", "strict", "twenty", "guarded", "hours")
+FLAGS = ("on", "strict", "twenty", "guarded", "hours", "grey")
 TEXTS = ("warn_text", "text", "twenty_text", "quotes")
 
 

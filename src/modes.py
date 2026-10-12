@@ -5,7 +5,7 @@ Used by the service (db.blocks) and the GUI - standard library only."""
 import json
 from datetime import datetime, timedelta
 
-from blocker.apps import exe_name
+from blocker.apps import block_flags, exe_name, make_block_type
 from rules import TIME_FMT, schedule_until
 
 LIST_KEY = "modes.list"       # JSON list of modes
@@ -140,6 +140,14 @@ def item_category(item: dict, categories: dict[tuple[str, str], str]) -> str:
     return "distracting" if "distracting" in chosen else chosen[0]
 
 
+def mode_way(item: dict) -> dict:
+    """A mode that blocks an app closes it, whatever its own way: an app set to "Grey it" (it stays open, the screen
+    goes grey) is closed - the grey is the lightest way and a mode asks for more. Minimize and the rest are kept."""
+    if item["item_type"] == "app" and "grey" in block_flags(item.get("block_type")):
+        return {**item, "block_type": make_block_type((block_flags(item.get("block_type")) - {"grey"}) | {"close"})}
+    return item
+
+
 def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[tuple[str, str], str]) -> list[dict]:
     """Items to block (existing blocklist items, or made-up ones with id None for things not on the list).
     categories: {(kind, name): category} as chosen on the Screen Time page; things on the blocklist count as
@@ -151,7 +159,7 @@ def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[
         key = item["target"].lower()
         if key not in seen:
             seen.add(key)
-            out.append(item)
+            out.append(mode_way(item))
 
     for item in items:
         in_cat = item_category(item, categories) in cats

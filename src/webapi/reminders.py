@@ -128,6 +128,8 @@ def _sleep_weaker(old: dict, new: dict) -> bool:
         return True
     if old.get("mode") and not new.get("mode"):
         return True
+    if old.get("grey") and not new.get("grey"):        # the screen would no longer go grey for the night
+        return True
     # the interval only changes where a step starts or the night begins / ends - look at exactly those minutes
     marks = {_minute_of(x[k]) for x in (old, new) for k in ("bedtime", "wake")}
     marks |= {_minute_of(t["from"]) for x in (old, new) for t in reminders.tiers_of(x)}
@@ -204,6 +206,8 @@ def _changes_text(name, old, new, kind) -> list:
         out.append(f"Turn off / un-flag the important {name}")
     if reminders.dismiss_wait(new) < reminders.dismiss_wait(old):
         out.append("Shorten the wait before Dismiss on the bedtime screen")
+    if kind == "sleep" and old.get("guarded") and old.get("grey") and not new.get("grey"):
+        out.append("Turn off the grey screen at bedtime")
     if _weaker(old, new, kind):
         out.append(f"Make the important {name} ask for less")
     return out or [f"Change the important {name}"]
@@ -230,7 +234,7 @@ def _sleep_view(s: dict) -> dict:
             "tiers": [{"every": reminders.seconds_text(t.get("every_sec", 300)), "after": t.get("from", "21:00")}
                       for t in reminders.tiers_of(s)],
             "dismiss_wait": reminders.dismiss_wait(s), "warn_text": s.get("warn_text") or "",
-            "text": s.get("text") or "", "mode": s.get("mode") or ""}
+            "text": s.get("text") or "", "mode": s.get("mode") or "", "grey": bool(s.get("grey"))}
 
 
 def _break_view(b: dict, today_count: int) -> dict:
@@ -320,7 +324,8 @@ def reminder_save_sleep(ctx, cfg):
     new = {**old, "on": _flag(cfg.get("on"), "Remind me to go to bed"), "bedtime": bedtime, "wake": wake,
            "before": before, "tiers": tiers, "warn_text": _text(cfg.get("warn_text"), "Heads-up says"),
            "text": _text(cfg.get("text"), "Bedtime says"), "guarded": _flag(cfg.get("guarded"), "Important"),
-           "dismiss_wait": wait, "mode": mode}
+           "dismiss_wait": wait, "mode": mode,
+           "grey": _flag(cfg["grey"], "Grey screen during bedtime") if "grey" in cfg else bool(old.get("grey"))}
     new.setdefault("repeat_sec", 300)
 
     def apply():

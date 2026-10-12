@@ -83,6 +83,7 @@ class StatusSnapshot:
     item_states: dict                 # item id -> {blocked, reason, until, next, rule}; enabled items only
     tray: TrayState
     break_allow: frozenset | None = None   # process names a strict break leaves up (reminders.allowed_exes); None = the default
+    bedtime_grey: bool = False        # the screen should be grey for bedtime (GreyWorker): in the sleep window, not held (_bedtime_grey)
 
     def public(self) -> dict:
         """The page part as one dict (the `status` event's payload)."""
@@ -148,6 +149,18 @@ def _emergency_part(db, now: datetime) -> dict:
               "resets": iso(reset)} for kind, left, allowed, reset in emergency.left_by_tier(db, now)]
     return {"enabled": enabled, "usable": enabled and bool(kinds),
             "left": sum(k["left"] for k in kinds) if enabled else 0, "kinds": kinds}
+
+
+def _bedtime_grey(db, now: datetime, paused: dict | None) -> bool:
+    """Bedtime grayscale (the phone's rule): the bedtime reminder and "Grey screen during bedtime" are on and trusted time
+    is from bedtime to wake-up time - but not while an emergency unlock or a silent "Pause my blocks" holds the alerts."""
+    try:
+        sleep = reminders.load(db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
+        if not reminders.bedtime_grey_wanted(sleep, now):
+            return False
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
+    return not ((paused and paused["silent"]) or emergency.alerts_paused_until(db, now))
 
 
 def _item_states(items: list[dict], groups: list[dict], blocks: list[dict], now: datetime, usage) -> dict:
@@ -224,4 +237,5 @@ def build(db, now: datetime, wall: float | None = None) -> StatusSnapshot:
         now=now, wall=wall, items=tuple(items), groups=tuple(groups), usage=usage, block_list=tuple(block_list),
         item_states=states, tray=_tray(len(items), running, bool(off), paused_until, state, mode_list, update),
         break_allow=reminders.allowed_exes(reminders.allowed_apps(reminders.load(db, reminders.BREAK_KEY,
-                                                                                 reminders.DEFAULT_BREAK))))
+                                                                                 reminders.DEFAULT_BREAK))),
+        bedtime_grey=_bedtime_grey(db, now, paused))

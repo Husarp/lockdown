@@ -523,6 +523,9 @@ def test_the_ways_follow_what_is_typed_and_exclude_each_other_like_the_old_picke
     page.check('.md-editor [data-g="app"] [data-way="minimize"]')
     assert not page.is_checked('.md-editor [data-g="app"] [data-way="close"]')
     assert page.is_disabled('.md-editor [data-g="app"] [data-way="background"]')
+    # (a mode that blocks an app closes it: there is no "Grey it" here, only in rules and groups)
+    assert page.eval_on_selector_all('.md-editor [data-g="app"] [data-way]', "els => els.map(e => e.dataset.way)") == \
+        ["close", "background", "minimize", "internet"]
     page.fill('.md-editor [data-k="p-text"]', "tool.jar")                        # a program file: Close / Minimize and the note
     assert page.is_visible('.md-editor [data-g="file"]') and "Java game or a script" in page.inner_text('.md-editor [data-g="file"]')
     assert page.eval_on_selector_all('.md-editor [data-g="file"] [data-way]', "els => els.map(e => e.dataset.way)") == ["close", "minimize"]

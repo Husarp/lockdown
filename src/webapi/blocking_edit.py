@@ -221,15 +221,18 @@ def _site_way(flags: set) -> str:
 
 def _app_way(flags: set, hosted: bool) -> str:
     """The block type for an app, a program file or a category. A program file runs inside java / python / cmd, which other
-    programs use too: only closed or minimised (blocker.apps.hosted_way)."""
+    programs use too: only closed or minimised (blocker.apps.hosted_way). "Grey it" (the app stays open, the screen goes grey
+    while it is in front) is the lightest way: closing and minimizing cover it, so it goes with neither."""
     if hosted:
         flags = flags - {"internet", "background"}
         if not flags & {"close", "minimize"}:
             raise _bad("Tick Close app or Minimize.", "ways")
     elif not flags - {"background"}:
-        raise _bad("Tick at least one of Close app / Minimize / Block internet.", "ways")
+        raise _bad("Tick at least one of Close app / Minimize / Grey it / Block internet.", "ways")
     if {"close", "minimize"} <= flags:
         raise _bad("Close app and Minimize do the same thing: pick one.", "ways")
+    if "grey" in flags and flags & {"close", "minimize"}:
+        raise _bad("Grey it can't go with Close app or Minimize (they cover it): pick one.", "ways")
     if "close" not in flags:
         flags = flags - {"background"}           # (the background processes go with Close app)
     return make_block_type(flags)

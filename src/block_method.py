@@ -13,7 +13,8 @@ the group's; looser than before is the Anti-Bypass challenge (antibypass.ways_lo
 - A block by a group (its rules or a member's extra rule in it): the group's way for that kind + the member's own.
   A group that hasn't chosen (every group before 0.84.11) blocks each member the way the member is set itself -
   nothing changes on upgrade.
-- Blocked by several at once: everything any of them asks for (closing wins over minimizing / going back).
+- Blocked by several at once: everything any of them asks for (closing wins over minimizing / going back, and
+  minimizing over "Grey it" - the app stays open and the screen goes grey while it is in front).
 
 Standard library only: the service reads this too.
 """
@@ -34,10 +35,12 @@ def flags(k: str, block_type: str | None) -> set[str]:
 
 def strength(k: str, block_type: str | None) -> set[str]:
     """Everything this way does, for comparing two ways: closing a tab covers going back, closing an app covers
-    minimizing it."""
+    minimizing it and greying the screen, minimizing it covers greying (so Grey it is the lightest app way)."""
     f = flags(k, block_type)
     if "close" in f:
-        f = f | ({"back"} if k == "site" else {"minimize"})
+        f = f | ({"back"} if k == "site" else {"minimize", "grey"})
+    elif "minimize" in f and k != "site":
+        f = f | {"grey"}
     return f
 
 
@@ -49,9 +52,11 @@ def merge(k: str, *block_types: str | None) -> str:
             f.discard("back")
         return make_site_block_type(f)
     if "close" in f:
-        f.discard("minimize")
+        f -= {"minimize", "grey"}
     else:
         f.discard("background")
+        if "minimize" in f:
+            f.discard("grey")
     return make_block_type(f)
 
 

@@ -1,6 +1,8 @@
 // "When blocked": how a blocked app, program file, category or website is dealt with (blocker/apps.py, blocker/site_block.py).
 //   apps and categories   Close app (not with Minimize)  - Also close its background processes (only with Close)  - Minimize
-//                         - Block internet. Default Close; a Steam game: Close + its background processes.
+//                         - Grey it (the app stays open, the screen goes grey while it is in front: goes with neither
+//                         Close nor Minimize, they cover it)  - Block internet. Default Close; a Steam game: Close + its
+//                         background processes.
 //   program files         Close app / Minimize only (a Java game or script runs inside javaw / python / cmd, which other
 //                         programs use too: no internet cut, no background processes).
 //   websites              Can't load it  - Close the tab (not with Go back)  - Go back. Default: Can't load it.
@@ -8,13 +10,16 @@
 // (webapi/blocking_edit.py) - nothing here is trusted.
 import { el, esc, ic } from "./ui.js";
 
+const GREY_HELP = "It stays open, but the whole screen goes grey while it is in front; the colour comes back when you leave it. Windows may also have its own Color filters (Settings > Accessibility): Lockdown's grey is separate, and goes away when Lockdown gives the colour back.";
 export const APP_WAYS = [
   ["close", "Close app", "Asked to close first (10 s to save), then force-closed; started while blocked: closed at once."],
   ["background", "Also close its background processes", "Once the app is closed: what it started and what runs from its install folder."],
   ["minimize", "Minimize", "Keeps it running (e.g. a browser with many tabs) but minimizes it whenever it's opened."],
+  ["grey", "Grey it", GREY_HELP],
   ["internet", "Block internet", "It can't connect to the internet."],
 ];
-export const FILE_WAYS = [APP_WAYS[0], APP_WAYS[2]];
+const wayOf = (flag) => APP_WAYS.find((w) => w[0] === flag);
+export const FILE_WAYS = [wayOf("close"), wayOf("minimize")];
 export const SITE_WAYS = [
   ["dns", "Can't load it", "The address goes nowhere, in every browser - what Lockdown has always done."],
   ["close", "Close the tab", "If you open it anyway, the tab is closed (a browser with one tab gets a fresh tab first)."],
@@ -27,8 +32,8 @@ export const GROUPS = ["app", "category", "file", "site"];
 const LISTS = { app: APP_WAYS, category: APP_WAYS, file: FILE_WAYS, site: SITE_WAYS };
 const TITLES = { app: "Apps", category: "Category (its apps)", file: "Program files", site: "Websites" };
 const HINTS = {
-  app: "Tick one or more; Close and Minimize exclude each other.",
-  category: "How every app in the category is dealt with; Close and Minimize exclude each other.",
+  app: "Tick one or more; Close, Minimize and Grey it exclude each other.",
+  category: "How every app in the category is dealt with; Close, Minimize and Grey it exclude each other.",
   file: "Close or Minimize - the file is found by its name.",
   site: "Tick one or more; Close the tab and Go back exclude each other.",
 };
@@ -43,15 +48,17 @@ export function defaultWays(group, steam = false) {
 }
 
 /** The ways after the owner ticked / unticked `flag`: Close and Minimize (and Close the tab and Go back) exclude each other,
- *  the background processes go with Close. Returns a new array in list order. */
+ *  Grey it excludes Close and Minimize too (they cover it), the background processes go with Close. Returns a new array in
+ *  list order. */
 export function toggleWay(group, flags, flag, on) {
   const set = new Set(flags);
   if (!LISTS[group].some((w) => w[0] === flag)) return LISTS[group].map((w) => w[0]).filter((f) => set.has(f));
   if (on) {
     set.add(flag);
     if (group === "site") { if (flag === "close") set.delete("back"); else if (flag === "back") set.delete("close"); }
-    else if (flag === "close") set.delete("minimize");
-    else if (flag === "minimize") { set.delete("close"); set.delete("background"); }
+    else if (flag === "close") { set.delete("minimize"); set.delete("grey"); }
+    else if (flag === "minimize") { set.delete("close"); set.delete("background"); set.delete("grey"); }
+    else if (flag === "grey") { set.delete("close"); set.delete("background"); set.delete("minimize"); }
     else if (flag === "background" && !set.has("close")) set.delete("background");
   } else {
     set.delete(flag);
@@ -67,7 +74,7 @@ export const enabled = (group, flags, flag) => flag !== "background" || flags.in
 export function waysProblem(group, flags) {
   if (group === "site") return flags.length ? "" : "Tick at least one of Can't load it / Close the tab / Go back.";
   if (group === "file") return flags.some((f) => f === "close" || f === "minimize") ? "" : "Tick Close app or Minimize.";
-  return flags.some((f) => f !== "background") ? "" : "Tick at least one of Close app / Minimize / Block internet.";
+  return flags.some((f) => f !== "background") ? "" : "Tick at least one of Close app / Minimize / Grey it / Block internet.";
 }
 
 // ---------------------------------------------------------------- the boxes
@@ -80,16 +87,16 @@ export function wayText(kind, way) {
     .map(([f, label]) => (f === "background" ? "its background processes" : f === "dns" ? "Can't load" : label)).join(" + ");
 }
 
-/** The flags that can't be ticked while `flag` is ticked (closing covers minimizing and going back). */
+/** The flags that can't be ticked while `flag` is ticked (closing covers minimizing, greying and going back). */
 const CLASH = {
   site: { close: ["back"], back: ["close"] },
-  apps: { close: ["minimize"], minimize: ["close", "background"] },
+  apps: { close: ["minimize", "grey"], minimize: ["close", "background", "grey"], grey: ["close", "background", "minimize"] },
 };
 const clashes = (group, flag) => (CLASH[group === "site" ? "site" : "apps"][flag] || []);
 
-const section = (g, compact) => `<section class="ways-g" data-g="${g}" hidden>` +
+const section = (g, compact, lists) => `<section class="ways-g" data-g="${g}" hidden>` +
   (compact ? "" : `<div class="ways-h"><b class="cap">${esc(TITLES[g])}</b><span class="small muted">${esc(HINTS[g])}</span></div>`) +
-  `<div class="way-list">${LISTS[g].map(([flag, label, help]) =>
+  `<div class="way-list">${lists[g].map(([flag, label, help]) =>
     `<label class="check way${flag === "background" ? " way-sub" : ""}" data-w="${flag}"><input type="checkbox" data-flag="${flag}" data-way="${flag}"><span class="ellip">${esc(label)}</span>` +
     `<span class="way-help" tabindex="0" role="img" aria-label="${esc(label)}: ${esc(help)}" title="${esc(help)}">${ic("info")}</span></label>`).join("")}</div>` +
   (g === "file" && !compact ? `<p class="small muted ways-note">${esc(HOSTED_NOTE)}</p>` : "") + `</section>`;
@@ -101,14 +108,16 @@ const section = (g, compact) => `<section class="ways-g" data-g="${g}" hidden>` 
  *   locked    {group: [flags]} ways that already apply (the group's, for a site member's own way): shown ticked and greyed,
  *             and the ways they exclude can't be ticked; they are never part of values() / value()
  *   compact   no heading and no program-file note (the page around it says it)
+ *   grey      offer "Grey it" for apps and categories (default yes; a mode that blocks an app closes it, so the Modes editor says no)
  *   section(g)  the <section> of one group, for a page that lays the groups out itself (its change events still reach onChange)
  *   values(g) the ticked flags, in list order      value(g) the same as "close,background", or null when none
  *   set(g, flags)  tick exactly these (an array or "close,background"; no onChange)
  * onChange({group}) runs when the owner ticks something.
  */
-export function createWays({ onChange, groups, locked = {}, compact = false } = {}) {
+export function createWays({ onChange, groups, locked = {}, compact = false, grey = true } = {}) {
   const drawn = groups || GROUPS;
-  const root = el(`<div class="ways">${drawn.map((g) => section(g, compact)).join("")}</div>`);
+  const lists = grey ? LISTS : { ...LISTS, app: LISTS.app.filter((w) => w[0] !== "grey"), category: LISTS.category.filter((w) => w[0] !== "grey") };
+  const root = el(`<div class="ways">${drawn.map((g) => section(g, compact, lists)).join("")}</div>`);
   const state = Object.fromEntries(drawn.map((g) => [g, defaultWays(g)]));
   const secs = Object.fromEntries(drawn.map((g) => [g, root.querySelector(`[data-g="${g}"]`)]));
   const fixed = (g) => locked[g] || [];
@@ -134,7 +143,7 @@ export function createWays({ onChange, groups, locked = {}, compact = false } = 
     });
   }
   if (groups) for (const g of GROUPS) if (secs[g]) secs[g].hidden = false;
-  const own = (g) => LISTS[g].map((w) => w[0]).filter((f) => state[g].includes(f));
+  const own = (g) => lists[g].map((w) => w[0]).filter((f) => state[g].includes(f));
   return {
     el: root,
     section: (g) => secs[g],
@@ -148,7 +157,7 @@ export function createWays({ onChange, groups, locked = {}, compact = false } = 
     },
     set(g, flags) {
       const wanted = Array.isArray(flags) ? flags : String(flags || "").split(",").filter(Boolean);
-      const ordered = LISTS[g].map((w) => w[0]).filter((f) => wanted.includes(f));
+      const ordered = lists[g].map((w) => w[0]).filter((f) => wanted.includes(f));
       state[g] = free(g, ordered.reduce((acc, f) => toggleWay(g, acc, f, true), [...fixed(g)]));
       paint(g);
     },

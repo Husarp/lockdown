@@ -73,7 +73,7 @@ def _targets_text(item: dict) -> str:
     if item["item_type"] == "app":
         flags = block_flags(item.get("block_type"))
         words = (("close", "closes"), ("background", "background processes"), ("minimize", "minimises"),
-                 ("internet", "internet blocked"))
+                 ("grey", "greys the screen"), ("internet", "internet blocked"))
         how = " + ".join(w for f, w in words if f in flags)
         return f"app · {item['target']} · {how}"
     return " · ".join(item["target"].split()) + " · " + site_block.text(item.get("block_type"))

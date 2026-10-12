@@ -121,7 +121,7 @@ test("the group's own way boxes: closing excludes minimizing, and an app way of 
   // createWays builds DOM; the pure part is checked in the browser test. Here: the module exports what the page uses.
   assert.equal(typeof ways.createWays, "function");
   assert.equal(cm.createWays, undefined);                                       // (one implementation: js/ways.js)
-  assert.deepEqual(ways.APP_WAYS.map((w) => w[0]), ["close", "background", "minimize", "internet"]);
+  assert.deepEqual(ways.APP_WAYS.map((w) => w[0]), ["close", "background", "minimize", "grey", "internet"]);
   assert.deepEqual(ways.SITE_WAYS.map((w) => w[0]), ["dns", "close", "back"]);
 });
 

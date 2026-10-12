@@ -4,8 +4,8 @@
 //                          apply and its time still fills the group's shared limits. OK checks the blockers with Python
 //                          (rules_validate) and hands back the rule dicts Python read: onDone({rule_type: rule}).
 //   openMemberWay({name, kind, hosted, groupWay, itemWay, way, onDone})   "How X is blocked": a member's own way in this
-//                          group - an app's replaces the group's, a site's is added on top, a program file is closed or
-//                          minimised only. onDone(way string | null).
+//                          group - an app's replaces the group's (Close, Minimize or Grey it ...), a site's is added on top, a
+//                          program file is closed or minimised only. onDone(way string | null).
 // Whether a lighter way or a removed / relaxed extra limit LOOSENS anything is not decided here: the page only sends what
 // was chosen with Done, and Python (antibypass) asks for the challenge.
 import { openDialog } from "./dialog.js";
@@ -37,7 +37,7 @@ export function openMemberWay({ name, kind, hosted, groupWay, itemWay, way, onDo
         const value = ways.value(group);
         if (isApp && !value) {
           const err = body.querySelector("[data-k=err]");
-          err.textContent = "Tick Close app, Minimize or Block internet for its own way.";
+          err.textContent = "Tick Close app, Minimize, Grey it or Block internet for its own way.";
           err.hidden = false;
           return false;
         }

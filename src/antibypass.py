@@ -36,7 +36,6 @@ import string
 from datetime import datetime, timedelta
 
 import block_method
-from blocker.apps import block_flags
 from blocker.site_block import site_flags
 from rules import (ALLOW, OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, day_limits,
                    load_schedule, next_window_start, parse_hhmm, window_until)
@@ -241,8 +240,8 @@ def rules_looser(old: list[dict], new: list[dict], now: datetime) -> bool:
 
 
 def _strength(block_type: str | None) -> set[str]:
-    flags = block_flags(block_type)
-    return flags | {"minimize"} if "close" in flags else flags   # closing is stronger than minimizing
+    """What an app way does, for comparing: closing is stronger than minimizing, which is stronger than Grey it."""
+    return block_method.strength("app", block_type)
 
 
 def item_looser(old: dict, new: dict | None, now: datetime) -> bool:

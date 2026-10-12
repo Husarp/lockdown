@@ -631,7 +631,7 @@ def test_a_members_own_way_dialog(shell, page, harness):
     assert "replaces the group's" in page.inner_text("#dlg .dlg-b")
     page.click('#dlg label:has([data-way="close"])')
     page.click('#dlg button:has-text("OK")')                                    # nothing ticked: refused
-    assert "Tick Close app, Minimize or Block internet" in page.inner_text("#dlg .rule-err")
+    assert "Tick Close app, Minimize, Grey it or Block internet" in page.inner_text("#dlg .rule-err")
     page.click('#dlg label:has([data-way="minimize"])')
     page.click('#dlg button:has-text("OK")')
     dialog_closed(page)
@@ -786,6 +786,62 @@ def test_a_lighter_own_way_while_locked_asks_and_a_stricter_one_does_not(shell, 
     page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
     assert not page.locator("dialog[open] .ch-phrase").count()
     assert group(harness)["member_blocks"] == {pad: "close"}
+
+
+def test_grey_it_is_one_of_the_group_s_app_ways_and_goes_with_neither_close_nor_minimize(shell, page, harness):
+    g = group(harness)
+    harness.db.update_group(g["id"], g["name"], g["rules"], g["members"], False,
+                            {"app_block": "close,background", "site_block": "dns", "member_blocks": {}})
+    reload_draft(harness)
+    open_fun(shell, page)
+    apps = ".ge-wcols > div:first-child"
+    assert page.eval_on_selector_all(f"{apps} [data-way]", "els => els.map(e => e.dataset.way)") == \
+        ["close", "background", "minimize", "grey", "internet"]
+    assert "Color filters" in page.get_attribute(f'{apps} [data-w="grey"] .way-help', "title")
+    page.click(f'{apps} label:has([data-way="grey"])')
+    assert page.is_checked(f'{apps} [data-way="grey"]') and not page.is_checked(f'{apps} [data-way="close"]')
+    assert page.is_disabled(f'{apps} [data-way="background"]')
+    page.click(f'{apps} label:has([data-way="internet"])')
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    assert group(harness)["app_block"] == "grey,internet"                      # (lighter than close,background: the harness isn't locked)
+
+
+def test_a_group_s_grey_way_is_drawn_ticked_and_greyed_it_back_to_close_is_free_while_locked(shell, page, harness):
+    g = group(harness)
+    harness.db.update_group(g["id"], g["name"], g["rules"], g["members"], False,
+                            {"app_block": "grey", "site_block": "dns", "member_blocks": {}})
+    reload_draft(harness)
+    lock(harness)
+    open_fun(shell, page)
+    apps = ".ge-wcols > div:first-child"
+    assert page.is_checked(f'{apps} [data-way="grey"]') and not page.is_checked(f'{apps} [data-way="close"]')
+    page.click(f'{apps} label:has([data-way="close"])')
+    assert page.is_checked(f'{apps} [data-way="close"]') and not page.is_checked(f'{apps} [data-way="grey"]')
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector('[data-k="g-blank"]:not([hidden])', timeout=8000)
+    assert not page.locator("dialog[open] .ch-phrase").count()                 # grey -> close: stronger, free
+    assert group(harness)["app_block"] == "close"
+
+
+def test_a_member_app_can_be_greyed_on_its_own_and_that_asks_while_locked(shell, page, harness):
+    pad = add_notepad(harness, "close")
+    lock(harness)
+    open_fun(shell, page)
+    pick_way(page, "Notepad", "Its own way")
+    page.wait_for_selector("#dlg[open]")
+    assert page.eval_on_selector_all("#dlg [data-way]", "els => els.map(e => e.dataset.way)") == \
+        ["close", "background", "minimize", "grey", "internet"]
+    page.click('#dlg label:has([data-way="close"])')
+    page.click('#dlg label:has([data-way="grey"])')
+    page.click('#dlg button:has-text("OK")')
+    dialog_closed(page)
+    assert member_row(page, "Notepad").locator('[data-act="way"]').inner_text() == "Its own way: Grey it"
+    page.click('.ge-top button:has-text("Done")')
+    page.wait_for_selector("dialog[open] .ch-phrase", timeout=5000)
+    assert "Loosen group Fun" in page.inner_text("dialog[open] .ch-changes")
+    assert group(harness)["member_blocks"] == {}
+    cancel_challenge(page)
 
 
 def test_a_raised_shared_limit_and_a_lighter_group_way_ask_for_the_challenge(shell, page, harness):
