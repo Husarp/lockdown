@@ -13,6 +13,11 @@ quick), and NET_WORKERS threads for the net (resident/iconfetch.py), with a shor
 requests go before the prefetch backlog (`prefetch`: the sites on the owner's lists, resident/icon_prefetch.py).
 Nothing here runs on the GUI thread; PIL is imported on a background thread only.
 
+A name the route cannot use (a ":" or "|" in it, ".." ...) is answered with a tile too - never a 404, so no <img> shows a
+broken-image glyph - and it never reaches the file system or the queue. Windows' own processes ("[system process]",
+"svchost.exe", "MsMpEng.exe" ...) get a system tile (a gear, or a shield for the security ones) until a real icon is
+found (%SystemRoot% and System32 are tried after the catalog); those without an .exe name are never extracted.
+
 The page is untrusted: only plain names are accepted (an exe name - anything Windows allows in a file name except
 path characters - or a host name; no folders, no "..", no control characters), and the page never says WHERE an exe is
 - the path comes from the app catalog or the owner's own list.
@@ -47,6 +52,24 @@ BAD_NAME_CHARS = frozenset('\\/:*?"<>|')   # what Windows refuses in a file name
 OWN_EXES = frozenset({"lockdown.exe", "lockdownservice.exe", "lockdownsetup.exe"})   # get Lockdown's own icon
 OWN_ICON_SIZE = 32      # as the extracted icons
 KINDS = {"app": ".png", "site": ".png", "letter": ".svg"}
+
+# Windows' own processes (lower case, with or without ".exe"): the gear = a system process, the shield = a security one.
+SYSTEM_NAMES = {
+    **dict.fromkeys((
+        "[system process]", "system", "system idle process", "idle", "registry", "memory compression", "secure system",
+        "svchost", "csrss", "lsass", "lsaiso", "services", "wininit", "winlogon", "smss", "dwm", "fontdrvhost", "sihost",
+        "taskhostw", "runtimebroker", "spoolsv", "audiodg", "conhost", "ctfmon", "searchhost", "searchindexer", "wmiprvse",
+        "dllhost", "backgroundtaskhost", "startmenuexperiencehost", "shellexperiencehost", "textinputhost", "explorer"),
+        "gear"),
+    **dict.fromkeys(("msmpeng", "nissrv", "mpdefendercoreservice", "securityhealthservice", "securityhealthsystray",
+                     "smartscreen", "mssense"), "shield"),
+}
+SYSTEM_COLOR = "#5b6b7c"    # a neutral slate
+# The two glyphs, copied from src/ui/js/icons.js (PATHS.settings and PATHS.shield; a test keeps them equal).
+GLYPHS = {
+    "gear": '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    "shield": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+}
 
 
 def clean_exe(name: str) -> str | None:
@@ -85,6 +108,55 @@ def letter_svg(text: str) -> bytes:
             f'<rect width="64" height="64" rx="14" fill="{color}"/>'
             '<text x="32" y="33" text-anchor="middle" dominant-baseline="central" font-family="Segoe UI, system-ui, '
             f'sans-serif" font-weight="700" font-size="38" fill="#fff">{letter}</text></svg>').encode()
+
+
+def system_kind(name: str) -> str | None:
+    """"gear" / "shield" for a Windows process the table knows (name in any case, with or without ".exe"), else None."""
+    name = name.lower()
+    return SYSTEM_NAMES.get(name[:-4] if name.endswith(".exe") else name)
+
+
+def system_svg(kind: str) -> bytes:
+    """The system tile: a rounded square as the letter tile, in slate, with the white stroke glyph."""
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">'
+            f'<rect width="64" height="64" rx="14" fill="{SYSTEM_COLOR}"/>'
+            f'<g data-glyph="{kind}" transform="translate(16 16) scale(1.3333)" fill="none" stroke="#fff" stroke-width="2" '
+            f'stroke-linecap="round" stroke-linejoin="round">{GLYPHS[kind]}</g></svg>').encode()
+
+
+def tile_svg(name: str) -> bytes:
+    """What an app name shows until (or instead of) its real icon: the system tile of a known Windows process, else
+    the letter tile."""
+    kind = system_kind(name)
+    return system_svg(kind) if kind else letter_svg(name[:MAX_NAME])
+
+
+def extractable(name: str) -> bool:
+    """Could a real icon exist for this (cleaned) app name? Not for "[system process]" and the like, nor for a known
+    system name without ".exe" ("System", "Registry"): those are not files."""
+    return not name.startswith("[") and (name.endswith(".exe") or system_kind(name) is None)
+
+
+def system_exe_path(name: str) -> str | None:
+    """%SystemRoot%\<exe> or %SystemRoot%\System32\<exe> if such a file exists (Windows only; `name` is a cleaned
+    ".exe" name, so it has no folder in it)."""
+    root = _system_root()
+    if root is None or not name.endswith(".exe"):
+        return None
+    for folder in (root, root / "System32"):
+        try:
+            path = folder / name
+            if path.is_file():
+                return str(path)
+        except OSError:
+            continue
+    return None
+
+
+def _system_root() -> Path | None:
+    import os
+    base = os.environ.get("SystemRoot") if sys.platform == "win32" else None
+    return Path(base) if base else None
 
 
 def default_dir() -> Path:
@@ -157,23 +229,27 @@ class IconService:
     def handle(self, rest: str, query: dict) -> Response | None:
         kind, _, name = rest.partition("/")
         ext = KINDS.get(kind)
-        if not ext or not name.endswith(ext) or "/" in name:
+        if not ext or not name.endswith(ext):
             return None
         name = name[:-len(ext)]
         if kind == "letter":
-            if not name or len(name) > 64 or not name.isprintable():   # (any text: it is XML-escaped; "/" cannot get here)
+            if not name or len(name) > 64 or not name.isprintable() or "/" in name:   # (any text: it is XML-escaped)
                 return None
             return Response(letter_svg(name), "image/svg+xml", cache="public, max-age=86400")
+        raw = name
         name = clean_exe(name) if kind == "app" else clean_host(name)
-        if name is None:
-            return None
+        if name is None:     # a name this server cannot use: a tile, never a 404 - and nothing is read, written or queued
+            return Response(tile_svg(raw) if kind == "app" else letter_svg(raw[:MAX_NAME]), "image/svg+xml",
+                            cache="public, max-age=86400")
         if kind == "site":
             return self._site(name)
         data = self._cached(kind, name)
         if data is not None:
             return Response(data, "image/png", cache="no-cache", etag=f'"{self._stamp(kind, name)}"')
+        if not extractable(name):    # (no real icon can ever come: the tile may be kept)
+            return Response(tile_svg(name), "image/svg+xml", cache="public, max-age=86400")
         self._enqueue(kind, name)
-        return Response(letter_svg(name), "image/svg+xml", cache="no-store")
+        return Response(tile_svg(name), "image/svg+xml", cache="no-store")
 
     def _site(self, name: str) -> Response:
         """The cache, else the icon bundled with Lockdown, else a letter tile (and a download, if that is on)."""
@@ -398,7 +474,7 @@ class IconService:
             if data:
                 self._save(target, data)
                 return True
-        path = self.path_of(name)
+        path = self.path_of(name) or system_exe_path(name)
         data = self.extract(path) if path else None
         if not data:
             return False

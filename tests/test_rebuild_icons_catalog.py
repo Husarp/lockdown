@@ -204,14 +204,29 @@ def test_a_crashing_extractor_leaves_the_letter_and_does_not_stop_the_thread(mad
     assert made.ready == [] and made.service.queued == 0
 
 
-@pytest.mark.parametrize("rest", [
+BAD_TILE_NAMES = [
     "app/../secret.png", "app/..%2fsecret.exe.png", "app/a/b.exe.png", "app/..\\x.exe.png", "app/c:x.exe.png",
-    "app/con:.exe.png", "app/.hidden.png", "app/x..exe.png", "app/.png", "app/x.exe", "app/x.exe.svg", "app/a\x00b.exe.png",
+    "app/con:.exe.png", "app/.hidden.png", "app/x..exe.png", "app/.png", "app/a\x00b.exe.png",
     "app/<script>.exe.png", "app/" + "a" * 120 + ".exe.png", "app/a|b.exe.png", "app/a*b.exe.png", "app/a?b.exe.png",
     'app/a"b.exe.png', "app/a>b.exe.png", "app/a\x1fb.exe.png", "app/a\x7fb.exe.png", "app/a\u2028b.exe.png", "app/ x.exe.png",
-    "app/x.exe .png", "app/x.exe..png", "app/x:y.exe.png", "app/....png",
+    "app/x.exe .png", "app/x.exe..png", "app/x:y.exe.png", "app/....png", "app//etc/passwd.png",
     "site/../x.png", "site/a b.com.png", "site/a_b.com.png", "site/.com.png", "site/a..com.png", "site/-a.com.png",
-    "site/a.com-.png", "site/" + "a" * 260 + ".com.png", "site/ex%61mple.com.png", "site/a/b.png", "site/a.com.svg",
+    "site/a.com-.png", "site/" + "a" * 260 + ".com.png", "site/ex%61mple.com.png", "site/a/b.png",
+]
+
+
+@pytest.mark.parametrize("rest", BAD_TILE_NAMES)
+def test_an_unusable_app_or_site_name_gets_a_tile_and_touches_nothing(made, rest):
+    s = made.service
+    r = s.handle(rest, {})
+    assert r is not None and r.status == 200 and r.content_type == "image/svg+xml" and b"<svg" in r.body
+    assert s.queued == 0 and made.extracted == [] and made.fetched == [] and not made.dir.exists()
+    import xml.dom.minidom
+    xml.dom.minidom.parseString(r.body)
+
+
+@pytest.mark.parametrize("rest", [
+    "app/x.exe", "app/x.exe.svg", "site/a.com.svg",
     "letter/a/b.svg", "letter/a\x00b.svg", "letter/a\nb.svg", "letter/" + "x" * 65 + ".svg", "letter/.svg",
     "letter/x.png",
     "other/x.png", "x.png", "", "app", "app/",
@@ -252,8 +267,10 @@ def test_odd_names_over_http_are_still_refused_and_osu_is_served(made, tmp_path)
             status, r, body = get(server, path)
             assert status == 200 and r.getheader("Content-Type") == "image/svg+xml" and b"<svg" in body, path
         for path in ("/icon/app/a%2fb.exe.png", "/icon/app/..%2f..%2fsecret.png", "/icon/app/a%5cb.exe.png",
-                     "/icon/app/a%3ab.exe.png", "/icon/app/x%7cy.exe.png", "/icon/app/a%00b.exe.png", "/icon/app/%2e%2e.png",
-                     "/icon/letter/a%2fb.svg", "/icon/letter/%2e%2e%2fsecret.svg"):
+                     "/icon/app/a%3ab.exe.png", "/icon/app/x%7cy.exe.png", "/icon/app/a%00b.exe.png", "/icon/app/%2e%2e.png"):
+            status, r, body = get(server, path)          # (a tile, not a broken image - and never the file)
+            assert status == 200 and r.getheader("Content-Type") == "image/svg+xml" and b"SECRET" not in body, path
+        for path in ("/icon/letter/a%2fb.svg", "/icon/letter/%2e%2e%2fsecret.svg"):
             status, _r, body = get(server, path)
             assert status in (400, 403, 404) and b"SECRET" not in body, path
     finally:
@@ -301,10 +318,13 @@ def test_the_route_over_http_cannot_leave_the_cache_folder(made, tmp_path):
     server.start()
     try:
         for path in ("/icon/app/..%2f..%2fsecret.png", "/icon/app/%2e%2e/secret.png", "/icon/app/..%5csecret.exe.png",
-                     "/icon/site/%2e%2e%2fsecret.png", "/icon/../secret.png", "/icon/app//etc/passwd.png",
-                     "/icon/app/%00.exe.png", "/icon/other/chrome.exe.png"):
+                     "/icon/site/%2e%2e%2fsecret.png", "/icon/app//etc/passwd.png", "/icon/app/%00.exe.png"):
+            status, r, body = get(server, path)          # (the answer is just an SVG tile)
+            assert status == 200 and r.getheader("Content-Type") == "image/svg+xml" and b"SECRET" not in body, path
+        for path in ("/icon/../secret.png", "/icon/other/chrome.exe.png"):
             status, _r, body = get(server, path)
             assert status in (400, 403, 404) and b"SECRET" not in body, path
+        assert not made.dir.exists() or not any(made.dir.iterdir()) and made.service.queued == 0
         status, r, body = get(server, "/icon/app/chrome.exe.png")
         assert status == 200 and r.getheader("Content-Type") == "image/svg+xml" and r.getheader("Cache-Control") == "no-store"
         made.service.run_pending()
@@ -326,6 +346,64 @@ def test_the_letter_route_makes_an_svg_and_escapes_the_text(made):
     import xml.dom.minidom
     xml.dom.minidom.parseString(r.body)
     assert icons.letter_svg("<&>\"").count(b"<text") == 1 and b"&lt;" not in icons.letter_svg("<&>")
+
+
+def test_the_system_glyphs_equal_the_ones_in_icons_js():
+    import re
+    js = (Path(__file__).resolve().parent.parent / "src" / "ui" / "js" / "icons.js").read_text(encoding="utf-8")
+    for glyph, key in (("gear", "settings"), ("shield", "shield")):
+        found = re.search(r"^\s*" + key + r": '(.*)',?$", js, re.M)
+        assert found and found.group(1) == icons.GLYPHS[glyph], key
+
+
+@pytest.mark.parametrize("name,glyph", [
+    ("[system process]", "gear"), ("System", "gear"), ("svchost.exe", "gear"), ("SvcHost", "gear"), ("explorer.exe", "gear"),
+    ("Registry", "gear"), ("MsMpEng.exe", "shield"), ("Msmpeng", "shield"), ("NisSrv.exe", "shield"), ("mssense", "shield"),
+])
+def test_windows_processes_get_the_gear_or_shield_tile(made, name, glyph):
+    r = made.service.handle(f"app/{name}.png", {})
+    assert r.content_type == "image/svg+xml"
+    assert f'data-glyph="{glyph}"'.encode() in r.body and icons.SYSTEM_COLOR.encode() in r.body and b"<text" not in r.body
+    import xml.dom.minidom
+    xml.dom.minidom.parseString(r.body)
+    assert icons.system_kind(name) == glyph
+
+
+def test_other_programs_keep_their_letter_tile():
+    for name in ("chrome.exe", "osu!.exe", "systemsettings.exe", "svchost.dll", "x"):
+        assert icons.system_kind(name) is None and b"<text" in icons.tile_svg(name), name
+
+
+def test_system_names_that_are_not_files_are_never_extracted(made):
+    s = made.service
+    for name in ("[system process]", "System", "Registry", "Msmpeng", "Memory Compression"):
+        r = s.handle(f"app/{name}.png", {})
+        assert b"data-glyph" in r.body and "max-age" in r.cache, name
+    assert s.queued == 0 and made.extracted == []
+    r = s.handle("app/svchost.exe.png", {})            # a real file name: the tile now, the real icon when it can be had
+    assert b"data-glyph" in r.body and r.cache == "no-store" and s.queued == 1
+
+
+def test_a_system_program_gets_its_real_icon_from_the_windows_folders(made, tmp_path, monkeypatch):
+    root = tmp_path / "Windows"
+    (root / "System32").mkdir(parents=True)
+    (root / "explorer.exe").write_bytes(b"x")
+    (root / "System32" / "svchost.exe").write_bytes(b"x")
+    monkeypatch.setattr(icons, "_system_root", lambda: root)
+    s = made.service
+    for name in ("explorer.exe", "svchost.exe", "nothere.exe"):
+        s.handle(f"app/{name}.png", {})
+    s.run_pending()
+    assert sorted(made.extracted) == sorted([str(root / "explorer.exe"), str(root / "System32" / "svchost.exe")])
+    assert sorted(made.ready) == ["app:explorer.exe", "app:svchost.exe"]
+    assert s.handle("app/svchost.exe.png", {}).content_type == "image/png"
+    assert s.handle("app/nothere.exe.png", {}).content_type == "image/svg+xml"
+    assert icons.system_exe_path("..\\x.exe") is None and icons.system_exe_path("explorer") is None
+
+
+def test_the_windows_folders_are_not_asked_off_windows(made, monkeypatch):
+    if sys.platform != "win32":
+        assert icons._system_root() is None and icons.system_exe_path("explorer.exe") is None
 
 
 def test_the_thread_gets_the_icon_and_nothing_heavy_is_imported_on_the_request():
