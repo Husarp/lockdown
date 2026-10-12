@@ -66,8 +66,9 @@ def public(found: dict | None) -> dict | None:
 def outcome(found: dict | None) -> dict:
     """What a check found, in the About page's words (the same ones as the old window)."""
     if not found:
+        why = f" ({updates.last_error})" if updates.last_error else ""
         return {"kind": "unreachable", "installable": False,
-                "text": "Couldn't ask GitHub just now - no connection, or no release published yet."}
+                "text": f"Couldn't ask GitHub just now - no connection, or no release published yet.{why}"}
     version, size = str(found.get("version")), int(found.get("size") or 0)
     if updates.can_install(found):
         mb = f" ({size / 1048576:.0f} MB)" if size else ""
@@ -189,6 +190,8 @@ class UpdateFlow:
     def _check_run(self):
         try:
             found = self._latest()
+            if not found and updates.last_error:
+                self._log(RuntimeError(f"no answer from GitHub ({updates.last_error})"))
             db = self._db()
             from trusted_time import now_from_db
             now = now_from_db(db)

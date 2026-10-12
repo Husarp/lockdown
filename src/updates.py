@@ -95,8 +95,13 @@ def latest_release(fetch=None) -> dict | None:
         return {"version": tag.lstrip("vV"), "url": data.get("html_url") or RELEASES.format(repo=REPO),
                 "newer": is_newer(tag), "asset": found[0] if found else None,
                 "size": found[1] if found else 0}
-    except Exception:
+    except Exception as error:
+        global last_error
+        last_error = f"{type(error).__name__}: {error}"[:200]   # (shown on About and logged: why a check got no answer)
         return None
+
+
+last_error = ""   # why the last latest_release() got no answer ("" = it did, or nothing tried yet)
 
 
 def can_install(found: dict | None) -> bool:

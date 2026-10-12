@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Update check says why it got no answer.** When About can't reach GitHub it now shows the reason (e.g. a timeout or a certificate error), and the log keeps it too.
+
 ## 0.87.0 - 2026-10-12 15:25
 - **Bedtime "Comes back" times (PC).** The time in each step is now a compact HH:MM field like the Bedtime and Wake up ones, with no extra box and no wide gap between hour and minutes. Tests: `test_a_step_time_is_a_compact_hh_mm_field`.
 - **Blocked-site alert names the category (PC).** When a site or app is blocked because it belongs to a blocked category (for example Distracting), the alert now ends with "It's in Distracting." If your message uses `{reason}`, it says "(it's in Distracting)" there instead. Sites and apps blocked in their own right read as before. Tests: `test_a_category_block_names_the_category`, `test_a_category_block_says_it_comes_from_the_category`.
