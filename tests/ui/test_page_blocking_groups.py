@@ -197,6 +197,41 @@ def test_a_disabled_group_and_an_unsaved_one_say_so(shell, page, harness):
     assert group(harness)["name"] == "Fun"                                  # (not saved yet)
 
 
+@pytest.mark.parametrize("size", [(1100, 720), (800, 600)])
+def test_a_long_group_card_stays_inside_its_card_and_beside_the_editor(shell, page, harness, size):
+    import json
+    g = group(harness)
+    night = json.dumps({"mode": "block", "windows": [{"days": [0, 1, 2, 3, 6], "start": "21:00", "end": "05:00"},
+                                                      {"days": [4, 5], "start": "22:00", "end": "05:00"}]})
+    harness.db.update_group(g["id"], "Good Night", [{"rule_type": "scheduled", "schedule": night}], g["members"], True)
+    reload_draft(harness)
+    open_groups(shell, page, width=size[0], height=size[1])
+    page.click(".gp-card[data-id]")
+    page.wait_for_selector('[data-k="g-editor"]:not([hidden]) [data-k="g-name"]')
+    settle(page, 300)
+    bad = page.evaluate("""() => {
+      const out = [];
+      for (const card of document.querySelectorAll('.gp-card[data-id]')) {
+        const c = card.getBoundingClientRect();
+        for (const e of card.querySelectorAll('.top .grow > *, .top .chip, .gp-chips, .bchip, .gp-ways')) {
+          const r = e.getBoundingClientRect();
+          if (r.width && (r.left < c.left - 1 || r.right > c.right + 1)) out.push(`${e.className}: ${r.left}-${r.right} vs card ${c.left}-${c.right}`);
+        }
+      }
+      const l = document.querySelector('.gp-list').getBoundingClientRect(), e = document.querySelector('.gp-right').getBoundingClientRect();
+      if (!(l.right <= e.left + 1 || l.bottom <= e.top + 1)) out.push(`list ${l.left}-${l.right}/${l.top}-${l.bottom} overlaps editor ${e.left}-${e.right}/${e.top}-${e.bottom}`);
+      const t = document.querySelector('.ge-top h2').getBoundingClientRect();
+      for (const b of document.querySelectorAll('.ge-top .card-h .btn')) {
+        const r = b.getBoundingClientRect();
+        if (r.width && r.left < t.right - 1 && r.right > t.left + 1 && r.top < t.bottom - 1 && r.bottom > t.top + 1) out.push('editor title overlaps ' + b.textContent);
+      }
+      return out;
+    }""")
+    assert bad == []
+    assert page.locator(".gp-card[data-id] .bchip").count() >= 1
+    assert "Friday" in page.get_attribute(".gp-card[data-id] .gp-chips", "title")        # the full text is in the tooltip
+
+
 # ================================================================ the editor
 
 def test_opening_a_group_fills_the_editor(shell, page, harness):

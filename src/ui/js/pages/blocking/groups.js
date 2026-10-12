@@ -124,17 +124,24 @@ const STYLE = `<style>
 .gp-intro { grid-column: 1 / -1; margin: 0; }
 @media (max-width: 900px) { .gp { grid-template-columns: minmax(0, 1fr); } }
 .gp-list { display: grid; gap: var(--sp-3); align-content: start; min-width: 0; }
-.gp-card { gap: var(--sp-2); position: relative; }
+.gp-card { gap: var(--sp-2); position: relative; grid-template-columns: minmax(0, 1fr); }
 .gp-card[aria-current="true"] { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); }
 .gp-card h3 { font-size: var(--fs-md, 1em); }
-.gp-card .top .chip { max-width: 55%; flex: none; }
-.gp-card .top .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-card .top { min-width: 0; flex-wrap: wrap; row-gap: var(--sp-2); }
+.gp-card .top .grow { flex: 1 1 calc(110px * var(--s)); }
+.gp-card .top .grow > * { display: block; }
+.gp-card .top .chip { max-width: 100%; flex: none; min-width: 0; }
+.gp-card .top .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gp-ways { overflow-wrap: anywhere; }
 .gp-chips { display: flex; flex-wrap: wrap; gap: 3px var(--sp-1); min-width: 0; }
 .gp-chips:empty { display: none; }
 .bchip { display: inline-flex; align-items: center; gap: 4px; height: calc(20px * var(--s)); max-width: 100%; padding: 0 var(--sp-2); border-radius: var(--r-pill);
   background: var(--k-soft); color: var(--text); font-size: var(--fs-sm); line-height: 1; white-space: nowrap; }
 .bchip .ic { color: var(--k); width: calc(12px * var(--s)); height: calc(12px * var(--s)); }
-.bchip span { overflow: hidden; text-overflow: ellipsis; }
+.bchip span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.gp-chips .bchip { height: auto; min-height: calc(20px * var(--s)); align-items: flex-start; padding: calc(3px * var(--s)) var(--sp-2); border-radius: var(--r-md); white-space: normal; line-height: 1.25; }
+.gp-chips .bchip .ic { flex: none; margin-top: calc(1px * var(--s)); }
+.gp-chips .bchip span { overflow-wrap: anywhere; text-overflow: clip; }
 .gp-new { border-style: dashed; background: transparent; color: var(--text-2); justify-items: center; place-content: center; min-height: calc(64px * var(--s)); text-align: center; }
 .gp-none { padding: var(--sp-3) 0; }
 .gp-right { min-width: 0; display: grid; gap: var(--sp-4); align-content: start; }
@@ -181,12 +188,13 @@ function paintCard(node, g) {
   node.dataset.id = g.id;
   setText(r.name, g.name);
   setText(r.line, membersLine(g));
+  r.line.title = r.line.textContent;
   const className = `chip ${STATUS_CLASS[g.status.k] || "chip-paused"}`;
   if (r.chip.className !== className) r.chip.className = className;
   setText(r.chipText, g.status.text);
   r.chip.title = g.status.title || g.status.text;
   const sig = JSON.stringify(g.chips);
-  if (node._sig !== sig) { node._sig = sig; r.chips.innerHTML = chipsHtml(g.chips); }
+  if (node._sig !== sig) { node._sig = sig; r.chips.innerHTML = chipsHtml(g.chips); r.chips.title = g.chips.map((c) => c.t).join("\n"); }
   setText(r.ways, g.ways);
   node.setAttribute("aria-current", String(!!ed && ed.id === g.id));
   node.setAttribute("aria-label", `${g.name}, ${g.status.text}`);
