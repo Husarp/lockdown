@@ -116,13 +116,10 @@ def test_nothing_takes_a_path_or_a_confirmed_flag():
     assert not core.ui_setting_allowed("antibypass") and not core.ui_setting_allowed("app.off")
 
 
-def test_the_new_window_switch_is_gone_from_both_settings_pages():
-    """No way back to the old window from either page: no Api method, no settings field, no switch in the old page."""
+def test_the_new_window_switch_is_gone_from_the_settings_page():
+    """No way back to the old window: no Api method, no settings field, no switch on the page."""
     import inspect
-    from gui import settings as legacy
     assert core.registry.get("ui_engine_set") is None and "engine" not in inspect.getsource(settings)
-    for gone in ("_build_engine", "_engine_changed", "engine_switch"):
-        assert gone not in inspect.getsource(legacy), gone
     js = (ROOT / "src" / "ui" / "js" / "pages" / "settings.js").read_text(encoding="utf-8")
     for gone in ("engine", "use the new window", "back to the old window", "old window opens"):
         assert gone not in js.lower(), gone
@@ -252,13 +249,14 @@ def test_the_settings_page_data(api, ctx):
     assert e["enabled"] is True and e["max_kinds"] == 5 and e["max_uses"] == 10 and 20 in e["minute_options"]
     [k] = e["kinds"]
     assert (k["uses"], k["per"], k["minutes"], k["left"], k["allowed"]) == (3, "week", 20, 3, 3)
-    assert k["per_text"] == "this week" and k["resets_text"] == "Mon 12 Oct 00:00"
+    assert k["per_text"] == "this week" and k["resets_text"] == "Mon 12 Oct 00:00" and k["used"] == []
 
 
 def test_the_meters_count_from_now(api, ctx, clock):
     emergency.unlock(ctx.db, [], NOW, alerts=True, tier="t1")
     [k] = data(api.settings_get())["emergency"]["kinds"]
     assert (k["left"], k["allowed"]) == (2, 3)
+    assert k["used"] == ["Sun 11 Oct 15:42–16:02"]
 
 
 def test_get_theme_carries_reduce_motion(api, ctx):

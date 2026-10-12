@@ -5,8 +5,8 @@ what is blocked now, read once), today's rows from the activity log, and a few c
 the cards that are shown (a card hidden in Display settings costs nothing) and `upcoming` once. Everything the page
 needs is plain text and numbers: the page formats nothing but the clock-driven countdowns.
 
-The logic is the old window's (gui/dashboard.py: limit_entries, upcoming, the stat cards), kept word for word where it
-decides what the owner reads; that module imports customtkinter, so the pure parts are repeated here.
+The logic is the old window's (limit_entries, upcoming, the stat cards), kept word for word where it decides what the
+owner reads.
 
 Nothing here can loosen a block. Hiding a card or picking Screen Time's first tab is cosmetic (`ui`).
 """
@@ -14,6 +14,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 
+import emergency
 import stats
 from resident import snapshot
 from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left, allowance_owner,
@@ -38,7 +39,7 @@ CARDS = {"stats": "Numbers at the top", "today": "Today", "limits": "Limits toda
          "week": "Last 7 days", "visits": "Blocked visits today", "glance": "At a glance",
          "active": "Active blocks", "bedtime": "Bedtime", "pause": "Pause my blocks",
          "emergency": "Emergency unlocks left"}
-ST_TABS = ("Overview", "Apps", "Websites", "Switches")     # gui/screen_time.TABS without Calendar (a test keeps them equal)
+ST_TABS = ("Overview", "Apps", "Websites", "Switches")     # (the Calendar tab is Screen Time's own page)
 ST_RANGES = tuple(stats.RANGES)
 COMING_MAX, VISITS_MAX, ACTIVE_MAX = 4, 4, 6
 LOW_LIMIT_SEC = 30 * 60                # "about N minutes of use left" shows from this little left
@@ -304,6 +305,11 @@ class _Day:
         return self._memo[key]
 
     @property
+    def unlocks(self):
+        """{day: [unlock, ...]} of the last 7 days' emergency unlocks (what the week bars and the Emergency card show)."""
+        return self.memo("unlocks", lambda: emergency.unlocks_by_day(self.db, self.today - timedelta(days=6)))
+
+    @property
     def rows(self):
         return self.memo("rows", lambda: stats.activity(self.db, self.today, self.tomorrow))
 
@@ -464,13 +470,14 @@ def _card_limits(d: _Day) -> dict:
 def _card_week(d: _Day) -> dict:
     start = d.today - timedelta(days=6)
     per_day = stats.daily_active(d.db, start, d.tomorrow)     # summed in SQL
-    unlocks = Counter(u["started"].date() for u in d.db.unlocks_since(datetime.combine(start, datetime.min.time())))
+    unlocks = d.unlocks
     bars = []
     for day in (start + timedelta(days=i) for i in range(7)):
         sec = per_day.get(day.isoformat(), 0)
+        tip = f"{DAY_NAMES[day.weekday()]} {day.day} {MONTHS[day.month - 1]}  {stats.hm(sec)}"
         bars.append({"label": DAY_NAMES[day.weekday()][:3], "value": round(sec / 60, 1), "today": day == d.today,
-                     "tip": f"{DAY_NAMES[day.weekday()]} {day.day} {MONTHS[day.month - 1]}  {stats.hm(sec)}",
-                     "unlocks": unlocks.get(day, 0)})
+                     "tip": "\n".join([tip] + [emergency.unlock_line(u) for u in unlocks.get(day, [])]),
+                     "unlocks": len(unlocks.get(day, []))})
     goal = d.goal
     return {"bars": bars, "goal": round(goal / 60, 1) if goal else 0,
             "goal_label": f"{goal / 3600:g} h" if goal else "", "note": f"daily goal {goal / 3600:g} h" if goal else ""}
@@ -561,7 +568,9 @@ def _card_glance(d: _Day) -> dict:
         n = streak["goal"]
         entries.append({"label": "Goal streak", "main": f"{_plural(n, 'day')} in a row", "extra": "within your daily goal"})
     n = streak["no_unlock"]
-    entries.append({"label": "No emergency unlock", "main": f"{_plural(n, 'day')} in a row", "extra": ""})
+    used = ", ".join(emergency.unlock_span(u["started"], u["until"]) for u in d.unlocks.get(d.today, [])) if not n else ""
+    entries.append({"label": "No emergency unlock", "main": f"{_plural(n, 'day')} in a row",
+                    "extra": f"used today {used}" if used else ""})
     return {"rows": entries}
 
 
@@ -601,7 +610,8 @@ def _card_emergency(d: _Day) -> dict:
               "resets": k["resets"],
               "text": f"{k['left']} of {k['allowed']} left {PERIOD_WORDS[k['per']]}",
               "detail": f"{k['minutes']} min each"} for k in e["kinds"]]
-    return {"enabled": e["enabled"], "usable": e["usable"], "left": e["left"], "kinds": kinds}
+    return {"enabled": e["enabled"], "usable": e["usable"], "left": e["left"], "kinds": kinds,
+            "used_today": [emergency.unlock_span(u["started"], u["until"]) for u in d.unlocks.get(d.today, [])]}
 
 
 BUILDERS = {"stats": _card_stats, "today": _card_today, "limits": _card_limits, "coming": _card_coming,

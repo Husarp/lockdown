@@ -36,15 +36,16 @@ export function stripSvg(intervals, ticks) {
   return `${out}</svg>`;
 }
 
-/** The emergency-unlock circles of one day: a string of absolutely placed Ⓔ (so they stay round at any width). */
-export function marksHtml(minutes) {
-  return minutes.map((m) => `<span class="cal-e" style="left:${(m / DAY) * 100}%" title="emergency unlock at ${hhmm(m)}">E</span>`).join("");
+/** The emergency-unlock circles of one day: a string of absolutely placed Ⓔ (so they stay round at any width). `tips` are the
+ *  hover texts Python wrote ("Emergency unlock 14:05–14:25 (YouTube, Reddit)"), one per circle. */
+export function marksHtml(minutes, tips = []) {
+  return minutes.map((m, i) => `<span class="cal-e" style="left:${(m / DAY) * 100}%" title="${esc(tips[i] || `Emergency unlock ${hhmm(m)}`)}">E</span>`).join("");
 }
 
 /** The inside of one track (a day's strip): the svg, the circles and, in Day view on today, the now-line. */
-export function trackHtml(intervals, marks, { ticks, nowMin }) {
+export function trackHtml(intervals, marks, { ticks, nowMin, tips }) {
   const now = nowMin == null ? "" : `<span class="cal-now" style="left:${(nowMin / DAY) * 100}%"></span>`;
-  return stripSvg(intervals, ticks) + marksHtml(marks) + now;
+  return stripSvg(intervals, ticks) + marksHtml(marks, tips) + now;
 }
 
 /** The "Limits that depend on use" sentence, or "" when there are none. */
@@ -160,14 +161,14 @@ function renderRow(node, row) {
   setText(r.sub, row.sub);
   r.sum.title = row.sub ? `${row.sum} · ${row.sub}` : row.sum;
   // the strips: rebuilt only when this row shows something else than last time (a recycled node, a reload that changed it)
-  const sig = `${d.days}|${d.is_today ? d.now.slice(11, 16) : ""}|${d.dates[0].date}|${JSON.stringify(row.days)}${JSON.stringify(row.marks)}`;
+  const sig = `${d.days}|${d.is_today ? d.now.slice(11, 16) : ""}|${d.dates[0].date}|${JSON.stringify(row.days)}${JSON.stringify(row.marks)}${JSON.stringify(row.mark_tips)}`;
   if (node._sig === sig) return;
   node._sig = sig;
   const multi = d.days > 1, nowMin = d.is_today ? Number(d.now.slice(11, 13)) * 60 + Number(d.now.slice(14, 16)) : null;
   r.tracks.className = `cal-tracks${multi ? " multi" : ""}`;
   r.tracks.style.gridTemplateColumns = `repeat(${d.days}, minmax(0, 1fr))`;
   r.tracks.innerHTML = d.dates.map((day, i) =>
-    `<div class="cal-track${multi && day.today ? " today" : ""}" role="button" tabindex="0" data-date="${day.date}" aria-label="${esc(multi ? `${row.name}, ${day.label}: open that day` : `${row.name}: edit`)}">${trackHtml(row.days[i], row.marks[i], { ticks: !multi, nowMin: multi ? null : nowMin })}</div>`).join("");
+    `<div class="cal-track${multi && day.today ? " today" : ""}" role="button" tabindex="0" data-date="${day.date}" aria-label="${esc(multi ? `${row.name}, ${day.label}: open that day` : `${row.name}: edit`)}">${trackHtml(row.days[i], row.marks[i], { ticks: !multi, nowMin: multi ? null : nowMin, tips: (row.mark_tips || [])[i] })}</div>`).join("");
 }
 
 // ---------------------------------------------------------------- clicks

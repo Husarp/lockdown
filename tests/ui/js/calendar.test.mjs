@@ -20,7 +20,10 @@ test("a strip has one bar per stretch, each with its HH:MM-HH:MM tooltip, and ti
 });
 
 test("emergency circles sit at their minute, the now-line only when given", () => {
-  assert.match(cal.marksHtml([720]), /left:50%.*emergency unlock at 12:00/);
+  assert.match(cal.marksHtml([720]), /left:50%.*title="Emergency unlock 12:00"/);       // (no text from Python: the start only)
+  assert.match(cal.marksHtml([720, 900], ["Emergency unlock 12:00–12:30 (YouTube, R&D)"]),
+    /left:50%.*title="Emergency unlock 12:00–12:30 \(YouTube, R&amp;D\)".*left:62.5%.*title="Emergency unlock 15:00"/);
+  assert.match(cal.trackHtml([], [720], { ticks: true, nowMin: null, tips: ["Emergency unlock 12:00–12:30 (Bbb)"] }), /title="Emergency unlock 12:00–12:30 \(Bbb\)"/);
   assert.equal(cal.marksHtml([]), "");
   assert.match(cal.trackHtml([], [], { ticks: true, nowMin: 360 }), /cal-now" style="left:25%/);
   assert.doesNotMatch(cal.trackHtml([], [], { ticks: false, nowMin: null }), /cal-now/);

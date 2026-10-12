@@ -262,3 +262,18 @@ def test_no_timer_runs_while_the_window_is_hidden(shell, page, harness, perf):
     perf.set_hidden(False)
     page.wait_for_timeout(1200)
     assert perf.timer_calls()["timeout"] >= 1                                   # the clock runs again
+
+
+def test_the_emergency_card_and_the_glance_say_when_it_was_used_and_the_week_bar_lists_the_times(shell, page, harness):
+    import emergency
+    emergency.save_tiers(harness.db, [{"id": "a", "uses": 3, "per": "week", "minutes": 20}])
+    open_dash(shell, page)
+    assert page.locator('[data-card="emergency"] [data-n="used"]').is_hidden()
+    start = NOW.replace(hour=14, minute=5, second=0)
+    harness.db.add_unlock([1], ["x"], start, start + timedelta(minutes=20))
+    page.evaluate("window.ld.push([['mode_changed', {}]])")
+    wait_for(page, "document.querySelector('[data-card=\"emergency\"] [data-n=\"used\"]').textContent !== ''")
+    assert page.inner_text('[data-card="emergency"] [data-n="used"]') == "Used today 14:05–14:25"
+    assert "used today 14:05–14:25" in page.inner_text('[data-card="glance"]')
+    tips = page.evaluate("() => [...document.querySelectorAll('[data-card=\"week\"] .ch-hit')].map(n => n.dataset.tip)")
+    assert tips[-1].endswith("\nEmergency unlock 14:05–14:25") and "Emergency unlock" not in tips[0]

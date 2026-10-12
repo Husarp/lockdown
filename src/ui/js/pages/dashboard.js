@@ -388,7 +388,7 @@ const BUILD = {
 
   emergency(title) {
     const [wrap, body] = frame("emergency", title);
-    body.innerHTML = `<div data-n="rows"></div><p class="muted small" data-n="off" hidden>Emergency unlock is turned off in Settings.</p>
+    body.innerHTML = `<div data-n="rows"></div><p class="muted small" data-n="used" hidden></p><p class="muted small" data-n="off" hidden>Emergency unlock is turned off in Settings.</p>
       <div class="btn-row" style="margin-top:var(--sp-2)" data-n="use-row" hidden><button class="btn btn-emerg" type="button" data-n="use">${ic("lifebuoy")}Use emergency unlock</button></div>`;
     n(wrap, "use").addEventListener("click", () =>
       import("../emergency.js").then(({ openEmergency }) => openEmergency({ onDone: () => page.reload() })));
@@ -396,6 +396,9 @@ const BUILD = {
       node: wrap,
       update(d) {
         n(wrap, "off").hidden = d.usable;
+        const used = d.used_today && d.used_today.length ? `Used today ${d.used_today.join(", ")}` : "";
+        setText(n(wrap, "used"), used);
+        n(wrap, "used").hidden = !used;
         n(wrap, "use-row").hidden = !(d.usable && d.kinds.some((k) => k.left > 0));
         syncRows(n(wrap, "rows"), d.usable ? d.kinds : [], () => el(`<div class="low-row"><div class="hstack"><b class="grow ellip" data-n="detail"></b><span class="small muted num" data-n="text"></span></div><div class="uses" data-n="uses"></div><span class="small faint" data-n="resets"></span></div>`),
           (node, r) => {

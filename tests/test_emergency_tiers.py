@@ -10,7 +10,6 @@ fewer, shorter or removing a kind is free.
 import json
 import sqlite3
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
 
@@ -333,25 +332,6 @@ def test_bedtime_emergency_with_none_left_toasts_and_dismisses(tmp_path):
     assert len(overlays(ui)) == 2                                           # back on the escalation as a dismiss
 
 
-def test_the_bedtime_question_offers_each_kind(tmp_path, monkeypatch):
-    from gui import reminders_ui
-    db, ui, e = _bedtime(tmp_path)
-    spend_the_week(db)
-    asked = []
-    monkeypatch.setattr(reminders_ui, "ChoiceDialog", lambda *a, **kw: asked.append(a))
-    screen = reminders_ui.ReminderUI(SimpleNamespace(db=db, after=lambda ms, fn: None))
-    screen.engine = e
-    e.tick(BED, 0, False)
-    screen._answer("sleep", "emergency")
-    [(_app, _title, _message, choices)] = asked
-    assert [(text, enabled) for text, enabled, _pick in choices] == [
-        ("5 min - none left · resets Mon 21 Sep 00:00", False), ("Pause 60 min · 1 left this month", True)]
-    assert emergency.available(db, BED) == 1                                # nothing spent by asking
-    choices[1][2]()
-    assert tiers_used(db)[-1] == "mo" and emergency.alerts_paused_until(db, BED) == BED + timedelta(minutes=60)
-    assert "sleep" in ui.closed
-
-
 # ---------------------------------------------------------------- Anti-Bypass
 
 def cfg(*tiers, on=True):
@@ -388,38 +368,7 @@ def test_what_needs_the_challenge():
     assert looser(cfg(T1, on=False), one)
 
 
-def test_the_settings_card_saves_through_the_challenge(tmp_path):
-    from gui.settings import SettingsPage
-    db = Database(tmp_path / "t.db")
-    asked = []
-    page = SettingsPage.__new__(SettingsPage)
-    page.db, page._draft = db, None
-    page.app = SimpleNamespace(pages={}, guard=lambda what, proceed, cancel: asked.append((what, proceed)))
-    page.load = page._hide_draft = lambda: None
-    page._edit_kind("t1", "uses", 2)                                        # fewer: saved at once
-    assert emergency.tiers(db) == [{**T1, "uses": 2}] and not asked
-    page._edit_kind("t1", "minutes", 30)                                    # longer: the challenge first
-    assert emergency.tiers(db) == [{**T1, "uses": 2}] and len(asked) == 1
-    asked.pop()[1]()                                                        # passed
-    assert emergency.tiers(db) == [{**T1, "uses": 2, "minutes": 30}]
-    page._draft = {"uses": 1, "per": "month", "minutes": 60}
-    page._add_kind()                                                        # a new kind: one challenge, then saved
-    assert len(emergency.tiers(db)) == 1 and len(asked) == 1
-    asked.pop()[1]()
-    [_t1, added] = emergency.tiers(db)
-    assert {k: added[k] for k in ("uses", "per", "minutes")} == {"uses": 1, "per": "month", "minutes": 60}
-    assert len(added["id"]) == 8
-    page._remove_kind("t1")                                                 # removing: free
-    assert emergency.tiers(db) == [added] and not asked
-    page._save_emergency(enabled=False)                                     # off: free
-    assert emergency.get(db, "emergency.enabled") == "0" and not asked
-    page._edit_kind(added["id"], "uses", 5)                                 # while off: free
-    assert emergency.tiers(db)[0]["uses"] == 5 and not asked
-    page._save_emergency(enabled=True)                                      # on again: the challenge
-    assert emergency.get(db, "emergency.enabled") == "0" and len(asked) == 1
-
-
-# ---------------------------------------------------------------- backup and the web view
+# ---------------------------------------------------------------- backup
 
 def test_backups_carry_the_kinds_and_an_old_one_brings_its_single_setting(tmp_path):
     db = Database(tmp_path / "a.db")
@@ -441,17 +390,30 @@ def test_backups_carry_the_kinds_and_an_old_one_brings_its_single_setting(tmp_pa
     assert emergency.tiers(db) == [T1]
 
 
-def test_the_web_view_shows_each_kind_and_unlocks_the_one_asked(tmp_path, monkeypatch):
-    from tests.test_webview_api import _api
-    api = _api(tmp_path, monkeypatch)
-    api.db.add_site("YouTube", ["youtube.com"], rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])
-    emergency.save_tiers(api.db, [WEEK5, MONTH60])
-    state = api.get_state()
-    assert state["emergencyLeft"] == 4
-    assert [{k: t[k] for k in ("id", "uses", "per", "minutes", "left")} for t in state["emergencyTiers"]] == \
-        [{**WEEK5, "left": 3}, {**MONTH60, "left": 1}]
-    assert all(datetime.strptime(t["reset"], "%Y-%m-%d %H:%M") for t in state["emergencyTiers"])
-    assert api.emergency_unlock() == {"ok": False, "error": "Pick how long."}
-    assert api.emergency_unlock("mo")["ok"]
-    assert api.get_state()["emergencyLeft"] == 3
-    assert api.emergency_unlock("mo")["ok"] is False
+# ---------------------------------------------------------------- the times of the uses (what the pages show)
+
+def test_unlock_times_per_day_two_in_a_day_past_midnight_and_none(tmp_path):
+    db, item = two_kinds(tmp_path)
+    assert emergency.unlocks_by_day(db, at(0, 0).date()) == {}
+    db.add_unlock([1], ["YouTube", "Reddit"], at(1, 14, 5), at(1, 14, 25))
+    db.add_unlock([1], ["YouTube"], at(1, 9, 0), at(1, 9, 20))                  # (added later, listed first)
+    db.add_unlock([1], ["YouTube"], at(2, 23, 50), at(3, 0, 10))                # past midnight: counts for the day it started
+    db.add_unlock([1], ["YouTube"], at(-1, 23, 50), at(0, 0, 10))               # started before the first day asked for
+    by_day = emergency.unlocks_by_day(db, at(0, 0).date())
+    assert sorted(by_day) == [at(1, 0).date(), at(2, 0).date()]
+    assert [emergency.unlock_span(u["started"], u["until"]) for u in by_day[at(1, 0).date()]] == ["09:00–09:20", "14:05–14:25"]
+    assert [emergency.unlock_span(u["started"], u["until"]) for u in by_day[at(2, 0).date()]] == ["23:50–00:10"]
+    first, second = by_day[at(1, 0).date()]
+    assert emergency.unlock_line(first) == "Emergency unlock 09:00–09:20"
+    assert emergency.unlock_line(second, names=True) == "Emergency unlock 14:05–14:25 (YouTube, Reddit)"
+    assert emergency.unlock_line({**first, "names": []}, names=True) == "Emergency unlock 09:00–09:20"
+
+
+def test_used_by_tier_lists_the_uses_of_the_current_period_only(tmp_path):
+    db, item = two_kinds(tmp_path)
+    emergency.unlock(db, item, at(-3, 12), tier="wk")                           # last week
+    emergency.unlock(db, item, at(1, 12), tier="wk")
+    emergency.unlock(db, item, at(2, 12), tier="mo")
+    used = emergency.used_by_tier(db, at(3, 8))
+    assert [u["started"] for u in used["wk"]] == [at(1, 12)] and [u["started"] for u in used["mo"]] == [at(2, 12)]
+    assert [len(v) for v in emergency.used_by_tier(db, at(9, 8)).values()] == [0, 1]       # the week came round

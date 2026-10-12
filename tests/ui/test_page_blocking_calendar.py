@@ -113,7 +113,7 @@ def test_the_emergency_circle_sits_on_its_hour_and_has_a_tooltip(shell, page, ha
     harness.db.add_unlock([three["Bbb"]], ["Bbb"], start, start + timedelta(minutes=30))
     open_calendar(shell, page)
     e = row(page, "Bbb").locator(".cal-e")
-    assert e.count() == 1 and e.get_attribute("title") == "emergency unlock at 12:00"
+    assert e.count() == 1 and e.get_attribute("title") == "Emergency unlock 12:00–12:30 (Bbb)"
     assert "left:50%" in e.get_attribute("style").replace(" ", "")
 
 

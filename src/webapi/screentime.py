@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta
 from itertools import groupby
 from operator import itemgetter
 
+import emergency
 import retention
 import stats
 from rules import DAY_NAMES
@@ -408,18 +409,9 @@ def _minutes(seconds: float) -> float:
     return round(seconds / 60, 1)
 
 
-def _unlocks_by_day(db, first: date) -> dict:
-    """{day: [(started, until), ...]} of the emergency unlocks that STARTED on each day from `first` on, earliest first."""
-    out: dict = {}
-    for u in db.unlocks_since(datetime.combine(first, datetime.min.time())):
-        out.setdefault(u["started"].date(), []).append((u["started"], u["until"]))
-    return out
-
-
-@core.internal
-def unlock_span(started: datetime, until: datetime) -> str:
-    """An emergency unlock as local clock times, "14:05–14:25" (one past midnight shows its real end: "23:50–00:20")."""
-    return f"{started:%H:%M}–{until:%H:%M}"
+def _unlocks(req) -> dict:
+    """{day: [unlock, ...]} of the emergency unlocks of the last 30 days, read once per reply."""
+    return req.memo("unlocks", lambda: emergency.unlocks_by_day(req.db, req.today - timedelta(days=29)))
 
 
 # ---------------------------------------------------------------- Overview
@@ -465,7 +457,7 @@ def _trend_tip(day: date, today: date, totals: dict, first_day: date | None, unl
     n = (day - start).days + 1
     if n > 0:
         lines.append(f"Week average {stats.hm(sum(totals.get(start + timedelta(days=i), 0) for i in range(n)) / n)}")
-    lines += [f"Emergency unlock {unlock_span(a, b)}" for a, b in unlocks]
+    lines += [emergency.unlock_line(u) for u in unlocks]
     return "\n".join(lines)
 
 
@@ -478,7 +470,7 @@ def _trend(req) -> dict:
     totals = req.memo("totals", lambda: _daily_totals(req, today - timedelta(days=29 + WEEK_LEAD_DAYS), today))
     days = [today - timedelta(days=span - 1 - i) for i in range(span)]
     values = [totals.get(d, 0) for d in days]
-    unlocks = req.memo("unlocks", lambda: _unlocks_by_day(req.db, today - timedelta(days=29)))
+    unlocks = _unlocks(req)
     first = stats.first_activity(req.db)
     first_day = first.date() if first else None
     points = []
@@ -595,6 +587,8 @@ def _streaks(req, today_active: int) -> list:
                                          (f"{today} 00:00:00", f"{today + timedelta(days=1)} 00:00:00")).fetchone()
         over = today_active > goal if goal else True
         streak = {"goal": 0 if over else run_goal + 1, "no_unlock": 0 if unlocked_today else run_unlock + 1}
+        if unlocked_today:
+            streak["times"] = [emergency.unlock_span(u["started"], u["until"]) for u in _unlocks(req).get(today, [])]
     out = []
     if goal:
         n = streak["goal"]
@@ -603,7 +597,7 @@ def _streaks(req, today_active: int) -> list:
     n = streak["no_unlock"]
     out.append({"key": "no_unlock", "icon": "lifebuoy",
                 "text": f"{_plural(n, 'day')} without an emergency unlock" if n else "Emergency unlock used today",
-                "sub": ""})
+                "sub": ", ".join(streak.get("times", ()))})
     return out
 
 

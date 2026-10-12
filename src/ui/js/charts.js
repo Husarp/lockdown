@@ -227,7 +227,7 @@ const hh = (h) => String(h).padStart(2, "0");
 
 // ---------------------------------------------------------------- bar chart (a value per day)
 /**
- * data = {bars: [{label, value, tip, today?, unlocks?, tone?: "block" | "over" | "now", show?: bool}], goal?: number,
+ * data = {bars: [{label, value, tip (its lines, the emergency unlock times among them), today?, unlocks? (how many: draws the ring), tone?: "block" | "over" | "now", show?: bool}], goal?: number,
  *         goalLabel?: string, minPeak?: number}      (tone: the bar's colour class, but today's bar is always "now"; show: draw its label - default every 5th)
  * Elements: 1 + 3n + 2 + n  (n = bars).
  */
@@ -252,7 +252,7 @@ export function layoutBars(data, W, H, s) {
     labels.push(P("text", { x: n2(x + bw / 2), y: n2(bottom + 14 * s), "text-anchor": "middle" },
       { text: (b.show ?? (n <= 10 || i % 5 === 0 || b.today)) ? String(b.label ?? "") : "" }));
     hits.push(P("rect", { x: n2(slot * i), y: 0, width: n2(slot), height: n2(H), class: "ch-hit",
-      "data-tip": (b.tip || "") + (b.unlocks ? `\nEmergency unlock used ${b.unlocks}x` : "") }));
+      "data-tip": b.tip || "" }));
   });
   const gy = goal ? y(goal) : bottom;
   prims.push(...marks, ...labels,

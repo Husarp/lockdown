@@ -13,6 +13,7 @@ Limits that depend on use (time, opening) and temporary blocks have no clock tim
 from datetime import date, datetime, timedelta
 
 import blockcal
+import emergency
 import stats
 from rules import effective_rules
 
@@ -132,7 +133,8 @@ def calendar_get(ctx, start=None, days=1, filter="all"):
     summary}.
     start: "YYYY-MM-DD" (null = today; a week snaps to its Monday). days: 1, 3 or 7. filter: all / sites / apps.
     dates: [{date, label, today}]. rows (by name): {id, name, type, icon, cat, disabled, days: [[[from, to], ...]
-    per day] (minutes 0..1440), marks: [[minute, ...] per day] (emergency unlocks), sum, sub}. limits: {names,
+    per day] (minutes 0..1440), marks: [[minute, ...] per day] (emergency unlocks) with mark_tips: [[text, ...] per day]
+    (the same marks, "Emergency unlock 14:05–14:25 (YouTube, Reddit)"), sum, sub}. limits: {names,
     more} of items with a limit that depends on use (not drawn). categories: [{key, name, color, color_light}].
     summary: {next, busiest, free} in Day view, else null. prev / next: the `start` of the previous / next page."""
     if type(days) is not int or days not in RANGES:
@@ -155,12 +157,14 @@ def calendar_get(ctx, start=None, days=1, filter="all"):
     cat_keys = {c["key"] for c in cats}
     saved = db.categories()
     marks_of: dict[int, list[list[int]]] = {}
-    for u in db.unlocks_since(datetime.combine(first, datetime.min.time())):
-        day = u["started"].date()
-        if first <= day <= dates[-1]:
+    tips_of: dict[int, list[list[str]]] = {}
+    for day, unlocks in emergency.unlocks_by_day(db, first).items():
+        if day <= dates[-1]:
             i = (day - first).days
-            for item_id in u["item_ids"]:
-                marks_of.setdefault(item_id, [[] for _ in dates])[i].append(u["started"].hour * 60 + u["started"].minute)
+            for u in unlocks:
+                for item_id in u["item_ids"]:
+                    marks_of.setdefault(item_id, [[] for _ in dates])[i].append(u["started"].hour * 60 + u["started"].minute)
+                    tips_of.setdefault(item_id, [[] for _ in dates])[i].append(emergency.unlock_line(u, names=True))
 
     rows, limited, cards_rows, cards_names = [], [], [], []
     for item in sorted(all_items, key=lambda i: i["display_name"].lower()):
@@ -194,7 +198,8 @@ def calendar_get(ctx, start=None, days=1, filter="all"):
                                     saved, all_items)
         rows.append({"id": item["id"], "name": item["display_name"], "type": item["item_type"], "icon": _icon(item),
                      "cat": cat, "disabled": disabled, "days": per_day,
-                     "marks": marks or [[] for _ in dates], "sum": text, "sub": sub})
+                     "marks": marks or [[] for _ in dates],
+                     "mark_tips": tips_of.get(item["id"]) or [[] for _ in dates], "sum": text, "sub": sub})
         if not disabled:
             cards_rows.append(per_day[0])
             cards_names.append(item["display_name"])

@@ -299,7 +299,8 @@ def test_week_bars_goal_and_unlock_marks(env):
     assert [b["label"] for b in week["bars"]] == ["Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Mon"]
     assert [b["today"] for b in week["bars"]] == [False] * 6 + [True]
     assert week["bars"][-1]["value"] == 60.0 and week["bars"][-1]["unlocks"] == 1
-    assert week["bars"][-1]["tip"] == "Monday 14 September  1 h 00 m"
+    assert week["bars"][-1]["tip"] == "Monday 14 September  1 h 00 m\nEmergency unlock 08:00–09:00"
+    assert week["bars"][-2]["tip"] == "Sunday 13 September  2 h 00 m" and week["bars"][-2]["unlocks"] == 0
     assert week["goal"] == 300.0 and week["note"] == "daily goal 5 h" and week["goal_label"] == "5 h"
     env.db.set_setting(dashboard.GOAL_KEY, "0")
     week = card(env, "week")
@@ -368,6 +369,10 @@ def test_bedtime_and_emergency(env):
     emergency = card(env, "emergency")
     assert emergency["usable"] is True and emergency["left"] == 3
     assert emergency["kinds"][0]["text"] == "3 of 3 left this week" and emergency["kinds"][0]["detail"] == "20 min each"
+    assert emergency["used_today"] == []
+    env.db.add_unlock([1], ["x"], MON.replace(hour=23, minute=50), MON.replace(hour=23, minute=50) + timedelta(minutes=20))
+    env.db.add_unlock([1], ["x"], MON.replace(hour=8), MON.replace(hour=8, minute=20))
+    assert card(env, "emergency")["used_today"] == ["08:00–08:20", "23:50–00:10"]      # (a use past midnight shows its real end)
     env.db.set_setting("emergency.enabled", "0")
     assert card(env, "emergency")["usable"] is False
 
@@ -585,7 +590,9 @@ def test_the_past_days_are_kept_between_calls_and_today_is_always_live(env):
     assert after["Goal streak"] == "0 days in a row"
     assert after["No emergency unlock"] == "3 days in a row"
     env.db.add_unlock([1], ["x"], MON.replace(hour=11), MON.replace(hour=12))
-    assert {r["label"]: r["main"] for r in card(env, "glance")["rows"]}["No emergency unlock"] == "0 days in a row"
+    rows = {r["label"]: r for r in card(env, "glance")["rows"]}
+    assert (rows["No emergency unlock"]["main"], rows["No emergency unlock"]["extra"]) == ("0 days in a row", "used today 11:00–12:00")
+    assert rows["Goal streak"]["extra"] == "within your daily goal" and after["No emergency unlock"] == "3 days in a row"
 
 
 # ---------------------------------------------------------------- speed

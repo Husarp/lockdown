@@ -57,6 +57,11 @@ def _short_when(when) -> str:
     return f"{DAY_NAMES[when.weekday()][:3]} {when.day} {when:%b %H:%M}"
 
 
+def _short_day(when) -> str:
+    """"Mon 12 Oct"."""
+    return f"{DAY_NAMES[when.weekday()][:3]} {when.day} {when:%b}"
+
+
 def _poke(ctx):
     """Tell the status worker something changed (the tray, the mute rule and the Emergency button follow at once)."""
     worker = getattr(getattr(ctx, "hub", None), "status_worker", None)
@@ -84,9 +89,12 @@ def _reset_info(db, now) -> dict:
 
 
 def _emergency_info(db, now) -> dict:
+    used = emergency.used_by_tier(db, now)
     kinds = [{"id": k["id"], "uses": k["uses"], "per": k["per"], "minutes": k["minutes"],
               "per_text": emergency.PERIODS[k["per"]], "left": left, "allowed": allowed, "resets": _iso(reset),
-              "resets_text": _short_when(reset)}
+              "resets_text": _short_when(reset),
+              "used": [f"{_short_day(u['started'])} {emergency.unlock_span(u['started'], u['until'])}"
+                       for u in used.get(k["id"], [])]}
              for k, left, allowed, reset in emergency.left_by_tier(db, now)]
     minutes = sorted({*emergency.MINUTE_OPTIONS, *(k["minutes"] for k in kinds)})
     return {"enabled": emergency.get(db, "emergency.enabled") == "1", "kinds": kinds, "max_kinds": emergency.MAX_TIERS,
@@ -106,8 +114,8 @@ def _goal(db) -> float:
 def settings_get(ctx):
     """Everything the page shows in one answer: {now, look: {theme, accent, scale, accents}, motion, goal, goal_options,
     reset: {time, ends, ends_text, carry_note}, categories, emergency: {enabled, kinds: [{id, uses, per, minutes,
-    per_text, left, allowed, resets_text}], ...}}. Meters are worked out now, so showing the page again always shows
-    today's uses."""
+    per_text, left, allowed, resets_text, used}], ...}}. `used`: the uses of the kind's current period, each as
+    "Mon 12 Oct 14:05–14:25". Meters are worked out now, so showing the page again always shows today's uses."""
     db, now = ctx.db, ctx.now()
     goal = _goal(db)
     return {

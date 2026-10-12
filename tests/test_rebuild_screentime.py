@@ -263,8 +263,7 @@ def test_the_trend_tooltip_lists_every_emergency_unlock_that_started_that_day(tm
     assert t["2026-10-10"] == ["Sat, 10 Oct", "Screen time 0 m", "Week average 0 m"]       # (it started the day before)
     assert [p["unlocks"] for p in d["trend"]["points"]] == [0, 0, 0, 2, 1, 0, 0]
     assert "Emergency unlock" not in "".join(t["2026-10-07"])
-    assert st.unlock_span(at(8, 9, 5), at(8, 9, 7)) == "09:05–09:07"
-
+    
 
 def test_the_trend_reads_36_days_of_totals_in_one_go(tmp_path, monkeypatch):
     """The first Monday-to-day average of the 30 days needs up to 6 days before them: one read of 36 days, not two."""
@@ -396,7 +395,11 @@ def test_the_streaks_of_the_past_are_worked_out_once_a_day(tmp_path, monkeypatch
     # an emergency unlock today shows at once; the kept past is not touched
     start = datetime.combine(TODAY, datetime.min.time()) + timedelta(hours=8)
     db.add_unlock([1], ["x"], start, start + timedelta(hours=1))
-    assert [x["text"] for x in get(api, "overview", "Today")["streaks"] if x["key"] == "no_unlock"] == ["Emergency unlock used today"]
+    [row] = [x for x in get(api, "overview", "Today")["streaks"] if x["key"] == "no_unlock"]
+    assert (row["text"], row["sub"]) == ("Emergency unlock used today", "08:00–09:00")
+    db.add_unlock([1], ["x"], start + timedelta(hours=7), start + timedelta(hours=7, minutes=20))
+    [row] = [x for x in get(api, "overview", "Today")["streaks"] if x["key"] == "no_unlock"]
+    assert row["sub"] == "08:00–09:00, 15:00–15:20"                     # (every use of today, earliest first)
     # a change of the goal or more activity today is seen at once, too
     db.set_setting(st.GOAL_KEY, "0.5")
     assert [x["text"] for x in get(api, "overview", "Today")["streaks"] if x["key"] == "goal"] == ["Over your goal today"]

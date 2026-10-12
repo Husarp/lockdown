@@ -42,6 +42,9 @@ export const meterBars = (left, allowed) => Array.from({ length: allowed }, (_, 
 /** "3 of 3 left this week · resets Mon 12 Oct 00:00" (what the old window said). */
 export const kindMeterText = (k) => `${k.left} of ${k.allowed} left ${k.per_text} · resets ${k.resets_text}`;
 
+/** "Used Mon 12 Oct 14:05–14:25, Tue 13 Oct 09:00–09:20" (the uses of this period, times from Python), or "". */
+export const usedText = (k) => (k.used && k.used.length ? `Used ${k.used.join(", ")}` : "");
+
 /** "7" + "5" -> "07:05"; both empty -> "" (Python then says "The time must look like 04:00."). */
 export function normTime(h, m) {
   h = String(h == null ? "" : h).trim();
@@ -269,10 +272,11 @@ function renderCategories(list) {
 function kindNode(k, e) {
   const node = el(`<div class="set-kind" data-id="${esc(k.id)}"><div class="set-kind-top">
     ${sel("k-uses", "Uses")}${sel("k-per", "Period")}<span class="muted">·</span>${sel("k-minutes", "Minutes")}<span class="grow"></span><span data-k="k-x"></span></div>
-    <div class="set-meter"><span class="uses" data-k="k-bars"></span><span data-k="k-text"></span></div></div>`);
+    <div class="set-meter"><span class="uses" data-k="k-bars"></span><span data-k="k-text"></span></div>
+    <div class="small muted" data-k="k-used" hidden></div></div>`);
   const x = confirmButton({ label: "×", confirmLabel: "Remove?", onConfirm: () => removeKind(k.id), cls: "btn btn-sm", title: "Remove this kind" });
   node.querySelector('[data-k="k-x"]').replaceWith(x);
-  return { id: k.id, node, sig: "", bars: node.querySelector('[data-k="k-bars"]'), text: node.querySelector('[data-k="k-text"]') };
+  return { id: k.id, node, sig: "", bars: node.querySelector('[data-k="k-bars"]'), text: node.querySelector('[data-k="k-text"]'), used: node.querySelector('[data-k="k-used"]') };
 }
 
 function fillKindSelects(get, e, k) {
@@ -298,6 +302,9 @@ function fillEmergency(e) {
     }
     const text = kindMeterText(k);
     if (r.text.textContent !== text) r.text.textContent = text;
+    const used = usedText(k);
+    if (r.used.textContent !== used) r.used.textContent = used;
+    r.used.hidden = !used;
     seen.add(k.id);
   });
   for (const [id, r] of [...rows]) if (!seen.has(id)) { r.node.remove(); rows.delete(id); }

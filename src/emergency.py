@@ -79,6 +79,28 @@ def new_id() -> str:
     return secrets.token_hex(4)
 
 
+def unlock_span(started: datetime, until: datetime) -> str:
+    """An emergency unlock as local clock times, "14:05–14:25" (one past midnight shows its real end: "23:50–00:20")."""
+    return f"{started:%H:%M}–{until:%H:%M}"
+
+
+def unlock_line(unlock: dict, names: bool = False) -> str:
+    """One line for a use, "Emergency unlock 14:05–14:25", with the sites / apps it freed after it when `names`
+    ("Emergency unlock 14:05–14:25 (YouTube, Reddit)")."""
+    line = f"Emergency unlock {unlock_span(unlock['started'], unlock['until'])}"
+    return f"{line} ({', '.join(unlock['names'])})" if names and unlock.get("names") else line
+
+
+def unlocks_by_day(db, first) -> dict:
+    """{day: [unlock, ...]} of the emergency unlocks that STARTED on each day from `first` (a date) on, earliest first -
+    the day an unlock counts for is the one it started on, and `until` is its real end (never ended early)."""
+    out: dict = {}
+    for u in db.unlocks_since(datetime.combine(first, datetime.min.time())):
+        if u["started"].date() >= first:
+            out.setdefault(u["started"].date(), []).append(u)
+    return out
+
+
 def tier_of(unlock: dict) -> str:
     """The kind an unlock was spent on (unlocks from before kinds existed: LEGACY_TIER)."""
     return unlock.get("tier") or LEGACY_TIER
@@ -101,6 +123,18 @@ def left_by_tier(db, now: datetime) -> list[tuple[dict, int, int, datetime]]:
     """(kind, uses left, uses allowed, when its count resets) for each kind, in their order."""
     history, clock = db.unlocks_since(now - timedelta(days=HISTORY_DAYS)), db.limit_clock()
     return [(t, *_left(t, history, clock, now)) for t in tiers(db)]
+
+
+def used_by_tier(db, now: datetime) -> dict[str, list[dict]]:
+    """{kind id: [the unlocks spent on it in its current day / week / month, earliest first]} (the same uses `left_by_tier`
+    counts)."""
+    history, clock = db.unlocks_since(now - timedelta(days=HISTORY_DAYS)), db.limit_clock()
+    out = {}
+    for t in tiers(db):
+        key = clock.period(t["per"], now)[0]
+        out[t["id"]] = [u for u in history if tier_of(u) == t["id"]
+                        and (u["started"] > now or clock.period(t["per"], u["started"])[0] == key)]
+    return out
 
 
 def uses_left(db, now: datetime, tier: str | None = None) -> tuple[int, int, datetime | None]:

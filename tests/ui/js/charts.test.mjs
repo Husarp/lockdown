@@ -127,11 +127,14 @@ test("a goal that is higher than every day still fits; no goal hides the line", 
   assert.equal(none.geom.goalY, null);
 });
 
-test("unlock marks: only days with an unlock get a mark and a tooltip line", () => {
-  const { prims } = layoutBars({ bars: days(10) }, 500, 170, 1);
+test("unlock marks: only days with an unlock get a mark; the tooltip is the text Python sent (its unlock times included)", () => {
+  const bars = days(10).map((d) => (d.unlocks ? { ...d, tip: `${d.tip}\nEmergency unlock 14:05–14:25\nEmergency unlock 16:00–16:20` } : d));
+  const { prims } = layoutBars({ bars }, 500, 170, 1);
   const marks = prims.filter((p) => p.a.class === "ch-mark");
   assert.deepEqual(marks.map((p) => +p.a.r > 0), days(10).map((d) => d.unlocks > 0));
-  assert.match(prims.filter((p) => p.a.class === "ch-hit")[0].a["data-tip"], /Emergency unlock used 1x/);
+  const tips = prims.filter((p) => p.a.class === "ch-hit").map((p) => p.a["data-tip"]);
+  assert.equal(tips[0], "day 1\nEmergency unlock 14:05–14:25\nEmergency unlock 16:00–16:20");
+  assert.equal(tips[1], "day 2");               // (no "used Nx" line of its own any more)
 });
 
 const xlabels = (prims) => prims.filter((p) => p.tag === "text" && p.a.class !== "ch-ylab").map((p) => p.text);
@@ -310,7 +313,7 @@ test("one shared tooltip for all charts, shown from data-tip and hidden away fro
   const tips = f.body.children.filter((c) => c.attrs.class === "ch-tip");
   assert.equal(tips.length, 1);
   assert.equal(tips[0].hidden, false);
-  assert.equal(tips[0].textContent, "day 1\nEmergency unlock used 1x");
+  assert.equal(tips[0].textContent, "day 1");
   b.svg.fire("pointermove", { target: { getAttribute: () => null }, clientX: 1, clientY: 1 });
   assert.equal(tips[0].hidden, true);
   assert.equal(f.body.children.filter((c) => c.attrs.class === "ch-tip").length, 1);

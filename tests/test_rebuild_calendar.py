@@ -123,6 +123,7 @@ def test_emergency_marks_land_on_their_day_and_show_items_without_clock_rules(en
     env.db.add_unlock([iid], ["Reddit"], start, start + timedelta(minutes=15))
     r = row(get(env, MON, 7), "Reddit")
     assert r["marks"][4] == [21 * 60 + 30] and r["days"] == [[]] * 7
+    assert r["mark_tips"][4] == ["Emergency unlock 21:30–21:45 (Reddit)"] and r["mark_tips"][3] == []
     assert get(env, "2026-10-11", 1)["rows"] == []              # not that day
 
 

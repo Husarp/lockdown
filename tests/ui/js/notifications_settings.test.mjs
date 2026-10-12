@@ -46,6 +46,9 @@ test("the emergency meter has one bar per use, lit while left", () => {
   assert.deepEqual(st.meterBars(2, 3), [true, true, false]);
   assert.deepEqual(st.meterBars(0, 2), [false, false]);
   assert.equal(st.kindMeterText({ left: 2, allowed: 3, per_text: "this week", resets_text: "Mon 12 Oct 00:00" }), "2 of 3 left this week · resets Mon 12 Oct 00:00");
+  assert.equal(st.usedText({ used: [] }), "");
+  assert.equal(st.usedText({}), "");
+  assert.equal(st.usedText({ used: ["Mon 12 Oct 14:05–14:25", "Tue 13 Oct 09:00–09:20"] }), "Used Mon 12 Oct 14:05–14:25, Tue 13 Oct 09:00–09:20");
 });
 
 test("the reset time boxes become HH:MM, empty stays empty", () => {

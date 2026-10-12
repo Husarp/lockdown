@@ -114,6 +114,8 @@ def test_the_page_shows_every_part(shell, page, harness):
     assert page.locator(".set-kind").count() == 1 and kind_ui(page) == [["3", "week", "20"]]
     assert re.fullmatch(r"\d of 3 left this week · resets \w{3} \d+ \w{3} \d\d:\d\d", page.inner_text(".set-meter"))
     assert page.locator(".set-meter .uses i").count() == 3
+    used = page.inner_text('[data-k="k-used"]')                 # (the harness has used this week once: when, from Python)
+    assert re.fullmatch(r"Used( \w{3} \d+ \w{3} \d\d:\d\d–\d\d:\d\d,?)+", used)
     assert page.locator('[data-k="lock"]').is_hidden()
 
 
