@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Tray Exit closes the icon and window only (PC).** After Exit the word filters (and app minimise/grey, blocked notices, the app-in-front warning, usage counting, reminders, bedtime and breaks) kept stopping; now they keep working: Lockdown runs on without its icon and window, opening it again brings both back, and a login starts it normally. Exit still asks for the challenge when Anti-Bypass is on, and the Anti-Bypass page says what Exit does. Tests: `test_tray_exit_leaves_the_workers_running_and_the_tray_gone`, `test_opening_again_brings_window_and_tray_back_in_the_same_process`, `test_watchdog_starts_only_when_nothing_runs`.
 - **Update check says why it got no answer.** When About can't reach GitHub it now shows the reason (e.g. a timeout or a certificate error), and the log keeps it too.
 
 ## 0.87.0 - 2026-10-12 15:25

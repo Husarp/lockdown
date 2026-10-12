@@ -24,11 +24,11 @@ export const PROTECTS = [
   "Turning SafeSearch or the blocked-words check off, removing your words, adding exceptions",
   "Emergency unlock: turning it on, a new kind, more uses, longer, a shorter period",
   "Pausing your blocks (Pause my blocks) - resuming early is always free",
-  "Quitting Lockdown from the tray",
+  "Closing the tray icon and window (tray Exit - blocking keeps running)",
   "Weakening Anti-Bypass itself (these settings)",
 ];
 const KEEPING = [
-  "The tray app comes back within a minute if it's closed any other way than Exit (e.g. Task Manager).",
+  "Tray Exit only closes the icon and the window - blocking, word filters and reminders keep running. If Lockdown is killed (e.g. in Task Manager) it comes back within a minute.",
   "The service comes back within a minute if it's stopped.",
   "Changing the Windows clock does nothing; a new time zone counts only after 24 hours.",
   "Uninstalling Lockdown asks for the challenge too.",

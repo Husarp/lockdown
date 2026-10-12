@@ -876,7 +876,7 @@ def test_tray_quit_goes_through_the_guard(tmp_path, monkeypatch):
     from resident import challenge_cli
     src = (ROOT / "src" / "agent.py").read_text("utf-8")
     assert "challenge_cli.ask_in_main(win, ctx, [EXIT_TEXT], quit_now)" in src
-    assert 'EXIT_TEXT = "Quit Lockdown' in src
+    assert 'EXIT_TEXT = "Close the Lockdown icon and window' in src
     env = Env(tmp_path, "locked", monkeypatch)
     ran = []
     monkeypatch.setattr("resident.windows.open_challenge", lambda win, d: ran.append(("asked", d["ticket"])))

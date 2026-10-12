@@ -207,8 +207,9 @@ Or from a terminal in the project folder:
 - The app registers itself to start hidden in the tray at login (`HKCU\...\Run\Lockdown`).
 - Only one copy runs; launching it again just shows the window.
 - Shortcuts: Esc closes pop-ups; in text boxes Ctrl+Z / Ctrl+Y, Ctrl+Backspace, Ctrl+A. Searches forgive small typos.
-- Closing the window minimizes it to the tray; use the tray icon's **Exit** to quit (needs the Anti-Bypass challenge
-  when it's on). Closed any other way (e.g. Task Manager), it's started again within a minute.
+- Closing the window minimizes it to the tray. The tray icon's **Exit** closes only the icon and the window (needs the
+  Anti-Bypass challenge when it's on): blocking, word filters and reminders keep running, and opening Lockdown again
+  brings the window and icon back. Killed (e.g. in Task Manager), Lockdown is started again within a minute.
 - Tray icon: green = service enforcing, red = service not running.
 
 ## Development

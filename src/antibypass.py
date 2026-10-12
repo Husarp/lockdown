@@ -44,7 +44,8 @@ from rules import (ALLOW, OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowa
 SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": bool, "windows": [...],
 #                                     "wait_min": minutes, "unlocked_from"/"unlocked_until": "Y-m-d H:M:S"}
 UNLOCK_MIN = 5
-EXITED_KEY = "agent.exited"   # "1" after tray Exit: the watchdog doesn't bring the tray app back until next login
+EXITED_KEY = "agent.exited"   # "1" after tray Exit: no tray icon until you open Lockdown again or log in (blocking keeps
+#                               running headless; the key only decides about the icon, not about enforcement)
 OFF_KEY = "app.off"           # "" or when Lockdown was switched off entirely - nothing is enforced until you
                               # switch it back on. Turning it off needs the challenge; turning it back on never
                               # does (coming back to your rules is never the thing to stand in the way of).

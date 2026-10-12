@@ -46,21 +46,96 @@ def set_dpi_awareness():
         pass
 
 
-EXIT_TEXT = "Quit Lockdown (blocked-visit notices, time limits and reminders stop until you start it again)"
+EXIT_TEXT = "Close the Lockdown icon and window (blocking, word filters, limits and reminders keep running)"
 
 
-def _tray_exit(win, tray, ctx):
-    """Tray Exit: quits at once while Anti-Bypass says "free"; otherwise the main window comes up with the challenge
-    (GuardService keeps the quit under a ticket and runs it only when the challenge is passed in Python)."""
+class TrayKeeper:
+    """The tray icon of the running agent, which can come and go while everything else keeps running.
+
+    `show()` makes the icon (a new Tray each time, with its listener and the notices' balloon fallback) - it does nothing
+    when the icon is there. `hide()` takes it away again (tray Exit, an update that restarts the app, giving up on the
+    window) and puts the notices' fallback back to nothing. The workers (keywords, minimise / grey, notices, usage,
+    reminders ...) never depend on the icon, so after `hide()` the agent enforces headless, as before."""
+
+    def __init__(self, make_tray, hub, toaster, listener_for, log=_log):
+        self.make_tray, self.hub, self.toaster, self.listener_for, self.log = make_tray, hub, toaster, listener_for, log
+        self._lock = threading.Lock()
+        self.tray = None
+        self._listener = None
+
+    @property
+    def shown(self) -> bool:
+        return self.tray is not None
+
+    def show(self) -> bool:
+        """The icon is there now. True if this call made it."""
+        with self._lock:
+            if self.tray is not None:
+                return False
+            tray = self.make_tray()
+            self.tray = tray
+            self.toaster.fallback = tray.notify    # (a Windows notification that can't be had: the tray's balloon says it)
+            tray.start()
+            self._listener = self.listener_for(tray)
+            self.hub.listeners.append(self._listener)
+            snap = self.hub.snapshot
+            if snap is not None:                   # (the listener only hears about changes: give the new icon the state now)
+                try:
+                    self._listener(None, snap)
+                except Exception as error:
+                    self.log(f"WARNING The tray icon could not be brought up to date: {error!r}")
+            return True
+
+    def hide(self) -> bool:
+        """The icon is gone now. True if this call removed it."""
+        with self._lock:
+            tray, self.tray = self.tray, None
+            if tray is None:
+                return False
+            if self._listener in self.hub.listeners:
+                self.hub.listeners.remove(self._listener)
+            self._listener = None
+            self.toaster.fallback = lambda text: None
+            try:
+                tray.stop()
+            except Exception as error:
+                self.log(f"WARNING The tray icon did not stop cleanly: {error!r}")
+            return True
+
+    stop = hide      # (what the code that closes everything down calls)
+
+
+def _tray_exit(win, keeper, ctx):
+    """Tray Exit: closes the tray icon and the window - nothing else. Every worker (keyword blocking, minimise / grey,
+    notices, the app-in-front warning, usage counting, reminders, bedtime, breaks) keeps running in this same process, and
+    so does the Lockdown service. Opening Lockdown again brings the window and the icon back (open_again).
+    Done at once while Anti-Bypass says "free"; otherwise the main window comes up with the challenge (GuardService keeps
+    the Exit under a ticket and runs it only when the challenge is passed in Python)."""
     from resident import challenge_cli, windows
 
     def quit_now():
         import antibypass
-        _log("Tray Exit")
-        ctx.db.set_setting(antibypass.EXITED_KEY, "1")
-        tray.stop()
-        threading.Timer(0.2, windows.quit_agent, args=(win,)).start()   # (after the challenge's reply went back)
+        _log("Tray Exit: the icon and the window are closed, blocking keeps running")
+        ctx.db.set_setting(antibypass.EXITED_KEY, "1")    # (no icon until you open Lockdown or log in again)
+        keeper.hide()
+        try:
+            win.main.hide()
+        except Exception as error:
+            _log(f"WARNING The window did not hide: {error!r}")
+        windows.set_visible(win, False)
     challenge_cli.ask_in_main(win, ctx, [EXIT_TEXT], quit_now)
+
+
+def open_again(win, keeper, ctx):
+    """Lockdown opened again (a second launch, the start menu): the window comes up and, after a tray Exit, the icon too -
+    in this same process. The flag that said "no icon" is cleared."""
+    import antibypass
+    from resident import windows
+    if keeper is not None and keeper.show():
+        _log("Lockdown opened again: the tray icon is back")
+    if ctx.db.get_setting(antibypass.EXITED_KEY, "0") == "1":
+        ctx.db.set_setting(antibypass.EXITED_KEY, "0")
+    windows.show_main(win)
 
 
 def message_box(text: str, title: str = "Lockdown"):
@@ -210,7 +285,7 @@ def _run(argv: list[str], events, state: dict) -> int:
         timer = state["leave"] = threading.Timer(HAND_OVER_SEC, leave)
         timer.daemon = True
         timer.start()
-        tray = state.get("tray")
+        tray = state.get("tray")      # (the TrayKeeper)
         if tray is not None:
             try:
                 tray.stop()
@@ -227,7 +302,8 @@ def _run(argv: list[str], events, state: dict) -> int:
         seen.append(f"files served {server.served}" + (f", last {server.last}" if server.last else ""))
         return "; ".join(seen)
     windows.attach_publisher(win, _log)
-    windows.pump_open_events(events, win)
+    state["keeper"] = None            # (the TrayKeeper, once start_up made it)
+    windows.pump_open_events(events, win, lambda: open_again(win, state["keeper"], ctx))
     # R11: app icons (/icon/...), the installed-apps catalog (loads in the background after the window is up) and the
     # window the program-file dialog belongs to
     from resident import catalog, icon_prefetch, icons
@@ -270,17 +346,23 @@ def _run(argv: list[str], events, state: dict) -> int:
 
     def start_up():
         from gui.tray import Tray
-        tray = Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, tray, ctx),
-                    on_mode=tray_actions.mode, on_update=tray_actions.update, on_pause=tray_actions.pause,
-                    on_resume=tray_actions.resume)
-        state["tray"] = tray
-        toaster.fallback = tray.notify      # (a Windows notification that can't be had: the tray's balloon says it)
-        tray.start()
-        pool.hub.listeners += [workers.tray_listener(tray), workers.publisher_listener(win)]
+        keeper = TrayKeeper(
+            lambda: Tray(on_open=lambda: windows.show_main(win), on_exit=lambda: _tray_exit(win, keeper, ctx),
+                         on_mode=tray_actions.mode, on_update=tray_actions.update, on_pause=tray_actions.pause,
+                         on_resume=tray_actions.resume),
+            hub, toaster, workers.tray_listener)
+        state["tray"] = state["keeper"] = keeper
+        pool.hub.listeners.append(workers.publisher_listener(win))
+        import antibypass
+        if "--watchdog" in argv and ctx.db.get_setting(antibypass.EXITED_KEY, "0") == "1":
+            diag.note("started by the watchdog after a tray Exit: no tray icon (open Lockdown to get it)")
+        else:       # (a start at login or by hand is a normal start: the icon comes, the "no icon" flag goes)
+            ctx.db.set_setting(antibypass.EXITED_KEY, "0")
+            keeper.show()
         from resident import update_flow   # R17: the in-app update (notice "Install", About, banner); quits WITHOUT EXITED_KEY
         ctx.update_flow = update_flow.attach(pool.hub, pool.updates, win.publisher.publish,
                                              show=lambda: windows.show_main(win),
-                                             quit_app=lambda: (tray.stop(), windows.quit_agent(win)))
+                                             quit_app=lambda: (keeper.stop(), windows.quit_agent(win)))
         from resident import protection_watch   # R23: list download progress -> the Site protection tab
         protection_watch.attach(pool, win.publisher.publish, lambda: win.publisher.visible)
         pool.start()

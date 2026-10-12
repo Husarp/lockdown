@@ -2,8 +2,9 @@
 
 Everything goes to the web window's agent (src/agent.py); this file only does what must happen before it.
 --tray: start hidden in the tray (used when starting with Windows).
---watchdog: run every minute by a scheduled task - starts the tray agent hidden if it was closed any other way than
-            tray Exit (e.g. killed in Task Manager); does nothing (quickly) when it's running.
+--watchdog: run every minute by a scheduled task - starts the agent hidden if it is not running (e.g. killed in Task
+            Manager); does nothing (quickly) when it's running. After a tray Exit the agent keeps running without its
+            icon and window, so there is nothing to start; if it was killed after that, it comes back without the icon.
 --challenge TEXT: only show the Anti-Bypass challenge for TEXT; exit code 0 = passed (used by the uninstaller).
 --selftest REPORT: build check - the windows and every Api read method with a temporary data folder, result written
             to REPORT.
@@ -99,12 +100,9 @@ def register_autostart_later():
 def watchdog_should_start() -> bool:
     if single_instance.running():
         return False
-    from antibypass import EXITED_KEY
-    from db import Database
-    db = Database()
-    if db.get_setting(EXITED_KEY, "0") == "1":   # quit with tray Exit (after the challenge): stay off until login
-        return False
-    _log("WARNING Tray app wasn't running (closed without Exit) - started again by the watchdog")
+    # (a tray Exit only closes the icon and the window: the agent runs on, so a missing agent is always a killed one -
+    #  it comes back; agent.py then leaves the icon out if the Exit was chosen)
+    _log("WARNING Lockdown's agent wasn't running - started again by the watchdog")
     return True
 
 

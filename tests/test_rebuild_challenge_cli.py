@@ -225,26 +225,26 @@ def test_tray_locked_shows_main_and_pushes_the_challenge(ctx):
 
 
 def test_agent_tray_exit_goes_through_the_guard(ctx, monkeypatch):
+    """Locked: the challenge, not the Exit. Free: the icon and the window go, the agent does not quit."""
     import agent
     from resident import windows
-    quits, stopped = [], []
+    quits, hidden = [], []
 
-    class Tray:
-        def stop(self):
-            stopped.append(1)
+    class Keeper:
+        def hide(self):
+            hidden.append(1)
 
     monkeypatch.setattr(windows, "quit_agent", lambda win: quits.append(win))
     monkeypatch.setattr(agent, "_log", lambda m: None)
-    real_timer = threading.Timer
-    monkeypatch.setattr(threading, "Timer", lambda t, f, args=(): real_timer(0, f, args=args))
 
     turn_on(ctx)
     win = FakeWin()
-    agent._tray_exit(win, Tray(), ctx)                                  # locked: the challenge, not the exit
-    assert win.main.shown == 1 and win.publisher.events[0][0] == "challenge_open" and not stopped
+    win.main.hide = lambda: hidden.append("window")
+    agent._tray_exit(win, Keeper(), ctx)                                # locked: the challenge, not the exit
+    assert win.main.shown == 1 and win.publisher.events[0][0] == "challenge_open" and not hidden
     assert ctx.db.get_setting(ab.EXITED_KEY, "0") != "1"
 
     ab.save(ctx.db, {**ab.settings(ctx.db), "phrase": False})           # Anti-Bypass off: straight out
-    agent._tray_exit(win, Tray(), ctx)
-    threading.Event().wait(0.3)
-    assert stopped == [1] and quits == [win] and ctx.db.get_setting(ab.EXITED_KEY, "0") == "1"
+    agent._tray_exit(win, Keeper(), ctx)
+    assert hidden == [1, "window"] and quits == [] and not win.quitting
+    assert ctx.db.get_setting(ab.EXITED_KEY, "0") == "1"

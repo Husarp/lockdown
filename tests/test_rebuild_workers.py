@@ -1625,7 +1625,7 @@ def test_the_agent_starts_the_workers_once_the_gui_is_up_and_stops_them_on_exit(
     def calls(node):
         return {ast.unparse(c.func) for c in ast.walk(node) if isinstance(c, ast.Call)}
     assert "start_up" in calls(ready)                       # (ready = the GUI loop is up; start_up = its work)
-    assert "pool.start" in calls(start_up) and "workers.tray_listener" in calls(start_up)
+    assert "pool.start" in calls(start_up) and "workers.tray_listener" in ast.unparse(start_up)   # (the TrayKeeper's listener)
     assert "pool.stop" in calls(run)
     # (and `main` returns before any of it when another instance owns the port)
     first_acquire = next(i for i, n in enumerate(main.body) if "single_instance.acquire" in ast.unparse(n))

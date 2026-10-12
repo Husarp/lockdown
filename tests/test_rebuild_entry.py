@@ -289,38 +289,29 @@ def test_tray_and_watchdog_starts_stay_hidden_and_a_plain_start_shows_the_window
     assert any("TRAY_ARGS" in g and g.startswith("not any(") for g in guards), guards
 
 
-class _FakeDb:
-    def __init__(self, exited):
-        self.exited = exited
-
-    def get_setting(self, key, default=None):
-        return "1" if self.exited and key == "agent.exited" else default
-
-
-@pytest.mark.parametrize("running, exited, expected", [
-    (False, False, True),
-    (True, False, False),      # Lockdown is already running: the watchdog does nothing
-    (False, True, False),      # quit with tray Exit: stays off until the next login
-    (True, True, False),
+@pytest.mark.parametrize("running, expected", [
+    (False, True),
+    (True, False),      # Lockdown is already running (also the headless one after a tray Exit): no second agent
 ])
-def test_watchdog_starts_only_when_nothing_runs_and_exit_was_not_chosen(monkeypatch, running, exited, expected):
-    import db
+def test_watchdog_starts_only_when_nothing_runs(monkeypatch, running, expected):
     monkeypatch.setattr(main.single_instance, "running", lambda: running)
-    monkeypatch.setattr(db, "Database", lambda: _FakeDb(exited))
     monkeypatch.setattr(main, "_log", lambda *a, **k: None)
     assert main.watchdog_should_start() is expected
 
 
-def test_watchdog_reads_the_exited_flag_from_a_real_db(tmp_path, monkeypatch):
+def test_watchdog_does_not_start_a_second_agent_while_the_headless_one_runs_after_exit(tmp_path, monkeypatch):
+    """After tray Exit the flag is set but the agent runs on (no icon, no window): the port is held, so no start. If that
+    agent is killed, the watchdog brings it back whatever the flag says (agent.py then leaves the icon out)."""
     import antibypass
     import db
     real = db.Database(tmp_path / "w.db")
-    monkeypatch.setattr(main.single_instance, "running", lambda: False)
+    real.set_setting(antibypass.EXITED_KEY, "1")
     monkeypatch.setattr(db, "Database", lambda: real)
     monkeypatch.setattr(main, "_log", lambda *a, **k: None)
-    assert main.watchdog_should_start() is True
-    real.set_setting(antibypass.EXITED_KEY, "1")
+    monkeypatch.setattr(main.single_instance, "running", lambda: True)
     assert main.watchdog_should_start() is False
+    monkeypatch.setattr(main.single_instance, "running", lambda: False)
+    assert main.watchdog_should_start() is True
 
 
 def test_a_second_launch_open_event_shows_the_main_window(monkeypatch):

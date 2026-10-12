@@ -184,12 +184,16 @@ def open_challenge(win: Windows, data: dict):
     win.publisher.publish("challenge_open", data)
 
 
-def pump_open_events(events: queue.Queue, win: Windows):
-    """A second launch (single_instance) puts "open" into `events`: show the main window. Runs on its own thread."""
+def pump_open_events(events: queue.Queue, win: Windows, on_open=None):
+    """A second launch (single_instance) puts "open" into `events`: show the main window - or run `on_open`, which does
+    that and more (agent.open_again also brings the tray icon back after a tray Exit). Runs on its own thread."""
     def run():
         while True:
             if events.get() == "open":
-                show_main(win)
+                try:
+                    (on_open or (lambda: show_main(win)))()
+                except Exception:
+                    show_main(win)
     threading.Thread(target=run, name="lockdown-open-events", daemon=True).start()
 
 

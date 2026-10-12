@@ -8,8 +8,8 @@ What may be downloaded is decided HERE, from Python's own records, never from an
   address (version.REPO) - nothing else is ever fetched;
 - the file name is built from the version, which must be plain letters / digits / dots.
 The installer is started like today (ShellExecute "runas", `--update`), and only when it started does Lockdown quit -
-by closing the window and tray, NOT through the tray's Exit: that one sets EXITED_KEY and keeps Lockdown off until the
-next login, but an update is meant to come straight back.
+by closing the window and tray and ending the agent, NOT through the tray's Exit: that one only closes the icon and window
+(sets EXITED_KEY) and keeps the agent running, but an update is meant to restart it.
 
 Pushes (all through `publish(event, payload)`):
   download_progress  {state: downloading | ready | installing | failed, version, done, total, error}
