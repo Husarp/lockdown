@@ -1,6 +1,6 @@
 # Changelog — Lockdown Mobile
 
-## Unreleased
+## 0.5.18 - 2026-10-12 19:30
 - **An allowed site can skip the blocked words too.** Protection lists > Allowed exceptions: every site has a **Blocked words don't apply here** switch, and adding a site has one too (on by default, as on the PC). The word check in browsers then leaves that site and its subdomains alone, like a site in the blocked-words exceptions. Sites already on the list keep it off after the update, so nothing loosens by itself. Turning it on for a site (or adding a site with it on) asks for the challenge on Save; turning it off is free. Old backups and the Island copy still read each other: the new `allowedWords` list is simply missing (off) in an older file and skipped by an older copy. Tests: new `AllowedWordsTest`.
 
 ## 0.5.17 - 2026-10-12 15:25

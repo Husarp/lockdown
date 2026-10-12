@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.89.0 - 2026-10-12 19:30
 - **An allowed site can skip the blocked words too.** Each site under Blocking > Site protection > Allowed anyway has a new switch, **Blocked words don't apply here** (handy for, say, a dictionary): the word check then leaves that site and its subdomains alone, like a site in the word exceptions. It is on for a site you allow from now on (you can untick it when adding); the sites already allowed keep it off, so nothing loosens by itself. Turning it on for a site, or allowing a site with it on, needs the Anti-Bypass challenge (it loosens the word check); turning it off is free. It is kept in backups (an older backup loads with it off everywhere). Tests: new `test_allowed_words.py`.
 - **Passing notices don't pile up in the notification centre.** A plain notice (a blocked word, a blocked site or app) pops up and is gone after about 12 seconds; ones with buttons, and ones that came while a game was full-screen, stay as before.
 - **App and site icons without a coloured square behind them**, and **no stray outline on tabs and the sidebar**: the focus ring now shows only when you move around with the keyboard (it also lit up the last-clicked tab when you came back from another app).
