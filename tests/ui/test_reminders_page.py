@@ -73,6 +73,14 @@ def test_sleep_times_heads_up_and_text_are_saved(shell, page, harness):
     assert s["bedtime"] == "22:45" and s["before"] == 0.75 and s["text"] == "Sleep tight"
 
 
+def test_a_step_time_is_a_compact_hh_mm_field(shell, page, harness):
+    open_page(shell, page)
+    box = lambda sel: page.locator(sel).first.bounding_box()
+    h, m = box("[data-tier] .tp-h"), box("[data-tier] .tp-m")
+    assert h["width"] <= 30 and m["width"] <= 30
+    assert m["x"] - (h["x"] + h["width"]) < 14
+
+
 def test_sleep_steps_can_be_added_and_removed(shell, page, harness):
     open_page(shell, page)
     assert len(sleep_saved(harness)["tiers"]) == 3

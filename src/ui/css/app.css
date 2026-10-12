@@ -194,8 +194,9 @@
 /* ---------- reminder steps ---------- */
 .steps { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
 .step { display: inline-flex; align-items: center; gap: var(--sp-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); height: var(--control-h); padding: 0 var(--sp-1) 0 var(--sp-2); background: var(--surface); }
-.step input { width: calc(38px * var(--s)); border: 0; background: transparent; text-align: right; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
-.step input:focus { outline: 0; }
+.step > input { width: calc(38px * var(--s)); border: 0; background: transparent; text-align: right; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.step > input:focus { outline: 0; }
+.step .tp { border: 0; background: transparent; padding: 0; height: auto; }
 .step select { border: 0; background: transparent; color: var(--text-2); font-size: var(--fs-sm); }
 .step-arrow { color: var(--text-3); }
 

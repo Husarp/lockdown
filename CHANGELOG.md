@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- **Bedtime "Comes back" times (PC).** The time in each step is now a compact HH:MM field like the Bedtime and Wake up ones, with no extra box and no wide gap between hour and minutes. Tests: `test_a_step_time_is_a_compact_hh_mm_field`.
+
 ## 0.86.0 - 2026-10-12 10:27
 - **The new window is now the only window you see (PC), and it can't leave you on a black screen.** Lockdown opens in the new window; the "Use the new window" switch is gone from both Settings pages, and an old "use the old window" choice no longer counts. Fixed: after turning the new window on and restarting, 0.85.1 could show a black screen - its windows were shown before their page had loaded, and at bedtime the full-screen bedtime cover then was a solid dark screen you couldn't close. Now no window of the new one is shown until its page says it works: the bedtime / break cover waits for its page, and if the page doesn't come within 10 s you get the bedtime message as a Windows notification instead (a strict break keeps your windows minimised as before); the corner notices wait the same way (Windows notifications meanwhile). If the main window's page doesn't come within 8 s (45 s when Lockdown starts in the tray at login), or WebView2 is missing, or the start fails, the old window opens instead for that run, so you're never stuck. The old window stays only as that fallback (and the hidden `--legacy`). The reason is written to the Lockdown log, and a step-by-step start-up log to `%TEMP%\lockdown-newui.log`; every script error a page hits at start goes to the Lockdown log too. Also fixed: the corner window (notices, reminder popups) was shown in a way that left its page undrawn. Tests: new `tests/test_rebuild_startup_safety.py`.
 
