@@ -684,6 +684,47 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         fun breaksLooser(old: BreakCfg, new: BreakCfg): Boolean =
             loosensReminder(old.on, old.guarded, old.on, new.guarded) || AntiBypass.breakAppsLooser(old.allowed, new.allowed)
 
+        private fun minuteOf(t: String?): Int = t?.let(::hm)?.let { it.hour * 60 + it.minute } ?: 0
+
+        /** The minutes of the day a window [from, to) covers (past midnight when to <= from). */
+        private fun windowMinutes(w: List<String>): Set<Int> {
+            val lo = minuteOf(w.getOrNull(0)); val hi = minuteOf(w.getOrNull(1))
+            return if (lo < hi) (lo until hi).toSet() else ((lo until 1440) + (0 until hi)).toSet()
+        }
+
+        /** True when the new "only between" hours cover less of the day than the old ones (no hours = all day). */
+        fun hoursNarrower(old: CustomCfg, new: CustomCfg): Boolean {
+            if (!old.hours) return new.hours
+            if (!new.hours) return false
+            return !windowMinutes(new.window).containsAll(windowMinutes(old.window))
+        }
+
+        /** A change that makes a guarded (Important) reminder of yours ask for less - the same rules as the PC: another
+         *  kind, a dropped day, a longer snooze or more snoozes, a longer interval or a narrower / newly-set hours
+         *  window, a dropped set time, a narrower or moved random window, a lower or newly-set daily cap. Stricter edits,
+         *  and the "did you do it?" delay, are free. An unguarded reminder is never asked about (turning it off or
+         *  dropping the guard is [loosensReminder]). */
+        fun customLooser(old: CustomCfg, new: CustomCfg): Boolean {
+            if (!old.guarded) return false
+            if (old.kind != new.kind) return true
+            if (!new.days.containsAll(old.days)) return true
+            if (new.snooze > old.snooze || new.maxSnooze > old.maxSnooze) return true
+            when (new.kind) {
+                "interval" -> if (new.everySeconds > old.everySeconds || hoursNarrower(old, new)) return true
+                "times" -> if (!new.times.containsAll(old.times)) return true
+                "random" -> {
+                    val olo = minuteOf(old.window.getOrNull(0)); val nlo = minuteOf(new.window.getOrNull(0))
+                    val ohi = maxOf(olo, minuteOf(old.window.getOrNull(1)) - 1); val nhi = maxOf(nlo, minuteOf(new.window.getOrNull(1)) - 1)
+                    if (nlo > olo || nhi < ohi) return true
+                }
+            }
+            return new.perDay > 0 && (old.perDay == 0 || new.perDay < old.perDay)
+        }
+
+        /** Saving a reminder edit needs the challenge: it turned a guarded one off, dropped its guard, or made it ask for less. */
+        fun customEditLoosens(old: CustomCfg, new: CustomCfg): Boolean =
+            loosensReminder(old.on, old.guarded, new.on, new.guarded) || customLooser(old, new)
+
         /** "Wait before Dismiss" choices in seconds (0 = off), and the range a typed one may take. */
         val DISMISS_WAITS = listOf(0, 10, 30, 60)
         const val DISMISS_WAIT_MAX = 600

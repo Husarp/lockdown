@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -123,50 +125,55 @@ private fun RemList(open: (RemPage) -> Unit) {
                 containerColor = cs.primaryContainer, contentColor = cs.onPrimaryContainer) { Icon(Icons.Filled.Add, "Add") }
         },
     ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // one lazy list for the whole page: the hero and breaks cards, then your reminders (keyed by id), then the note
+        LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Bedtime hero
-            val indigo = tone(Hue.INDIGO)
-            Card(color = indigo.container, contentColor = indigo.onContainer, shape = MaterialTheme.shapes.extraLarge, onClick = { open(RemPage.Bedtime) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(40.dp).background(cs.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Bedtime, null, tint = indigo.accent, modifier = Modifier.size(22.dp))
-                    }
-                    Spacer(Modifier.size(12.dp))
-                    Text("Bedtime", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Switch(checked = cfg.sleep.on, onCheckedChange = { on ->
-                        if (on) { Store.update { it.copy(sleep = it.sleep.copy(on = true)) }; Grayscale.sync(ctx) }
-                        else guard(cfg.sleep.guarded) {
-                            Store.update { it.copy(sleep = it.sleep.copy(on = false)) }
-                            // Bedtime off by hand: colour back now, whoever turned grayscale on (only while bedtime grayscale is on)
-                            if (Store.config.settings.bedtimeGrayscale) Grayscale.switchedOff(ctx) else Grayscale.sync(ctx)
+            item(key = "bedtime") {
+                val indigo = tone(Hue.INDIGO)
+                Card(color = indigo.container, contentColor = indigo.onContainer, shape = MaterialTheme.shapes.extraLarge, onClick = { open(RemPage.Bedtime) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).background(cs.surface.copy(alpha = 0.6f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Bedtime, null, tint = indigo.accent, modifier = Modifier.size(22.dp))
                         }
-                    })
+                        Spacer(Modifier.size(12.dp))
+                        Text("Bedtime", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Switch(checked = cfg.sleep.on, onCheckedChange = { on ->
+                            if (on) { Store.update { it.copy(sleep = it.sleep.copy(on = true)) }; Grayscale.sync(ctx) }
+                            else guard(cfg.sleep.guarded) {
+                                Store.update { it.copy(sleep = it.sleep.copy(on = false)) }
+                                // Bedtime off by hand: colour back now, whoever turned grayscale on (only while bedtime grayscale is on)
+                                if (Store.config.settings.bedtimeGrayscale) Grayscale.switchedOff(ctx) else Grayscale.sync(ctx)
+                            }
+                        })
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Numeral("${cfg.sleep.bedtime} → ${cfg.sleep.wake}", sizeSp = 36, color = indigo.onContainer)
+                    Spacer(Modifier.height(8.dp))
+                    Text((if (cfg.sleep.before > 0) "Heads-up ${cfg.sleep.before} min before · " else "") +
+                        "full-screen at bedtime · comes back ${stepsText(cfg.sleep)}",
+                        style = MaterialTheme.typography.bodySmall, color = indigo.onContainer)
                 }
-                Spacer(Modifier.height(10.dp))
-                Numeral("${cfg.sleep.bedtime} → ${cfg.sleep.wake}", sizeSp = 36, color = indigo.onContainer)
-                Spacer(Modifier.height(8.dp))
-                Text((if (cfg.sleep.before > 0) "Heads-up ${cfg.sleep.before} min before · " else "") +
-                    "full-screen at bedtime · comes back ${stepsText(cfg.sleep)}",
-                    style = MaterialTheme.typography.bodySmall, color = indigo.onContainer)
             }
             // Breaks
-            Card(color = cs.surfaceContainerLow, onClick = { open(RemPage.Breaks) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconTile(Icons.Filled.Coffee, Hue.TEAL)
-                    Spacer(Modifier.size(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Breaks", style = MaterialTheme.typography.titleSmall)
-                        Text("${cfg.breaks.length} min every ${Interval.text(cfg.breaks.everySeconds)}" + if (cfg.breaks.twenty) " · 20-20-20 on" else "",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            item(key = "breaks") {
+                Card(color = cs.surfaceContainerLow, onClick = { open(RemPage.Breaks) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(Icons.Filled.Coffee, Hue.TEAL)
+                        Spacer(Modifier.size(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Breaks", style = MaterialTheme.typography.titleSmall)
+                            Text("${cfg.breaks.length} min every ${Interval.text(cfg.breaks.everySeconds)}" + if (cfg.breaks.twenty) " · 20-20-20 on" else "",
+                                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        }
+                        Switch(checked = cfg.breaks.on, onCheckedChange = { on ->
+                            if (on) Store.update { it.copy(breaks = it.breaks.copy(on = true)) }
+                            else guard(cfg.breaks.guarded) { Store.update { it.copy(breaks = it.breaks.copy(on = false)) } }
+                        })
                     }
-                    Switch(checked = cfg.breaks.on, onCheckedChange = { on ->
-                        if (on) Store.update { it.copy(breaks = it.breaks.copy(on = true)) }
-                        else guard(cfg.breaks.guarded) { Store.update { it.copy(breaks = it.breaks.copy(on = false)) } }
-                    })
                 }
             }
-            SectionLabel("Your reminders")
-            cfg.customs.forEach { c ->
+            item(key = "label") { SectionLabel("Your reminders") }
+            items(cfg.customs, key = { it.id }) { c ->
                 Card(color = cs.surfaceContainerLow, onClick = { open(RemPage.Custom(c)) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconTile(Icons.Filled.NotificationsActive, Hue.AMBER, on = c.on)
@@ -186,9 +193,11 @@ private fun RemList(open: (RemPage) -> Unit) {
                     }
                 }
             }
-            Text("Quiet pacing: a reminder backs off after a few ignored nudges and stops at its daily cap.",
-                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            Spacer(Modifier.height(72.dp))
+            item(key = "note") {
+                Text("Quiet pacing: a reminder backs off after a few ignored nudges and stops at its daily cap.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            item(key = "end") { Spacer(Modifier.height(72.dp)) }
         }
     }
 }
@@ -522,7 +531,7 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
         }
         draft = draft.copy(times = draft.times.map { validTime(it) ?: it }, window = draft.window.map { validTime(it) ?: it })
         val old = Store.config.customs.firstOrNull { it.id == draft.id }
-        val loosen = old != null && RemindersEngine.loosensReminder(old.on, old.guarded, draft.on, draft.guarded)
+        val loosen = old != null && RemindersEngine.customEditLoosens(old, draft)
         guard(loosen) {
             Store.update { s -> if (s.customs.any { it.id == draft.id }) s.copy(customs = s.customs.map { if (it.id == draft.id) draft else it }) else s.copy(customs = s.customs + draft) }
             then()
@@ -539,6 +548,11 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
             when (draft.kind) {
                 "interval" -> Card(color = cs.surfaceContainerLow) {
                     IntervalField("Every (of use)", draft.everySeconds) { draft = draft.copy(everySec = it) }
+                    SwitchRowInline("Only inside an hours window", draft.hours) { draft = draft.copy(hours = it) }
+                    if (draft.hours) {
+                        Spacer(Modifier.height(8.dp))
+                        WindowFields(draft.window) { draft = draft.copy(window = it) }
+                    }
                 }
                 "times" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // tap a time to change it, × to remove it, + to add one (all with the system clock dialog)
@@ -550,22 +564,49 @@ private fun CustomEditor(c: CustomCfg, onClose: () -> Unit) {
                     }
                     TextButton(onClick = { pickTime(ctx, "09:00") { v -> draft = draft.copy(times = draft.times + v) } }) { Text("+ Add time") }
                 }
-                else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val from = draft.window.getOrElse(0) { "10:00" }; val to = draft.window.getOrElse(1) { "18:00" }
-                    TimeField("From", from, Modifier.weight(1f)) { draft = draft.copy(window = listOf(it, to)) }
-                    TimeField("To", to, Modifier.weight(1f)) { draft = draft.copy(window = listOf(from, it)) }
-                }
+                else -> WindowFields(draft.window) { draft = draft.copy(window = it) }
             }
             SectionLabel("Days")
             DaysRow(draft.days) { draft = draft.copy(days = it) }
             Card(color = cs.surfaceContainerLow) {
-                if (draft.kind == "interval") SwitchRowInline("Only inside an hours window", draft.hours) { draft = draft.copy(hours = it) }
-                SwitchRowInline("Ask \"did you do it?\" after", draft.check > 0) { on -> draft = draft.copy(check = if (on) 10 else 0) }
                 SwitchRowInline("Important (challenge to turn off)", draft.guarded) { draft = draft.copy(guarded = it) }
                 SwitchRowInline("On", draft.on) { draft = draft.copy(on = it) }
             }
             StepperRow("Stop after (per day, 0 = no cap)", draft.perDay, "×", 1) { draft = draft.copy(perDay = it) }
+            MinuteChoices("Snooze for", "How long its Snooze button waits.", SNOOZE_CHOICES, draft.snooze, off = null) { draft = draft.copy(snooze = it) }
+            MinuteChoices("Ask \u201cdid you actually do it?\u201d", "After Done, this long after. Off = never asks.", CHECK_CHOICES, draft.check, off = "Off") { draft = draft.copy(check = it) }
             TextButton(onClick = { guard(draft.guarded) { Store.update { s -> s.copy(customs = s.customs.filterNot { it.id == draft.id }) }; onClose() } }) { Text("Delete reminder") }
+        }
+    }
+}
+
+/** The hours window of a reminder (From / To): "Random once" and "Every…" with the hours window on. */
+@Composable
+private fun WindowFields(window: List<String>, onChange: (List<String>) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        val from = window.getOrElse(0) { "10:00" }; val to = window.getOrElse(1) { "18:00" }
+        TimeField("From", from, Modifier.weight(1f)) { onChange(listOf(it, to)) }
+        TimeField("To", to, Modifier.weight(1f)) { onChange(listOf(from, it)) }
+    }
+}
+
+private val SNOOZE_CHOICES = listOf(1, 5, 10, 15, 30)
+private val CHECK_CHOICES = listOf(0, 5, 10, 15, 30)
+
+/** A row of minute choices (the PC's snooze / "did you do it?" lists); a value outside them (set elsewhere) stays shown.
+ *  [off]: the label of the 0 choice, if there is one. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MinuteChoices(label: String, help: String, choices: List<Int>, value: Int, off: String?, onChange: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(color = cs.surfaceContainerLow) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(help, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            (if (value in choices) choices else (choices + value).sorted()).forEach { n ->
+                Chip(if (n == 0 && off != null) off else "$n min", n == value) { onChange(n) }
+            }
         }
     }
 }
