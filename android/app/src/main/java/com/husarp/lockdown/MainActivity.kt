@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
 
     // The Quick Settings tile asked to turn Lockdown off: App() runs it through the challenge.
     private val askOff = mutableStateOf(false)
+    private var iconWatch: kotlinx.coroutines.Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,6 +102,9 @@ class MainActivity : ComponentActivity() {
         com.husarp.lockdown.remind.ReminderRunner.appVisible = true
         com.husarp.lockdown.update.Updates.onResume(this)
         runCatching { com.husarp.lockdown.remind.Grayscale.sync(this) }   // a grey screen left on outside bedtime clears on open
+        // Site icons for the sites on your lists: fetched while the app is in front, when it opens and when the lists change.
+        iconWatch?.cancel()
+        iconWatch = if (com.husarp.lockdown.link.IslandLink.isHelper) null else com.husarp.lockdown.ui.SiteIcons.watch(this)
     }
 
     // Rotation, dark mode, split screen resizing don't recreate the activity (the manifest's configChanges), so a
@@ -123,6 +127,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        iconWatch?.cancel()
+        iconWatch = null
         com.husarp.lockdown.remind.ReminderRunner.appVisible = false
         com.husarp.lockdown.update.Updates.onPause()
         super.onPause()

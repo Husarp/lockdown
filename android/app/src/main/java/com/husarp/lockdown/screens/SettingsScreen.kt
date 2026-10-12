@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
@@ -277,6 +278,10 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
             Toggle(Icons.Filled.Language, "Show sites instead of browsers",
                 "Insights lists the time per site (youtube.com · in Chrome) instead of one row for the browser, and so does the CSV export.",
                 s.sitesInsteadOfBrowsers) { on -> set { it.copy(sitesInsteadOfBrowsers = on) } }
+            // Not a loosening either way (it changes no block), so it is saved at once. Off = no icon is ever fetched.
+            Toggle(Icons.Filled.Image, "Download icons for my sites",
+                "Icons come from each site; when a site doesn't give one, a favicon service (Google) is asked, so it sees which sites are looked up.",
+                s.siteIcons) { on -> set { it.copy(siteIcons = on) } }
             HomeLayoutEditor()
         }
         "alerts" -> NotificationsCard()

@@ -59,13 +59,18 @@ fun AppIcon(pkg: String, fallbackName: String, size: Dp = 40.dp) {
     }
 }
 
-/** The right icon for a blocklist item: a real app icon for apps; for sites a letter tile in a colour that stays the
- *  same for the site (never red or orange - no favicons, nothing is fetched). */
+/** The right icon for a blocklist item: a real app icon for apps; for sites the site's real icon (saved, bundled or
+ *  fetched for your lists - ui/SiteIcons.kt) and, until there is one, a letter tile in a colour that stays the same
+ *  for the site (never red or orange). */
 @Composable
 fun ItemIcon(type: ItemType, target: String, name: String, size: Dp = 40.dp) {
     if (type == ItemType.APP) AppIcon(target, name, size)
     else {
-        val t = tone(Kinds.siteHue(target))
-        Avatar(name, bg = t.container, fg = t.onContainer, size = size)
+        val icon = rememberSiteIcon(target)
+        if (icon != null) SiteIconTile(icon, size)
+        else {
+            val t = tone(Kinds.siteHue(target))
+            Avatar(name, bg = t.container, fg = t.onContainer, size = size)
+        }
     }
 }
