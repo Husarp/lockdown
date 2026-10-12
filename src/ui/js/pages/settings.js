@@ -1,6 +1,7 @@
 // Settings page (BLUEPRINT 3.10): the REAL options of the old window - Appearance (theme, accent, interface size, daily
-// goal, Reduce motion), When limits reset, Categories, Emergency unlock, Backup & export. The mock's General / Updates /
-// Protection / Data content (start with Windows, language, channel, ...) has no backend and is left out.
+// goal, Reduce motion, Download icons for my sites), When limits reset, Categories, Emergency unlock, Backup & export.
+// The mock's General / Updates / Protection / Data content (start with Windows, language, channel, ...) has no backend
+// and is left out.
 //
 // The look applies live, with no reload and no restart (js/shell.js setLook). Python decides everything that loosens and
 // this file never compares old with new: moving the reset back and starting a fresh day now, more / longer emergency
@@ -96,6 +97,7 @@ const NOTE = {
   cats: "Screen time is split into Productive / Neutral / Distracting (plus any of your own, each with a colour). Modes that block \"Distracting\" follow these. Set an app's or site's category on Screen Time > Apps / Websites.",
   emergency: "The \"Emergency unlock\" button (Blocking > Overview) unblocks the sites / apps you pick for a while. Unlocking several at once counts as one use. With more than one kind (e.g. 3 a week for 5 min and 1 a month for 60 min) you pick which kind to use; each counts its own uses.",
   emergencyRule: "Fewer, shorter, per day to per week or month, or removing a kind saves at once. More, longer, any other period, a new kind or turning it on needs the challenge.",
+  icons: "Icons come from each site; when a site doesn't give one, a favicon service (Google) is asked, so it sees which sites are looked up.",
   backup: "A backup has everything you set up: blocked sites and apps with their rules, groups, categories, modes, reminders and settings. Importing one replaces yours - it can loosen blocks, so it asks for the challenge first.",
 };
 
@@ -110,6 +112,7 @@ function appearanceCard() {
       ${field("Interface size", "How big everything is drawn.", sel("scale", "Interface size"))}
       ${field("Daily goal", NOTE.goal, sel("goal", "Daily goal"))}
       ${field("Reduce motion", "No transitions or animations.", sw(false, 'data-k="motion" aria-label="Reduce motion"'))}
+      ${field("Download icons for my sites", NOTE.icons, sw(true, 'data-k="icons" aria-label="Download icons for my sites"'))}
     </div></section>`;
 }
 
@@ -243,6 +246,7 @@ function fillLook(d) {
   setOptions(q("scale"), SCALE_CHOICES, look.scale);
   setOptions(q("goal"), d.goal_options.map((h) => [h, goalLabel(h)]), d.goal);
   if (q("motion").checked !== d.motion) q("motion").checked = d.motion;
+  if (q("icons").checked !== d.icons_download) q("icons").checked = d.icons_download;
 }
 
 function fillReset(r) {
@@ -359,6 +363,15 @@ async function setMotion(on) {
   } catch (err) {
     applyLook({ motion: !on });
     q("motion").checked = !on;
+    toast((err && err.message) || "That didn't work.");
+  }
+}
+
+async function setIcons(on) {
+  try {
+    await ld.call("set_icons_download", on);
+  } catch (err) {
+    q("icons").checked = !on;
     toast((err && err.message) || "That didn't work.");
   }
 }
@@ -508,6 +521,7 @@ function onChange(e) {
   if (k === "scale") return lookChange({ scale: t.value });
   if (k === "goal") return setGoal(Number(t.value));
   if (k === "motion") return setMotion(t.checked);
+  if (k === "icons") return setIcons(t.checked);
   if (k === "accent-input") return lookChange({ accent: t.value });
   if (k === "em-on" || (k && k.startsWith("k-"))) return saveCurrent();
 }

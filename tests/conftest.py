@@ -12,8 +12,14 @@ Tests that genuinely need the real Win32 API (process list, TCP table, DNS adapt
 """
 import ctypes
 import importlib.util
+import os
 import sys
+import tempfile
 import types
+
+# Tests never touch the real data folder (paths.DATA_DIR - C:\ProgramData\Lockdown by default, which on Linux became a
+# folder of that name in the current directory): a temporary one, unless the run sets its own.
+os.environ.setdefault("LOCKDOWN_DATA_DIR", tempfile.mkdtemp(prefix="lockdown-tests-"))
 
 
 IS_WINDOWS = sys.platform == "win32"

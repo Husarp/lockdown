@@ -101,7 +101,8 @@ def test_the_page_shows_every_part(shell, page, harness):
     heads = page.eval_on_selector_all(".set .card-h h3", "els => els.map(e => e.textContent)")
     assert heads == ["Appearance", "When limits reset", "Categories", "Emergency unlock", "Backup & export"]
     text = page.inner_text(".set")
-    for label in ("Theme", "Accent colour", "Interface size", "Daily goal", "Reduce motion", "Reset at", "ends ",
+    for label in ("Theme", "Accent colour", "Interface size", "Daily goal", "Reduce motion", "Download icons for my sites",
+                  "Reset at", "ends ",
                   "Manage categories", "Allow emergency unlocks", "Add another kind", "Export…", "Import…",
                   "Screen time (CSV)…", "Applies at once - no restart"):
         assert label in text, label
@@ -194,6 +195,29 @@ def test_reduce_motion_turns_animations_off_and_stays_after_a_restart(shell, pag
     page.click('[data-k="motion"]')
     wait_for(page, "document.documentElement.dataset.motion === undefined")
     assert eventually(lambda: saved(harness, "ui.reduce_motion") == "0")
+
+
+def test_download_icons_for_my_sites_is_on_by_default_saves_both_ways_and_stays(shell, page, harness):
+    open_page(shell, page)
+    box = '[data-k="icons"]'
+    assert page.is_checked(box) and saved(harness, "icons.download") is None
+    text = page.inner_text('[data-card="look"]')
+    assert ("Icons come from each site; when a site doesn't give one, a favicon service (Google) is asked, "
+            "so it sees which sites are looked up.") in text
+    page.click(box)
+    assert eventually(lambda: saved(harness, "icons.download") == "0")
+    shell(route="settings")                                                  # the app starts again: still off
+    page.wait_for_function("document.querySelector('[data-k=icons]') && !document.querySelector('[data-k=icons]').checked")
+    page.click(box)
+    assert eventually(lambda: saved(harness, "icons.download") == "1")
+
+
+def test_the_icons_switch_is_free_while_locked(shell, page, harness):
+    lock(harness)
+    open_page(shell, page)
+    page.click('[data-k="icons"]')
+    assert eventually(lambda: saved(harness, "icons.download") == "0")
+    assert page.locator('[data-k="lock"]').is_visible() and page.locator("dialog[open]").count() == 0
 
 
 def test_a_look_change_is_free_while_locked(shell, page, harness):

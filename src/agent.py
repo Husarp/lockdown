@@ -230,12 +230,14 @@ def _run(argv: list[str], events, state: dict) -> int:
     windows.pump_open_events(events, win)
     # R11: app icons (/icon/...), the installed-apps catalog (loads in the background after the window is up) and the
     # window the program-file dialog belongs to
-    from resident import catalog, icons
+    from resident import catalog, icon_prefetch, icons
     ctx.main_window = win.main
     ctx.publish = win.publisher.publish   # R18: the draft tells the page (draft / blocks_changed pushes)
     ctx.catalog = app_catalog = catalog.AppCatalog(on_ready=lambda: win.publisher.publish("apps_ready", {}), seed_games=True)
-    server.add_icon_routes(icons.IconService(on_ready=lambda key: win.publisher.publish("icon_ready", {"key": key}),
-                                             path_of=app_catalog.path_for))
+    icon_service = icons.IconService(on_ready=lambda key: win.publisher.publish("icon_ready", {"key": key}),
+                                     path_of=app_catalog.path_for, download=icons.download_on(ctx.db))
+    server.add_icon_routes(icon_service)
+    site_icons = icon_prefetch.attach(ctx, icon_service)   # UP15: real icons for your sites (starts in start_up; after ctx.publish)
 
     from resident import reminder_ui, workers
     hub = workers.Hub(log_sink=_log)
@@ -283,6 +285,7 @@ def _run(argv: list[str], events, state: dict) -> int:
         protection_watch.attach(pool, win.publisher.publish, lambda: win.publisher.visible)
         pool.start()
         app_catalog.start()   # (R11: reads the cached list, scans again if it is over a day old)
+        site_icons.start()    # (UP15: a few seconds on, the sites of your lists get their real icons in the background)
         webapi.screentime.start_warmup(ctx)   # (a few seconds on, in the background: the first visit of Screen Time finds its day sums ready)
         webapi.protection.start_warmup(ctx)   # (R29: ten seconds on: "Check a site" finds the lists' tables loaded, not 1.5 s of file reading)
     try:

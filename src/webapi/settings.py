@@ -20,6 +20,9 @@ ticket (ctx.guard.request) and the page only gets the ticket; nothing here reads
 - Export / CSV: the owner picks the place in the native Save dialog; the page never sends a path.
 - Cosmetic (ui): the daily goal, the look (webapi/shell.py), Reduce motion. Reduce motion is saved with the generic
   `ui_setting` (allow-listed below).
+- Site icons: "Download icons for my sites" (`icons.download`, on by default) is free both ways - it only decides whether
+  the icon service may use the net (set_icons_download). The service keeps its own copy of the switch: this module tells
+  it (ctx.icon_prefetch) after a change and after an import; none of its threads reads the database.
 """
 import hashlib
 import json
@@ -30,6 +33,7 @@ import antibypass
 import backup
 import emergency
 import reminders
+from resident import icons
 from rules import DAY_NAMES, RESET_KEY, apply_reset_now, change_reset, parse_hhmm, reset_is_looser
 
 from . import categories, core, draft as drafts, shell
@@ -113,8 +117,8 @@ def _goal(db) -> float:
 @core.read
 def settings_get(ctx):
     """Everything the page shows in one answer: {now, look: {theme, accent, scale, accents}, motion, goal, goal_options,
-    reset: {time, ends, ends_text, carry_note}, categories, emergency: {enabled, kinds: [{id, uses, per, minutes,
-    per_text, left, allowed, resets_text, used}], ...}}. `used`: the uses of the kind's current period, each as
+    reset: {time, ends, ends_text, carry_note}, icons_download, categories, emergency: {enabled, kinds: [{id, uses, per,
+    minutes, per_text, left, allowed, resets_text, used}], ...}}. `used`: the uses of the kind's current period, each as
     "Mon 12 Oct 14:05–14:25". Meters are worked out now, so showing the page again always shows today's uses."""
     db, now = ctx.db, ctx.now()
     goal = _goal(db)
@@ -122,6 +126,7 @@ def settings_get(ctx):
         "now": _iso(now), "look": shell.get_theme(ctx), "motion": db.get_setting(MOTION_KEY) == "1",
         "goal": goal, "goal_options": sorted({*GOAL_HOURS, goal}),
         "reset": _reset_info(db, now), "categories": categories.load(db), "emergency": _emergency_info(db, now),
+        "icons_download": icons.download_on(db),
     }
 
 
@@ -135,6 +140,27 @@ def set_goal(ctx, hours):
     ctx.db.set_setting(GOAL_KEY, str(hours))
     _dirty(ctx, "dashboard", "screentime")
     return {"goal": hours}
+
+
+# ---------------------------------------------------------------- site icons
+
+def _icons_changed(ctx):
+    """Tell the icon service the switch is what the database says now (off stops new downloads at once; on scans the
+    owner's sites). Only the agent has one."""
+    follow = getattr(ctx, "icon_prefetch", None)
+    if follow is not None:
+        follow.setting_changed(icons.download_on(ctx.db))
+
+
+@core.ui
+def set_icons_download(ctx, on):
+    """"Download icons for my sites": on = real site icons are fetched from the sites themselves (and from a favicon
+    service when a site has none); off = no network at all for icons. Not part of blocking, so free both ways."""
+    if type(on) is not bool:
+        raise ApiError("Bad request: yes or no expected.")
+    ctx.db.set_setting(icons.DOWNLOAD_KEY, "1" if on else "0")
+    _icons_changed(ctx)
+    return {"icons_download": on}
 
 
 # ---------------------------------------------------------------- when limits reset
@@ -421,6 +447,7 @@ def backup_import_apply(ctx, token):
         with drafts.lock:
             d.discard()                               # (the blocks are the backup's now: reload them everywhere)
         _poke(ctx)
+        _icons_changed(ctx)                           # (the backup carries its own icon switch)
         _dirty(ctx, *PAGES)
         return {"items": len(again["items"]), "groups": len(again.get("groups", []))}
 
