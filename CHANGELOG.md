@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.87.0 - 2026-10-12 15:25
 - **Bedtime "Comes back" times (PC).** The time in each step is now a compact HH:MM field like the Bedtime and Wake up ones, with no extra box and no wide gap between hour and minutes. Tests: `test_a_step_time_is_a_compact_hh_mm_field`.
 - **Blocked-site alert names the category (PC).** When a site or app is blocked because it belongs to a blocked category (for example Distracting), the alert now ends with "It's in Distracting." If your message uses `{reason}`, it says "(it's in Distracting)" there instead. Sites and apps blocked in their own right read as before. Tests: `test_a_category_block_names_the_category`, `test_a_category_block_says_it_comes_from_the_category`.
 - **Groups page: long chips stay inside the card (PC).** A group card's schedule chips and its status ("Disabled - nothing is enforced") no longer run out of the card and over the "Edit group" panel: a long chip wraps onto more lines (full text on hover) and the status moves under the name. Tests: `test_a_long_group_card_stays_inside_its_card_and_beside_the_editor`.
