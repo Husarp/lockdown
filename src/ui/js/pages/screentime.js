@@ -31,7 +31,7 @@ const STYLE = `<style>
 .st .page-h { min-height: calc(36px * var(--s)); }
 .st-panes { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .st-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); overflow-y: auto; }
-.st-pane.st-fill { overflow: hidden; }
+.st-pane.st-fill { overflow-x: hidden; overflow-y: auto; }
 .st-content.st-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .st-pane[hidden], .st-pane > [hidden] { display: none; }
 .st-pane > .card, .st-pane > .stack { flex: none; }

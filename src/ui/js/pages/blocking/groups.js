@@ -174,7 +174,7 @@ const STYLE = `<style>
 .ge { display: grid; gap: var(--sp-4); min-width: 0; }
 .ge[hidden], .gp-blank[hidden] { display: none; }
 .ge-top .card-h { flex-wrap: wrap; row-gap: var(--sp-2); }
-.ge-top .card-h h2 { margin: 0; flex: 1; min-width: 0; }
+.ge-top .card-h h2 { margin: 0; flex: 1 1 auto; min-width: 0; }
 .ge-name { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .ge-name .input { flex: 1; min-width: calc(180px * var(--s)); max-width: calc(420px * var(--s)); }
 .ge-wcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(220px * var(--s)), 1fr)); gap: var(--sp-4); }

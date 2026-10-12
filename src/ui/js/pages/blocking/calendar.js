@@ -122,7 +122,8 @@ const STYLE = `<style>
 .cal-cardbox .v .blocked { color: var(--brand); }
 .cal-cardbox .v .allowed { color: var(--ok); }
 .cal-note { flex: none; margin: 0; }
-@media (max-width: 860px) { .cal-grid { grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) calc(110px * var(--s)); } .cal-cards { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .cal-grid { grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) calc(110px * var(--s)); } .cal-cards { grid-template-columns: 1fr; } .cal-axis.h24 span:nth-child(even) { visibility: hidden; } }
+@media (max-width: 640px) { .cal-who .cal-badge { display: none; } }
 </style>`;
 
 const NEXT = { blocked: "blocked", allowed: "allowed" };

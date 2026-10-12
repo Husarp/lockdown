@@ -32,7 +32,7 @@ const STYLE = `<style>
 .bk-lock { border: 1px solid var(--line); border-radius: var(--r-lg); }
 .bk-panes { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .bk-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); overflow-y: auto; }
-.bk-pane.bk-fill { overflow: hidden; }
+.bk-pane.bk-fill { overflow-x: hidden; overflow-y: auto; }
 .bk-pane[hidden] { display: none; }
 .bk-pane > .card, .bk-pane > .stack { flex: none; }
 .bk-pane.bk-fill > .list-card { flex: 1; }

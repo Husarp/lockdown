@@ -67,6 +67,28 @@ export function createSuggest({ input, onPick, kind = "all" }) {
     if (i >= 0) nodes[i].scrollIntoView({ block: "nearest" });
   }
 
+  /** Open upwards when the box is too low for the list to fit under it (Site protection's "Allowed anyway" sits at the bottom
+   *  of its page): measured against every box that clips it - the page scroller, a dialog, the window. When neither side has
+   *  room for all rows, it opens on the roomier side and its rows scroll. */
+  function place() {
+    root.classList.remove("sg-up");
+    list.style.maxHeight = "";
+    const anchor = root.parentNode.getBoundingClientRect(), h = root.offsetHeight + 4;
+    let lo = 0, hi = window.innerHeight;
+    for (let p = root.parentNode; p && p !== document.documentElement; p = p.parentNode) {
+      if (p.nodeType !== 1) continue;
+      const cs = getComputedStyle(p);
+      if (cs.overflowY === "visible") continue;
+      const r = p.getBoundingClientRect();
+      lo = Math.max(lo, r.top);
+      hi = Math.min(hi, r.bottom);
+    }
+    const below = hi - anchor.bottom, above = anchor.top - lo;
+    const up = h > below && above > below, room = up ? above : below;
+    if (up) root.classList.add("sg-up");
+    if (h > room) list.style.maxHeight = Math.max(nodes[0].offsetHeight, room - 8 - (h - 4 - list.offsetHeight)) + "px";
+  }
+
   const api = {
     el: root,
     /** Is the dropdown showing? */
@@ -84,6 +106,7 @@ export function createSuggest({ input, onPick, kind = "all" }) {
       if (!rows.length) return api.hide();
       paint();
       root.hidden = false;
+      place();
     },
     destroy() { off(); root.remove(); },
   };

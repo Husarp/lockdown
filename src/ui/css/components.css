@@ -157,7 +157,7 @@ button { cursor: pointer; }
 /* field row: label + description on the left, control on the right */
 .field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) var(--sp-4); min-height: calc(56px * var(--s)); }
 .field + .field { border-top: 1px solid var(--line); }
-.field-l { flex: 1 1 calc(180px * var(--s)); min-width: calc(180px * var(--s)); display: grid; gap: 2px; }
+.field-l { flex: 1 1 calc(180px * var(--s)); min-width: calc(180px * var(--s)); display: grid; gap: 2px; overflow-wrap: anywhere; }
 .field-l b { font-weight: var(--fw-semibold); }
 .field-l span { color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
 .field-c { display: flex; align-items: center; gap: var(--sp-2); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }

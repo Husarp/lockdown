@@ -57,6 +57,8 @@ const STYLE = `<style>
 .nt .nt-repeat { width: calc(84px * var(--s)); text-align: center; }
 .nt .nt-err { color: var(--k-block); font-size: var(--fs-sm); padding: 0 var(--sp-4) var(--sp-2); }
 .nt .nt-err:empty { display: none; }
+.nt .seg { flex: 0 1 auto; min-width: 0; }
+.nt .seg button { white-space: normal; height: auto; min-height: calc(var(--control-h) - 4px); text-align: center; line-height: 1.2; padding: var(--sp-1) var(--sp-3); }
 @media (max-width: 860px) { .nt .nt-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nt .nt-msg { grid-template-columns: minmax(0, 1fr) auto; } .nt .nt-msg label { grid-column: 1 / -1; } }
 </style>`;
 
