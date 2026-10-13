@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.90.0 - 2026-10-13 03:10
 - **App log filters.** A new **Bypass used** chip (emergency unlocks, pauses, challenges passed, Lockdown switched off, Tray Exit), an **Only…** menu for one kind of event, and a period (Today / 7 days / 30 days / All time). Tests: `test_applog.py`, `test_page_applog.py`, `applog.test.mjs`.
 - **Each bedtime step can have its own Dismiss wait.** While *Wait before Dismiss* is on, every "Comes back" step gets a wait field (blank = the general wait), e.g. 22:00 -> 10 s, 00:00 -> 30 s, 02:00 -> 2 min. The screen waits as long as the step running when it comes up. Anything that makes Dismiss wait less at some time of the night needs the challenge; longer is free. Older settings and backups read as "the general wait". Tests: `test_dismiss_wait.py`, `test_rebuild_reminders_page.py`, `test_reminders_page.py`.
 - **Customise Dashboard is a list.** Customise opens a list of every card with up/down and an on/off switch, plus Reset to default, saved at once (no more arrows on the cards). New card: **Most used apps today** (your top 5 apps, as in Screen Time). Tests: `test_rebuild_dashboard.py`, `test_page_dashboard.py`.

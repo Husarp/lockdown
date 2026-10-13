@@ -1,6 +1,6 @@
 # Changelog — Lockdown Mobile
 
-## Unreleased
+## 0.5.19 - 2026-10-13 03:10
 - **Activity log: "Bypass used".** A new chip lists emergency unlocks, pauses ("Pause my blocks", with the length), passed challenges and Lockdown switched off - the last three are now recorded (newest 500). The chip row scrolls sideways on a narrow phone. Tests: `ActivityLogTest`.
 - **Bedtime screen looks like the PC's.** Centred, a round icon (moon / cup for a break / bell), the big clock (a break: its countdown), and full-width buttons in the PC's order: Dismiss with its wait, Disable alerts, then Emergency as a pink link. The strict-break screen matches. Look only.
 - **Each bedtime step can have its own Dismiss wait** (as on the PC): a Wait field in every step row while the Dismiss wait is on; blank = the general wait. Shorter at any time of the night = the challenge on Save, longer is free. Tests: `RemindersEngineTest`.
