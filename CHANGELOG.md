@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.92.0 - 2026-10-13 18:30
 - **Missing app icons (Firefox, Brave, Javaw, LockApp).** Every way of getting an icon is now tried in turn - the big icon, the small one, a Store/system app's own logo (read from its package, e.g. LockApp), then the icon Explorer shows - and a blank picture counts as a failure. Icons are drawn more reliably (transparency worked out properly, read only once Windows has finished drawing), app icons have their own queue (they were dropped while many site icons were loading), and programs are also found in C:\Windows\SystemApps, the App Paths registry and PATH (an installed Java). Icons that came out blank in 0.91.0 are made again once. When an icon still can't be made, lockdown.log says why. Tests: new `test_app_icon_fallbacks.py`.
 
 ## 0.91.0 - 2026-10-13 14:15
