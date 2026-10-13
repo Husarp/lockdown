@@ -18,6 +18,11 @@ broken-image glyph - and it never reaches the file system or the queue. Windows'
 "svchost.exe", "MsMpEng.exe" ...) get a system tile (a gear, or a shield for the security ones) until a real icon is
 found (%SystemRoot% and System32 are tried after the catalog); those without an .exe name are never extracted.
 
+An app icon is taken big (up to 256 px) and kept at ICON_SIZE: from the places the app catalog knows for it (a
+shortcut's icon, Steam's icon of the game, the uninstall entry's DisplayIcon - see monitor/applist.py) and the program
+itself. APP_CACHE_VERSION marks the app icons on disk: older (32 px) ones are deleted once and made again when asked.
+When the catalog has loaded, the app icons that failed for want of a path are tried again (`retry_apps`).
+
 The page is untrusted: only plain names are accepted (an exe name - anything Windows allows in a file name except
 path characters - or a host name; no folders, no "..", no control characters), and the page never says WHERE an exe is
 - the path comes from the app catalog or the owner's own list.
@@ -50,7 +55,12 @@ LOCAL_SUFFIXES = frozenset({"local", "localhost", "localdomain", "internal", "la
                             "invalid", "test", "onion"})   # names of a private network or of nothing: never asked about
 BAD_NAME_CHARS = frozenset('\\/:*?"<>|')   # what Windows refuses in a file name (and what could leave the icon folder)
 OWN_EXES = frozenset({"lockdown.exe", "lockdownservice.exe", "lockdownsetup.exe"})   # get Lockdown's own icon
-OWN_ICON_SIZE = 32      # as the extracted icons
+ICON_SIZE = 64          # app icons are kept this big (sharp at 40 px on a 150% screen)
+EXTRACT_SIZE = 256      # ... and taken from the program this big, then scaled down
+OWN_ICON_SIZE = ICON_SIZE   # as the extracted icons
+APP_CACHE_VERSION = "2"     # 2: big icons (version 1 kept 32 px ones) - older app icons are made again, once
+APP_MARK = "app_icons.version"
+IMAGE_TYPES = (".ico", ".png", ".jpg", ".jpeg", ".bmp")   # icon files read as they are (Steam's, a shortcut's .ico)
 KINDS = {"app": ".png", "site": ".png", "letter": ".svg"}
 
 # Windows' own processes (lower case, with or without ".exe"): the gear = a system process, the shield = a security one.
@@ -198,18 +208,20 @@ def _default_fetch(host: str):
 
 class IconService:
     """`on_ready(key)` is called from a background thread when an icon has arrived. `path_of(exe)` gives the full path of
-    a program (or None); `extract(path)` -> PNG bytes | None and `fetch(host)` -> PNG bytes | None can be replaced
-    (tests). `download`: the setting "Download icons for my sites" (the owner of the service keeps it up to date; no
+    a program (or None); `sources_of(exe)` the app catalog's icon places for it, best first ("path" or "path,index":
+    a shortcut's icon, Steam's, the uninstall entry's - see monitor/applist.py), tried before the path;
+    `extract(location)` -> PNG bytes | None and `fetch(host)` -> PNG bytes | None can be replaced (tests). `download`: the setting "Download icons for my sites" (the owner of the service keeps it up to date; no
     thread of this class reads the database). `start=False` keeps the threads off: call `run_pending()` instead.
     `wall` is the clock of file ages, `clock` the one of retry times, `sleep` the pause between downloads."""
 
     def __init__(self, cache_dir: Path | None = None, on_ready=None, path_of=None, extract=None, fetch=None,
                  old_dir: Path | None = None, start: bool = True, clock=time.monotonic, download: bool = True,
-                 wall=time.time, sleep=time.sleep, pause: float = PAUSE_SEC):
+                 wall=time.time, sleep=time.sleep, pause: float = PAUSE_SEC, sources_of=None):
         self.dir = Path(cache_dir) if cache_dir else default_dir()
         self.old_dir = old_dir if old_dir is not None else old_window_dir()
         self.on_ready = on_ready or (lambda key: None)
         self.path_of = path_of or (lambda exe: None)
+        self.sources_of = sources_of or (lambda exe: [])
         self.extract = extract or extract_exe_icon
         self.fetch = fetch or _default_fetch
         self.clock, self.wall, self.sleep, self.pause = clock, wall, sleep, pause
@@ -224,6 +236,7 @@ class IconService:
         self._back: dict = {}                                   # prefetch backlog: site -> None (in order)
         self._thread: threading.Thread | None = None
         self._net_threads: list = []
+        self._app_cache_ok = False         # the app icons on disk are of APP_CACHE_VERSION (checked on the first request)
 
     # ------------------------------------------------------------------ the route (HTTP server threads)
     def handle(self, rest: str, query: dict) -> Response | None:
@@ -243,6 +256,7 @@ class IconService:
                             cache="public, max-age=86400")
         if kind == "site":
             return self._site(name)
+        self._upgrade_app_cache()
         data = self._cached(kind, name)
         if data is not None:
             return Response(data, "image/png", cache="no-cache", etag=f'"{self._stamp(kind, name)}"')
@@ -264,6 +278,26 @@ class IconService:
         if is_public_host(name) and (self.download or self._old_file(name) is not None):
             self._enqueue("site", name)             # (off: only to take over an icon the old window had - no network)
         return Response(letter_svg(name), "image/svg+xml", cache="no-store")
+
+    def _upgrade_app_cache(self):
+        """Once: app icons saved by an older version (small, blurry) are deleted, so each is made again when asked."""
+        if self._app_cache_ok:
+            return
+        with self._lock:            # (the other requests wait: none may send an old icon meanwhile)
+            if self._app_cache_ok:
+                return
+            try:
+                mark = (self.dir / APP_MARK).read_text(encoding="utf-8").strip()
+            except OSError:
+                mark = None
+            try:
+                if mark != APP_CACHE_VERSION and self.dir.is_dir():   # (no folder yet: marked with the first icon)
+                    for old in self.dir.glob("app_*.png"):
+                        old.unlink(missing_ok=True)
+                    (self.dir / APP_MARK).write_text(APP_CACHE_VERSION, encoding="utf-8")
+            except OSError:
+                pass                # (tried again at the next start)
+            self._app_cache_ok = True
 
     def _file(self, kind: str, name: str) -> Path:
         return self.dir / f"{kind}_{name}.png"
@@ -381,6 +415,16 @@ class IconService:
         except Exception:
             return None
 
+    def retry_apps(self):
+        """The app catalog has (re)loaded: the app icons that could not be made a moment ago (no path known yet) are
+        tried again now, and the page is told when they arrive."""
+        with self._lock:
+            names = [k[4:] for k in self._failed if k.startswith("app:")]
+            for name in names:
+                del self._failed[f"app:{name}"]
+        for name in names:
+            self._enqueue("app", name)
+
     @property
     def queued(self) -> int:
         """Icons waiting to be got (tests)."""
@@ -464,22 +508,26 @@ class IconService:
         target = self._file(kind, name)
         if kind == "site":
             return self._make_site(target, name)
-        if self.old_dir is not None:   # the old window may have it already (its names: app_<exe>.png, <host>.png)
-            old = self.old_dir / f"app_{name}.png"
-            if old.is_file() and old.stat().st_size:
-                self._save(target, old.read_bytes())
-                return True
         if name in OWN_EXES:   # Lockdown's own program: its real icon, no catalog lookup
             data = own_icon()
             if data:
                 self._save(target, data)
                 return True
+        places = list(self.sources_of(name) or [])
         path = self.path_of(name) or system_exe_path(name)
-        data = self.extract(path) if path else None
-        if not data:
-            return False
-        self._save(target, data)
-        return True
+        if path and path not in places:
+            places.append(path)
+        for place in places:
+            data = self.extract(place)
+            if data:
+                self._save(target, data)
+                return True
+        if self.old_dir is not None:   # the old window may have it (its names: app_<exe>.png, <host>.png; 32 px)
+            old = self.old_dir / f"app_{name}.png"
+            if old.is_file() and old.stat().st_size:
+                self._save(target, old.read_bytes())
+                return True
+        return False
 
     def _make_site(self, target: Path, name: str) -> bool | None:
         have = self._has("site", name)
@@ -499,6 +547,8 @@ class IconService:
 
     def _save(self, target: Path, data: bytes):
         self.dir.mkdir(parents=True, exist_ok=True)
+        if target.name.startswith("app_") and not (self.dir / APP_MARK).exists():
+            (self.dir / APP_MARK).write_text(APP_CACHE_VERSION, encoding="utf-8")   # (the new icons are of this version)
         tmp = target.with_suffix(".tmp")
         tmp.write_bytes(data)
         tmp.replace(target)
@@ -529,18 +579,65 @@ def own_icon() -> bytes | None:
     return None
 
 
-def extract_exe_icon(path: str) -> bytes | None:
-    """The program's own icon (32x32) as PNG bytes - Windows only (ExtractIconEx + DrawIconEx, as gui/icons.py)."""
-    if sys.platform != "win32" or not path:
+def split_location(text: str) -> tuple[str, int]:
+    """An icon place as Windows writes it - '"C:\\App\\app.exe",0', 'C:\\x.dll,-101', '%SystemRoot%\\a.ico' - as
+    (path, index): quotes off, environment variables filled in, index 0 when none is given."""
+    text = str(text or "").strip()
+    index = 0
+    m = re.fullmatch(r"(.*?),\s*(-?\d+)", text)
+    if m:
+        text, index = m.group(1).strip(), int(m.group(2))
+    import os
+    return os.path.expandvars(text.strip().strip('"').strip()), index
+
+
+def fit(image):
+    """An icon picture as kept: RGBA (transparency kept), scaled down to fit ICON_SIZE (never up), square."""
+    from PIL import Image
+    image = image.convert("RGBA")
+    if max(image.size) > ICON_SIZE:
+        image.thumbnail((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
+    if image.width != image.height:
+        side = max(image.size)
+        square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        square.paste(image, ((side - image.width) // 2, (side - image.height) // 2))
+        image = square
+    return image
+
+
+def image_file_icon(path: str) -> bytes | None:
+    """An icon file (.ico - its biggest picture -, .png, .jpg, .bmp) as PNG bytes (any system: Pillow reads it)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            return _png(fit(image))
+    except Exception:
         return None
-    image = _exe_icon(path)
-    return _png(image) if image else None
 
 
-def _exe_icon(path: str):
+def extract_exe_icon(location: str) -> bytes | None:
+    """The icon at `location` ("path" or "path,index") as PNG bytes, ICON_SIZE at most. An icon file is read as it is;
+    a program's (or a .dll's) icon is taken big (SHDefExtractIcon at EXTRACT_SIZE, Windows only) and scaled down, and
+    when that fails the 32 px one is taken as before (ExtractIconEx)."""
+    path, index = split_location(location)
+    if not path:
+        return None
+    if path.lower().endswith(IMAGE_TYPES):
+        return image_file_icon(path)
+    if sys.platform != "win32":
+        return None
+    try:
+        image = _exe_icon_large(path, index)
+    except Exception:
+        image = None
+    if image is None:
+        image = _exe_icon(path, index)
+    return _png(fit(image)) if image else None
+
+
+def _gdi():
     import ctypes
     from ctypes import wintypes
-    from PIL import Image
     shell32, user32, gdi32 = ctypes.windll.shell32, ctypes.windll.user32, ctypes.windll.gdi32
     for fn in (gdi32.CreateCompatibleDC, gdi32.CreateDIBSection, gdi32.SelectObject):
         fn.restype = wintypes.HANDLE
@@ -553,10 +650,41 @@ def _exe_icon(path: str):
     user32.DrawIconEx.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int, wintypes.HANDLE, ctypes.c_int,
                                   ctypes.c_int, wintypes.UINT, wintypes.HANDLE, wintypes.UINT]
     user32.DestroyIcon.argtypes = [wintypes.HANDLE]
+    shell32.SHDefExtractIconW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.UINT, ctypes.POINTER(wintypes.HANDLE),
+                                          ctypes.POINTER(wintypes.HANDLE), wintypes.UINT]
+    shell32.SHDefExtractIconW.restype = ctypes.c_long
+    return shell32, user32, gdi32
+
+
+def _exe_icon_large(path: str, index: int = 0):
+    """The program's icon drawn at EXTRACT_SIZE (Windows picks its biggest picture - up to 256 px - for that size)."""
+    import ctypes
+    from ctypes import wintypes
+    shell32, _user32, _gdi32 = _gdi()
     large = wintypes.HANDLE()
-    if shell32.ExtractIconExW(path, 0, ctypes.byref(large), None, 1) < 1 or not large.value:
+    sizes = (16 << 16) | EXTRACT_SIZE                       # MAKELONG(large size, small size)
+    if shell32.SHDefExtractIconW(path, index, 0, ctypes.byref(large), None, sizes) != 0 or not large.value:
+        return None                                         # (S_FALSE: no icon in that file)
+    return _draw_icon(large, EXTRACT_SIZE)
+
+
+def _exe_icon(path: str, index: int = 0):
+    """The program's 32 px icon (ExtractIconEx) - the way before EXTRACT_SIZE, kept as the fallback."""
+    import ctypes
+    from ctypes import wintypes
+    shell32, _user32, _gdi32 = _gdi()
+    large = wintypes.HANDLE()
+    if shell32.ExtractIconExW(path, index, ctypes.byref(large), None, 1) < 1 or not large.value:
         return None
-    size = 32
+    return _draw_icon(large, 32)
+
+
+def _draw_icon(icon, size: int):
+    """Draw an HICON into a size x size RGBA picture (Pillow); the icon is destroyed."""
+    import ctypes
+    from ctypes import wintypes
+    from PIL import Image
+    _shell32, user32, gdi32 = _gdi()
 
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
@@ -572,12 +700,12 @@ def _exe_icon(path: str):
     bmp = gdi32.CreateDIBSection(dc, ctypes.byref(hdr), 0, ctypes.byref(bits), None, 0)
     try:
         gdi32.SelectObject(dc, bmp)
-        user32.DrawIconEx(dc, 0, 0, large, size, size, 0, None, 3)   # DI_NORMAL
+        user32.DrawIconEx(dc, 0, 0, icon, size, size, 0, None, 3)   # DI_NORMAL
         raw = ctypes.string_at(bits, size * size * 4)
     finally:
         gdi32.DeleteObject(bmp)
         gdi32.DeleteDC(dc)
-        user32.DestroyIcon(large)
+        user32.DestroyIcon(icon)
     image = Image.frombuffer("RGBA", (size, size), raw, "raw", "BGRA", 0, 1)
     if image.getextrema()[3][1] == 0:   # old icons without alpha: make drawn pixels opaque
         image.putalpha(Image.eval(image.convert("L"), lambda v: 255 if v else 0))

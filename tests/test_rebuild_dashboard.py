@@ -339,6 +339,35 @@ def test_at_a_glance(env):
     assert labels["No emergency unlock"]["main"] == "1 day in a row"
 
 
+def test_most_used_apps_today_is_the_top_of_screen_times_apps_table(env):
+    for i, exe in enumerate(("a.exe", "b.exe", "c.exe", "d.exe", "e.exe", "f.exe")):
+        record(env.db, "2026-09-14", f"0{i + 1}:00", 600 + i * 60, 600 + i * 60, exe=exe)
+    record(env.db, "2026-09-14", "08:00", 30, 30, exe="tiny.exe")                    # (under a minute: not in the table)
+    record(env.db, "2026-09-13", "09:00", 3600, 3600, exe="yesterday.exe")          # (yesterday's: not today)
+    env.db.add_item("Bee", ["b.exe"], "app", rules=[{"rule_type": "permanent"}])
+    rows = card(env, "apps")["rows"]
+    table = data(env.api.screentime_get("apps", "Today"))["rows"]
+    assert [r["key"] for r in rows] == [r["key"] for r in table][:dashboard.APPS_MAX] == ["f.exe", "e.exe", "d.exe", "c.exe", "b.exe"]
+    assert [(r["name"], r["time"]) for r in rows] == [(r["name"], r["time"]) for r in table][:5]
+    assert rows[0] == {"key": "f.exe", "name": "F", "icon": ["app", "f.exe"], "time": "15 m"}
+    assert rows[4]["name"] == "Bee"                                                 # (the blocklist's name, as Screen Time says it)
+
+
+def test_most_used_apps_today_is_empty_before_any_use_today(env):
+    record(env.db, "2026-09-13", "09:00", 3600, 3600, exe="code.exe")
+    assert card(env, "apps") == {"rows": []}
+
+
+def test_a_saved_layout_from_before_the_apps_card_gets_it_appended(env):
+    old = [k for k in dashboard.CARDS if k != "apps"]
+    env.db.set_setting("dash.order", json.dumps(list(reversed(old))))
+    env.db.set_setting("dash.hidden", json.dumps(["glance"]))
+    record(env.db, "2026-09-14", "09:00")
+    d = get(env)
+    assert d["order"] == list(reversed(old)) + ["apps"] and d["hidden"] == ["glance"] and "apps" in d["cards"]
+    assert d["titles"]["apps"] == "Most used apps today"
+
+
 def test_the_names_of_apps_come_from_the_blocklist(env):
     record(env.db, "2026-09-14", "09:00", exe="disc.exe")
     env.db.add_item("Discord", ["disc.exe"], "app", rules=[{"rule_type": "permanent"}])
@@ -635,7 +664,7 @@ def test_dashboard_get_is_fast_on_two_years(tmp_path, capsys):
     t = time.process_time()
     first = dashboard.dashboard_get(ctx)
     cold = (time.process_time() - t) * 1000
-    assert first["empty"] is False and len(first["cards"]) == 11
+    assert first["empty"] is False and len(first["cards"]) == len(dashboard.CARDS)
 
     def p95_of(clear):
         times = []

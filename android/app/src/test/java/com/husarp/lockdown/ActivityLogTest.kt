@@ -3,6 +3,7 @@ package com.husarp.lockdown
 import com.husarp.lockdown.engine.ActivityLog
 import com.husarp.lockdown.engine.AppSpan
 import com.husarp.lockdown.engine.BlockedVisit
+import com.husarp.lockdown.engine.Bypass
 import com.husarp.lockdown.engine.EmergencyUse
 import com.husarp.lockdown.engine.LogFilter
 import com.husarp.lockdown.engine.LogItem
@@ -113,7 +114,40 @@ class ActivityLogTest {
         assertEquals(listOf(LogKind.APP), ActivityLog.view(rows, LogFilter.APPS).map { it.kind })
         assertEquals(listOf(LogKind.SITE), ActivityLog.view(rows, LogFilter.SITES).map { it.kind })
         assertEquals(listOf(LogKind.BLOCK, LogKind.EMERGENCY), ActivityLog.view(rows, LogFilter.BLOCKS).map { it.kind })
-        assertEquals(listOf("All", "Apps", "Sites", "Blocks"), LogFilter.entries.map { it.label })
+        assertEquals(listOf("All", "Apps", "Sites", "Blocks", "Bypass used"), LogFilter.entries.map { it.label })
+    }
+
+    @Test fun bypass_used_shows_emergency_uses_and_the_recorded_bypasses_only() {
+        val rows = listOf(row(at(12, 0), LogKind.APP), row(at(11, 0), LogKind.BYPASS), row(at(10, 0), LogKind.BLOCK), row(at(9, 0), LogKind.EMERGENCY))
+        assertEquals(listOf(LogKind.BYPASS, LogKind.EMERGENCY), ActivityLog.view(rows, LogFilter.BYPASS).map { it.kind })
+        assertEquals(listOf(LogKind.BLOCK, LogKind.EMERGENCY), ActivityLog.view(rows, LogFilter.BLOCKS).map { it.kind })
+        assertEquals(4, ActivityLog.view(rows, LogFilter.ALL).size)
+    }
+
+    // ---------- bypass record ----------
+
+    @Test fun recorded_bypasses_become_rows_newest_first_with_a_pause_length() {
+        var text = ""
+        text = ActivityLog.bypassAdd(text, at(7, 0, day = 20), Bypass.OFF)                // older than the window
+        text = ActivityLog.bypassAdd(text, at(9, 0), Bypass.CHALLENGE)
+        text = ActivityLog.bypassAdd(text, at(9, 1), Bypass.PAUSE, 7200)
+        text = ActivityLog.bypassAdd(text, at(21, 30), Bypass.OFF)
+        text += "\nnot a time\tPAUSE\t0\n${at(10, 0)}\tNO_SUCH_KIND\t0"                  // unreadable lines are skipped
+        val rows = ActivityLog.bypassRows(text, today.minusDays(6))
+        assertEquals(listOf(at(21, 30), at(9, 1), at(9, 0)), rows.map { it.at })
+        assertEquals(listOf("Lockdown switched off", "Blocks paused", "Challenge passed"), rows.map { it.name })
+        assertEquals(listOf("Bypass used", "Bypass used · 2 h 00 min", "Bypass used"), rows.map { it.what })
+        assertTrue(rows.all { it.kind == LogKind.BYPASS })
+        assertEquals(rows, ActivityLog.view(ActivityLog.merge(today, rows), LogFilter.BYPASS))
+    }
+
+    @Test fun the_bypass_record_keeps_only_its_newest_lines() {
+        var text = ""
+        repeat(ActivityLog.BYPASS_KEEP + 20) { text = ActivityLog.bypassAdd(text, at(0, 0).plusSeconds(it.toLong()), Bypass.CHALLENGE) }
+        val lines = text.lines()
+        assertEquals(ActivityLog.BYPASS_KEEP, lines.size)
+        assertEquals(at(0, 0).plusSeconds(ActivityLog.BYPASS_KEEP + 19L).toString(), lines.last().substringBefore('\t'))
+        assertEquals(at(0, 0).plusSeconds(20).toString(), lines.first().substringBefore('\t'))
     }
 
     @Test fun the_list_is_capped_and_keeps_the_newest() {

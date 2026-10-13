@@ -31,6 +31,8 @@ data class AntiBypassCfg(
     val grid: Boolean = false,
     val complex: Boolean = false,
     val customPhrase: String = "",
+    // "My own phrase" picked; "A random phrase" keeps it saved. Saved before the picker kept it: on when there is one.
+    val useOwn: Boolean = customPhrase.isNotEmpty(),
     val hours: Boolean = false,
     val windows: List<Window> = listOf(Window(listOf(6), "18:00", "20:00")),   // Sunday 18:00-20:00
     val waitMin: Int = 0,
@@ -93,21 +95,25 @@ object AntiBypass {
         return chars.chunked(5).joinToString(" ")
     }
 
+    /** Your own phrase while "My own phrase" is picked, else "" (a random one is asked). */
+    fun ownPhrase(cfg: AntiBypassCfg): String = if (cfg.useOwn) cfg.customPhrase else ""
+
     fun phraseFor(cfg: AntiBypassCfg, rng: Random = Random.Default): String =
-        cfg.customPhrase.ifEmpty { newPhrase(cfg.length, cfg.complex, rng) }
+        ownPhrase(cfg).ifEmpty { newPhrase(cfg.length, cfg.complex, rng) }
 
     private fun phraseStrength(cfg: AntiBypassCfg): Int =
-        cfg.customPhrase.ifEmpty { null }?.replace(" ", "")?.length ?: cfg.length
+        ownPhrase(cfg).ifEmpty { null }?.replace(" ", "")?.length ?: cfg.length
 
     /** A challenge field's edit was typed (one character at a time, or a deletion), not a pasted chunk (PC block_paste). */
     fun typedNotPasted(old: String, new: String): Boolean = new.length - old.length <= 1
 
     /** Anti-Bypass itself weakened: a challenge off, a shorter/simpler phrase, grid dropped, other hours, less wait.
-     *  Setting or changing your own phrase counts too: one you know is weaker than a random one of the same length. */
+     *  Setting, changing or picking your own phrase again counts too: one you know is weaker than a random one of the
+     *  same length. Picking a random one (yours stays saved) is free unless it is shorter. */
     fun settingsLooser(old: AntiBypassCfg, new: AntiBypassCfg): Boolean =
         (new.waitMin < old.waitMin) ||
             (old.phrase && (!new.phrase || phraseStrength(new) < phraseStrength(old) ||
-                (new.customPhrase.isNotEmpty() && new.customPhrase != old.customPhrase) ||
+                (ownPhrase(new).isNotEmpty() && ownPhrase(new) != ownPhrase(old)) ||
                 (old.grid && !new.grid) || (old.complex && !new.complex))) ||
             (old.hours && (!new.hours || new.windows != old.windows))
 

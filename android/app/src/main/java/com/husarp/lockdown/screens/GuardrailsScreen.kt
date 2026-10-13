@@ -118,7 +118,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
     val e = d.value
     val dab = e.ab
     fun setAb(f: (AntiBypassCfg) -> AntiBypassCfg) = d.update { it.copy(ab = f(it.ab)) }
-    var ownPhrase by remember(d.resets) { mutableStateOf(dab.customPhrase.isNotEmpty()) }   // "My own phrase" picked
+    val ownPhrase = dab.useOwn          // "My own phrase" picked ("A random phrase" keeps it saved)
     var ownText by remember(d.resets) { mutableStateOf(dab.customPhrase) }
     var lengthText by remember(d.resets, dab.length) { mutableStateOf(dab.length.toString()) }
 
@@ -126,8 +126,8 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
         val new = d.value
         val problem = new.problem() ?: when {
             !new.ab.phrase -> null
-            ownPhrase && new.ab.customPhrase.isEmpty() -> "Type your own phrase, or pick a random one."
-            !ownPhrase && AntiBypass.parseLength(lengthText) == null -> "The phrase length must be ${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH}."
+            new.ab.useOwn && new.ab.customPhrase.isEmpty() -> "Type your own phrase, or pick a random one."
+            !new.ab.useOwn && AntiBypass.parseLength(lengthText) == null -> "The phrase length must be ${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH}."
             else -> null
         }
         if (problem != null) { Toast.makeText(ctx, problem, Toast.LENGTH_LONG).show(); return }
@@ -270,8 +270,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 Spacer(Modifier.height(14.dp))
                 // random or your own, chosen before Save: nothing is locked in half-set
                 com.husarp.lockdown.ui.Segmented(listOf("A random phrase", "My own phrase"), if (ownPhrase) 1 else 0) { i ->
-                    ownPhrase = i == 1
-                    setAb { it.copy(customPhrase = if (ownPhrase) cleanPhrase(ownText) else "") }
+                    setAb { it.copy(useOwn = i == 1) }
                 }
                 Spacer(Modifier.height(12.dp))
                 if (!ownPhrase) {          // a random phrase's settings; your own phrase has none
@@ -298,7 +297,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                     Chip("Table writing", dab.grid) { setAb { it.copy(grid = !it.grid) } }
                 }
                 Text(
-                    (if (ownPhrase) "Your own phrase, typed exactly each time (no pasting). Once saved, changing it needs the challenge."
+                    (if (ownPhrase) "Your own phrase, typed exactly each time (no pasting). Once saved, changing it or picking it again needs the challenge; a random phrase keeps it saved."
                         else "A random phrase of ${dab.length} characters" + (if (dab.complex) ", with numbers and capitals" else "") + ".") +
                         if (dab.grid) " Typed word by word into a 3×3 grid (no paste/macros)." else "",
                     Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
@@ -489,6 +488,9 @@ private fun PauseCard(now: LocalDateTime, guard: (Boolean, () -> Unit) -> Unit) 
                 guard(true) {
                     val at = TrustedTime.local(ctx)        // the time it is once the challenge is done
                     Store.update { it.copy(pause = Pause.start(at, minutes, silent, it.resetTime())) }
+                    val end = Pause.until(Store.state.value.pause, at)
+                    com.husarp.lockdown.data.BypassLog.record(ctx, com.husarp.lockdown.engine.Bypass.PAUSE,
+                        end?.let { java.time.Duration.between(at, it).seconds.toInt() } ?: 0)
                     if (silent) com.husarp.lockdown.remind.Grayscale.sync(ctx)
                 }
             }) { Text("Pause my blocks") }

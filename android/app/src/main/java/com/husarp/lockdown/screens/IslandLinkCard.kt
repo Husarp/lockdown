@@ -79,7 +79,7 @@ private fun MainLinkCard() {
                 "linked" -> {
                     val ago = (now - st.lastSeen) / 1000
                     val covers = IslandLink.mainCovers()         // main blocks Island apps itself: the helper checks in every 15 min
-                    val recent = ago in 0 until com.husarp.lockdown.engine.IslandSight.seenWithinMs(covers) / 1000   // negative: the clock was set back
+                    val recent = IslandLink.checkedInLately(st, now)   // the same rule as Home and the notice
                     val text = when {
                         recent && !st.canBlock -> "Linked · Lockdown in Island can't block: open it there and grant what it asks for"
                         recent -> "Linked · last heard from Island ${agoText(ago)}"

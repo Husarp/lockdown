@@ -214,7 +214,8 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
     // A draft, saved with Save (one challenge for the whole edit). Steps, heads-up, texts and the mode are ordinary
-    // edits, as on the PC; only un-flagging Important, or a shorter wait before Dismiss, asks for the challenge.
+    // edits, as on the PC; only un-flagging Important, a shorter wait before Dismiss, or letting taps through the
+    // bedtime screen asks for the challenge.
     val d = rememberDraft(BedtimeDraft(cfg.sleep, cfg.settings.bedtimeGrayscale))
     val s = d.value.sleep
     // the steps re-order as soon as a step is added or its time changes
@@ -259,7 +260,8 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 if (s.tiers.isEmpty()) Text("Every ${Interval.text(s.repeatSeconds)}, all night.", style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = { set { c -> c.copy(tiers = c.tiers + newStep(c)) } }) { Text("+ Add step") }
                 Text("The later it is, the more often the bedtime screen returns after you dismiss it. " +
-                    "A step earlier in the evening than bedtime counts from bedtime. Type how often like 30 s, 5 min or 1h (at least 5 s).",
+                    "A step earlier in the evening than bedtime counts from bedtime. Type how often like 30 s, 5 min or 1h (at least 5 s)." +
+                    (if (s.dismissWait > 0) " Wait: the step's own wait before Dismiss, like 10 s or 2 min; empty uses the one below." else ""),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {
@@ -306,6 +308,13 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 SwitchRowInline("Grayscale the screen at bedtime", d.value.grayscale) { on -> d.update { it.copy(grayscale = on) } }
                 GrayscaleNote(d.value.grayscale)
             }
+            Column {
+                SwitchRowInline("Block taps behind the bedtime screen", s.blockBehind) { on -> set { it.copy(blockBehind = on) } }
+                Text("The bedtime screen (and a strict break) covers the whole screen and takes every tap and key, Back " +
+                    "too, so nothing behind it can be used unseen. Its own buttons keep working, calls still get through. " +
+                    "Turning it off while this is Important needs the challenge.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
             SwitchRowInline("Important (need the challenge to turn off)", s.guarded) { on -> set { it.copy(guarded = on) } }
             Text("At bedtime the screen goes dark with \"Time for bed\": Dismiss, Disable alerts (asks for the challenge), " +
                 "or an emergency unlock while you have one.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
@@ -323,16 +332,32 @@ private fun CardTitle(icon: androidx.compose.ui.graphics.vector.ImageVector, tex
     }
 }
 
-/** One escalation step: "from HH:MM, every 5 min / 30 s", with × to remove it. */
+/** One escalation step: "from HH:MM, every 5 min / 30 s" (and, with a wait before Dismiss on, its own wait), with ×
+ *  to remove it. */
 @Composable
 private fun TierRow(s: SleepCfg, t: ReminderTier, onChange: (ReminderTier) -> Unit, onRemove: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TimeField("From", t.from, Modifier.weight(1f)) { onChange(t.copy(from = it)) }
         IntervalField("Every", t.seconds, Modifier.weight(1f), hint = null) { onChange(t.copy(everySec = it)) }
+        if (s.dismissWait > 0) StepWaitField(t.waitSec, s.dismissWait, Modifier.weight(1f)) { onChange(t.copy(waitSec = it)) }
         IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, "Remove step") }
     }
     if (RemindersEngine.stepFromBedtime(s, t.from))
         Text("Before bedtime: counts from ${s.bedtime}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** A step's own wait before Dismiss: empty = the general one ([general], shown as the hint), else like 10 s or 2 min
+ *  ([RemindersEngine.parseStepWait]). Only a wait (or empty) reaches [onChange]; something else shows the error. */
+@Composable
+private fun StepWaitField(waitSec: Int?, general: Int, modifier: Modifier, onChange: (Int?) -> Unit) {
+    fun shown(w: Int?) = w?.let(Interval::text) ?: ""
+    fun read(v: String) = if (v.isBlank()) null else RemindersEngine.parseStepWait(v)
+    var text by remember { mutableStateOf(shown(waitSec)) }
+    // a change from outside (Discard) shows, unless what's typed already says it
+    LaunchedEffect(waitSec) { if (read(text) != waitSec) text = shown(waitSec) }
+    OutlinedTextField(text, { v -> text = v; if (v.isBlank() || read(v) != null) read(v).let { if (it != waitSec) onChange(it) } },
+        label = { Text("Wait") }, placeholder = { Text(Interval.text(general)) }, singleLine = true,
+        isError = text.isNotBlank() && read(text) == null, modifier = modifier)
 }
 
 /** A new step: at bedtime if there is none, else an hour after the last one, as often. */

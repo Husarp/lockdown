@@ -104,7 +104,7 @@ def test_the_page_shows_every_part(shell, page, harness):
     assert heads == ["Challenges", "Always on", "Pause my blocks", "Turn Lockdown off", "What needs the challenge",
                      "Keeping Lockdown running"]
     for label in ("Type a random phrase", "Length", "Short 30", "Medium 60", "Long 120", "Very long 250", "characters",
-                  "Numbers & CAPITALS", "3×3 grid", "Your own phrase", "Save phrase", "Then wait",
+                  "Numbers & CAPITALS", "3×3 grid", "Use my own phrase", "Your own phrase", "Save phrase", "Then wait",
                   "Only during these hours", "Add time window", "Save hours", "Try the challenge",
                   "Silence all notifications", "Resume blocking", "Uninstall protection", "Trusted time"):
         assert page.locator(f".ab :text('{label}')").count() >= 1, label
@@ -340,17 +340,39 @@ def test_numbers_and_the_grid_are_switches(shell, page, harness):
     assert eventually(lambda: stored(harness)["complex"] is True and stored(harness)["grid"] is True)
 
 
-def test_the_own_phrase_is_saved_and_dims_the_random_options(shell, page, harness):
+def test_the_own_phrase_is_kept_while_off_and_its_switch_dims_the_random_options(shell, page, harness):
     open_page(shell, page)
+    page.click('[data-k="own"]')                                               # nothing written yet: refused
+    wait_for(page, "document.querySelector('[data-k=\"err\"]').textContent.includes('write it first')")
+    assert page.is_checked('[data-k="own"]') is False and not dialog_open(page)
     page.fill('[data-k="custom"]', "I promised myself one focused evening, and I keep my promises.")
-    page.click('[data-act="save-phrase"]')
-    answer_yes(page)
+    page.click('[data-act="save-phrase"]')                                     # switched off: saved, nothing asked
+    assert eventually(lambda: stored(harness)["custom_phrase"].startswith("I promised myself"))
+    assert stored(harness)["use_own"] is False and not dialog_open(page)
+    assert "ab-dim" not in page.get_attribute(".ab-len", "class")
+    page.click('[data-k="own"]')
+    answer_yes(page)                                                           # (no phrase asked yet: only a yes)
     wait_for(page, "document.querySelector('.ab-len').classList.contains('ab-dim')")
-    assert stored(harness)["custom_phrase"].startswith("I promised myself")
+    assert stored(harness)["use_own"] is True and page.is_checked('[data-k="own"]')
+    page.click('[data-k="own"]')
+    answer_yes(page)
+    wait_for(page, "!document.querySelector('.ab-len').classList.contains('ab-dim')")
+    assert stored(harness)["use_own"] is False and stored(harness)["custom_phrase"].startswith("I promised myself")
+    assert page.input_value('[data-k="custom"]').startswith("I promised myself")
     page.click('[data-act="help"][data-help="own"]')
     assert page.is_visible('[data-helptext="own"]')
     page.click('[data-act="help"][data-help="own"]')
     assert page.is_hidden('[data-helptext="own"]')
+
+
+def test_switching_your_own_phrase_on_while_locked_is_the_challenge(shell, page, harness):
+    lock(harness, custom_phrase="my own words for the lock")                    # saved, switched off
+    open_page(shell, page)
+    assert page.input_value('[data-k="custom"]') == "my own words for the lock" and not page.is_checked('[data-k="own"]')
+    page.click('[data-k="own"]')
+    escape_challenge(page)
+    wait_for(page, "document.querySelector('[data-k=\"own\"]').checked === false")
+    assert stored(harness)["use_own"] is False and not dialog_open(page)
 
 
 def test_then_wait_is_applied_on_enter_and_on_leaving_the_box(shell, page, harness):
@@ -596,3 +618,4 @@ def test_no_timer_runs_while_the_window_is_hidden(shell, page, harness, perf):
     perf.set_hidden(False)
     page.wait_for_timeout(1200)
     assert perf.timer_calls()["timeout"] >= 1                                   # the clock runs again
+

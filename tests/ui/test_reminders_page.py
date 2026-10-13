@@ -125,6 +125,21 @@ def test_dismiss_wait_quick_picks_and_any_seconds(shell, page, harness):
     assert sleep_saved(harness)["dismiss_wait"] == 90
 
 
+def test_each_step_has_its_own_dismiss_wait_while_the_wait_is_on(shell, page, harness):
+    open_page(shell, page)
+    box = page.locator('[data-tier] [data-k="t-waitbox"]').first
+    assert box.is_hidden()                                      # Dismiss wait Off: no per-step waits
+    page.click('.seg[data-seg="wait"] button[data-v="30"]')
+    wait_for(page, "!document.querySelector('[data-tier] [data-k=\"t-waitbox\"]').hidden")
+    page.locator('[data-tier] [data-k="t-wait"]').first.fill("2 min")
+    page.locator('[data-tier] [data-k="t-wait"]').first.press("Enter")
+    page.wait_for_timeout(300)
+    tiers = sleep_saved(harness)["tiers"]
+    assert reminders.step_wait(tiers[0]) == 120 and all(reminders.step_wait(t) is None for t in tiers[1:])
+    page.locator('[data-k="s-before"]').click()                 # (focus out of the steps: the reload fills them)
+    wait_for(page, "document.querySelector('[data-tier] [data-k=\"t-wait\"]').value === '2 min'")
+
+
 def test_sleep_switch_and_important(shell, page, harness):
     open_page(shell, page)
     page.click('[data-k="s-on"]')
@@ -158,10 +173,20 @@ def test_grey_screen_during_bedtime_is_a_switch_on_the_sleep_card(shell, page, h
     assert "Color filters" in text and "separate" in text                         # (Windows' own colour filters)
     page.click('[data-k="s-grey"]')                                                # on: free
     wait_for(page, "document.querySelector('[data-k=\"s-grey\"]').checked === true")
-    assert sleep_saved(harness)["grey"] is True and not page.locator("#dlg[open]").count()
+    _saved_soon(page, harness, True)
+    assert not page.locator("#dlg[open]").count()
     page.click('[data-k="s-grey"]')                                                # off again: bedtime is not Important, free
-    page.wait_for_timeout(300)
-    assert sleep_saved(harness)["grey"] is False and not page.locator("#dlg[open]").count()
+    _saved_soon(page, harness, False)
+    assert not page.locator("#dlg[open]").count()
+
+
+def _saved_soon(page, harness, want, key="grey"):
+    """The switch's save goes through the bridge after the box flips: wait for it (up to 3 s)."""
+    for _ in range(30):
+        if sleep_saved(harness)[key] is want:
+            return
+        page.wait_for_timeout(100)
+    assert sleep_saved(harness)[key] is want
 
 
 def test_turning_the_bedtime_grey_off_while_important_and_locked_asks_for_the_challenge(shell, page, harness):
@@ -177,6 +202,34 @@ def test_turning_the_bedtime_grey_off_while_important_and_locked_asks_for_the_ch
     page.wait_for_function("!document.querySelector('#dlg').open")
     wait_for(page, "document.querySelector('[data-k=\"s-grey\"]').checked === true")      # the switch snapped back
     assert sleep_saved(harness)["grey"] is True
+
+
+def test_block_clicks_behind_the_bedtime_screen_is_a_switch_on_the_sleep_card(shell, page, harness):
+    open_page(shell, page)
+    assert page.locator(".rem :text('Block clicks behind the bedtime screen')").count() >= 1
+    assert not page.is_checked('[data-k="s-block"]') and sleep_saved(harness)["block_behind"] is False
+    page.click('[data-k="s-block"]')                                               # on: free
+    wait_for(page, "document.querySelector('[data-k=\"s-block\"]').checked === true")
+    assert sleep_saved(harness)["block_behind"] is True and not page.locator("#dlg[open]").count()
+    page.click('[data-k="s-block"]')                                               # off again: bedtime is not Important, free
+    page.wait_for_timeout(300)
+    assert sleep_saved(harness)["block_behind"] is False and not page.locator("#dlg[open]").count()
+
+
+def test_letting_clicks_through_while_important_and_locked_asks_for_the_challenge(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY,
+                   {**reminders.DEFAULT_SLEEP, "on": True, "guarded": True, "block_behind": True})
+    lock(harness)
+    open_page(shell, page)
+    assert page.is_checked('[data-k="s-block"]')
+    page.click('[data-k="s-block"]')
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    assert "let clicks through the bedtime screen" in page.inner_text("#dlg").lower()
+    assert sleep_saved(harness)["block_behind"] is True
+    page.keyboard.press("Escape")
+    page.wait_for_function("!document.querySelector('#dlg').open")
+    wait_for(page, "document.querySelector('[data-k=\"s-block\"]').checked === true")     # the switch snapped back
+    assert sleep_saved(harness)["block_behind"] is True
 
 
 # ---------------------------------------------------------------- Breaks

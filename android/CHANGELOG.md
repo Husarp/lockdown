@@ -1,5 +1,16 @@
 # Changelog — Lockdown Mobile
 
+## Unreleased
+- **Activity log: "Bypass used".** A new chip lists emergency unlocks, pauses ("Pause my blocks", with the length), passed challenges and Lockdown switched off - the last three are now recorded (newest 500). The chip row scrolls sideways on a narrow phone. Tests: `ActivityLogTest`.
+- **Bedtime screen looks like the PC's.** Centred, a round icon (moon / cup for a break / bell), the big clock (a break: its countdown), and full-width buttons in the PC's order: Dismiss with its wait, Disable alerts, then Emergency as a pink link. The strict-break screen matches. Look only.
+- **Each bedtime step can have its own Dismiss wait** (as on the PC): a Wait field in every step row while the Dismiss wait is on; blank = the general wait. Shorter at any time of the night = the challenge on Save, longer is free. Tests: `RemindersEngineTest`.
+- **Island time counts everywhere:** Home's "Time per app today" and today's total, the screen-time widget, the daily-goal reminder and the weekly summary now include Island apps, like Insights (limits still don't count Island). Tests: `IslandUseTest`.
+- **Own phrase kept when you pick a random one.** Guardrails' "A random phrase / My own phrase" picker no longer throws your phrase away: picking random keeps it saved (never asked), picking yours again brings it back and asks the challenge on Save. Tests: `AntiBypassEngineTest`.
+- **No false "Island apps not covered" notice.** The notice now comes only after two failed checks in a row (a check while the screen is off doesn't count), goes away as soon as Island checks in again, and the Island copy keeps its hour to check in after the main app stops covering it (it only wakes every 15 min). The Settings Island card judges the same way as Home and the notice. Tests: `IslandSightTest`.
+- **Insights chart:** tapping anywhere outside the bars (or the same bar again) brings the total back.
+- **Top apps bars line up:** the category button took different widths ("Distracting" vs "Neutral"), so bars of the same time had different lengths; every row now has the same bar width.
+- **Block taps behind the bedtime screen.** A new switch in the bedtime settings (off by default): the bedtime screen (and a strict break's cover) then also takes Back and the keyboard and covers the screen edges (gesture strip, camera cutout), so the hidden app gets nothing; the status bar and the navigation buttons still work. Turning it on is free; turning it off while bedtime is Important asks for the challenge. Tests: `DraftsTest`.
+
 ## 0.5.18 - 2026-10-12 19:30
 - **An allowed site can skip the blocked words too.** Protection lists > Allowed exceptions: every site has a **Blocked words don't apply here** switch, and adding a site has one too (on by default, as on the PC). The word check in browsers then leaves that site and its subdomains alone, like a site in the blocked-words exceptions. Sites already on the list keep it off after the update, so nothing loosens by itself. Turning it on for a site (or adding a site with it on) asks for the challenge on Save; turning it off is free. Old backups and the Island copy still read each other: the new `allowedWords` list is simply missing (off) in an older file and skipped by an older copy. Tests: new `AllowedWordsTest`.
 

@@ -317,9 +317,13 @@ def _run(argv: list[str], events, state: dict) -> int:
     from resident import catalog, icon_prefetch, icons
     ctx.main_window = win.main
     ctx.publish = win.publisher.publish   # R18: the draft tells the page (draft / blocks_changed pushes)
-    ctx.catalog = app_catalog = catalog.AppCatalog(on_ready=lambda: win.publisher.publish("apps_ready", {}), seed_games=True)
+    def apps_ready():
+        win.publisher.publish("apps_ready", {})
+        icon_service.retry_apps()       # (app icons asked for before the catalog knew where the program is)
+    ctx.catalog = app_catalog = catalog.AppCatalog(on_ready=apps_ready, seed_games=True)
     icon_service = icons.IconService(on_ready=lambda key: win.publisher.publish("icon_ready", {"key": key}),
-                                     path_of=app_catalog.path_for, download=icons.download_on(ctx.db))
+                                     path_of=app_catalog.path_for, sources_of=app_catalog.icon_sources,
+                                     download=icons.download_on(ctx.db))
     server.add_icon_routes(icon_service)
     site_icons = icon_prefetch.attach(ctx, icon_service)   # UP15: real icons for your sites (starts in start_up; after ctx.publish)
 

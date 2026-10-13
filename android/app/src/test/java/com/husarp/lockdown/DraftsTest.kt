@@ -31,7 +31,7 @@ class DraftsTest {
 
     @Test fun turning_the_phrase_on_with_your_own_is_one_free_change() {
         // the reported bug: picking "Type a phrase" saved a random one at once, and your own then needed the challenge
-        val new = gr().let { it.copy(ab = it.ab.copy(phrase = true, customPhrase = "my own words")) }
+        val new = gr().let { it.copy(ab = it.ab.copy(phrase = true, useOwn = true, customPhrase = "my own words")) }
         assertFalse(new.looser(gr()))
         val saved = gr(new.applyTo(base))
         assertTrue(saved.copy(ab = saved.ab.copy(customPhrase = "other words")).looser(saved))   // once saved: the challenge
@@ -102,6 +102,14 @@ class DraftsTest {
         assertFalse(RemindersEngine.bedtimeLooser(s, s.copy(bedtime = "21:00", tiers = emptyList(), before = 0, dismissWait = 60)))
         assertTrue(RemindersEngine.bedtimeLooser(s, s.copy(guarded = false)))
         assertTrue(RemindersEngine.bedtimeLooser(s, s.copy(dismissWait = 10)))
+        // "Block taps behind the bedtime screen": on is free, off loosens only while bedtime is important
+        val b0 = s.copy(blockBehind = true)
+        assertTrue(RemindersEngine.bedtimeLooser(b0, b0.copy(blockBehind = false)))
+        assertFalse(RemindersEngine.bedtimeLooser(s, b0))
+        assertFalse(RemindersEngine.bedtimeLooser(b0.copy(guarded = false), b0.copy(guarded = false, blockBehind = false)))
+        // saved before it existed (a backup, the Island copy): off
+        assertFalse(kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString(SleepCfg.serializer(), """{"on":true,"guarded":true}""").blockBehind)
         val b = BreakCfg(guarded = true)
         assertFalse(RemindersEngine.breaksLooser(b, b.copy(every = 90, strict = false)))
         assertTrue(RemindersEngine.breaksLooser(b, b.copy(guarded = false)))

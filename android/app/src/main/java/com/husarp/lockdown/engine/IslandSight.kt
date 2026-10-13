@@ -113,6 +113,29 @@ object IslandSight {
     /** Main: the Island copy counts as "checked in lately" within this long (it only wakes every 15 min when main covers). */
     fun seenWithinMs(mainCovers: Boolean) = if (mainCovers) COVERED_SEEN_MS else 10 * 60_000L
 
+    /** Main: has the Island copy checked in lately, [ageMs] after its last check-in (negative: a clock set back, not a
+     *  fresh check-in)? [toldCovers]: main told it at that check-in that it covers Island, so it sleeps until its next
+     *  15-min wake and only then hears that main stopped covering: the hour holds until it can have heard (main
+     *  stopping to cover, or main's process just starting with its service not yet up, doesn't cut it to 10 min).
+     *  [coversNow]: main covers Island now. The one rule for the Island cards and the "not covered" notice. */
+    fun checkedInLately(ageMs: Long, toldCovers: Boolean, coversNow: Boolean) =
+        ageMs in 0 until seenWithinMs(toldCovers || coversNow)
+
+    /** Main's 15-minute "Island apps not covered" notice: up only after [NOTICE_AFTER] failed checks in a row (one
+     *  late check-in - Doze letting the worker run just before Lockdown in Island - is no reason), down as soon as a
+     *  check passes. A check with the screen off counts neither way: Doze holds Lockdown in Island back then too. */
+    const val NOTICE_AFTER = 2
+
+    enum class Notice { NONE, POST, CANCEL }
+
+    /** One check: [fails] failed checks in a row so far, [bad] Island isn't covered now. The new count, and what to do. */
+    fun noticeStep(fails: Int, bad: Boolean, screenOn: Boolean): Pair<Int, Notice> = when {
+        !bad -> 0 to Notice.CANCEL
+        !screenOn -> fails to Notice.NONE
+        fails + 1 >= NOTICE_AFTER -> fails + 1 to Notice.POST
+        else -> fails + 1 to Notice.NONE
+    }
+
     /** Main's record of which apps its accessibility service heard from and when: one entry per app per second at
      *  most, the last [KEEP_MS], at most [MAX_LOG]. Thread-safe (the service writes, the link server reads). */
     class Log(private val keepMs: Long = KEEP_MS, private val max: Int = MAX_LOG) {

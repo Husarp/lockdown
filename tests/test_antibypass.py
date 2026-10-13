@@ -45,7 +45,31 @@ def test_custom_and_complex_looser():
     assert ab.settings_looser({**base, "complex": True}, base)                # dropping complexity is looser
     assert not ab.settings_looser(base, {**base, "complex": True})            # adding it is not
     assert ab.settings_looser(base, {**base, "custom_phrase": "short"})       # 5-char custom < 60 is looser
-    assert not ab.settings_looser(base, {**base, "custom_phrase": "x" * 80})  # a longer custom phrase is not
+    assert ab.settings_looser(base, {**base, "custom_phrase": "x" * 80})      # a longer one too: it is switched on
+
+
+def test_own_phrase_switch_keeps_it_and_only_switching_it_on_loosens():
+    base = {**ab.DEFAULTS, "phrase": True, "length": 60}
+    kept = {**base, "use_own": False, "custom_phrase": "I keep my promises to myself, every evening"}
+    on = {**kept, "use_own": True}
+    assert ab.own_phrase(kept) == "" and len(ab.phrase_for(kept).replace(" ", "")) == 60   # off: a random one is asked
+    assert ab.phrase_for(on) == on["custom_phrase"]
+    assert not ab.settings_looser(base, kept)                    # saved while off: nothing asked changes
+    assert ab.settings_looser(kept, on)                          # switched on: a known phrase, whatever its length
+    assert not ab.settings_looser(on, kept)                      # off again: a random 60 instead of your 36
+    assert ab.settings_looser(on, {**kept, "length": 30})        # ... unless the random one is shorter
+    assert not ab.settings_looser({**kept, "phrase": False}, {**on, "phrase": False})   # no phrase asked: free
+    assert not ab.settings_looser(on, {**on, "length": 30})      # the random length while yours is on: not in use
+    assert ab.settings_looser({**on, "custom_phrase": "x" * 80}, on)   # your own phrase made shorter: as before
+
+
+def test_a_config_from_before_the_switch_uses_its_saved_phrase(tmp_path):
+    assert ab.with_defaults({"custom_phrase": "my words"})["use_own"] is True
+    assert ab.with_defaults({})["use_own"] is False
+    assert ab.with_defaults({"custom_phrase": "my words", "use_own": False})["use_own"] is False
+    db = Database(tmp_path / "t.db")
+    db.set_setting(ab.SETTINGS_KEY, '{"phrase": true, "custom_phrase": "my words"}')   # as an older version (or backup) saved it
+    assert ab.settings(db)["use_own"] is True and ab.phrase_for(ab.settings(db)) == "my words"
 
 
 def test_rule_looser():

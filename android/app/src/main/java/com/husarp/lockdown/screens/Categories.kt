@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -14,6 +16,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.ModesStore
@@ -95,7 +101,13 @@ fun CategoryMenu(pkg: String, site: String? = null) {
         cfg.items.firstOrNull { it.type == ItemType.SITE && com.husarp.lockdown.block.Enforce.hostMatches(it.target, site) }
             ?.let(::categoryKeys) ?: listOf("site:${site.lowercase()}")
     } else listOf("app:${pkg.lowercase()}")
-    Box {
+    Box(contentAlignment = Alignment.CenterEnd) {
+        // As wide as its widest label whatever it says now, so the Top apps bars beside it all get the same track
+        // (a "Distracting" row's bar was shorter than a "Neutral" one's for the same time).
+        (CATEGORY_NAMES.map { it.second } + "Category").forEach {
+            Text("$it ▾", Modifier.padding(ButtonDefaults.TextButtonContentPadding).alpha(0f).clearAndSetSemantics {},
+                style = MaterialTheme.typography.labelMedium)
+        }
         TextButton(onClick = { open = true }) {
             Text((CATEGORY_NAMES.firstOrNull { it.first == current }?.second ?: "Category") + " ▾", style = MaterialTheme.typography.labelMedium,
                 color = tone(Kinds.category(current).hue).accent)

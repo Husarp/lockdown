@@ -34,6 +34,14 @@ class IslandUseTest {
         assertEquals("Chrome", top[1].label)
     }
 
+    @Test fun a_days_island_total_takes_hourly_rows_when_there_else_the_app_rows() {
+        val rows = listOf(IslandUseRow("2026-10-10", "a", "A", 600), IslandUseRow("2026-10-10", "b", "B", 300), IslandUseRow("2026-10-09", "a", "A", 120))
+        val hours = listOf(IslandHourRow("2026-10-10", 9, 500), IslandHourRow("2026-10-10", 10, 420))
+        assertEquals(920_000L, IslandUse.dayMs(rows, hours, today))                       // hourly rows for today win
+        assertEquals(120_000L, IslandUse.dayMs(rows, hours, LocalDate.of(2026, 10, 9)))   // no hours that day: app rows
+        assertEquals(0L, IslandUse.dayMs(rows, hours, LocalDate.of(2026, 10, 1)))
+    }
+
     @Test fun incoming_days_replace_and_other_days_stay() {
         val old = listOf(IslandUseRow("2026-10-01", "a", "A", 100), IslandUseRow("2026-10-09", "a", "A", 50), IslandUseRow("2024-01-01", "a", "A", 5))
         val inc = listOf(IslandUseRow("2026-10-09", "a", "A", 80), IslandUseRow("2026-10-10", "b", "B", 7))

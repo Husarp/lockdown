@@ -1,8 +1,8 @@
 """R13: the Dashboard (js/pages/dashboard.js) and the Display settings dialog (js/display.js) in Chrome against the real
 Python Api (see harness.py).
 
-What is checked: every card renders without a console error in every theme, hide + move a card (Customise and the
-Display dialog) persist after a reload, a `usage_tick` push changes the screen-time number in the SAME element (no
+What is checked: every card renders without a console error in every theme, the Customise list (move, hide, show, reset,
+saved at once and kept after a reload) and the Display dialog, Most used apps today (and its empty state), a `usage_tick` push changes the screen-time number in the SAME element (no
 re-render, no Api call), a `status` push asks again only when something the cards show changed, the pause and bedtime
 countdowns tick on the page's own clock, the empty state and its two buttons, the first visit is fast, and a hidden
 window does nothing."""
@@ -15,7 +15,7 @@ import pytest
 import pause
 from harness import NOW
 
-ALL_CARDS = ["stats", "today", "limits", "coming", "week", "visits", "glance", "active", "bedtime", "pause", "emergency"]
+ALL_CARDS = ["stats", "today", "limits", "coming", "week", "visits", "glance", "active", "bedtime", "pause", "emergency", "apps"]
 
 
 def open_dash(shell, page, **kw):
@@ -84,36 +84,109 @@ def test_a_hidden_card_is_not_asked_for(shell, page, harness):
     assert page.locator('[data-card="glance"]').count() == 0
 
 
-# ---------------------------------------------------------------- customise: hide, move, show
+# ---------------------------------------------------------------- customise: the list of cards
 
-def test_hide_and_move_a_card_persist_after_a_reload(shell, page, harness):
-    open_dash(shell, page)
-    page.click('[data-k="customise"]')
-    assert page.evaluate("document.querySelector('.dash').classList.contains('dash-edit')")
-    page.click('[data-card="glance"] [data-hide="glance"]')
-    page.click('[data-card="coming"] [data-move="-1"]')                            # coming before limits
-    assert order(page)[:4] == ["stats", "today", "coming", "limits"] and "glance" not in order(page)
-    for _ in range(50):                                                            # (the save runs in Python a moment later)
-        if stored(harness, "dash.hidden") == ["glance"]:
-            break
+def cust_rows(page):
+    return page.eval_on_selector_all("#dlg .cust-row", "els => els.map(e => [e.dataset.card, e.querySelector('input').checked])")
+
+
+def wait_stored(page, harness, key, want):
+    for _ in range(60):                                                            # (the save runs in Python a moment later)
+        if stored(harness, key) == want:
+            return
         page.wait_for_timeout(50)
-    assert stored(harness, "dash.hidden") == ["glance"]
-    assert stored(harness, "dash.order")[:4] == ["stats", "today", "coming", "limits"]
+    assert stored(harness, key) == want
+
+
+def test_customise_opens_the_list_of_every_card_and_the_cards_have_no_edit_tools(shell, page, harness):
+    harness.db.set_setting("dash.hidden", json.dumps(["glance"]))
+    open_dash(shell, page)
+    assert page.locator(".dash [data-move], .dash [data-hide], .dash .card-tools").count() == 0
+    page.click('[data-k="customise"]')
+    page.wait_for_selector("#dlg[open] .cust-row")
+    assert page.inner_text("#dlg h2") == "Customise Dashboard"
+    assert cust_rows(page) == [[k, k != "glance"] for k in ALL_CARDS]
+    assert page.inner_text('#dlg [data-card="apps"] .name') == "Most used apps today"
+    assert page.locator('#dlg [data-card="stats"] [data-cust="up"]').is_disabled()
+    assert page.locator('#dlg [data-card="apps"] [data-cust="down"]').is_disabled()
+    assert page.evaluate("document.querySelector('.dash').classList.contains('dash-edit')") is False
+
+
+def test_customise_move_and_hide_save_at_once_and_persist_after_a_reload(shell, page, harness):
+    open_dash(shell, page)
+    calls = harness.rpc_count("dashboard_get")
+    page.click('[data-k="customise"]')
+    page.wait_for_selector("#dlg[open] .cust-row")
+    page.click('#dlg [data-card="coming"] [data-cust="up"]')                         # coming before limits
+    page.click('#dlg [data-card="stats"] [data-cust="down"]')                        # stats after today
+    page.uncheck('#dlg [data-card="glance"] [data-cust="on"]')
+    assert [k for k, _ in cust_rows(page)][:4] == ["today", "stats", "coming", "limits"]
+    assert order(page)[:4] == ["today", "stats", "coming", "limits"] and "glance" not in order(page)   # the grid follows
+    wait_stored(page, harness, "dash.hidden", ["glance"])
+    assert stored(harness, "dash.order")[:4] == ["today", "stats", "coming", "limits"]
+    assert harness.rpc_count("dashboard_get") == calls                               # (moving and hiding ask nothing)
+    page.click("#dlg .dlg-f .btn-primary")
+    wait_for(page, "!document.getElementById('dlg').open")
     page.reload()
     page.wait_for_selector('[data-stat="screen"] .v', timeout=8000)
-    assert order(page)[:4] == ["stats", "today", "coming", "limits"] and "glance" not in order(page)
-    # and back: the hidden card is a pill in Customise; clicking it shows it (and asks for its data)
+    assert order(page)[:4] == ["today", "stats", "coming", "limits"] and "glance" not in order(page)
     page.click('[data-k="customise"]')
-    page.click('[data-show="glance"]')
-    page.wait_for_selector('[data-card="glance"] .gl-row', timeout=5000)
+    page.wait_for_selector("#dlg[open] .cust-row")
+    assert [k for k, _ in cust_rows(page)][:4] == ["today", "stats", "coming", "limits"]
+    assert dict(cust_rows(page))["glance"] is False
+
+
+def test_customise_shows_a_hidden_card_again_with_its_data(shell, page, harness):
+    harness.db.set_setting("dash.hidden", json.dumps(["glance"]))
+    open_dash(shell, page)
+    page.click('[data-k="customise"]')
+    page.wait_for_selector("#dlg[open] .cust-row")
+    page.check('#dlg [data-card="glance"] [data-cust="on"]')
+    page.wait_for_selector('[data-card="glance"] .gl-row', timeout=5000)            # (asked again: it had no data)
     assert "glance" in order(page) and stored(harness, "dash.hidden") == []
+
+
+def test_customise_reset_to_default_shows_every_card_in_the_default_order(shell, page, harness):
+    harness.db.set_setting("dash.order", json.dumps(list(reversed(ALL_CARDS))))
+    harness.db.set_setting("dash.hidden", json.dumps(["glance", "apps"]))
+    open_dash(shell, page)
+    assert order(page) == [k for k in reversed(ALL_CARDS) if k not in ("glance", "apps")]
+    page.click('[data-k="customise"]')
+    page.wait_for_selector("#dlg[open] .cust-row")
+    page.click('#dlg .dlg-f button:has-text("Reset to default")')
+    assert page.evaluate("document.getElementById('dlg').open")                      # (the list stays open)
+    assert cust_rows(page) == [[k, True] for k in ALL_CARDS]
+    wait_stored(page, harness, "dash.order", ALL_CARDS)
+    assert stored(harness, "dash.hidden") == []
+    page.wait_for_selector('[data-card="apps"] .vis-row', timeout=5000)
+    assert order(page) == ALL_CARDS
+
+
+# ---------------------------------------------------------------- most used apps today
+
+def test_most_used_apps_today_lists_screen_times_top_five(shell, page, harness):
+    open_dash(shell, page)
+    rows = page.eval_on_selector_all('[data-card="apps"] .vis-row', """els => els.map(e => [
+        e.querySelector('[data-n="name"]').textContent, e.querySelector('[data-n="text"]').textContent,
+        e.querySelector('img[data-icon]').dataset.icon])""")
+    table = harness.rpc("screentime_get", ["apps", "Today"])["data"]["rows"][:5]
+    assert len(rows) == 5 and rows == [[r["name"], r["time"], f"app:{r['key']}"] for r in table]
+    assert page.locator('[data-card="apps"] [data-n="none"]').is_hidden()
+
+
+def test_most_used_apps_today_says_so_before_any_use_today(shell, page, harness):
+    harness.db.write("DELETE FROM activity WHERE minute >= ?", ("2026-10-11 00:00",))
+    open_dash(shell, page)
+    page.wait_for_selector('[data-card="apps"] [data-n="none"]:not([hidden])')
+    assert page.inner_text('[data-card="apps"] [data-n="none"]') == "No app use yet today."
+    assert page.locator('[data-card="apps"] .vis-row').count() == 0
 
 
 def test_the_display_dialog_saves_at_once_and_the_dashboard_follows(shell, page, harness):
     open_dash(shell, page)
     page.click('[data-k="gear"]')
     page.wait_for_selector("#dlg[open] .dsp-row")
-    assert page.locator("#dlg .dsp-row").count() == 11
+    assert page.locator("#dlg .dsp-row").count() == len(ALL_CARDS)
     page.uncheck('#dlg [data-card="today"] input')
     wait_for(page, "!document.querySelector('.dash [data-card=\"today\"]:not([hidden])')")
     assert stored(harness, "dash.hidden") == ["today"]

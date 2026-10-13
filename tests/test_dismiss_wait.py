@@ -94,3 +94,62 @@ def test_dismiss_still_comes_back_on_its_escalation(tmp_path):
     assert len(_bedtime_screens(ui)) == 1
     run(e, t, 2)
     assert len(_bedtime_screens(ui)) == 2
+
+
+# ---- each bedtime step's own wait (Adam, 2026-10-12): 22:00 -> 10 s, 00:00 -> 30 s, 02:00 -> 2 min
+
+STEPS = {**reminders.DEFAULT_SLEEP, "on": True, "bedtime": "22:00", "wake": "07:00", "dismiss_wait": 20,
+         "tiers": [{"from": "22:00", "every_sec": 900, "wait_sec": 10}, {"from": "00:00", "every_sec": 300, "wait_sec": 30},
+                   {"from": "02:00", "every_sec": 60, "wait_sec": 120}, {"from": "04:00", "every_sec": 30}]}
+
+
+def test_a_step_without_its_own_wait_and_old_settings_read_as_none():
+    assert reminders.step_wait({"from": "22:00", "every_sec": 60}) is None
+    assert reminders.step_wait({"wait_sec": "junk"}) is None and reminders.step_wait(None) is None
+    assert reminders.step_wait({"wait_sec": 0}) == 0
+    assert reminders.step_wait({"wait_sec": 99999}) == reminders.MAX_DISMISS_WAIT
+
+
+@pytest.mark.parametrize("at, wait", [((8, 21, 45), 20),     # heads-up, before the night: the general wait
+                                      ((8, 22, 0), 10), ((8, 23, 59), 10), ((9, 0, 0), 30), ((9, 1, 30), 30),
+                                      ((9, 2, 0), 120), ((9, 3, 59), 120),
+                                      ((9, 4, 30), 20)])     # a step with no own wait: the general one
+def test_the_wait_is_the_active_steps(at, wait):
+    d, h, m = at
+    assert reminders.dismiss_wait_now(STEPS, datetime(2026, 10, d, h, m)) == wait
+
+
+def test_steps_own_waits_count_only_with_the_general_wait_on():
+    assert reminders.dismiss_wait_now({**STEPS, "dismiss_wait": 0}, datetime(2026, 10, 9, 2, 30)) == 0
+
+
+def test_after_midnight_bedtime_places_steps_like_the_interval():
+    s = {**STEPS, "bedtime": "01:00", "tiers": [{"from": "23:00", "every_sec": 900, "wait_sec": 45},
+                                                 {"from": "03:00", "every_sec": 60, "wait_sec": 90}]}
+    assert reminders.dismiss_wait_now(s, datetime(2026, 10, 9, 1, 10)) == 45    # 23:00 is before bedtime: from bedtime
+    assert reminders.dismiss_wait_now(s, datetime(2026, 10, 9, 3, 10)) == 90
+
+
+def test_shorter_step_waits_need_the_challenge_longer_are_free():
+    def step(i, **kw):
+        return {**STEPS, "tiers": [{**t, **kw} if j == i else t for j, t in enumerate(STEPS["tiers"])]}
+    assert reminders.loosens_reminder(STEPS, step(2, wait_sec=60)) is True
+    assert reminders.loosens_reminder(STEPS, step(2, wait_sec=300)) is False
+    assert reminders.loosens_reminder(STEPS, step(2, **{"from": "03:00"})) is True     # 02:00-03:00 now only 30 s
+    assert reminders.loosens_reminder(STEPS, {**STEPS, "tiers": STEPS["tiers"][:2]}) is True   # 02:00 step removed
+    assert reminders.loosens_reminder(STEPS, {**STEPS, "dismiss_wait": 0}) is True
+    assert reminders.loosens_reminder(STEPS, {**STEPS, "dismiss_wait": 15}) is True     # 04:00 uses the general one
+    covered = {**STEPS, "tiers": STEPS["tiers"][:3]}                                  # every minute has its own wait:
+    assert reminders.loosens_reminder(covered, {**covered, "dismiss_wait": 5}) is False  # the general one isn't used
+    assert reminders.loosens_reminder({**STEPS, "dismiss_wait": 0}, step(2, wait_sec=5)) is False   # no wait was on
+
+
+def test_the_bedtime_screen_gets_the_active_steps_wait(tmp_path):
+    from resident.overlay import Overlay
+    db, ui, e = setup(tmp_path)
+    reminders.save(db, reminders.SLEEP_KEY, STEPS)
+    at = [datetime(2026, 10, 9, 2, 30)]
+    o = Overlay(now=lambda: at[0], wait_for=lambda key: reminders.dismiss_wait_now(
+        reminders.load(db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP), at[0]), clock=lambda: 0.0)
+    o.show("sleep", "Time for bed", "", None, [("Dismiss", "dismiss")])
+    assert o._cur["wait_total"] == 120

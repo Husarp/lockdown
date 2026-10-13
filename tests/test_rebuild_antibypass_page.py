@@ -108,8 +108,8 @@ def test_there_is_no_confirmed_argument_on_any_other_method():
 def test_the_page_data_has_everything(api, ctx):
     d = data(api.antibypass_get())
     assert d["now"] == "2026-10-11T15:42:17"
-    assert d["config"] == {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "",
-                           "hours": False, "windows": SUN_EVENING, "wait_min": 0, "wait_text": "Off"}
+    assert d["config"] == {"phrase": False, "length": 60, "grid": False, "complex": False, "use_own": False,
+                           "custom_phrase": "", "hours": False, "windows": SUN_EVENING, "wait_min": 0, "wait_text": "Off"}
     assert d["status"] == "free" and d["banner"]["kind"] == "off"
     assert d["lengths"] == {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
     assert (d["min_length"], d["max_length"], d["unlock_min"]) == (30, 2000, 5)
@@ -243,18 +243,46 @@ def test_adding_numbers_or_the_grid_is_only_a_yes(api, ctx):
     assert data(api.antibypass_save({"complex": True, "grid": True}, True))["config"]["grid"] is True
 
 
-def test_an_own_phrase_shorter_than_the_random_one_is_looser_and_a_longer_one_is_not(api, ctx):
+def test_switching_your_own_phrase_on_is_looser_whatever_its_length(api, ctx):
     locked(ctx)
-    needs_ticket(api.antibypass_save({"custom_phrase": "short one"}, True))
+    needs_ticket(api.antibypass_save({"use_own": True, "custom_phrase": "short one"}, True))
     long_phrase = "I promised myself one focused evening, and I keep my promises. " * 2
-    assert data(api.antibypass_save({"custom_phrase": long_phrase}))["needs_confirm"]
-    out = data(api.antibypass_save({"custom_phrase": long_phrase}, True))
-    assert out["config"]["custom_phrase"] == " ".join(long_phrase.split())
+    needs_ticket(api.antibypass_save({"use_own": True, "custom_phrase": long_phrase}, True))
+    assert stored(ctx)["use_own"] is False and stored(ctx)["custom_phrase"] == ""
+
+
+def test_your_own_phrase_is_kept_while_it_is_off_and_saving_it_then_asks_nothing(api, ctx):
+    locked(ctx)
+    out = data(api.antibypass_save({"custom_phrase": "short one"}))           # not asked: saved at once
+    assert out["config"]["custom_phrase"] == "short one" and out["config"]["use_own"] is False
+    assert len(ctx.guard.begin(needs_ticket(api.antibypass_unlock_to_edit()))["data"]["phrase"].replace(" ", "")) == 60
+
+
+def test_switching_your_own_phrase_off_is_a_yes_unless_the_random_one_is_shorter(api, ctx):
+    locked(ctx, use_own=True, custom_phrase="x" * 40)
+    assert data(api.antibypass_save({"use_own": False}))["needs_confirm"]      # a random 60 instead of your 40
+    out = data(api.antibypass_save({"use_own": False}, True))
+    assert out["config"]["use_own"] is False and out["config"]["custom_phrase"] == "x" * 40   # kept
+    locked(ctx, use_own=True, custom_phrase="x" * 100)
+    needs_ticket(api.antibypass_save({"use_own": False}, True))                # a random 60 instead of your 100
+    assert data(api.antibypass_save({"length": 30}))["config"]["length"] == 30   # not in use while yours is on: no question
+
+
+def test_switching_your_own_phrase_on_needs_one(api, ctx):
+    assert "write it first" in error(api.antibypass_save({"use_own": True}, True))
+    assert "yes or no" in error(api.antibypass_save({"use_own": "yes"}, True))
+    assert data(api.antibypass_save({"use_own": True, "custom_phrase": "my own words"}, True))["config"]["use_own"] is True
 
 
 def test_removing_the_own_phrase_that_was_longer_than_the_random_one_is_looser(api, ctx):
-    locked(ctx, custom_phrase="x" * 100)
+    locked(ctx, use_own=True, custom_phrase="x" * 100)
     needs_ticket(api.antibypass_save({"custom_phrase": ""}, True))
+
+
+def test_emptying_your_own_phrase_switches_it_off(api, ctx):
+    locked(ctx, use_own=True, custom_phrase="x" * 40)
+    out = data(api.antibypass_save({"custom_phrase": ""}, True))
+    assert out["config"]["use_own"] is False and stored(ctx)["use_own"] is False
 
 
 def test_an_own_phrase_is_checked(api, ctx):

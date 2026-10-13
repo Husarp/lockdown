@@ -115,7 +115,7 @@ def test_sleep_boxes_round_trip(api, ctx):
     assert [(t["from"], t["every_sec"]) for t in s["tiers"]] == [("00:00", 30), ("21:00", 900)]
     got = data(api.reminders_get())["sleep"]
     assert got["before"] == "45s" and got["dismiss_wait"] == 90
-    assert got["tiers"] == [{"every": "30s", "after": "00:00"}, {"every": "15 min", "after": "21:00"}]
+    assert got["tiers"] == [{"every": "30s", "after": "00:00", "wait": ""}, {"every": "15 min", "after": "21:00", "wait": ""}]
 
 
 def test_heads_up_goes_up_to_12_hours_and_dismiss_wait_to_600(api):
@@ -375,6 +375,32 @@ def test_a_shorter_dismiss_wait_needs_the_challenge_even_if_not_important(api, c
     assert reminders.dismiss_wait(reminders.load(ctx.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)) == 60
     assert data(api.reminder_save_sleep({**SLEEP, "dismiss_wait": 120}))["saved"]    # longer: free
     assert data(api.reminder_save_sleep({**SLEEP, "dismiss_wait": 0}))["needs_challenge"]
+
+
+LATE = [{"every": "15 min", "after": "22:00", "wait": "10s"}, {"every": "5 min", "after": "00:00", "wait": "30"},
+        {"every": "1 min", "after": "02:00", "wait": "2 min"}]
+NIGHT = {**SLEEP, "bedtime": "22:00", "dismiss_wait": 20}
+
+
+def test_steps_have_their_own_dismiss_wait_round_trip(api, ctx):
+    assert data(api.reminder_save_sleep({**NIGHT, "tiers": LATE + [{"every": "30s", "after": "04:00", "wait": ""}]}))["saved"]
+    s = reminders.load(ctx.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
+    assert [reminders.step_wait(t) for t in s["tiers"]] == [10, 30, 120, None]     # empty: the general wait
+    got = data(api.reminders_get())["sleep"]
+    assert [t["wait"] for t in got["tiers"]] == ["10s", "30s", "2 min", ""]
+    r = api.reminder_save_sleep({**NIGHT, "tiers": [{**LATE[0], "wait": "11 min"}]})
+    assert not r["ok"] and "wait before Dismiss" in r["error"]
+
+
+def test_a_shorter_step_wait_needs_the_challenge_a_longer_one_is_free(api, ctx, locked):
+    data(api.reminder_save_sleep({**NIGHT, "tiers": LATE}))
+    longer = [LATE[0], LATE[1], {**LATE[2], "wait": "3 min"}]
+    assert data(api.reminder_save_sleep({**NIGHT, "tiers": longer}))["saved"]
+    out = data(api.reminder_save_sleep({**NIGHT, "tiers": [LATE[0], {**LATE[1], "wait": "5"}, longer[2]]}))
+    assert out["needs_challenge"]
+    assert any("wait before Dismiss" in c for c in out["changes"]) and not any("un-flag" in c for c in out["changes"])
+    assert data(api.reminder_save_sleep({**NIGHT, "tiers": longer[:2]}))["needs_challenge"]   # 02:00 gone
+    assert data(api.reminder_save_sleep({**NIGHT, "dismiss_wait": 0, "tiers": longer}))["needs_challenge"]   # all off
 
 
 def test_a_stale_ticket_cannot_be_used_twice_and_the_page_has_no_confirmed_flag(api, ctx, locked):

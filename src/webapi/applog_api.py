@@ -1,9 +1,10 @@
 """Api for Settings > App log (src/applog.py): read the events a block at a time, get the text to copy, and save the
 shareable file. Nothing here changes a block, so nothing needs the challenge.
 
-- `applog_get(chip, search, before, limit)`: the newest events first (filtered by the chip and the search box); `before`
-  is the id of the oldest event the page has, to get the next older block. The page paints them in a virtual list.
-- `applog_text(chip, search)`: the text "Copy" puts on the clipboard (header + the newest 1000 events as filtered).
+- `applog_get(chip, search, before, limit, days)`: the newest events first (filtered by the chip or "Only…" filter, the
+  search box and the period: `days` 0 = all, 1 = today, 7 / 30 = the last 7 / 30 days); `before` is the id of the oldest
+  event the page has, to get the next older block. The page paints them in a virtual list.
+- `applog_text(chip, search, days)`: the text "Copy" puts on the clipboard (header + the newest 1000 events as filtered).
 - `applog_save()`: "Save log…": the owner's own Save dialog (the page never names a path), then lockdown-log-YYYY-MM-DD.txt
   with the version, Windows, the newest 1000 events and the ends of lockdown.log and lockdown-newui.log.
 """
@@ -17,9 +18,11 @@ MAX_SEARCH = 100
 TEXT_FILTER = "Text file (*.txt)"
 
 
-def _checked(chip, search, before=None, limit=1) -> tuple[str, str, int | None, int]:
+def _checked(chip, search, before=None, limit=1, days=0) -> tuple[str, str, int | None, int]:
     if not isinstance(chip, str) or chip not in applog.CHIP_NAMES:
-        raise ApiError("Pick All, Changes, Updates, Problems or Anti-Bypass.")
+        raise ApiError("Pick one of the filters.")
+    if type(days) is not int or days not in applog.PERIODS:
+        raise ApiError("Pick All time, Today, 7 days or 30 days.")
     if not isinstance(search, str) or len(search) > MAX_SEARCH:
         raise ApiError("That search is too long.")
     if before is not None and (type(before) is not int or before < 1):
@@ -30,21 +33,21 @@ def _checked(chip, search, before=None, limit=1) -> tuple[str, str, int | None, 
 
 
 @core.read
-def applog_get(ctx, chip="all", search="", before=None, limit=300):
+def applog_get(ctx, chip="all", search="", before=None, limit=300, days=0):
     """{rows: [{id, ts, source, kind, text}] newest first, more: older ones exist, total: how many events there are,
     chips: [...]}."""
-    chip, search, before, limit = _checked(chip, search, before, limit)
+    chip, search, before, limit = _checked(chip, search, before, limit, days)
     conn = ctx.db.conn
-    rows = applog.query(conn, chip, search, before, limit + 1)
+    rows = applog.query(conn, chip, search, before, limit + 1, since=applog.since_text(days, ctx.now()))
     return {"rows": rows[:limit], "more": len(rows) > limit, "total": applog.count(conn) if before is None else None,
             "chips": list(applog.CHIP_NAMES)}
 
 
 @core.read
-def applog_text(ctx, chip="all", search=""):
+def applog_text(ctx, chip="all", search="", days=0):
     """The text to copy: the header and the newest events (as filtered), without the ends of the two log files."""
-    chip, search, _before, _limit = _checked(chip, search)
-    return {"text": applog.report(ctx.db.conn, chip=chip, search=search, with_logs=False, when=ctx.now())}
+    chip, search, _before, _limit = _checked(chip, search, days=days)
+    return {"text": applog.report(ctx.db.conn, chip=chip, search=search, with_logs=False, when=ctx.now(), days=days)}
 
 
 def _ask_save_path(window, name: str) -> str | None:

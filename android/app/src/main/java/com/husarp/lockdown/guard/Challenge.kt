@@ -56,6 +56,7 @@ fun rememberGuard(onCancel: () -> Unit = {}): (loosening: Boolean, onPass: () ->
             // In trusted time: setting the clock back can't stretch it.
             val now = TrustedTime.local(ctx)
             Store.update { it.copy(antibypass = it.antibypass.copy(unlockedFrom = now.toString(), unlockedUntil = now.plusMinutes(AntiBypass.UNLOCK_MIN).toString())) }
+            com.husarp.lockdown.data.BypassLog.record(ctx, com.husarp.lockdown.engine.Bypass.CHALLENGE)
             pending = null; onPass()
         }, onCancel = { pending = null; onCancel() })
     }

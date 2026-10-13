@@ -89,7 +89,7 @@ object IslandLink {
         if (isMain) {
             val p = prefs()
             _main.value = MainLink(p.getString("state", "") ?: "", p.getLong("lastSeen", 0), p.getLong("helperApp", 0), p.getBoolean("cfgError", false),
-                canBlock = p.getBoolean("canBlock", true), linkedAt = p.getLong("linkedAt", 0))
+                canBlock = p.getBoolean("canBlock", true), linkedAt = p.getLong("linkedAt", 0), toldCovers = p.getBoolean("toldCovers", false))
             sight = IslandSight.Sight(p.getString("sight", "") ?: "", p.getBoolean("covers", false))
             if (_main.value.state.isNotEmpty()) ensureServer()
             HelperWatcher.init(app)
@@ -150,6 +150,7 @@ object IslandLink {
         val codeFails: Int = 0,
         val noPort: Boolean = false,         // no link port could be opened
         val linkedAt: Long = 0,              // wall ms the link was made (0: made by an older version)
+        val toldCovers: Boolean = false,     // main told the helper at its last check-in that it covers Island
     )
 
     private val _main = MutableStateFlow(MainLink())
@@ -250,13 +251,17 @@ object IslandLink {
     }
 
     /** Main: the helper checked in lately and can block, or Island is paused (then nothing there can run). "Lately" is
-     *  10 minutes, an hour while main covers Island itself (the helper then checks in only when it wakes). */
+     *  10 minutes, an hour while main covers Island itself or told the helper so at its last check-in (the helper then
+     *  checks in only when it wakes): [IslandSight.checkedInLately]. */
     fun healthy(ctx: Context): Boolean {
         val m = _main.value
-        // A negative age is a clock set back, not a fresh check-in.
-        if (System.currentTimeMillis() - m.lastSeen in 0 until IslandSight.seenWithinMs(mainCovers()) && m.canBlock) return true
+        if (checkedInLately(m) && m.canBlock) return true
         return profilePaused(ctx)
     }
+
+    /** Main: the helper checked in lately ([IslandSight.checkedInLately]), as of [now] (wall ms). */
+    fun checkedInLately(m: MainLink, now: Long = System.currentTimeMillis()) =
+        IslandSight.checkedInLately(now - m.lastSeen, m.toldCovers, mainCovers())
 
     /** Island (the work profile) can't run anything: it is switched off, or still locked after a reboot (not running /
      *  not unlocked until you unlock it), so nothing there needs covering. A profile that is up with the helper
@@ -388,12 +393,13 @@ object IslandLink {
         if (unlinking) return       // the link and the secret stay until the helper says bye (or Forget Island now)
         val ms = System.currentTimeMillis()
         val m = _main.value
-        if (ms - lastSeenSaved > 60_000 || m.helperApp != body.app || m.cfgError != body.cfgError || m.canBlock != body.canBlock) {
+        if (ms - lastSeenSaved > 60_000 || m.helperApp != body.app || m.cfgError != body.cfgError || m.canBlock != body.canBlock || m.toldCovers != covers) {
             lastSeenSaved = ms
             p.edit().putLong("lastSeen", ms).putLong("helperApp", body.app).putBoolean("cfgError", body.cfgError)
-                .putBoolean("canBlock", body.canBlock).apply()
+                .putBoolean("canBlock", body.canBlock).putBoolean("toldCovers", covers).apply()
         }
-        publish { it.copy(lastSeen = ms, helperApp = body.app, cfgError = body.cfgError, canBlock = body.canBlock) }
+        publish { it.copy(lastSeen = ms, helperApp = body.app, cfgError = body.cfgError, canBlock = body.canBlock, toldCovers = covers) }
+        if (Reminders.islandFailing(app) && healthy(app)) Reminders.islandBack(app)   // its "not covered" notice goes now
     }
 
     // Serialised only when the config / modes change (a big imported config is several MB).
@@ -451,6 +457,14 @@ object IslandLink {
     /** Main: Island's time per app in [from]..[to] (for Insights); empty when not linked or nothing came yet. */
     fun islandUse(ctx: Context, from: java.time.LocalDate, to: java.time.LocalDate): Map<String, AppTime> =
         if (!isMain) emptyMap() else IslandUse.total(readIslandUse(ctx), from, to)
+
+    /** Main: [mainMs] (main's screen time on [days]) plus Island's time on those days ([IslandUse.dayMs]); just
+     *  [mainMs] when not linked or nothing came yet. */
+    fun withIsland(ctx: Context, mainMs: Long, days: List<java.time.LocalDate>): Long {
+        if (!isMain) return mainMs
+        val rows = readIslandUse(ctx); val hours = readIslandHours(ctx)
+        return mainMs + days.sumOf { IslandUse.dayMs(rows, hours, it) }
+    }
 
     /** Main: all of Island's per-day, per-app rows that came over the link (empty when not linked). */
     fun islandRows(ctx: Context): List<IslandUseRow> = if (!isMain) emptyList() else readIslandUse(ctx)

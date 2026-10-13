@@ -19,9 +19,11 @@ import kotlin.random.Random
  */
 
 /** A bedtime "comes back" step. Intervals are in seconds now: [every] (minutes) is a step saved before that, read
- *  through [seconds] when [everySec] is missing; it stays in the file so an older copy (in Island) still reads it. */
+ *  through [seconds] when [everySec] is missing; it stays in the file so an older copy (in Island) still reads it.
+ *  [waitSec]: the step's own wait before Dismiss (null: none, the general [SleepCfg.dismissWait] applies - also a step
+ *  saved before steps had one). */
 @Serializable
-data class ReminderTier(val from: String, val every: Int = 0, val everySec: Int? = null) {
+data class ReminderTier(val from: String, val every: Int = 0, val everySec: Int? = null, val waitSec: Int? = null) {
     val seconds: Int get() = everySec ?: (every * 60)
 }
 
@@ -41,6 +43,7 @@ data class SleepCfg(
     val guarded: Boolean = false,               // dismissing needs the anti-bypass challenge
     val dismissWait: Int = 0,                   // seconds before Dismiss works on the bedtime screen (0 = off)
     val repeatSec: Int? = null,                 // fallback interval (seconds) when no step applies yet
+    val blockBehind: Boolean = false,           // the bedtime screen (and a strict break) takes every tap and key
 ) {
     val repeatSeconds: Int get() = repeatSec ?: (repeat * 60)
 }
@@ -299,22 +302,9 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         return null
     }
 
-    /** Seconds (at least [Interval.MIN_SEC]). A step's time is placed in the night counted from bedtime; one in the
-     *  daytime gap before bedtime (at or after wake) counts from bedtime. Two steps at the same time: the more frequent one. */
-    private fun sleepInterval(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): Int {
-        val wakeT = hm(s.wake) ?: return maxOf(Interval.MIN_SEC, s.repeatSeconds)
-        val wakeOff = sinceBed(bed.toLocalTime(), wakeT).let { if (it == 0) 1440 else it }
-        var best: Pair<LocalDateTime, Int>? = null
-        for (t in s.tiers) {
-            val tierT = hm(t.from) ?: continue
-            val off = sinceBed(bed.toLocalTime(), tierT)
-            val whenAt = if (off >= wakeOff) bed else bed.plusMinutes(off.toLong())
-            if (whenAt.isAfter(now)) continue
-            val b = best
-            if (b == null || whenAt.isAfter(b.first) || (whenAt == b.first && t.seconds < b.second)) best = whenAt to t.seconds
-        }
-        return maxOf(Interval.MIN_SEC, best?.second ?: s.repeatSeconds)
-    }
+    /** Seconds (at least [Interval.MIN_SEC]): the active step's ([activeStep]), or the flat one before the first. */
+    private fun sleepInterval(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): Int =
+        maxOf(Interval.MIN_SEC, activeStep(s, bed, now)?.seconds ?: s.repeatSeconds)
 
     private fun sleep(now: LocalDateTime, s: SleepCfg, quiet: Boolean, paused: Boolean, emergencyLeft: Int, out: Out) {
         val night = if (s.on) night(s, now) else null
@@ -342,7 +332,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             if (emergencyLeft > 0) buttons.add(RButton("Emergency ($emergencyLeft left)", "emergency"))
             overlay("sleep", "Time for bed",
                 message(s.text, SLEEP_TEXT, "time" to hhmm(now), "bedtime" to hhmm(bed), "wake" to hhmm(wake)),
-                null, buttons, out, wait = maxOf(0, s.dismissWait))
+                null, buttons, out, wait = dismissWaitAt(s, bed, now))
         }
     }
 
@@ -644,6 +634,54 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             return t
         }
 
+        /** The step active at [now] in the night that starts at [bed]: the latest that has started. A step's time is
+         *  placed in the night counted from bedtime; one in the daytime gap before bedtime (at or after wake) counts from
+         *  bedtime. Two steps at the same time: the more frequent one. Null before the first step, or with none. */
+        fun activeStep(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): ReminderTier? {
+            val wakeT = hm(s.wake) ?: return null
+            val wakeOff = sinceBed(bed.toLocalTime(), wakeT).let { if (it == 0) 1440 else it }
+            var best: Pair<LocalDateTime, ReminderTier>? = null
+            for (t in s.tiers) {
+                val tierT = hm(t.from) ?: continue
+                val off = sinceBed(bed.toLocalTime(), tierT)
+                val whenAt = if (off >= wakeOff) bed else bed.plusMinutes(off.toLong())
+                if (whenAt.isAfter(now)) continue
+                val b = best
+                if (b == null || whenAt.isAfter(b.first) || (whenAt == b.first && t.seconds < b.second.seconds)) best = whenAt to t
+            }
+            return best?.second
+        }
+
+        /** The wait before Dismiss for a bedtime screen coming up at [now] (night from [bed]): the own wait of the step
+         *  active then ([activeStep], the one that sets how often it comes back), else the general one. With the general
+         *  wait off there is none: the steps' own waits only show, and count, while it is on. */
+        fun dismissWaitAt(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): Int {
+            if (s.dismissWait <= 0) return 0
+            return (activeStep(s, bed, now)?.waitSec ?: s.dismissWait).coerceIn(0, DISMISS_WAIT_MAX)
+        }
+
+        /** The wait before Dismiss at [minute] of the day, or null when the night (bedtime up to wake) doesn't cover it. */
+        private fun nightWait(s: SleepCfg, minute: Int): Int? {
+            val bedT = hm(s.bedtime) ?: return null
+            val wakeT = hm(s.wake) ?: return null
+            val span = sinceBed(bedT, wakeT).let { if (it == 0) 1440 else it }
+            val off = Math.floorMod(minute - (bedT.hour * 60 + bedT.minute), 1440)
+            if (off >= span) return null
+            val bed = LocalDateTime.of(2000, 1, 1, bedT.hour, bedT.minute)
+            return dismissWaitAt(s, bed, bed.plusMinutes(off.toLong()))
+        }
+
+        /** Would Dismiss wait less at ANY minute of the old night - the general wait shorter or off, a step's own wait
+         *  shorter, a step with a long wait removed or moved later? That loosens bedtime (the challenge); longer is free.
+         *  A minute the new night doesn't cover is no wait question (no screen then). The wait only changes where a step
+         *  starts or the night begins / ends: exactly those minutes are looked at (as the PC). */
+        fun dismissWaitsShorter(old: SleepCfg, new: SleepCfg): Boolean {
+            if (old.dismissWait <= 0) return false
+            val marks = listOf(old, new).flatMap { c -> listOf(c.bedtime, c.wake) + c.tiers.map { it.from } }
+                .mapNotNull { hm(it)?.let { t -> t.hour * 60 + t.minute } }.toSet()
+            return marks.any { m -> val was = nightWait(old, m); val now = nightWait(new, m); was != null && now != null && now < was }
+        }
+
         /** A step in the daytime gap before bedtime (wake → bedtime): it counts from bedtime, as the bedtime screen
          *  only starts then. The same test the engine uses. */
         fun stepFromBedtime(s: SleepCfg, from: String): Boolean {
@@ -674,10 +712,12 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         fun loosensReminder(oldOn: Boolean, oldGuarded: Boolean, newOn: Boolean, newGuarded: Boolean): Boolean =
             oldGuarded && ((oldOn && !newOn) || !newGuarded)
 
-        /** A bedtime editor draft that weakens bedtime: its guard dropped, or a shorter wait before Dismiss. Times,
-         *  steps, heads-up, texts and the mode are ordinary edits (as on the PC). */
+        /** A bedtime editor draft that weakens bedtime: its guard dropped, a shorter wait before Dismiss at any moment of
+         *  the night (the general one or a step's own, [dismissWaitsShorter]), or taps let through the bedtime screen
+         *  while it is important. Times, steps, heads-up, texts and the mode are otherwise ordinary edits (as on the PC). */
         fun bedtimeLooser(old: SleepCfg, new: SleepCfg): Boolean =
-            loosensReminder(old.on, old.guarded, old.on, new.guarded) || loosensDismissWait(old.dismissWait, new.dismissWait)
+            loosensReminder(old.on, old.guarded, old.on, new.guarded) || dismissWaitsShorter(old, new) ||
+                (old.guarded && old.blockBehind && !new.blockBehind)
 
         /** A breaks editor draft that weakens breaks: dropping its guard, or an app added to "Allowed during breaks"
          *  (removing one is free). */
@@ -731,6 +771,17 @@ class RemindersEngine(private val rng: Random = Random.Default) {
 
         /** A typed wait in seconds (1 to [DISMISS_WAIT_MAX]), or null. */
         fun parseDismissWait(text: String): Int? = text.trim().toIntOrNull()?.takeIf { it in 1..DISMISS_WAIT_MAX }
+
+        /** A step's own wait before Dismiss as typed, like the PC: "30" / "30s" / "30 s" -> 30, "2 min" -> 120, "Off" /
+         *  "0" -> 0; 0 to [DISMISS_WAIT_MAX] seconds, else null. (Empty is no own wait: the editor keeps that apart.) */
+        fun parseStepWait(text: String): Int? {
+            val t = text.trim().lowercase()
+            if (t in setOf("off", "0", "no", "never")) return 0
+            val sec = Regex("""(\d{1,4})\s*(?:s|sec|secs|seconds?)?""").matchEntire(t)?.groupValues?.get(1)?.toInt()
+                ?: Regex("""(\d{1,4})\s*(?:m|min|mins|minutes?)""").matchEntire(t)?.groupValues?.get(1)?.toInt()?.times(60)
+                ?: return null
+            return sec.takeIf { it in 0..DISMISS_WAIT_MAX }
+        }
 
         /** A shorter wait before Dismiss (or none) loosens bedtime: it needs the challenge. Longer is free. */
         fun loosensDismissWait(old: Int, new: Int): Boolean = new < old

@@ -40,12 +40,14 @@ DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30,
                  "warn_text": "", "text": "",
                  # The later it gets, the more often the bedtime screen comes back after you dismiss it - so that
                  # going to bed is easier than fending it off. Each tier is {"from": "HH:MM", "every_sec": seconds},
-                 # read within the night; the latest tier whose time has passed wins. Fully editable.
+                 # read within the night; the latest tier whose time has passed wins. Fully editable. A tier may
+                 # have its own wait before Dismiss, "wait_sec" (step_wait); without it the general one applies.
                  "tiers": [{"from": "21:00", "every_sec": 15 * 60}, {"from": "00:00", "every_sec": 5 * 60},
                            {"from": "03:00", "every_sec": 60}],
                  "guarded": False,   # dismissing the bedtime screen needs the Anti-Bypass challenge
                  "dismiss_wait": 0,  # seconds before the bedtime screen's Dismiss works (0 = at once)
-                 "grey": False}      # the whole screen goes grey from bedtime to wake-up time (resident/grayscale.py)
+                 "grey": False,      # the whole screen goes grey from bedtime to wake-up time (resident/grayscale.py)
+                 "block_behind": False}   # the cover (bedtime / strict break) takes every click and key (resident/overlay.py)
 # Apps that stay usable during a strict break ("Allowed during breaks"): the break settings' "allow" list, program
 # (.exe) names. A list saved before it existed has none, so it reads as this default; the user can take either out.
 BREAK_ALLOW_DEFAULT = ("lockdown.exe", "systemsettings.exe")
@@ -154,11 +156,72 @@ def parse_seconds(text: str) -> int:
 
 
 def dismiss_wait(s: dict) -> int:
-    """Seconds the bedtime screen's Dismiss stays off each time it comes up (0 = none)."""
+    """Seconds the bedtime screen's Dismiss stays off each time it comes up (0 = none) - the general wait; a bedtime
+    step may have its own (step_wait, dismiss_wait_at)."""
     try:
         return max(0, min(MAX_DISMISS_WAIT, int(s.get("dismiss_wait") or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def step_wait(t: dict | None) -> int | None:
+    """A bedtime step's own wait before Dismiss in seconds ("wait_sec"), or None: the step has none and the general
+    wait applies (a step saved before steps had one, an old backup, a damaged value)."""
+    raw = (t or {}).get("wait_sec")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return max(0, min(MAX_DISMISS_WAIT, int(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
+def dismiss_wait_at(s: dict, bed: datetime, now: datetime) -> int:
+    """The wait before Dismiss for a bedtime screen coming up at `now` in the night that starts at `bed`: the own wait
+    of the step active then (the same step that sets how often it comes back, active_step), else the general one.
+    With the general wait Off there is none at all (the steps' own waits only show, and count, while it is on)."""
+    general = dismiss_wait(s)
+    if not general:
+        return 0
+    own = step_wait(active_step(s, bed, now))
+    return general if own is None else own
+
+
+def dismiss_wait_now(s: dict, now: datetime) -> int:
+    """dismiss_wait_at for the night we are in at `now` (the general wait outside one)."""
+    night = Engine._night(None, s, now)
+    return dismiss_wait_at(s, night[0], now) if night else dismiss_wait(s)
+
+
+def _night_wait(s: dict, minute: int) -> int | None:
+    """The wait before Dismiss at this minute of the day, or None when the night (bedtime up to wake) doesn't cover it."""
+    bed_t, wake_t = parse_hhmm(s["bedtime"]), parse_hhmm(s["wake"])
+    bed_min = bed_t.hour * 60 + bed_t.minute
+    span = (wake_t.hour * 60 + wake_t.minute - bed_min) % 1440 or 1440
+    off = (minute - bed_min) % 1440
+    if off >= span:
+        return None
+    bed = datetime(2000, 1, 1, bed_t.hour, bed_t.minute)
+    return dismiss_wait_at(s, bed, bed + timedelta(minutes=off))
+
+
+def dismiss_waits_shorter(old: dict, new: dict) -> bool:
+    """Would the bedtime screen's Dismiss wait less at ANY minute of the old night - the general wait shorter or Off,
+    a step's own wait shorter, a step with a long wait removed or moved later? Then it needs the challenge; a longer
+    wait is free. A minute the new night doesn't cover is not a wait question (no screen then). The wait only changes
+    where a step starts or the night begins / ends: exactly those minutes are looked at."""
+    if not dismiss_wait(old):
+        return False                     # (no wait to shorten - also every other reminder, which has none)
+    marks = {parse_hhmm(x[k]) for x in (old, new) for k in ("bedtime", "wake")}
+    marks |= {parse_hhmm(t["from"]) for x in (old, new) for t in tiers_of(x)}
+    for m in {t.hour * 60 + t.minute for t in marks}:
+        was = _night_wait(old, m)
+        if was is None:
+            continue
+        now = _night_wait(new, m)
+        if now is not None and now < was:
+            return True
+    return False
 
 
 def message(custom: str, default: str, **values) -> str:
@@ -316,8 +379,9 @@ def bedtime_grey_wanted(s: dict, now: datetime) -> bool:
 def loosens_reminder(old: dict, new: dict) -> bool:
     """A change that weakens an IMPORTANT alert - turning it off, or removing its "important" flag.
     Those need the Anti-Bypass challenge; ordinary edits (times, message, frequency) do not. A shorter wait
-    before the bedtime screen's Dismiss (or none) needs it too, important or not; a longer one is free."""
-    if dismiss_wait(new) < dismiss_wait(old):
+    before the bedtime screen's Dismiss (or none) needs it too, important or not - the general wait or a step's own,
+    at any moment of the night (dismiss_waits_shorter); a longer one is free."""
+    if dismiss_waits_shorter(old, new):
         return True
     if not old.get("guarded"):
         return False
@@ -336,6 +400,23 @@ def tiers_of(s: dict) -> list[dict]:
     """The sleep escalation tiers in the order of the night (see sort_tiers). Empty means "use the flat `repeat`
     instead"."""
     return sort_tiers(s.get("tiers") or [], s.get("bedtime") or "23:00")
+
+
+def active_step(s: dict, bed: datetime, now: datetime) -> dict | None:
+    """The bedtime step active at `now` in the night that starts at `bed` (Engine._sleep_interval says why steps are
+    placed so): the latest that has started; two at the same time: the more frequent one. None before the first step,
+    or with no steps."""
+    def since_bed(t) -> int:            # minutes from bedtime to t, going forward through the night
+        return (t.hour * 60 + t.minute - bed.hour * 60 - bed.minute) % 1440
+    wake_off = since_bed(parse_hhmm(s["wake"])) or 1440
+    best = None
+    for t in tiers_of(s):
+        off = since_bed(parse_hhmm(t["from"]))
+        when = bed if off >= wake_off else bed + timedelta(minutes=off)
+        every = int(t["every_sec"])
+        if when <= now and (best is None or when > best[0] or (when == best[0] and every < best[1])):
+            best = (when, every, t)
+    return best[2] if best else None
 
 
 def schedule_text(r: dict) -> str:
@@ -610,17 +691,8 @@ class Engine:
         with bedtime 01:00 used to be dated the evening after (or past wake) and never applied (the phone's rule
         since 0.5.14). Two steps at the same time: the more frequent one. With no steps, or before the first, the
         flat `repeat_sec`."""
-        def since_bed(t) -> int:            # minutes from bedtime to t, going forward through the night
-            return (t.hour * 60 + t.minute - bed.hour * 60 - bed.minute) % 1440
-        wake_off = since_bed(parse_hhmm(s["wake"])) or 1440
-        best = None
-        for t in tiers_of(s):
-            off = since_bed(parse_hhmm(t["from"]))
-            when = bed if off >= wake_off else bed + timedelta(minutes=off)
-            every = int(t["every_sec"])
-            if when <= now and (best is None or when > best[0] or (when == best[0] and every < best[1])):
-                best = (when, every)
-        return max(MIN_INTERVAL_SEC, best[1] if best else int(s.get("repeat_sec", 300)))
+        step = active_step(s, bed, now)
+        return max(MIN_INTERVAL_SEC, int(step["every_sec"]) if step else int(s.get("repeat_sec", 300)))
 
     def _sleep(self, now):
         s = load(self.db, SLEEP_KEY, DEFAULT_SLEEP)

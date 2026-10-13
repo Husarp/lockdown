@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
 private const val CHANNEL = "reminders"
 private const val WORK = "lockdown-reminders"
 private const val DIGEST = "lockdown-digest"
+private const val ISLAND_ID = 8      // "Island apps not covered"
 
 /** Schedules a 15-minute check (tamper watchdog, daily goal, clock) and a weekly screen-time digest. */
 object Reminders {
@@ -40,6 +41,18 @@ object Reminders {
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.UNMETERED).build())
                 .build(),
         )
+    }
+
+    /** Failed Island checks in a row ([com.husarp.lockdown.engine.IslandSight.noticeStep]); kept across processes. */
+    internal fun islandPrefs(ctx: Context) = ctx.getSharedPreferences("island_notice", Context.MODE_PRIVATE)
+
+    /** A failed Island check is counted (the "not covered" notice may be up). */
+    fun islandFailing(ctx: Context) = islandPrefs(ctx).getInt("fails", 0) > 0
+
+    /** Lockdown in Island checked in and Island is covered: the count starts again and the notice goes now. */
+    fun islandBack(ctx: Context) {
+        islandPrefs(ctx).edit().putInt("fails", 0).apply()
+        runCatching { NotificationManagerCompat.from(ctx).cancel(ISLAND_ID) }
     }
 }
 
@@ -216,12 +229,15 @@ class ProtectionWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, par
 class DigestWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result {
         if (!Store.config.settings.weeklyDigest) return Result.success()
-        val total = runCatching {
+        val main = runCatching {
             com.husarp.lockdown.usage.Usage.range(
                 applicationContext, com.husarp.lockdown.usage.Usage.lastDaysStart(7), System.currentTimeMillis(),
             ) { isStopped }.totalMs
         }.getOrDefault(0)
         if (isStopped) return Result.success()   // stopped by Android: no half-counted week
+        // Island apps count too, day by day (as Home's total)
+        val week = (0L..6L).map { java.time.LocalDate.now().minusDays(it) }
+        val total = runCatching { com.husarp.lockdown.link.IslandLink.withIsland(applicationContext, main, week) }.getOrDefault(main)
         val nm = applicationContext.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null)
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
@@ -252,17 +268,29 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         // An open "Island helper stopped" alert (the service counts it) is put up again here, in case that service is
         // gone; the plain notice is for everything else that leaves Island uncovered.
         val stoppedAlert = com.husarp.lockdown.link.HelperWatcher.repost(applicationContext, cfg.enabled && cfg.guardrails.helperAlert)
-        if (!stoppedAlert && cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext))
-            notify(8, "Island apps not covered", "Lockdown in Island isn't checking in or can't block - open it there.")
+        // Only after 2 failed checks in a row, and taken down once one passes (IslandSight.noticeStep).
+        val bad = !stoppedAlert && cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext)
+        val screenOn = runCatching { applicationContext.getSystemService(android.os.PowerManager::class.java).isInteractive }.getOrDefault(true)
+        val fails = Reminders.islandPrefs(applicationContext).getInt("fails", 0)
+        val (nextFails, act) = com.husarp.lockdown.engine.IslandSight.noticeStep(fails, bad, screenOn)
+        when (act) {
+            com.husarp.lockdown.engine.IslandSight.Notice.POST ->
+                notify(ISLAND_ID, "Island apps not covered", "Lockdown in Island isn't checking in or can't block - open it there.")
+            com.husarp.lockdown.engine.IslandSight.Notice.CANCEL -> Reminders.islandBack(applicationContext)
+            com.husarp.lockdown.engine.IslandSight.Notice.NONE -> {}
+        }
+        if (nextFails != fails) Reminders.islandPrefs(applicationContext).edit().putInt("fails", nextFails).apply()
 
         // daily screen-time goal (once a day) - held while a pause silences alerts (PC 0.84.8); the tamper notices above
         // and below are never silenced
         val silent = com.husarp.lockdown.block.Enforce.silenced(cfg, com.husarp.lockdown.guard.TrustedTime.local(applicationContext))
         val budget = cfg.settings.dailyGoalMin
         if (budget > 0 && !silent) {
-            val total = runCatching {
+            val main = runCatching {
                 com.husarp.lockdown.usage.Usage.range(applicationContext, com.husarp.lockdown.usage.Usage.dayBounds(0).first, System.currentTimeMillis()) { isStopped }.totalMs
             }.getOrDefault(0)
+            // Island apps count toward the goal too (as Home's goal bar)
+            val total = runCatching { com.husarp.lockdown.link.IslandLink.withIsland(applicationContext, main, listOf(java.time.LocalDate.now())) }.getOrDefault(main)
             if (total >= budget * 60_000L) {
                 val prefs = applicationContext.getSharedPreferences("goal", Context.MODE_PRIVATE)
                 val today = java.time.LocalDate.now().toString()

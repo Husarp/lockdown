@@ -116,6 +116,11 @@ object IslandUse {
         return (both + only).sortedByDescending { it.ms }
     }
 
+    /** Island's milliseconds on [day]: its hourly rows when it sent them for that day, else its per-app rows. The one
+     *  rule for a day's Island total (Home, Insights' Today, the widget and the reminders). */
+    fun dayMs(rows: List<IslandUseRow>, hours: List<IslandHourRow>, day: LocalDate): Long =
+        hourMs(hours, day)?.sum() ?: perDay(rows, listOf(day)).single()
+
     /** Island's milliseconds on each of [days] (all apps), for the Insights bars and the total. */
     fun perDay(rows: List<IslandUseRow>, days: List<LocalDate>): List<Long> {
         val by = HashMap<String, Long>()

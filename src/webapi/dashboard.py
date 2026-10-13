@@ -22,7 +22,7 @@ from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS
                    block_end, blocked_text, effective_rules, item_block, limits, next_block, opening_bucket,
                    period_words, rule_block, time_bucket)
 
-from . import categories, core
+from . import categories, core, screentime
 from .core import ApiError
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
@@ -39,10 +39,10 @@ MAX_TIMELINE_SEGMENTS = 150            # the timeline draws the longest ones any
 CARDS = {"stats": "Numbers at the top", "today": "Today", "limits": "Limits today", "coming": "Coming up",
          "week": "Last 7 days", "visits": "Blocked visits today", "glance": "At a glance",
          "active": "Active blocks", "bedtime": "Bedtime", "pause": "Pause my blocks",
-         "emergency": "Emergency unlocks left"}
+         "emergency": "Emergency unlocks left", "apps": "Most used apps today"}
 ST_TABS = ("Overview", "Apps", "Websites", "Switches")     # (the Calendar tab is Screen Time's own page)
 ST_RANGES = tuple(stats.RANGES)
-COMING_MAX, VISITS_MAX, ACTIVE_MAX = 4, 4, 6
+COMING_MAX, VISITS_MAX, ACTIVE_MAX, APPS_MAX = 4, 4, 6, 5
 LOW_LIMIT_SEC = 30 * 60                # "about N minutes of use left" shows from this little left
 GOOD, WARN, BAD = "ok", "warn", "bad"  # the tone of a number: green, amber, red (muted = no tone)
 
@@ -280,8 +280,8 @@ def limit_entries(now, items, groups, usage) -> list[dict]:
 class _Day:
     """What the cards share, each worked out the first time a shown card asks for it."""
 
-    def __init__(self, db, snap, cache=None, catalog=None):
-        self.db, self.snap, self.catalog = db, snap, catalog
+    def __init__(self, db, snap, cache=None, catalog=None, ctx=None):
+        self.db, self.snap, self.catalog, self.ctx = db, snap, catalog, ctx
         self.cache = {} if cache is None else cache       # kept between calls (ctx.dash_cache): key -> (when, value)
         self.now = snap.now
         self.today = self.now.date()
@@ -621,9 +621,15 @@ def _card_emergency(d: _Day) -> dict:
             "used_today": [emergency.unlock_span(u["started"], u["until"]) for u in d.unlocks.get(d.today, [])]}
 
 
+def _card_apps(d: _Day) -> dict:
+    """Most used apps today: the top of Screen Time's Apps table for Today (the same rows, worked out the same way)."""
+    rows = screentime._list(screentime._Req(d.ctx, "Today"), "app")["rows"][:APPS_MAX]
+    return {"rows": [{"key": r["key"], "name": r["name"], "icon": ["app", r["key"]], "time": r["time"]} for r in rows]}
+
+
 BUILDERS = {"stats": _card_stats, "today": _card_today, "limits": _card_limits, "coming": _card_coming,
             "week": _card_week, "visits": _card_visits, "glance": _card_glance, "active": _card_active,
-            "bedtime": _card_bedtime, "pause": _card_pause, "emergency": _card_emergency}
+            "bedtime": _card_bedtime, "pause": _card_pause, "emergency": _card_emergency, "apps": _card_apps}
 
 
 # ---------------------------------------------------------------- Api
@@ -641,7 +647,7 @@ def dashboard_get(ctx):
     is not hidden. With nothing ever recorded `empty` is true and there are no cards."""
     db = ctx.db
     snap = fresh_snapshot(ctx)
-    d = _Day(db, snap, ctx.__dict__.setdefault("dash_cache", {}), getattr(ctx, "catalog", None))
+    d = _Day(db, snap, ctx.__dict__.setdefault("dash_cache", {}), getattr(ctx, "catalog", None), ctx)
     order, hidden = layout(db)
     today = d.today
     out = {"now": iso(d.now), "date": f"{DAY_NAMES[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}",

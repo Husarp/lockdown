@@ -6,9 +6,9 @@ locally from the "ms left" values it is given; the Api (webapi/overlay.py) hands
 engine reaches it through the ReminderUI (`show(key, title, text, until, buttons)` / `close(key)`).
 
 Rules kept here, never in the page:
-- Dismiss waits (reminders.dismiss_wait seconds, from the moment the screen comes up, afresh each time): an early
-  Dismiss is refused. Backing out of Disable alerts / Emergency while the wait runs is no Dismiss either - the screen
-  stays and its wait starts over.
+- Dismiss waits (reminders.dismiss_wait_now seconds: the own wait of the bedtime step active then, or the general one;
+  from the moment the screen comes up, afresh each time): an early Dismiss is refused. Backing out of Disable alerts /
+  Emergency while the wait runs is no Dismiss either - the screen stays and its wait starts over.
 - The screen is taken down FIRST and only then does the engine hear the answer (as the corner window does), so a
   challenge or question that follows can never sit behind it.
 - Only the buttons the engine gave can be used; an answer works once (a second click finds the screen gone).
@@ -20,7 +20,15 @@ if it is not ready within PAGE_READY_SEC the owner is told another way (`fallbac
 bedtime screen; a strict break keeps its windows minimised all the same) and the reason goes to the log.
 
 `OverlayHost` is the Win32 / pywebview glue (the window on the primary monitor, a plain cover of the same colour on
-every other one, always on top). It is kept thin; the maths is in `plan_rects`."""
+every other one, always on top). It is kept thin; the maths is in `plan_rects`.
+
+"Block clicks behind the bedtime screen" (reminders.sleep `block_behind`, read when a screen comes up; it covers a strict
+break too - one cover): without it the cover is put on top once, and only put back when it is moved, so a window that
+makes itself topmost later (the taskbar, another app's always-on-top window) can sit over it and take the clicks, and the
+keyboard stays with the app in front when Windows refuses to hand it over (a tray process may not take the foreground;
+the covers on the other monitors never take it). With it, every BLOCK_GUARD_SEC the cover and its covers go back on top
+of every other always-on-top window and the keyboard is taken back from whatever has it. No keyboard hook: Ctrl+Alt+Del,
+Win+L and the cover's own buttons (Dismiss, Disable alerts, Emergency) all keep working."""
 import sys
 import threading
 import time
@@ -31,6 +39,7 @@ from datetime import datetime
 BACKGROUNDS = {"dark": "#191817", "amoled": "#000000", "light": "#F3F2F1"}
 DEFAULT_RECT = (0, 0, 1920, 1080)      # when Windows can't be asked: a plain 1080p screen
 GUARD_SEC = 2.0                        # while the cover is up the monitors are re-read this often
+BLOCK_GUARD_SEC = 0.5                  # ... and this often when it blocks the clicks behind it (back on top, the keyboard)
 BREAK_FAILSAFE_SEC = 20                # a break cover leaves this long after its end even if the engine never says
 SNOOZE_MIN = 15                        # the one snooze Disable alerts offers
 MAX_BUTTONS = 4
@@ -81,13 +90,16 @@ class Overlay:
     now(): the trusted time.   wait_for(key): the Dismiss wait in seconds for that screen (0 = none).
     clock: a monotonic clock in seconds (tests drive it).
     page_ready: is the page known to work? The agent passes False: the window is then only shown after `page_loaded()`.
-    fallback(kind, title, text): tells the owner another way when the page is not ready within `ready_wait` seconds."""
+    fallback(kind, title, text): tells the owner another way when the page is not ready within `ready_wait` seconds.
+    block_for(key): does that screen block the clicks behind it ("Block clicks behind the bedtime screen")?"""
 
     def __init__(self, publisher=None, host=None, answer=None, now=None, wait_for=None, clock=time.monotonic,
-                 background=saved_background, log=None, page_ready=True, fallback=None, ready_wait=PAGE_READY_SEC):
+                 background=saved_background, log=None, page_ready=True, fallback=None, ready_wait=PAGE_READY_SEC,
+                 block_for=None):
         self.publisher, self.host, self._answer = publisher, host, answer
         self._now = now or datetime.now
         self._wait_for = wait_for or (lambda key: 0)
+        self._block_for = block_for or (lambda key: False)
         self._clock = clock
         self._background = background
         self.log = log or (lambda text: None)
@@ -119,6 +131,12 @@ class Overlay:
     @property
     def page_ok(self) -> bool:
         return self._page_ok
+
+    @property
+    def blocking(self) -> bool:
+        """Does the screen that is up block the clicks (and keys) behind it?"""
+        with self._lock:
+            return bool(self._cur and self._cur["block"])
 
     def key(self):
         with self._lock:
@@ -163,12 +181,16 @@ class Overlay:
             wait = max(0, int(self._wait_for(key) or 0))
         except Exception:
             wait = 0
+        try:
+            block = bool(self._block_for(key))
+        except Exception:
+            block = False
         ms = left_ms(until, self._trusted_now())
         mono = self._clock()
         with self._lock:
             self._token += 1
             screen = {"key": key, "kind": kind, "title": str(title), "text": str(text), "token": self._token,
-                      "buttons": clean_buttons(buttons), "wait_total": wait,
+                      "buttons": clean_buttons(buttons), "wait_total": wait, "block": block,
                       "wait_end": mono + wait if wait > 0 else None,
                       "until_end": mono + ms / 1000 if ms is not None else None}
             cur = self._cur
@@ -390,8 +412,9 @@ class Overlay:
                 self.log(f"overlay window: {error}")
 
     def _guard(self, stop: threading.Event):
-        """While the cover is up: a monitor plugged or unplugged, or the window moved, puts everything back."""
-        while not stop.wait(GUARD_SEC):
+        """While the cover is up: a monitor plugged or unplugged, or the window moved, puts everything back (blocking the
+        clicks behind it: back on top of everything and the keyboard taken back, more often)."""
+        while not stop.wait(BLOCK_GUARD_SEC if self.blocking else GUARD_SEC):
             try:
                 self.host.refresh()
             except Exception as error:
@@ -417,6 +440,11 @@ def _user32():
     user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     user32.IsIconic.argtypes = [wintypes.HWND]
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+    user32.BringWindowToTop.argtypes = [wintypes.HWND]
     return user32
 
 
@@ -453,19 +481,42 @@ def _put(hwnd: int, rect, front: bool = False, show: bool = True):
         user32.SetForegroundWindow(hwnd)
 
 
+def _take_keys(hwnd: int, ours) -> bool:
+    """The keyboard back to the cover `hwnd` unless one of `ours` (the cover, its covers) has it. Windows refuses
+    SetForegroundWindow to a process that is not in front (the tray agent never is): for that one call this thread shares
+    the input state of the window in front, the usual way round it. No hook, nothing is pressed. True when it moved."""
+    import ctypes
+    user32 = _user32()
+    front = user32.GetForegroundWindow() or 0
+    if front in ours:
+        return False
+    mine = ctypes.WinDLL("kernel32").GetCurrentThreadId()
+    theirs = user32.GetWindowThreadProcessId(front, None) if front else 0
+    attached = bool(theirs and theirs != mine and user32.AttachThreadInput(mine, theirs, True))
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            user32.AttachThreadInput(mine, theirs, False)
+    return True
+
+
 class OverlayHost:
     """Shows / hides the pywebview window `window` ("Lockdown overlay") over the primary monitor and a plain cover of
     the same colour on every other one. `monitors()` -> [gui.screens.Monitor]; `make_cover(title, background)` makes a
     cover window (default: a pywebview window with a blank page). The covers are made and taken down on a thread of
     their own (a new window takes a moment): the bedtime screen itself is up at once. Without Win32 (or when the native
-    handle isn't found) pywebview's own move / resize / show are used."""
+    handle isn't found) pywebview's own move / resize / show are used. `blocking()`: does the screen up now block the clicks
+    behind it (then every refresh puts everything back on top and takes the keyboard back)?"""
 
-    def __init__(self, window, monitors=None, make_cover=None, log=None):
+    def __init__(self, window, monitors=None, make_cover=None, log=None, blocking=None):
         from gui import screens
         self.window = window
         self._monitors = monitors or screens.monitors
         self._make_cover = make_cover or self._pywebview_cover
         self.log = log or (lambda text: None)
+        self.blocking = blocking or (lambda: False)
         self._covers: list[tuple[object, tuple]] = []      # (window, rect)
         self._covers_lock = threading.Lock()
         self._wanted = None                                 # (main rect, [cover rects]) as last placed; None = hidden
@@ -489,17 +540,27 @@ class OverlayHost:
         self._covers_soon()
 
     def refresh(self):
-        """Put the window and the covers back where they belong (the monitors may have changed, a window been moved)."""
+        """Put the window and the covers back where they belong (the monitors may have changed, a window been moved).
+        Blocking the clicks behind: also back on top of every other always-on-top window, and the keyboard taken back."""
         if self._wanted is None:
             return
+        block = self.blocking()
         main, others = plan_rects(self._monitors())
         hwnd = _hwnd(TITLE)
-        if hwnd and (main != self._wanted[0] or _rect_of(hwnd) != main):
+        if hwnd and (block or main != self._wanted[0] or _rect_of(hwnd) != main):
             _put(hwnd, main)
         changed = (main, others) != self._wanted
         self._wanted = (main, others)
         if changed or self._covers_moved():
             self._covers_soon()
+        elif block:
+            for i, (_window, rect) in enumerate(list(self._covers)):
+                cover = _hwnd(f"{TITLE} cover {i + 1}")
+                if cover:
+                    _put(cover, rect)
+        if hwnd and block:
+            ours = {hwnd} | {_hwnd(f"{TITLE} cover {i + 1}") for i in range(len(self._covers))}
+            _take_keys(hwnd, ours)
 
     def hide(self):
         self._wanted = None
@@ -587,7 +648,8 @@ def attach(win, hub, ctx, ui, log=None):
     def wait_for(key):          # (the engine calls show() on the reminder worker's thread: its own Database is right)
         if key != "sleep" or ui.worker is None:
             return 0
-        return reminders.dismiss_wait(reminders.load(ui.worker.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP))
+        return reminders.dismiss_wait_now(reminders.load(ui.worker.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP),
+                                          now())      # (the wait of the bedtime step active now)
 
     def now():                  # (any thread: trusted time from the snapshot's offset, no database)
         snap = hub.snapshot
@@ -604,8 +666,14 @@ def attach(win, hub, ctx, ui, log=None):
             return
         ui.toaster.send(text, title=title)
 
-    overlay = Overlay(publisher, OverlayHost(win.overlay, log=log), answer, now, wait_for, log=log, page_ready=False,
-                      fallback=fallback)
+    def block_for(key):         # (the reminder worker's thread, as wait_for; one cover: a strict break goes by it too)
+        if ui.worker is None:
+            return False
+        return bool(reminders.load(ui.worker.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP).get("block_behind"))
+
+    host = OverlayHost(win.overlay, log=log, blocking=lambda: overlay.blocking)
+    overlay = Overlay(publisher, host, answer, now, wait_for, log=log, page_ready=False, fallback=fallback,
+                      block_for=block_for)
     ctx.overlay = overlay
     ui.overlay_handler = overlay
     win.overlay_ctl, win.overlay_publisher = overlay, publisher

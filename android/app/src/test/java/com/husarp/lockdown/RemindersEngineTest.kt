@@ -336,6 +336,51 @@ class RemindersEngineTest {
         assertTrue(e.tick(at(28, 22, 6), 999.0, s, noBreak, emptyList()).show.any { it.key == "sleep" && it.wait == 30 })
     }
 
+    // each bedtime step's own wait before Dismiss (2026-10-12): 22:00 -> 10 s, 00:00 -> 30 s, 02:00 -> 2 min
+    private val steps = SleepCfg(on = true, bedtime = "22:00", wake = "07:00", dismissWait = 20, tiers = listOf(
+        ReminderTier("22:00", everySec = 900, waitSec = 10), ReminderTier("00:00", everySec = 300, waitSec = 30),
+        ReminderTier("02:00", everySec = 60, waitSec = 120), ReminderTier("04:00", everySec = 30)))
+
+    @Test fun the_bedtime_screen_takes_the_wait_of_the_step_active_then() {
+        fun waitAt(d: Int, h: Int, m: Int, s: SleepCfg = steps) =
+            RemindersEngine().tick(at(d, h, m), 999.0, s, noBreak, emptyList()).show.single { it.key == "sleep" }.wait
+        assertEquals(10, waitAt(28, 22, 5))
+        assertEquals(30, waitAt(29, 0, 30))
+        assertEquals(120, waitAt(29, 2, 0))
+        assertEquals(20, waitAt(29, 4, 30))                                       // no own wait: the general one
+        assertEquals(0, waitAt(29, 2, 30, steps.copy(dismissWait = 0)))           // general off: no waits at all
+        // a bedtime after midnight: a 23:00 step counts from bedtime, as for the interval
+        val late = steps.copy(bedtime = "01:00", tiers = listOf(ReminderTier("23:00", everySec = 900, waitSec = 45),
+            ReminderTier("03:00", everySec = 60, waitSec = 90)))
+        assertEquals(45, waitAt(29, 1, 10, late))
+        assertEquals(90, waitAt(29, 3, 10, late))
+    }
+
+    @Test fun a_shorter_step_wait_loosens_bedtime_a_longer_one_is_free() {
+        fun step(i: Int, f: (ReminderTier) -> ReminderTier) = steps.copy(tiers = steps.tiers.mapIndexed { j, t -> if (j == i) f(t) else t })
+        assertTrue(RemindersEngine.bedtimeLooser(steps, step(2) { it.copy(waitSec = 60) }))
+        assertFalse(RemindersEngine.bedtimeLooser(steps, step(2) { it.copy(waitSec = 300) }))
+        assertTrue(RemindersEngine.bedtimeLooser(steps, step(2) { it.copy(from = "03:00") }))      // 02:00-03:00 now 30 s
+        assertTrue(RemindersEngine.bedtimeLooser(steps, steps.copy(tiers = steps.tiers.take(2))))  // the 02:00 step removed
+        assertTrue(RemindersEngine.bedtimeLooser(steps, steps.copy(dismissWait = 0)))
+        assertTrue(RemindersEngine.bedtimeLooser(steps, steps.copy(dismissWait = 15)))             // 04:00 uses it
+        val covered = steps.copy(tiers = steps.tiers.take(3))                                     // every minute has its own:
+        assertFalse(RemindersEngine.bedtimeLooser(covered, covered.copy(dismissWait = 5)))         // the general one isn't used
+        assertFalse(RemindersEngine.bedtimeLooser(steps.copy(dismissWait = 0), step(2) { it.copy(waitSec = 5) }.copy(dismissWait = 0)))
+    }
+
+    @Test fun step_waits_are_typed_like_the_pc_and_old_steps_have_none() {
+        assertEquals(30, RemindersEngine.parseStepWait("30"))
+        assertEquals(30, RemindersEngine.parseStepWait("30 s"))
+        assertEquals(120, RemindersEngine.parseStepWait("2 min"))
+        assertEquals(0, RemindersEngine.parseStepWait("Off"))
+        assertEquals(null, RemindersEngine.parseStepWait("11 min"))
+        assertEquals(null, RemindersEngine.parseStepWait("soon"))
+        val old = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString(ReminderTier.serializer(), """{"from":"23:00","every":15}""")
+        assertEquals(null, old.waitSec)
+    }
+
     @Test fun bedtime_grayscale_only_when_toggle_and_bedtime_on_inside_the_window() {
         val s = SleepCfg(on = true, bedtime = "23:00", wake = "07:00")
         assertTrue(bedtimeGrayscaleWanted(true, s, 23 * 60 + 30))                 // inside, across midnight

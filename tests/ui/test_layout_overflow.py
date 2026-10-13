@@ -317,3 +317,36 @@ def test_the_editors_and_dialogs_stay_inside_their_cards(shell, page, loaded, si
     settle(page, 200)
     found += report(page, "reminder editor", size)
     assert not found, "\n".join(found)
+
+
+# the Dashboard's cards pack like a masonry: above every card, in at least one of the columns it covers, the next card up (or
+# the top of the grid) is no further away than the card spacing - a card never floats below a hole that ends a row; no card
+# is cut short by its grid rows, and the next card below it in its columns is a full card spacing away (no overlap)
+GAPS_JS = r"""() => {
+  const grid = document.querySelector('.page-host[data-page="dashboard"] .dash'), g = grid.getBoundingClientRect();
+  const cs = getComputedStyle(grid), space = parseFloat(cs.columnGap);
+  const cols = []; let x = g.left;
+  for (const w of cs.gridTemplateColumns.split(' ').map(parseFloat)) { cols.push([x, x + w]); x += w + space; }
+  const items = [...grid.children].filter((e) => !e.hidden).map((e) => ({ key: e.dataset.card, e, r: e.getBoundingClientRect(),
+    cols: cols.map((c, i) => i).filter((i) => cols[i][0] < e.getBoundingClientRect().right - 1 && cols[i][1] > e.getBoundingClientRect().left + 1) }));
+  const out = [];
+  for (const it of items) {
+    const gaps = it.cols.map((c) => it.r.top - Math.max(g.top, ...items.filter((o) => o !== it && o.cols.includes(c) && o.r.bottom <= it.r.top + 1).map((o) => o.r.bottom)));
+    if (Math.min(...gaps) > space + 2) out.push(`${it.key}: ${Math.round(Math.min(...gaps))}px above it (spacing ${space}px, columns ${cols.length})`);
+    for (const e of [it.e, it.e.querySelector('.card')].filter(Boolean))     // its rows are not shorter than the card
+      if (e.scrollHeight > e.clientHeight + 1) out.push(`${it.key}: clipped, ${e.scrollHeight}px in ${e.clientHeight}px`);
+    for (const o of items) if (o !== it && o.r.top >= it.r.top && o.cols.some((c) => it.cols.includes(c)) && o.r.top < it.r.bottom + space - 1)
+      out.push(`${it.key}: ${o.key} starts ${Math.round(o.r.top - it.r.bottom)}px under it (spacing ${space}px)`);
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (1280, 800)] + SIZES, ids=lambda s: f"{s[0]}x{s[1]}")
+def test_the_dashboard_cards_pack_without_holes(shell, page, loaded, size):
+    """A short card beside a tall one (Blocked visits next to the 7-day chart) has the next card right under it, at every
+    window size, once the data is in."""
+    shell(size[0], size[1], route="dashboard")
+    page.wait_for_selector('[data-card="stats"] [data-stat="screen"] .v', timeout=8000)
+    settle(page)
+    assert page.evaluate(GAPS_JS) == []

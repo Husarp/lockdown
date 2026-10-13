@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Emergency's lifebuoy (the PC's icons.js "lifebuoy", a Lucide outline). Tinted in code. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M2,12a10,10 0 1,0 20,0a10,10 0 1,0 -20,0zM8,12a4,4 0 1,0 8,0a4,4 0 1,0 -8,0z"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="1.75" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4.93,4.93l4.24,4.24M14.83,9.17l4.24,-4.24M14.83,14.83l4.24,4.24M9.17,14.83l-4.24,4.24"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="1.75" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

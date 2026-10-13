@@ -7,6 +7,7 @@ import json
 import sqlite3
 from datetime import date, timedelta
 
+import antibypass
 import applog
 import block_method
 import emergency
@@ -83,6 +84,8 @@ def _norm(key: str, value):
     if key in ("antibypass", "protection"):
         try:
             d = json.loads(value)
+            if key == "antibypass" and isinstance(d, dict):
+                d = antibypass.with_defaults(d)    # (as it is read: an older backup's own phrase is in use, ...)
             for drop in ("unlocked_until", "info", "update_now"):
                 d.pop(drop, None)
             return json.dumps(d, sort_keys=True)

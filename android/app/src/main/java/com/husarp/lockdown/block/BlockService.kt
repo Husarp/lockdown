@@ -9,10 +9,12 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.media.AudioManager
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -61,6 +63,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private var overlay: View? = null
     private var wm: WindowManager? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val cover by lazy { CoverLook(this) }     // the bedtime / strict-break screen's look
 
     @Volatile private var currentPkg = ""
     private val lastUrl = HashMap<String, String>()   // browser -> last address read (kept while the bar is hidden)
@@ -553,8 +556,15 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     /** The bedtime screen: Dismiss, Disable alerts (the challenge, in the app) and Emergency (N left). Also a break
      *  or an important reminder when notifications are off (its own buttons). */
     override fun show(p: RPrompt) {
-        val col = remindColumn(p.title, p.text)
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val kind = when (p.key) { "sleep" -> CoverLook.Kind.SLEEP; "break" -> CoverLook.Kind.BREAK; else -> CoverLook.Kind.REMIND }
+        val built = cover.build(kind, p.title, p.text, heroFirst = true)
+        val col = built.root
+        val buttons = built.buttons
+        // bedtime shows the clock on top, as the PC's cover (redrawn once a minute, only while it is on screen)
+        if (kind == CoverLook.Kind.SLEEP) cover.ticking(built.hero, handler) {
+            val t = ReminderRunner.now(this)
+            "%02d:%02d".format(t.hour, t.minute) to 60_000L - (t.second * 1000L + t.nano / 1_000_000) + 20
+        }
         // "Wait before Dismiss": Dismiss counts down and can't be tapped until it ends, from the start each time the
         // screen comes up (also back after a call or the lock screen). Disable alerts and Emergency don't wait.
         var readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L
@@ -567,7 +577,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 val left = RemindersEngine.waitLeft(readyAt, now)
                 if (left != shownLeft) {
                     shownLeft = left
-                    dismiss?.apply { text = RemindersEngine.dismissLabel(left); isEnabled = left == 0; alpha = if (left == 0) 1f else 0.4f }
+                    dismiss?.apply { text = RemindersEngine.dismissLabel(left); isEnabled = left == 0; alpha = if (left == 0) 1f else CoverLook.DISABLED_ALPHA }
                 }
                 handler.removeCallbacks(this)
                 if (left > 0) handler.postDelayed(this, Cadence.countdownMs(readyAt, now))
@@ -580,7 +590,14 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         fun fill() {
             buttons.removeAllViews()
             p.buttons.forEachIndexed { i, b ->
-                buttons.addView(remindButton(if (b.action == "dismiss") "Dismiss" else b.label, primary = i == 0) {
+                // as the PC's cover: Dismiss (first) filled, Disable alerts quiet, Emergency (N left) a text link
+                val role = when {
+                    b.action == "emergency" -> CoverLook.Role.EMERG
+                    b.action == "disable" -> CoverLook.Role.GHOST
+                    i == 0 -> CoverLook.Role.PRIMARY
+                    else -> CoverLook.Role.PLAIN
+                }
+                buttons.addView(remindButton(if (b.action == "dismiss") "Dismiss" else b.label, role) {
                     when (b.action) {
                         "disable" -> {
                             val early = RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime()) > 0
@@ -602,7 +619,6 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             countdown.run()
         }
         fill()
-        col.addView(buttons)
         addRemind(p.key, col)
     }
 
@@ -615,20 +631,18 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if (left <= 0) { Toast.makeText(this, "No emergency unlocks left.", Toast.LENGTH_LONG).show(); back(); return }
         val tiers = cfg.emergency.tierList()
         buttons.removeAllViews()
-        buttons.addView(TextView(this).apply {
-            text = if (tiers.size == 1) "Pause the bedtime and break alerts for ${tiers[0].minutes} min? Uses 1 of your " +
+        buttons.addView(cover.note(
+            if (tiers.size == 1) "Pause the bedtime and break alerts for ${tiers[0].minutes} min? Uses 1 of your " +
                 "$left emergency unlock${if (left != 1) "s" else ""} left. $note"
-            else "Pause the bedtime and break alerts? Pick how long - it uses 1 of that kind's emergency unlocks. $note"
-            textSize = 15f; setTextColor(Color.parseColor("#D8C2BC")); setPadding(0, 32, 0, 0)
-        })
-        if (tiers.size == 1) buttons.addView(remindButton("Pause ${tiers[0].minutes} min", primary = true) { onPause(tiers[0].id) })
+            else "Pause the bedtime and break alerts? Pick how long - it uses 1 of that kind's emergency unlocks. $note"))
+        if (tiers.size == 1) buttons.addView(remindButton("Pause ${tiers[0].minutes} min", CoverLook.Role.PRIMARY) { onPause(tiers[0].id) })
         else for (t in tiers) {
             val u = Emergency.usesLeft(cfg.allUses(), t, now, cfg.clock())
             buttons.addView(remindButton("Pause ${t.minutes} min · " +
                 (if (u.left > 0) "${u.left} left" else "none left") + " ${Emergency.PERIODS[t.per]}",
-                primary = false, enabled = u.left > 0) { onPause(t.id) })
+                CoverLook.Role.PLAIN, enabled = u.left > 0) { onPause(t.id) })
         }
-        buttons.addView(remindButton("Cancel", primary = false) { back() })
+        buttons.addView(remindButton("Cancel", CoverLook.Role.GHOST) { back() })
     }
 
     override fun close(key: String) = closeRemind(key)
@@ -638,21 +652,25 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
      *  (engine/BreakAllow.kt: the built-in set, the "Allowed during breaks" list, calls). Phone opens the dialer
      *  (calls always get through); an emergency use ends the break, as on the PC. */
     override fun startBreak(until: LocalDateTime) {
-        val col = remindColumn("Break time", "Step away from the screen. Back at %02d:%02d.".format(until.hour, until.minute))
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val built = cover.build(CoverLook.Kind.BREAK, "Break time",
+            "Step away from the screen. Back at %02d:%02d.".format(until.hour, until.minute), heroFirst = false)
+        val col = built.root
+        val buttons = built.buttons
+        // the time left, under the title (as the PC's break): counted on the steady clock from now, each second on screen
+        val endAt = SystemClock.elapsedRealtime() + java.time.Duration.between(ReminderRunner.now(this), until).toMillis()
+        cover.ticking(built.hero, handler) { CoverLook.countdown(endAt) }
         fun fill() {
             buttons.removeAllViews()
-            buttons.addView(remindButton("Dismiss", primary = true) { dismissBreak() })
-            buttons.addView(remindButton("Phone", primary = false) { dial() })
+            buttons.addView(remindButton("Dismiss", CoverLook.Role.PRIMARY) { dismissBreak() })
+            buttons.addView(remindButton("Phone", CoverLook.Role.PLAIN) { dial() })
             val left = ReminderRunner.emergencyLeft(Store.config, ReminderRunner.now(this))
-            if (left > 0) buttons.addView(remindButton("Emergency ($left left)", primary = false) {
+            if (left > 0) buttons.addView(remindButton("Emergency ($left left)", CoverLook.Role.EMERG) {
                 askEmergency(buttons, "The break ends now.", back = { fill() }) { tier ->
                     if (ReminderRunner.spendEmergency(this, tier)) closeRemind(STRICT_BREAK) else fill()
                 }
             })
         }
         fill()
-        col.addView(buttons)
         addRemind(STRICT_BREAK, col)
     }
 
@@ -668,7 +686,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
      *  window says what really is). */
     private fun trackBreakFront(pkg: String) {
         if (pkg == "com.android.systemui" || isKeyboard(pkg)) return
-        val active = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        val active = activeApp()
         if (pkg == packageName) { if (active != packageName) return }
         else if (active != null && active != pkg && active != "com.android.systemui" && !isKeyboard(active)) return
         breakFront = pkg
@@ -678,9 +696,14 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     /** After a dismiss, on the slow tick: what the active window is now (a missed window event can't leave the break
      *  uncovered for a not-allowed app). */
     private fun refreshBreakFront() {
-        val active = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull() ?: return
+        val active = activeApp() ?: return
         if (active != "com.android.systemui" && !isKeyboard(active)) breakFront = active
     }
+
+    /** The active window's package. A reminder screen that blocks taps is focusable, so while one is up it can be the
+     *  active window itself: that says nothing about the app in front (null, as when it can't be told). */
+    private fun activeApp(): String? = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        ?.takeUnless { it == packageName && onScreenKeys.isNotEmpty() }
 
     /** "Phone": the dialer, with the reminder screens out of its way while it's in front. */
     private fun dial() {
@@ -710,7 +733,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun applyRemind() {
         for ((key, v) in remindViews.entries.toList()) {
             val want = !remindHidden && (key != STRICT_BREAK || breakCovered)
-            if (want && key !in onScreenKeys) { if (runCatching { wm?.addView(v, remindParams()) }.isSuccess) onScreenKeys.add(key) }
+            if (want && key !in onScreenKeys) { if (runCatching { wm?.addView(v, remindParams(Store.config.sleep.blockBehind)) }.isSuccess) onScreenKeys.add(key) }
             else if (!want && onScreenKeys.remove(key)) runCatching { wm?.removeView(v) }
         }
     }
@@ -722,36 +745,16 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
 
     override fun endBreak() = closeRemind(STRICT_BREAK)
 
-    private fun remindColumn(title: String, body: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
-        setPadding(72, 72, 72, 72)
-        addView(TextView(this@BlockService).apply {
-            text = title; textSize = 30f; setTextColor(Color.parseColor("#F1DFDA"))
-            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
-        })
-        addView(TextView(this@BlockService).apply {
-            text = body; textSize = 16f; setTextColor(Color.parseColor("#D8C2BC")); setPadding(0, 24, 0, 0)
-        })
-    }
-
-    private fun remindButton(label: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) = Button(this).apply {
-        text = label
-        setTextColor(Color.parseColor(if (primary) "#5C1900" else "#FFB59C"))
-        setBackgroundColor(Color.parseColor(if (primary) "#FFB59C" else "#3A2A26"))
-        isEnabled = enabled
-        if (!enabled) alpha = 0.4f
-        setOnClickListener { runCatching(onClick) }
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130); lp.topMargin = 32
-        layoutParams = lp
-    }
+    private fun remindButton(label: String, role: CoverLook.Role, enabled: Boolean = true, onClick: () -> Unit) =
+        cover.button(label, role, enabled).apply { setOnClickListener { runCatching(onClick) } }
 
     private fun addRemind(key: String, col: View) {
         closeRemind(key)
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#1A110F")) }
+        val root = FrameLayout(this).apply { background = cover.backdrop() }
         // scrolls when it doesn't fit (several emergency kinds on a small screen or with a large font), centred when it does
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            addView(col, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(col, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL))
         }
         root.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         remindViews[key] = root
@@ -760,10 +763,25 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if (key !in onScreenKeys && !remindHidden && (key != STRICT_BREAK || breakCovered)) remindViews.remove(key)   // couldn't be added
     }
 
-    private fun remindParams() = WindowManager.LayoutParams(
+    /** The bedtime / strict-break screen's window. Not [block]: as it always was - not focusable, so Back and the
+     *  keyboard still reach the app under it, and laid out inside the system bars, so the strip under gesture
+     *  navigation (and a display cutout) is left to the app under it, taps included. [block] ("Block taps behind the
+     *  bedtime screen"): focusable, so Back and keys stop here, and over everything but what can be tapped of the
+     *  system bars (the status bar, 3-button navigation) - those still get their taps (not touch-modal), and the
+     *  swipes of gesture navigation are the system's own, never this window's. */
+    private fun remindParams(block: Boolean) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.OPAQUE,
-    )
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        if (block) WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+        PixelFormat.OPAQUE,
+    ).apply {
+        if (!block) return@apply
+        if (Build.VERSION.SDK_INT >= 30) {
+            fitInsetsTypes = WindowInsets.Type.tappableElement()
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+    }
 
     private fun closeRemind(key: String) {
         onScreenKeys.remove(key)

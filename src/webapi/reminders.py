@@ -130,6 +130,8 @@ def _sleep_weaker(old: dict, new: dict) -> bool:
         return True
     if old.get("grey") and not new.get("grey"):        # the screen would no longer go grey for the night
         return True
+    if old.get("block_behind") and not new.get("block_behind"):     # clicks would reach the apps behind the cover again
+        return True
     # the interval only changes where a step starts or the night begins / ends - look at exactly those minutes
     marks = {_minute_of(x[k]) for x in (old, new) for k in ("bedtime", "wake")}
     marks |= {_minute_of(t["from"]) for x in (old, new) for t in reminders.tiers_of(x)}
@@ -202,12 +204,14 @@ def _loosens(old: dict, new: dict, kind: str) -> bool:
 
 def _changes_text(name, old, new, kind) -> list:
     out = []
-    if reminders.loosens_reminder(old, {**new, "dismiss_wait": reminders.dismiss_wait(old)}):
+    if reminders.loosens_reminder({**old, "dismiss_wait": 0}, new):     # (no old wait: only the guard is asked about)
         out.append(f"Turn off / un-flag the important {name}")
-    if reminders.dismiss_wait(new) < reminders.dismiss_wait(old):
+    if reminders.dismiss_waits_shorter(old, new):
         out.append("Shorten the wait before Dismiss on the bedtime screen")
     if kind == "sleep" and old.get("guarded") and old.get("grey") and not new.get("grey"):
         out.append("Turn off the grey screen at bedtime")
+    if kind == "sleep" and old.get("guarded") and old.get("block_behind") and not new.get("block_behind"):
+        out.append("Let clicks through the bedtime screen")
     if _weaker(old, new, kind):
         out.append(f"Make the important {name} ask for less")
     return out or [f"Change the important {name}"]
@@ -231,10 +235,12 @@ def _breaks_today(db, today) -> int:
 def _sleep_view(s: dict) -> dict:
     return {"on": bool(s["on"]), "guarded": bool(s.get("guarded")), "bedtime": s["bedtime"], "wake": s["wake"],
             "before": reminders.minutes_text(s["before"]),
-            "tiers": [{"every": reminders.seconds_text(t.get("every_sec", 300)), "after": t.get("from", "21:00")}
+            "tiers": [{"every": reminders.seconds_text(t.get("every_sec", 300)), "after": t.get("from", "21:00"),
+                       "wait": "" if reminders.step_wait(t) is None else reminders.seconds_text(reminders.step_wait(t))}
                       for t in reminders.tiers_of(s)],
             "dismiss_wait": reminders.dismiss_wait(s), "warn_text": s.get("warn_text") or "",
-            "text": s.get("text") or "", "mode": s.get("mode") or "", "grey": bool(s.get("grey"))}
+            "text": s.get("text") or "", "mode": s.get("mode") or "", "grey": bool(s.get("grey")),
+            "block_behind": bool(s.get("block_behind"))}
 
 
 def _break_view(b: dict, today_count: int) -> dict:
@@ -311,7 +317,13 @@ def reminder_save_sleep(ctx, cfg):
             after = _clock(t.get("after"), error="")
         except (ValueError, ApiError):
             raise ApiError("Steps need how often (5 min, 30s - at least 5s) and a time like 21:00.") from None
-        tiers.append({"from": after, "every_sec": every})
+        step = {"from": after, "every_sec": every}
+        if str(t.get("wait") or "").strip():           # (empty: the general wait before Dismiss applies)
+            try:
+                step["wait_sec"] = reminders.parse_seconds(str(t["wait"]))
+            except ValueError as e:
+                raise ApiError(f"A step's wait before Dismiss: {e}") from None
+        tiers.append(step)
     tiers = reminders.sort_tiers(tiers, bedtime)
     try:
         wait = reminders.parse_seconds(str(cfg.get("dismiss_wait", 0)))
@@ -325,7 +337,9 @@ def reminder_save_sleep(ctx, cfg):
            "before": before, "tiers": tiers, "warn_text": _text(cfg.get("warn_text"), "Heads-up says"),
            "text": _text(cfg.get("text"), "Bedtime says"), "guarded": _flag(cfg.get("guarded"), "Important"),
            "dismiss_wait": wait, "mode": mode,
-           "grey": _flag(cfg["grey"], "Grey screen during bedtime") if "grey" in cfg else bool(old.get("grey"))}
+           "grey": _flag(cfg["grey"], "Grey screen during bedtime") if "grey" in cfg else bool(old.get("grey")),
+           "block_behind": _flag(cfg["block_behind"], "Block clicks behind the bedtime screen") if "block_behind" in cfg
+           else bool(old.get("block_behind"))}
     new.setdefault("repeat_sec", 300)
 
     def apply():

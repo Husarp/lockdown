@@ -291,12 +291,14 @@ def test_random_phrase_is_fresh_on_every_begin_and_custom_stays(env):
     ticket = ask(env, Change())["data"]["ticket"]
     seen = {env.guard.begin(ticket)["data"]["phrase"] for _ in range(5)}
     assert len(seen) == 5 and all(len(p.replace(" ", "")) == 30 for p in seen)
-    ab.save(env.db, {**ab.settings(env.db), "custom_phrase": "my own phrase"})
+    ab.save(env.db, {**ab.settings(env.db), "custom_phrase": "my own phrase"})          # saved, switched off
+    assert len({env.guard.begin(ticket)["data"]["phrase"] for _ in range(3)}) == 3
+    ab.save(env.db, {**ab.settings(env.db), "use_own": True})
     assert {env.guard.begin(ticket)["data"]["phrase"] for _ in range(3)} == {"my own phrase"}
 
 
 def test_a_blank_own_phrase_cannot_be_passed_by_typing_nothing(env):
-    ab.save(env.db, {**ab.settings(env.db), "custom_phrase": "   ", "grid": True})
+    ab.save(env.db, {**ab.settings(env.db), "use_own": True, "custom_phrase": "   ", "grid": True})
     change = Change()
     ticket, shown = open_challenge(env, change)
     assert shown["grid_words"] and all(shown["grid_words"])
@@ -419,7 +421,7 @@ def test_the_challenge_methods_take_no_confirmed_flag():
 
 
 def test_antibypass_status_is_readable_and_hides_the_phrase(env):
-    ab.save(env.db, {**ab.settings(env.db), "custom_phrase": "top secret words", "hours": True,
+    ab.save(env.db, {**ab.settings(env.db), "use_own": True, "custom_phrase": "top secret words", "hours": True,
                      "windows": SUN_EVENING})
     got = env.api.antibypass_status()
     assert got["ok"] and got["data"]["status"] == "phrase" and got["data"]["custom_phrase"] is True

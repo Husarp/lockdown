@@ -140,10 +140,14 @@ class MainActivity : ComponentActivity() {
 fun App(askOff: MutableState<Boolean>) {
     val nav = rememberNavController()
     val guard = com.husarp.lockdown.guard.rememberGuard()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(askOff.value) {
         if (askOff.value) {
             askOff.value = false
-            guard(true) { com.husarp.lockdown.data.Store.update { it.copy(enabled = false) } }
+            guard(true) {
+                com.husarp.lockdown.data.Store.update { it.copy(enabled = false) }
+                com.husarp.lockdown.data.BypassLog.record(ctx, com.husarp.lockdown.engine.Bypass.OFF)
+            }
         }
     }
     com.husarp.lockdown.screens.BedtimeAsk()

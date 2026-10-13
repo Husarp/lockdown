@@ -34,7 +34,7 @@ const KEEPING = [
   "Uninstalling Lockdown asks for the challenge too.",
 ];
 const HELP = {
-  own: "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - no pasting. With the 3×3 grid it's split into words by the spaces. While your own phrase is set, the length and the numbers & capitals option don't apply.",
+  own: "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - no pasting. With the 3×3 grid it's split into words by the spaces. While it's switched on, the length and the numbers & capitals option don't apply; switched off, it stays saved and a random phrase is asked. Switching it on needs the challenge (a phrase you know is easier than a fresh random one).",
   wait: "Off, or a time like 10, 1h or 1h30. Passing the challenge starts the wait instead of unlocking at once, and you come back when it ends - an easy phrase plus a long wait stops more than a hard phrase does. The wait is kept in the database, so closing Lockdown or restarting the PC doesn't skip it.",
 };
 const SLIDER_STEP = 10;
@@ -168,8 +168,9 @@ function challengeCard() {
         `<span data-k="len">${stepper(60, "characters", { step: SLIDER_STEP, min: 30, max: 2000, label: "Phrase length in characters" })}</span>`, "ab-len")}
       ${field("Numbers & CAPITALS", "Adds digits and capital letters to a random phrase - harder to type quickly.", sw(false, 'data-k="complex" aria-label="Numbers and capitals"'), "ab-cx")}
       ${field("3×3 grid", "One word at a time into a random box of a 3×3 grid - you click the box first.", sw(false, 'data-k="grid" aria-label="3 by 3 grid"'))}
-      ${field("Your own phrase", "Leave empty for a random one.",
-        `<input class="input ab-own" data-k="custom" maxlength="2000" placeholder="leave empty for a random one" autocomplete="off" spellcheck="false" aria-label="Your own phrase">` +
+      ${field("Use my own phrase", "Instead of a random one. Switched off, it stays saved.", sw(false, 'data-k="own" aria-label="Use my own phrase"'))}
+      ${field("Your own phrase", "Asked while the switch above is on.",
+        `<input class="input ab-own" data-k="custom" maxlength="2000" placeholder="a phrase only you know" autocomplete="off" spellcheck="false" aria-label="Your own phrase">` +
         `<button class="btn btn-sm" type="button" data-act="save-phrase">Save phrase</button>${help("own", "your own phrase")}`, "ab-ownrow")}
       ${helpRow("own")}
       ${field("Then wait", "Off, 10, 1h, 1h30 ... before it actually unlocks.",
@@ -274,6 +275,7 @@ function paintChallenges(keepTyped, committed) {
   setSwitch(q("phrase"), c.phrase);
   setSwitch(q("complex"), c.complex);
   setSwitch(q("grid"), c.grid);
+  setSwitch(q("own"), c.use_own);
   setSwitch(q("hours"), c.hours);
   paintLength(c.length, keepTyped, committed);
   if (!keepTyped) {
@@ -281,7 +283,7 @@ function paintChallenges(keepTyped, committed) {
     setBox(q("wait"), c.wait_text, committed);
     lastWait = c.wait_text;
   }
-  for (const f of root.querySelectorAll(".ab-len, .ab-cx")) f.classList.toggle("ab-dim", !!c.custom_phrase);
+  for (const f of root.querySelectorAll(".ab-len, .ab-cx")) f.classList.toggle("ab-dim", c.use_own);
   const key = JSON.stringify(c.windows);
   if (!hoursDirty && key !== winKey) {
     winKey = key;
@@ -462,6 +464,11 @@ function commitPhrase() {
   save({ custom_phrase: q("custom").value });
 }
 
+/** "Use my own phrase": switching it on takes what the box holds too (typed but not saved yet). */
+function commitOwn(on) {
+  save(on ? { use_own: true, custom_phrase: q("custom").value } : { use_own: false });
+}
+
 async function startPause() {
   const btn = q("p-start");
   btn.disabled = true;
@@ -594,6 +601,7 @@ function wire() {
     const t = e.target;
     const k = t.dataset && t.dataset.k;
     if (k === "phrase" || k === "complex" || k === "grid" || k === "hours") save({ [k]: t.checked });
+    else if (k === "own") commitOwn(t.checked);
     else if (k === "len-range") save({ length: Number(t.value) });
     else if (k === "wait") commitWait();
     else if (k === "lockdown") switchLockdown(t.checked);

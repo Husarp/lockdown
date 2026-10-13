@@ -1,5 +1,6 @@
 package com.husarp.lockdown.screens
 
+import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,7 +62,9 @@ import com.husarp.lockdown.data.HomeLayout
 import com.husarp.lockdown.data.Live
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.AppTime
 import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Modes
@@ -85,7 +88,6 @@ import com.husarp.lockdown.ui.Pill
 import com.husarp.lockdown.ui.fmtDuration
 import com.husarp.lockdown.ui.theme.Hue
 import com.husarp.lockdown.ui.theme.tone
-import com.husarp.lockdown.usage.DayUse
 import com.husarp.lockdown.usage.Usage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -119,8 +121,8 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
     // Home refreshes every minute while it's shown: today's screen time (read off the main thread, shared by the
     // hero and "Time per app"), and what's blocked or running low.
     val tick = com.husarp.lockdown.guard.rememberTick(60_000)      // (only while the app is in front)
-    val today by produceState<DayUse?>(null, tick) {
-        value = withContext(Dispatchers.IO) { runCatching { val (s, e) = Usage.dayBounds(0); Usage.range(ctx, s, e) }.getOrNull() }
+    val today by produceState<TodayUse?>(null, tick) {
+        value = withContext(Dispatchers.IO) { todayUse(ctx) }
     }
     val now = remember(tick, cfg) { TrustedTime.local(ctx) }
     val modeState = ModesStore.current(now)
@@ -151,11 +153,24 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
     }
 }
 
+/** Today's screen time and per-app time, main's and Island's together (as Insights' "Today"). */
+private data class TodayUse(val totalMs: Long, val apps: List<AppTime>)
+
+private fun todayUse(ctx: Context): TodayUse {
+    val du = runCatching { val (s, e) = Usage.dayBounds(0); Usage.range(ctx, s, e) }.getOrNull()
+    val day = java.time.LocalDate.now()
+    val island = runCatching { IslandLink.islandUse(ctx, day, day) }.getOrDefault(emptyMap())
+    val apps = IslandUse.topApps(du?.apps?.map { AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island)
+    val main = du?.totalMs ?: 0L
+    return TodayUse(runCatching { IslandLink.withIsland(ctx, main, listOf(day)) }.getOrDefault(main), apps)
+}
+
 /** Always first: the master switch, today's screen time and the goal bar. */
 @Composable
 private fun StatusHero(cfg: Config, todayMs: Long) {
     val cs = MaterialTheme.colorScheme
     val guard = rememberGuard()
+    val ctx = LocalContext.current
     val goalMin = cfg.settings.dailyGoalMin
     Card(color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, shape = MaterialTheme.shapes.extraLarge) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -163,7 +178,10 @@ private fun StatusHero(cfg: Config, todayMs: Long) {
                 style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
             Switch(checked = cfg.enabled, onCheckedChange = { on ->
                 if (on) Store.update { it.copy(enabled = true) }
-                else guard(true) { Store.update { it.copy(enabled = false) } }
+                else guard(true) {
+                    Store.update { it.copy(enabled = false) }
+                    com.husarp.lockdown.data.BypassLog.record(ctx, com.husarp.lockdown.engine.Bypass.OFF)
+                }
             })
         }
         Spacer(Modifier.height(6.dp))
@@ -353,9 +371,9 @@ private fun LowCard(cfg: Config, now: LocalDateTime, modeState: ModeState?) {
     }
 }
 
-/** Today's top 5 apps: time, and for an app with a daily limit the time left (amber, red once blocked). */
+/** Today's top 5 apps (main and Island merged, as Insights' Top apps): time, and for an app with a daily limit the time left (amber, red once blocked). */
 @Composable
-private fun AppsCard(cfg: Config, now: LocalDateTime, today: DayUse?, modeState: ModeState?, onOpenInsights: () -> Unit) {
+private fun AppsCard(cfg: Config, now: LocalDateTime, today: TodayUse?, modeState: ModeState?, onOpenInsights: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val info = HOME_CARDS.getValue("apps")
     val listed = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.associateBy { it.target.lowercase() } }
@@ -364,7 +382,7 @@ private fun AppsCard(cfg: Config, now: LocalDateTime, today: DayUse?, modeState:
         if (today == null) Text("Loading…", color = cs.onSurfaceVariant)
         else if (apps.isEmpty()) Text(if (Usage.hasAccess(LocalContext.current)) "No screen time yet today." else "Allow usage access in Settings to see it.",
             style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-        val top = (apps.maxOfOrNull { it.totalMs } ?: 1L).coerceAtLeast(1L)
+        val top = (apps.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
         apps.forEach { a ->
             val item = listed[a.pkg.lowercase()]
             val left = item?.let { Live.timeLeft(cfg, it, now, modeState) }?.takeIf { it.kind != TimeLeft.Kind.FREE }
@@ -374,16 +392,16 @@ private fun AppsCard(cfg: Config, now: LocalDateTime, today: DayUse?, modeState:
                 else -> tone(Hue.AMBER).accent
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                AppIcon(a.pkg, a.label.ifEmpty { a.pkg }, 32.dp)
+                AppIcon(a.pkg, a.label, 32.dp)
                 Column(Modifier.weight(1f)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(a.label.ifEmpty { a.pkg }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text(a.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         if (left != null) Text(TimeLeft.line(left, now) + " · ", style = MaterialTheme.typography.labelMedium, color = bar,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(fmtDuration(a.totalMs), style = MaterialTheme.typography.titleSmall)
+                        Text(fmtDuration(a.ms), style = MaterialTheme.typography.titleSmall)
                     }
                     Spacer(Modifier.height(5.dp))
-                    val frac = left?.fraction ?: (a.totalMs.toFloat() / top)
+                    val frac = left?.fraction ?: (a.ms.toFloat() / top)
                     Box(Modifier.fillMaxWidth().height(4.dp).background(cs.surfaceContainerHighest, CircleShape)) {
                         Box(Modifier.fillMaxWidth(frac.coerceIn(0.02f, 1f)).height(4.dp).background(bar, CircleShape))
                     }

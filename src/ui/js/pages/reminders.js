@@ -65,6 +65,10 @@ const STYLE = `<style>
 .rem .err:empty { display: none; }
 .rem .step input.in-step { width: calc(64px * var(--s)); text-align: center; }
 .rem .step .lbl { color: var(--text-2); font-size: var(--fs-sm); }
+.rem .step .step-wait { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.rem .step .step-wait[hidden] { display: none; }
+.rem .step .step-wait input { border: 0; background: transparent; font-weight: var(--fw-semibold); width: calc(52px * var(--s)); }
+.rem .step .step-wait input:focus { outline: 0; }
 </style>`;
 
 function sleepCard() {
@@ -75,13 +79,14 @@ function sleepCard() {
       ${field("Important", "Turning it off or making it ask for less needs the challenge.", flag("s-guarded", "sleep", "Important"))}
       ${field("Bedtime", "", `<span data-k="s-bed">${tp("23:00", "Bedtime")}</span><span class="muted small">Wake up</span><span data-k="s-wake">${tp("07:00", "Wake up")}</span><button class="btn btn-sm" type="button" data-act="save-times">Save times</button>`)}
       ${field("Heads-up", "Off, 30, 1h or 45s before bedtime (up to 12 h).", `${num("s-before", 90)}<span class="muted small">before bedtime</span>`)}
-      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Comes back</b><span>The later it is, the more often the bedtime screen returns after you dismiss it. Write how often (30s, 5 min, 1h30; at least 5s) and after what time.</span></div>
+      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Comes back</b><span>The later it is, the more often the bedtime screen returns after you dismiss it. Write how often (30s, 5 min, 1h30; at least 5s) and after what time. With a Dismiss wait on, a step can have its own (10s, 2 min); empty uses the Dismiss wait below.</span></div>
         <div class="steps" data-k="tiers"></div>
         <div><button class="btn btn-sm" type="button" data-act="tier-add">${ic("plus")}Add step</button></div></div>
       ${field("Dismiss wait", "Dismiss on the bedtime screen works only after this many seconds. A shorter wait (or Off) needs the challenge; a longer one is free.",
         `${seg("wait", WAITS.map(([v, t]) => [String(v), t]), "")}${num("s-wait", 56)}<span class="muted small">s</span>`)}
       ${field("Turn on a mode", "at bedtime, until wake-up time", select("s-mode", "sleep", [["", "No mode"]]))}
       ${field("Grey screen during bedtime", "The whole screen goes grey from bedtime until wake-up time, and gets its colour back after. Turning it off while this is Important needs the challenge. Windows may also have its own Color filters (Settings > Accessibility): Lockdown's grey is separate, and goes away when Lockdown gives the colour back.", flag("s-grey", "sleep", "Grey screen during bedtime"))}
+      ${field("Block clicks behind the bedtime screen", "The bedtime screen (and a strict break) takes every click and key, and keeps itself in front, so nothing behind it can be used unseen. Its own buttons keep working. Turning it off while this is Important needs the challenge.", flag("s-block", "sleep", "Block clicks behind the bedtime screen"))}
       ${field("Heads-up says", "Your own words, or leave empty. {bedtime}, {wake} and {time} are filled in.", text("s-warn", "sleep", "Heads-up says"))}
       ${field("Bedtime says", "", text("s-text", "sleep", "Bedtime says"))}
       <p class="err" data-k="s-err" role="alert"></p>
@@ -135,8 +140,8 @@ export function mount(host, p) {
 }
 
 // ---------------------------------------------------------------- reading the boxes
-function tierRow(every, after) {
-  const n = el(`<span class="step" data-tier><input class="in-step" data-k="t-every" aria-label="How often" value="${esc(every)}"><span class="lbl">after</span>${tp(after, "After")}<button class="icon-btn icon-btn-sm" type="button" data-act="tier-x" aria-label="Remove step">${ic("x")}</button></span>`);
+function tierRow(every, after, wait = "") {
+  const n = el(`<span class="step" data-tier><input class="in-step" data-k="t-every" aria-label="How often" value="${esc(every)}"><span class="lbl">after</span>${tp(after, "After")}<span class="step-wait" data-k="t-waitbox" hidden><span class="lbl">wait</span><input class="in-step" data-k="t-wait" aria-label="Wait before Dismiss" value="${esc(wait)}"></span><button class="icon-btn icon-btn-sm" type="button" data-act="tier-x" aria-label="Remove step">${ic("x")}</button></span>`);
   return n;
 }
 
@@ -144,8 +149,9 @@ function sleepCfg() {
   return {
     on: q("s-on").checked, guarded: q("s-guarded").checked, bedtime: getTp(q("s-bed")), wake: getTp(q("s-wake")),
     before: q("s-before").value, mode: q("s-mode").value, dismiss_wait: q("s-wait").value, grey: q("s-grey").checked,
+    block_behind: q("s-block").checked,
     warn_text: q("s-warn").value, text: q("s-text").value,
-    tiers: [...root.querySelectorAll("[data-tier]")].map((t) => ({ every: t.querySelector("input").value, after: getTp(t.querySelector(".tp")) })),
+    tiers: [...root.querySelectorAll("[data-tier]")].map((t) => ({ every: t.querySelector("input").value, after: getTp(t.querySelector(".tp")), wait: t.querySelector('[data-k="t-wait"]').value })),
   };
 }
 
@@ -243,18 +249,25 @@ function putChecked(node, on) {
   node.checked = !!on;
 }
 
-function fillTiers(tiers) {
+function fillTiers(tiers, general) {
   const box = q("tiers");
+  const waitBoxes = () => {                                 // own waits: only with a Dismiss wait on; empty = that one
+    for (const w of box.querySelectorAll('[data-k="t-waitbox"]')) { w.hidden = !(general > 0); w.querySelector("input").placeholder = `${general}s`; }
+  };
+  waitBoxes();
   if (box.contains(document.activeElement)) return;
   const have = [...box.querySelectorAll("[data-tier]")];
   tiers.forEach((t, i) => {
     let n = have[i];
-    if (!n) { n = tierRow(t.every, t.after); box.append(n); }
+    if (!n) { n = tierRow(t.every, t.after, t.wait); box.append(n); }
     const input = n.querySelector("input");
     if (input.value !== t.every) input.value = t.every;
+    const wait = n.querySelector('[data-k="t-wait"]');
+    if (wait.value !== (t.wait || "")) wait.value = t.wait || "";
     setTp(n.querySelector(".tp"), t.after);
   });
   have.slice(tiers.length).forEach((n) => n.remove());
+  waitBoxes();
 }
 
 function fillModes(list, current) {
@@ -276,11 +289,12 @@ function fillSleep(s, modes) {
   putChecked(q("s-on"), s.on);
   putChecked(q("s-guarded"), s.guarded);
   putChecked(q("s-grey"), s.grey);
+  putChecked(q("s-block"), s.block_behind);
   for (const [k, value] of [["s-bed", s.bedtime], ["s-wake", s.wake]]) {
     if (!q(k).contains(document.activeElement)) setTp(q(k), value);
   }
   put(q("s-before"), s.before);
-  fillTiers(s.tiers);
+  fillTiers(s.tiers, s.dismiss_wait);
   put(q("s-wait"), s.dismiss_wait ? s.dismiss_wait : "Off");
   for (const b of root.querySelectorAll('.seg[data-seg="wait"] button')) b.setAttribute("aria-pressed", String(b.dataset.v === String(s.dismiss_wait)));
   fillModes(modes, s.mode);

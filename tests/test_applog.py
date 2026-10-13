@@ -169,6 +169,38 @@ def test_the_chips_search_and_paging(db):
     assert [e["id"] for e in page + older] == [6, 5, 4, 3, 2, 1]
 
 
+def test_bypass_used_and_the_finer_filters(db):
+    for kind, text in [("emergency", "Emergency unlock used for 5 min"), ("pause", "Pause my blocks started"),
+                       ("off", "Lockdown switched off"), ("on", "Lockdown switched back on"), ("tray_exit", "Quit from the tray"),
+                       ("challenge_passed", "challenge passed"), ("challenge_failed", "challenge failed"),
+                       ("antibypass_change", "Anti-Bypass: wait 10 s → 30 s"), ("change", "Rule changed: YouTube")]:
+        applog.record(kind, text, db)
+    assert log(db, "bypass") == ["Emergency unlock used for 5 min", "Pause my blocks started", "Lockdown switched off",
+                                 "Quit from the tray", "challenge passed"]
+    assert log(db, "emergency") == ["Emergency unlock used for 5 min"]
+    assert log(db, "pauses") == ["Pause my blocks started"]
+    assert log(db, "switched") == ["Lockdown switched off", "Lockdown switched back on"]
+    assert log(db, "tray_exit") == ["Quit from the tray"]
+    assert log(db, "challenges_passed") == ["challenge passed"]
+    assert log(db, "challenges_failed") == ["challenge failed"]
+
+
+def test_the_period_starts_at_midnight(db):
+    now = datetime(2026, 10, 12, 18, 30)
+    for ts, text in [("2026-09-01 10:00:00", "old"), ("2026-10-06 00:00:00", "six days ago"),
+                     ("2026-10-05 23:59:59", "seven days ago"), ("2026-10-11 23:00:00", "yesterday"), ("2026-10-12 00:00:01", "today")]:
+        db.conn.execute("INSERT INTO app_events (ts, source, kind, text) VALUES (?, 'agent', 'change', ?)", (ts, text))
+    db.conn.commit()
+    assert applog.since_text(0, now) is None and applog.since_text(1, now) == "2026-10-12 00:00:00"
+    texts = lambda days: [e["text"] for e in applog.query(db.conn, since=applog.since_text(days, now))]
+    assert texts(1) == ["today"]
+    assert texts(7) == ["today", "yesterday", "six days ago"]
+    assert texts(30) == ["today", "yesterday", "seven days ago", "six days ago"]        # (newest written first)
+    assert len(texts(0)) == 5
+    text = applog.report(db.conn, chip="changes", days=7, with_logs=False, when=now)
+    assert "Filter: changes, last 7 days" in text and "six days ago" in text and "seven days ago" not in text
+
+
 # ---------------------------------------------------------------- settings: what changed, in words
 
 def lines(db):
@@ -225,6 +257,15 @@ def test_antibypass_changes_name_what_changed_but_never_the_phrase(db):
     assert "own phrase changed" in text and "allowed hours turned on" in text
     assert "secret" not in text
     assert set(kinds(db)) == {"antibypass_change"}
+
+
+def test_the_own_phrase_switch_is_logged_and_a_config_from_before_it_is_no_change(db):
+    db.set_setting(antibypass.SETTINGS_KEY, '{"phrase": true, "custom_phrase": "my secret phrase"}')   # (older version)
+    before = len(lines(db))
+    antibypass.save(db, antibypass.settings(db))                   # now with use_own, read as on: nothing changed
+    assert len(lines(db)) == before
+    antibypass.save(db, {**antibypass.settings(db), "use_own": False})
+    assert lines(db)[-1] == "Anti-Bypass changed: own phrase turned off"
 
 
 def test_an_unlock_is_not_a_change_of_anti_bypass(db):
@@ -770,7 +811,8 @@ def test_no_code_that_sees_a_visit_writes_to_the_log():
 def test_the_kinds_the_page_filters_by_are_all_real_kinds():
     for chip, members in applog.CHIPS.items():
         assert members and all(k in applog.KINDS for k in members), chip
-    assert applog.CHIP_NAMES == ("all", "changes", "updates", "problems", "antibypass")
+    assert applog.CHIP_NAMES == ("all", "changes", "updates", "problems", "antibypass", "bypass", "emergency", "pauses",
+                                 "switched", "tray_exit", "challenges_passed", "challenges_failed")
 
 
 # ---------------------------------------------------------------- the report (Copy and Save log...)
@@ -829,8 +871,9 @@ def test_applog_get_pages_filters_and_refuses_bad_input(ctx):
     assert len(older["rows"]) == 25 and older["more"] is False and older["total"] is None
     assert [r["text"] for r in applog_api.applog_get(ctx, "changes", "", None, 100)["rows"]][:2] == ["event 39", "event 37"]
     assert [r["text"] for r in applog_api.applog_get(ctx, "all", "event 3", None, 100)["rows"]][0] == "event 39"
+    assert applog_api.applog_get(ctx, "all", "", None, 100, 7)["rows"][0]["text"] == "event 39"
     for bad in [("nope",), ("all", 5), ("all", "x" * 101), ("all", "", "a"), ("all", "", None, 0), ("all", "", None, 501),
-                ("all", "", 0)]:
+                ("all", "", 0), ("all", "", None, 10, 3), ("all", "", None, 10, "7"), ("all", "", None, 10, None)]:
         with pytest.raises(core.ApiError):
             applog_api.applog_get(ctx, *bad)
 

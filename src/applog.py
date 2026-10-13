@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS app_events (
 );
 """
 
-# kind -> what it is; the page's filter chips are made from CHIPS below.
+# kind -> what it is; the page's filters are made from CHIPS below.
 KINDS = {
     "start": "Lockdown or its service started", "stop": "Lockdown or its service stopped normally",
     "tray_exit": "Quit from the tray", "updated": "Updated to another version",
@@ -70,8 +70,18 @@ CHIPS = {
                  "clock_changed", "list_failed", "update_failed", "update_check_failed", "challenge_failed"),
     "antibypass": ("challenge_passed", "challenge_failed", "antibypass_change", "off", "on", "pause", "emergency",
                    "tray_exit", "uninstall"),
+    # "Bypass used": every way a block was got around or let go - not the settings of Anti-Bypass, not a failed try
+    "bypass": ("emergency", "pause", "off", "tray_exit", "challenge_passed", "uninstall"),
+    # the finer ones (the page's "Only…" menu)
+    "emergency": ("emergency",),
+    "pauses": ("pause",),
+    "switched": ("off", "on"),
+    "tray_exit": ("tray_exit",),
+    "challenges_passed": ("challenge_passed",),
+    "challenges_failed": ("challenge_failed",),
 }
 CHIP_NAMES = ("all",) + tuple(CHIPS)
+PERIODS = {0: "", 1: "today", 7: "last 7 days", 30: "last 30 days"}   # days -> words (0 = the whole log)
 
 SOURCES = ("agent", "service", "installer")
 _source = ["agent"]               # who this process is (set_source)
@@ -177,14 +187,27 @@ def chip_kinds(chip: str) -> tuple | None:
     return CHIPS.get(chip)
 
 
+def since_text(days: int, now: datetime | None = None) -> str | None:
+    """The first moment a period shows (midnight of today for 1 day, of 6 days ago for 7 ...); None = the whole log."""
+    if not days:
+        return None
+    start = (now or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    return start.strftime(TS_FORMAT)
+
+
 def _like(text: str) -> str:
     return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-def query(conn, chip: str = "all", search: str = "", before: int | None = None, limit: int = 300) -> list[dict]:
+def query(conn, chip: str = "all", search: str = "", before: int | None = None, limit: int = 300,
+          since: str | None = None) -> list[dict]:
     """The newest events first, as dicts {id, ts, source, kind, text}: those of the chip's kinds whose text (or source or
-    time) holds `search`, with an id below `before` (the page asks for the next older block with it)."""
+    time) holds `search`, with an id below `before` (the page asks for the next older block with it), written at or
+    after `since` (since_text)."""
     where, args = [], []
+    if since:
+        where.append("ts >= ?")
+        args.append(since)
     kinds = chip_kinds(chip)
     if kinds:
         where.append(f"kind IN ({', '.join('?' * len(kinds))})")
@@ -243,17 +266,18 @@ def windows_text() -> str:
 
 
 def report(conn, limit: int = REPORT_EVENTS, chip: str = "all", search: str = "", with_logs: bool = True,
-           when: datetime | None = None) -> str:
+           when: datetime | None = None, days: int = 0) -> str:
     """The plain text people share: Lockdown's version, Windows, the newest `limit` events (as filtered) and the ends of
     the two log files. No sites you visited, no secrets."""
     import paths
     from version import RELEASED, VERSION
     when = when or datetime.now()
-    events = query(conn, chip, search, limit=limit)
+    events = query(conn, chip, search, limit=limit, since=since_text(days, when))
     out = ["Lockdown app log", f"Saved: {when:%Y-%m-%d %H:%M:%S}", f"Lockdown version: {VERSION} (released {RELEASED})",
            f"Windows: {windows_text()}", f"Events in the log: {count(conn)}"]
-    if chip != "all" or search:
-        out.append(f"Filter: {chip}" + (f", containing {search!r}" if search else ""))
+    if chip != "all" or search or days:
+        out.append(f"Filter: {chip}" + (f", {PERIODS.get(days, f'last {days} days')}" if days else "")
+                   + (f", containing {search!r}" if search else ""))
     out += ["", f"== Events (newest first, {len(events)} shown) =="]
     out += [event_line(e) for e in events] or ["(none)"]
     if with_logs:

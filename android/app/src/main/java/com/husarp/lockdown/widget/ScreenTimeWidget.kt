@@ -8,14 +8,17 @@ import android.content.Intent
 import android.widget.RemoteViews
 import com.husarp.lockdown.MainActivity
 import com.husarp.lockdown.R
+import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.ui.fmtDuration
 import com.husarp.lockdown.usage.Usage
 
-/** Home-screen widget: today's total screen time. Tap it to open the app. */
+/** Home-screen widget: today's total screen time (main and Island). Tap it to open the app. */
 class ScreenTimeWidget : AppWidgetProvider() {
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
         val (s, e) = Usage.dayBounds(0)
-        val total = runCatching { Usage.range(ctx, s, e).totalMs }.getOrDefault(0)
+        val main = runCatching { Usage.range(ctx, s, e).totalMs }.getOrDefault(0)
+        // Island apps count too (as Home's total)
+        val total = runCatching { IslandLink.withIsland(ctx, main, listOf(java.time.LocalDate.now())) }.getOrDefault(main)
         val open = PendingIntent.getActivity(
             ctx, 0, Intent(ctx, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,

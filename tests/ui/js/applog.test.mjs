@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CHIPS, buildRows, dayHeading, dayOf, timeOf, toneOf } from "../../../src/ui/js/applog.js";
+import { CHIPS, ONLY, PERIODS, buildRows, dayHeading, dayOf, timeOf, toneOf } from "../../../src/ui/js/applog.js";
 
 const ev = (id, ts, kind = "change", text = "x", source = "agent") => ({ id, ts, kind, text, source });
 
@@ -38,6 +38,11 @@ test("dayOf / timeOf cut the stamp Python writes", () => {
   assert.equal(timeOf(undefined), "");
 });
 
-test("the filter chips are the five the page promises, in order", () => {
-  assert.deepEqual(CHIPS.map((c) => c[1]), ["All", "Changes", "Updates", "Problems", "Anti-Bypass"]);
+test("the filter chips are the six the page promises, in order", () => {
+  assert.deepEqual(CHIPS.map((c) => c[1]), ["All", "Changes", "Updates", "Problems", "Anti-Bypass", "Bypass used"]);
+});
+
+test("the Only… menu and the period", () => {
+  assert.deepEqual(ONLY.map((c) => c[0]), ["", "emergency", "pauses", "switched", "tray_exit", "challenges_passed", "challenges_failed"]);
+  assert.deepEqual(PERIODS.map((p) => p[0]), [0, 1, 7, 30]);
 });

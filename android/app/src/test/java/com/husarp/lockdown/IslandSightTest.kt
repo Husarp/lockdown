@@ -260,4 +260,65 @@ class IslandSightTest {
         assertEquals(10 * 60_000L, IslandSight.seenWithinMs(false))
         assertEquals(60 * 60_000L, IslandSight.seenWithinMs(true))
     }
+
+    // ---------- "checked in lately" and the "Island apps not covered" notice ----------
+
+    private val min = 60_000L
+
+    @Test fun a_copy_told_main_covers_keeps_the_hour_after_main_stops_covering() {
+        // told "covered" at its last check-in, it sleeps until its next 15-min wake: 14 min later is not "not checking in"
+        assertTrue(IslandSight.checkedInLately(14 * min, toldCovers = true, coversNow = false))
+        assertTrue(IslandSight.checkedInLately(59 * min, toldCovers = true, coversNow = false))
+        assertFalse(IslandSight.checkedInLately(60 * min, toldCovers = true, coversNow = false))
+    }
+
+    @Test fun a_copy_told_main_doesnt_cover_has_ten_minutes() {
+        assertTrue(IslandSight.checkedInLately(9 * min, toldCovers = false, coversNow = false))
+        assertFalse(IslandSight.checkedInLately(10 * min, toldCovers = false, coversNow = false))
+        // main took over since (it covers now): the hour
+        assertTrue(IslandSight.checkedInLately(30 * min, toldCovers = false, coversNow = true))
+    }
+
+    @Test fun a_clock_set_back_is_not_a_fresh_check_in() {
+        assertFalse(IslandSight.checkedInLately(-1, toldCovers = true, coversNow = true))
+    }
+
+    @Test fun main_stopping_to_cover_raises_no_notice_before_the_copy_can_have_heard() {
+        // check-in at 0 (told covered), main stops covering at 5, the worker checks at 14 and 29; the copy wakes at 15,
+        // hears main stopped covering and starts its service (a check-in every 30 s from then on)
+        var fails = 0
+        for ((at, lastSeen) in listOf(14 * min to 0L, 29 * min to 29 * min - 30_000L)) {
+            val bad = !IslandSight.checkedInLately(at - lastSeen, toldCovers = lastSeen == 0L, coversNow = false)
+            val (n, act) = IslandSight.noticeStep(fails, bad, screenOn = true)
+            assertFalse(bad); assertEquals(IslandSight.Notice.CANCEL, act)
+            fails = n
+        }
+    }
+
+    @Test fun the_notice_comes_only_after_two_failed_checks_in_a_row() {
+        val (one, a1) = IslandSight.noticeStep(0, bad = true, screenOn = true)
+        assertEquals(1, one); assertEquals(IslandSight.Notice.NONE, a1)
+        val (two, a2) = IslandSight.noticeStep(one, bad = true, screenOn = true)
+        assertEquals(2, two); assertEquals(IslandSight.Notice.POST, a2)
+        // still bad: it stays up
+        assertEquals(IslandSight.Notice.POST, IslandSight.noticeStep(two, bad = true, screenOn = true).second)
+    }
+
+    @Test fun a_passing_check_takes_the_notice_down_and_starts_the_count_again() {
+        assertEquals(0 to IslandSight.Notice.CANCEL, IslandSight.noticeStep(3, bad = false, screenOn = true))
+        // fail, pass, fail: never two in a row, never up
+        var fails = 0
+        for (bad in listOf(true, false, true, false)) {
+            val (n, act) = IslandSight.noticeStep(fails, bad, screenOn = true)
+            assertTrue(act != IslandSight.Notice.POST)
+            fails = n
+        }
+    }
+
+    @Test fun a_check_with_the_screen_off_counts_neither_way() {
+        assertEquals(1 to IslandSight.Notice.NONE, IslandSight.noticeStep(1, bad = true, screenOn = false))
+        assertEquals(0 to IslandSight.Notice.NONE, IslandSight.noticeStep(0, bad = true, screenOn = false))
+        // but a pass takes it down with the screen off too
+        assertEquals(0 to IslandSight.Notice.CANCEL, IslandSight.noticeStep(2, bad = false, screenOn = false))
+    }
 }

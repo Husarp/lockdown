@@ -253,7 +253,7 @@ def antibypass_status(ctx):
     until = antibypass.unlocked_until(cfg, now)
     nxt = antibypass.next_hours(cfg, now) if cfg["hours"] else None
     return {"status": antibypass.status(cfg, now), "active": antibypass.active(cfg), "phrase": cfg["phrase"],
-            "grid": cfg["grid"], "complex": cfg.get("complex", False), "custom_phrase": bool(cfg.get("custom_phrase")),
+            "grid": cfg["grid"], "complex": cfg.get("complex", False), "custom_phrase": bool(antibypass.own_phrase(cfg)),
             "length": cfg["length"], "hours": cfg["hours"], "windows": cfg["windows"], "wait_min": cfg["wait_min"],
             "unlock_min": antibypass.UNLOCK_MIN, "unlocked_until": until, "waiting_until": waiting,
             "next_open": nxt, "off": antibypass.is_off(db), "now": now}

@@ -5,13 +5,14 @@ phrase, a wait as TEXT like "1h30", the hours windows); Python validates every o
 STORED ones plus only those values (the unlock state and every other key can't be smuggled in), and decides - with the
 same functions the old window used (antibypass.settings_looser, pause.end_for ...) - whether it loosens anything:
 
-- weaker Anti-Bypass (a challenge off, a shorter / simpler phrase, no grid, no wait, other hours): waits under a
-  challenge ticket (ctx.guard.request) and the page only gets the ticket;
+- weaker Anti-Bypass (a challenge off, a shorter / simpler phrase, your own phrase switched on, no grid, no wait,
+  other hours): waits under a challenge ticket (ctx.guard.request) and the page only gets the ticket;
 - a stricter change of the challenge: needs a yes first, because a phrase you can't reproduce (or hours you can't
   reach) would lock you out of ever loosening a block. The page asks, then sends `confirmed=True`. That flag ONLY
   answers "are you sure?" for a change that is not loosening - the loosening check is made first, every time, and
   a loosening change gets its ticket whatever the flag says;
-- everything else (and a longer phrase) is saved at once.
+- everything else (and a setting not in use: your own phrase while it's off, the random one's length or numbers while
+  it's on) is saved at once.
 
 Starting "Pause my blocks" and switching Lockdown off are loosening too (the second one even asks while no challenge is
 turned on, `force`); ending a pause and switching Lockdown on are free (`pause_resume` and `antibypass_switch_on`
@@ -28,7 +29,7 @@ from .core import ApiError
 
 MAX_PHRASE_CHARS = 2000              # the longest own phrase (as long as the longest random one)
 MAX_WINDOWS = 14
-SAVE_KEYS = ("phrase", "length", "grid", "complex", "custom_phrase", "hours", "windows", "wait")
+SAVE_KEYS = ("phrase", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait")
 OFF_CHANGE = "Turn Lockdown off entirely (no blocking, no limits, no reminders, until you turn it back on)"
 
 
@@ -46,7 +47,7 @@ def describe(cfg: dict) -> str:
     """What loosening a block needs, in one line (the same words as the old window's confirm)."""
     parts = []
     if cfg["phrase"]:
-        which = "your own phrase" if cfg.get("custom_phrase") else (
+        which = "your own phrase" if antibypass.own_phrase(cfg) else (
             f"a {cfg['length']}-character phrase" + (" (with numbers & capitals)" if cfg.get("complex") else ""))
         parts.append(f"typing {which}" + (" in a 3×3 grid" if cfg["grid"] else ""))
     if cfg["hours"]:
@@ -110,7 +111,8 @@ def _page(ctx) -> dict:
     return {
         "now": _iso(now),
         "config": {"phrase": bool(cfg["phrase"]), "length": cfg["length"], "grid": bool(cfg["grid"]),
-                   "complex": bool(cfg.get("complex")), "custom_phrase": cfg.get("custom_phrase") or "",
+                   "complex": bool(cfg.get("complex")), "use_own": bool(antibypass.own_phrase(cfg)),
+                   "custom_phrase": cfg.get("custom_phrase") or "",
                    "hours": bool(cfg["hours"]), "windows": cfg["windows"], "wait_min": cfg.get("wait_min") or 0,
                    "wait_text": reminders.minutes_text(cfg.get("wait_min") or 0)},
         "status": antibypass.status(cfg, now),
@@ -218,6 +220,8 @@ def _fields(sent: dict, old: dict) -> dict:
         new["grid"] = _flag(sent["grid"], "3×3 grid")
     if "complex" in sent:
         new["complex"] = _flag(sent["complex"], "Numbers & CAPITALS")
+    if "use_own" in sent:
+        new["use_own"] = _flag(sent["use_own"], "Use my own phrase")
     if "custom_phrase" in sent:
         new["custom_phrase"] = _own_phrase(sent["custom_phrase"])
     if "hours" in sent:
@@ -243,10 +247,17 @@ def _apply(ctx, fields: dict) -> dict:
     return _page(ctx)
 
 
+def _asked(cfg: dict) -> dict:
+    """The challenge settings as they are met: your own phrase while it's on, else the random one's length and numbers."""
+    own = antibypass.own_phrase(cfg)
+    return {**{k: cfg[k] for k in ("phrase", "grid", "hours", "windows", "wait_min")},
+            **({"own": own} if own else {"length": cfg["length"], "complex": cfg.get("complex")})}
+
+
 @core.loosen
 def antibypass_save(ctx, cfg, confirmed=False):
-    """Change the challenges: `cfg` holds only what changed (phrase, length, grid, complex, custom_phrase, hours,
-    windows, wait). -> the page data once saved; {needs_challenge, ticket, ...} when it weakens Anti-Bypass;
+    """Change the challenges: `cfg` holds only what changed (phrase, length, grid, complex, use_own, custom_phrase,
+    hours, windows, wait). -> the page data once saved; {needs_challenge, ticket, ...} when it weakens Anti-Bypass;
     {needs_confirm, line} when it is a stricter change that wants a yes first (send it again with confirmed=True)."""
     confirmed = _flag(confirmed, "Confirmed")
     old = antibypass.settings(ctx.db)
@@ -254,9 +265,13 @@ def antibypass_save(ctx, cfg, confirmed=False):
     if not fields:
         return _page(ctx)
     new = {**old, **fields}
+    if new["use_own"] and not new["custom_phrase"]:
+        if fields.get("use_own"):
+            raise ApiError("Your own phrase: write it first.")
+        fields["use_own"] = new["use_own"] = False          # (your own phrase emptied: a random one is asked again)
     if antibypass.settings_looser(old, new):                # checked first, always: `confirmed` never skips it
         return ctx.guard.request(["Weaken Anti-Bypass"], lambda: _apply(ctx, fields))
-    if not confirmed:                                       # (every field is a challenge setting)
+    if not confirmed and _asked(new) != _asked(old):        # (a setting not in use: nothing to be sure of)
         return {"needs_confirm": True, "line": describe(new)}
     return _apply(ctx, fields)
 

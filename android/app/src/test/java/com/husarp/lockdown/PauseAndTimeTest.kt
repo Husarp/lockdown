@@ -155,12 +155,13 @@ class PauseAndTimeTest {
         assertFalse(AntiBypass.settingsLooser(on, on.copy(length = 120)))
         assertTrue(AntiBypass.settingsLooser(on.copy(complex = true), on))
         assertFalse(AntiBypass.settingsLooser(on, on.copy(complex = true)))
-        assertTrue(AntiBypass.settingsLooser(on, on.copy(customPhrase = "short one")))          // 8 letters < 60
+        val own = on.copy(useOwn = true)
+        assertTrue(AntiBypass.settingsLooser(on, own.copy(customPhrase = "short one")))          // 8 letters < 60
         // your own phrase is known in advance: setting or changing one is looser whatever its length
-        assertTrue(AntiBypass.settingsLooser(on.copy(complex = true), on.copy(complex = true, customPhrase = "a".repeat(60))))
-        assertTrue(AntiBypass.settingsLooser(on.copy(customPhrase = "x".repeat(70)), on.copy(customPhrase = "y".repeat(70))))
-        assertFalse(AntiBypass.settingsLooser(AntiBypassCfg(), on.copy(customPhrase = "x".repeat(70))))   // challenge was off
-        assertFalse(AntiBypass.settingsLooser(on.copy(customPhrase = "x".repeat(40)), on))                 // back to random 60
+        assertTrue(AntiBypass.settingsLooser(on.copy(complex = true), own.copy(complex = true, customPhrase = "a".repeat(60))))
+        assertTrue(AntiBypass.settingsLooser(own.copy(customPhrase = "x".repeat(70)), own.copy(customPhrase = "y".repeat(70))))
+        assertFalse(AntiBypass.settingsLooser(AntiBypassCfg(), own.copy(customPhrase = "x".repeat(70))))   // challenge was off
+        assertFalse(AntiBypass.settingsLooser(own.copy(customPhrase = "x".repeat(40)), on))                 // back to random 60
         val hours = AntiBypassCfg(hours = true)
         assertTrue(AntiBypass.settingsLooser(hours, hours.copy(windows = hours.windows + Window(listOf(0), "09:00", "10:00"))))
         assertTrue(AntiBypass.settingsLooser(AntiBypassCfg(waitMin = 10), AntiBypassCfg(waitMin = 5)))

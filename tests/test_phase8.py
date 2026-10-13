@@ -70,6 +70,16 @@ def test_backup_diff(tmp_path):
     assert "Accent colour will change" in lines
 
 
+def test_backup_diff_reads_an_older_anti_bypass_as_it_is_used(tmp_path):
+    db = Database(tmp_path / "c.db")
+    older = {"phrase": True, "custom_phrase": "my own words"}                 # from before "Use my own phrase"
+    db.set_setting("antibypass", json.dumps({**older, "use_own": True, "complex": False}))
+    data = {**backup.export(db), "settings": {**backup.export(db)["settings"], "antibypass": json.dumps(older)}}
+    assert backup.diff(db, data) == ["No differences - it matches your current setup."]
+    db.set_setting("antibypass", json.dumps({**older, "use_own": False}))
+    assert "Anti-Bypass challenge will change" in backup.diff(db, data)
+
+
 def test_screen_time_csv(tmp_path):
     db = Database(tmp_path / "a.db")
     _activity(db, date.today(), 30, "chrome.exe", "youtube.com")

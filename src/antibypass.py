@@ -3,6 +3,7 @@
 Challenges (any combination, both off = Anti-Bypass off):
 - phrase: type a random phrase (no pasting). Passing it unlocks loosening changes for UNLOCK_MIN minutes.
   Optional "3×3 grid" (off by default): one word at a time into a box picked at random (you have to click it).
+  Or "Use my own phrase" (use_own): a phrase you saved instead; switched off, it stays saved and isn't asked.
 - hours: loosening changes only during the chosen time windows (e.g. Sunday 18:00-20:00).
 - wait: passing the challenge doesn't open at once - the unlock starts this many minutes later (a cooling-off
   period; the wait runs in the database, so closing Lockdown or rebooting doesn't skip it).
@@ -52,7 +53,7 @@ LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}   # quick p
 MIN_LENGTH, MAX_LENGTH = 30, 2000
 DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "wait_min": 0,
-            "unlocked_from": None, "unlocked_until": None}
+            "unlocked_from": None, "unlocked_until": None}   # (+ "use_own", see with_defaults)
 
 
 def settings(db) -> dict:
@@ -60,7 +61,13 @@ def settings(db) -> dict:
         cfg = json.loads(db.get_setting(SETTINGS_KEY, "") or "{}")
     except ValueError:
         cfg = {}
-    return {**DEFAULTS, **cfg}
+    return with_defaults(cfg)
+
+
+def with_defaults(cfg: dict) -> dict:
+    """A stored config (or a backup's) with every key. One from before the "Use my own phrase" switch has no use_own:
+    a saved own phrase was always used then, so it reads as on."""
+    return {**DEFAULTS, "use_own": bool(cfg.get("custom_phrase")), **cfg}
 
 
 def save(db, cfg: dict):
@@ -148,14 +155,20 @@ def parse_length(text) -> int:
     return n
 
 
+def own_phrase(cfg: dict) -> str:
+    """The user's own phrase while "Use my own phrase" is on, else "" (a random phrase is asked)."""
+    cfg = with_defaults(cfg)
+    return (cfg["custom_phrase"] or "") if cfg["use_own"] else ""
+
+
 def phrase_for(cfg: dict, rng=random) -> str:
-    """The phrase to type for a challenge: the user's own if set, else a fresh random one."""
-    return cfg.get("custom_phrase") or new_phrase(cfg["length"], cfg.get("complex", False), rng)
+    """The phrase to type for a challenge: the user's own if it's switched on, else a fresh random one."""
+    return own_phrase(cfg) or new_phrase(cfg["length"], cfg.get("complex", False), rng)
 
 
 def _phrase_strength(cfg: dict) -> int:
-    """How long the phrase is in characters (a custom phrase counts its non-space characters)."""
-    custom = cfg.get("custom_phrase") or ""
+    """How long the phrase is in characters (an own phrase in use counts its non-space characters)."""
+    custom = own_phrase(cfg)
     return len(custom.replace(" ", "")) if custom else cfg["length"]
 
 
@@ -379,10 +392,13 @@ def switch_on(db):
 
 
 def settings_looser(old: dict, new: dict) -> bool:
-    """Anti-Bypass itself: a challenge switched off, a shorter / simpler phrase, the grid dropped, other hours,
-    or less waiting before the unlock opens."""
+    """Anti-Bypass itself: a challenge switched off, a shorter / simpler phrase, your own phrase switched on (one you
+    know - and could have typed by a macro - is weaker than a fresh random one, whatever its length), the grid
+    dropped, other hours, or less waiting before the unlock opens. Switching your own phrase off is free unless the
+    random phrase is shorter."""
     return (((new.get("wait_min") or 0) < (old.get("wait_min") or 0))
             or (old["phrase"] and (not new["phrase"] or _phrase_strength(new) < _phrase_strength(old)
+                                or (own_phrase(new) and not own_phrase(old))
                                 or (old["grid"] and not new["grid"])
                                 or (old.get("complex") and not new.get("complex"))))
             or (old["hours"] and (not new["hours"] or new["windows"] != old["windows"])))

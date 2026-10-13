@@ -184,14 +184,17 @@ def test_an_unknown_program_is_a_letter_and_nothing_is_read_from_a_path_the_page
 def test_the_old_windows_cached_icon_is_reused(made, tmp_path):
     old = tmp_path / "old"
     old.mkdir()
+    (old / "app_gone.exe.png").write_bytes(PNG + b"old")
     (old / "app_chrome.exe.png").write_bytes(PNG + b"old")
     (old / "example.com.png").write_bytes(PNG + b"site")
     s = made.service
+    s.handle("app/gone.exe.png", {})
     s.handle("app/chrome.exe.png", {})
     s.handle("site/example.com.png", {})
     s.run_pending()
-    assert made.extracted == [] and made.fetched == []
-    assert s.handle("app/chrome.exe.png", {}).body == PNG + b"old"
+    assert made.fetched == []
+    assert s.handle("app/gone.exe.png", {}).body == PNG + b"old"             # (no program to take it from)
+    assert s.handle("app/chrome.exe.png", {}).body == PNG                    # (the program's own big icon wins: 32 px there)
     assert s.handle("site/example.com.png", {}).body == PNG + b"site"
 
 

@@ -10,24 +10,29 @@ import java.util.Locale
 /** A stretch of one app in the foreground, from Android's usage events (epoch ms). */
 data class AppSpan(val pkg: String, val fromMs: Long, val toMs: Long)
 
-enum class LogKind { APP, SITE, BLOCK, EMERGENCY }
+enum class LogKind { APP, SITE, BLOCK, EMERGENCY, BYPASS }
 
-/** The activity log's filter chips. Emergency uses are about blocks, so they sit under Blocks. */
+/** A way round the blocks that Lockdown records for the log itself (data/BypassLog.kt); [label] names the row. */
+enum class Bypass(val label: String) { PAUSE("Blocks paused"), CHALLENGE("Challenge passed"), OFF("Lockdown switched off") }
+
+/** The activity log's filter chips. Emergency uses are about blocks, so they sit under Blocks too; "Bypass used"
+ *  is every way round them: emergency unlocks, pauses, challenges passed, Lockdown switched off (like the PC). */
 enum class LogFilter(val label: String) {
-    ALL("All"), APPS("Apps"), SITES("Sites"), BLOCKS("Blocks");
+    ALL("All"), APPS("Apps"), SITES("Sites"), BLOCKS("Blocks"), BYPASS("Bypass used");
 
     fun matches(kind: LogKind) = when (this) {
         ALL -> true
         APPS -> kind == LogKind.APP
         SITES -> kind == LogKind.SITE
         BLOCKS -> kind == LogKind.BLOCK || kind == LogKind.EMERGENCY
+        BYPASS -> kind == LogKind.EMERGENCY || kind == LogKind.BYPASS
     }
 }
 
 /** One line of the log. [name] is the app, site or blocked thing; [pkg] is set when it is an app (for its icon);
  *  [via] is the browser a site was seen in; [seconds] how long (0: no length to show). */
 data class LogRow(val at: LocalDateTime, val kind: LogKind, val name: String, val pkg: String = "", val via: String = "", val seconds: Int = 0) {
-    /** "Opened · 12 min" / "Visited in Chrome · 5 min" / "Blocked" / "Emergency used · 20 min". */
+    /** "Opened · 12 min" / "Visited in Chrome · 5 min" / "Blocked" / "Emergency used · 20 min" / "Bypass used · 2 h 00 min". */
     val what: String get() {
         val len = if (seconds > 0) " · ${ActivityLog.span(seconds)}" else ""
         return when (kind) {
@@ -35,6 +40,7 @@ data class LogRow(val at: LocalDateTime, val kind: LogKind, val name: String, va
             LogKind.SITE -> "Visited in $via$len"
             LogKind.BLOCK -> "Blocked"
             LogKind.EMERGENCY -> "Emergency used$len"
+            LogKind.BYPASS -> "Bypass used$len"
         }
     }
 }
@@ -48,7 +54,8 @@ sealed interface LogItem {
 /**
  * The "Activity log" page: what was used in the last [DAYS] days, newest first - apps opened (Android's usage events),
  * sites visited in browsers (Lockdown's own history, the browser's address bar), blocks shown (the history's blocked
- * tries) and emergency uses (the config). Nothing new is recorded for it. Pure: the screen collects the raw pieces.
+ * tries), emergency uses (the config) and the other bypasses (a small record of its own: pauses, challenges passed,
+ * Lockdown switched off). Pure: the screen collects the raw pieces.
  */
 object ActivityLog {
     const val DAYS = 7
@@ -116,6 +123,23 @@ object ActivityLog {
             if (at.toLocalDate().isBefore(from)) return@mapNotNull null
             val until = runCatching { LocalDateTime.parse(u.until) }.getOrNull()
             LogRow(at, LogKind.EMERGENCY, "Emergency unlock", seconds = until?.let { Duration.between(at, it).seconds.toInt() }?.coerceAtLeast(0) ?: 0)
+        })
+
+    const val BYPASS_KEEP = 500           // bypass record lines kept (newest)
+
+    /** The bypass record ([text]: one "time<TAB>kind<TAB>seconds" line each, oldest first) with one more line for
+     *  [kind] at [at] ([seconds]: how long it frees things, 0 for none), the newest [BYPASS_KEEP] kept. */
+    fun bypassAdd(text: String, at: LocalDateTime, kind: Bypass, seconds: Int = 0): String =
+        (text.lines().filter { it.isNotBlank() } + "$at\t${kind.name}\t$seconds").takeLast(BYPASS_KEEP).joinToString("\n")
+
+    /** The bypass record's lines from [from] on as rows; an unreadable line is left out. */
+    fun bypassRows(text: String, from: LocalDate): List<LogRow> =
+        newest(text.lines().mapNotNull { line ->
+            val p = line.split('\t')
+            val at = runCatching { LocalDateTime.parse(p[0]) }.getOrNull() ?: return@mapNotNull null
+            val kind = Bypass.entries.firstOrNull { it.name == p.getOrNull(1) } ?: return@mapNotNull null
+            if (at.toLocalDate().isBefore(from)) return@mapNotNull null
+            LogRow(at, LogKind.BYPASS, kind.label, seconds = p.getOrNull(2)?.toIntOrNull()?.coerceAtLeast(0) ?: 0)
         })
 
     private fun newest(rows: List<LogRow>): List<LogRow> = rows.sortedByDescending { it.at }.take(MAX_PER_SOURCE)

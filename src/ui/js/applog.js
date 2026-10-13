@@ -3,15 +3,21 @@
 // Python (webapi/applog_api.py) does all the filtering and searching and hands out the events a block at a time
 // (applog_get, 300 at once; scrolling near the end - or "Show older" - asks for the next older block). The list is ONE
 // virtual list (js/vlist.js): about 25 row nodes whether there are 300 events or 20 000; day headings are rows of the same
-// height. Filter chips (All / Changes / Updates / Problems / Anti-Bypass) and the search box start the list again from the
-// newest event; the search waits SEARCH_MS for the next key. Copy puts the text of the (filtered) newest events on the
-// clipboard; Save log… opens the owner's own Save dialog in Python - the page never names a path.
+// height. Filter chips (All / Changes / Updates / Problems / Anti-Bypass / Bypass used), the finer "Only…" menu (it stands
+// in for the chips while it is set), the period (All time / Today / 7 / 30 days) and the search box start the list again
+// from the newest event; the search waits SEARCH_MS for the next key. Copy puts the text of the (filtered) newest events on the
+// clipboard; Save log… (the full report for whoever helps you, never filtered) opens the owner's own Save dialog in Python - the page never names a path.
 // Nothing about the sites or apps you visit is ever in this log (applog.py): this page cannot show what is not there.
 import { ld } from "./bridge.js";
 import { empty, ic, seg, setText, toast } from "./ui.js";
 import { createVList } from "./vlist.js";
 
-export const CHIPS = [["all", "All"], ["changes", "Changes"], ["updates", "Updates"], ["problems", "Problems"], ["antibypass", "Anti-Bypass"]];
+export const CHIPS = [["all", "All"], ["changes", "Changes"], ["updates", "Updates"], ["problems", "Problems"], ["antibypass", "Anti-Bypass"], ["bypass", "Bypass used"]];
+/** The finer filters (one kind of event each), in the "Only…" menu next to the search box. */
+export const ONLY = [["", "Only…"], ["emergency", "Emergency unlocks"], ["pauses", "Pause my blocks"], ["switched", "Switched off / on"],
+  ["tray_exit", "Quit from the tray"], ["challenges_passed", "Challenges passed"], ["challenges_failed", "Challenges failed"]];
+/** The period: days back (0 = the whole log, 1 = today). */
+export const PERIODS = [[0, "All time"], [1, "Today"], [7, "Last 7 days"], [30, "Last 30 days"]];
 export const PAGE = 300;
 export const SEARCH_MS = 150;
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -60,6 +66,8 @@ export const STYLE = `<style>
 .al-bar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; padding: var(--sp-3) var(--sp-4); }
 .al-bar .search { flex: 1 1 180px; min-width: 0; max-width: 320px; }
 .al-bar .grow { flex: 1; }
+.al-bar + .al-bar { padding-top: 0; }
+.al-bar .seg { flex: 0 1 auto; flex-wrap: wrap; }   /* (six chips: on a narrow window they take two lines, not more width) */
 .al-list { height: clamp(calc(var(--row-h-sm) * 6), 55vh, calc(var(--row-h-sm) * 14)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); }
 .al-row { display: grid; grid-template-columns: calc(66px * var(--s)) minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4); font-size: var(--fs-sm); border-bottom: 1px solid var(--line); }
 .al-row .t { color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -80,10 +88,14 @@ export function appLogCard() {
     <header class="card-h"><h3>App log</h3><span class="muted small">Everything Lockdown did and everything that happened to it - never the sites or apps you use.</span></header>
     <div class="al-bar">
       ${seg("alchip", CHIPS, "all")}
-      <div class="search">${ic("search")}<input class="input" placeholder="Search the log" aria-label="Search the log" data-al="search" autocomplete="off" spellcheck="false"></div>
       <span class="grow"></span>
       <button class="btn btn-sm" type="button" data-al="copy">${ic("file")}Copy</button>
-      <button class="btn btn-sm" type="button" data-al="save">${ic("download")}Save log…</button>
+      <button class="btn btn-sm" type="button" data-al="save" title="The whole log and the program's own log files, for whoever helps you">${ic("download")}Save log…</button>
+    </div>
+    <div class="al-bar">
+      <div class="search">${ic("search")}<input class="input" placeholder="Search the log" aria-label="Search the log" data-al="search" autocomplete="off" spellcheck="false"></div>
+      <select class="select select-sm" data-al="only" aria-label="Only one kind of event">${ONLY.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select>
+      <select class="select select-sm" data-al="period" aria-label="Period">${PERIODS.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select>
     </div>
     <div class="al-list" data-al="list" tabindex="0" aria-label="App log"><div class="al-empty" data-al="empty" hidden></div></div>
     <div class="al-foot"><span class="grow" data-al="count">&nbsp;</span><button class="btn btn-sm" type="button" data-al="more" hidden>Show older</button></div>
@@ -91,7 +103,7 @@ export function appLogCard() {
 }
 
 let root = null, vl = null, list = null;
-let chip = "all", query = "", events = [], more = false, total = 0, busy = false, searchTimer = 0, generation = 0;
+let chip = "all", query = "", days = 0, events = [], more = false, total = 0, busy = false, searchTimer = 0, generation = 0;
 const q = (k) => root.querySelector(`[data-al="${k}"]`);
 
 const todayText = () => {
@@ -139,7 +151,15 @@ export function mountAppLog(host) {
   root = host;
   list = q("list");
   vl = createVList(list, { rowVar: "--row-h-sm", rows: [], key: (row) => row.k, create: createRow, render: renderRow });
-  root.addEventListener("seg", (e) => { if (e.detail.name === "alchip") { chip = e.detail.value; restart(); } });
+  root.addEventListener("seg", (e) => { if (e.detail.name === "alchip") { chip = e.detail.value; q("only").value = ""; restart(); } });
+  q("only").addEventListener("change", () => {
+    const v = q("only").value;
+    const segBox = root.querySelector('[data-seg="alchip"]');
+    for (const b of segBox.children) b.setAttribute("aria-pressed", String(!v && b.dataset.v === "all"));
+    chip = v || "all";
+    restart();
+  });
+  q("period").addEventListener("change", () => { days = Number(q("period").value) || 0; restart(); });
   q("search").addEventListener("input", () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { query = q("search").value.trim(); restart(); }, SEARCH_MS);
@@ -153,7 +173,7 @@ export function mountAppLog(host) {
 }
 
 async function fetchBlock(before) {
-  return ld.call("applog_get", chip, query, before || null, PAGE);
+  return ld.call("applog_get", chip, query, before || null, PAGE, days);
 }
 
 /** (Re)load from the newest event, with the current chip and search. */
@@ -193,14 +213,14 @@ function paint(fromTop) {
   const empt = q("empty");
   if (!events.length) {
     empt.hidden = false;
-    empt.innerHTML = total === 0 && chip === "all" && !query
+    empt.innerHTML = total === 0 && chip === "all" && !query && !days
       ? empty("k-grey", "history", "Nothing logged yet", "Lockdown writes here when it starts, updates, or you change something.")
       : empty("k-grey", "search", "Nothing matches", "Try another word or another filter.");
   } else if (!empt.hidden) {
     empt.hidden = true;
     empt.innerHTML = "";
   }
-  const filtered = chip !== "all" || query;
+  const filtered = chip !== "all" || query || days;
   setText(q("count"), events.length
     ? `${events.length}${more ? "+" : ""} event${events.length === 1 ? "" : "s"} shown${filtered ? "" : ` of ${total}`} · kept for 90 days`
     : filtered ? "No matching events" : "No events yet");
@@ -224,7 +244,7 @@ async function copyLog() {
   const b = q("copy");
   b.disabled = true;
   try {
-    const r = await ld.call("applog_text", chip, query);
+    const r = await ld.call("applog_text", chip, query, days);
     await copy(r.text);
     toast("Copied the log - paste it where you want to share it.");
   } catch (err) {

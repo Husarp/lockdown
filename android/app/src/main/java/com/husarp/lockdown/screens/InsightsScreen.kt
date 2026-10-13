@@ -2,11 +2,13 @@ package com.husarp.lockdown.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
@@ -113,7 +116,9 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // A tap anywhere but on a bar (those take their own taps; a scroll is no tap) brings the total back.
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).pointerInput(Unit) { detectTapGestures { selected = -1 } }
+        .padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ranges.forEachIndexed { i, r -> Chip(r.first, i == range, hue = Hue.TEAL) { range = i } }
         }
@@ -132,7 +137,7 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
                 val max = (d.bars.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
                 Row(Modifier.fillMaxWidth().height(120.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(if (d.hourly) 2.dp else 6.dp)) {
                     d.bars.forEachIndexed { i, b ->
-                        Column(Modifier.weight(1f).clickable { selected = if (selected == i) -1 else i }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                        Column(Modifier.weight(1f).fillMaxHeight().clickable { selected = if (selected == i) -1 else i }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
                             val h = (100 * b.ms / max).toInt().dp.coerceAtLeast(if (b.ms > 0) 3.dp else 1.dp)
                             // a day's hours inside bedtime -> wake are indigo
                             val night = d.hourly && cfg.sleep.on && inBedtime(i * 60, cfg.sleep.bedtime, cfg.sleep.wake)

@@ -186,15 +186,16 @@ def _simple_text(label: str, how: str, old, new, default=None) -> str:
 # ---- Anti-Bypass
 
 AB_LABELS = {"phrase": "challenge", "length": "phrase length", "grid": "word grid", "complex": "capitals and digits",
-             "custom_phrase": "own phrase", "hours": "allowed hours", "windows": "the hours", "wait_min": "wait (min)"}
+             "use_own": "own phrase", "custom_phrase": "own phrase", "hours": "allowed hours", "windows": "the hours",
+             "wait_min": "wait (min)"}
 
 
 def _antibypass(old, new):
     import antibypass
     from rules import days_text
-    a, b = {**antibypass.DEFAULTS, **_dict(old)}, {**antibypass.DEFAULTS, **_dict(new)}
+    a, b = antibypass.with_defaults(_dict(old)), antibypass.with_defaults(_dict(new))
     parts = _fields(a, b, {k: v for k, v in AB_LABELS.items() if k != "windows"},
-                    flags=("phrase", "grid", "complex", "hours"), hidden=("custom_phrase",))
+                    flags=("phrase", "grid", "complex", "use_own", "hours"), hidden=("custom_phrase",))
     if a["windows"] != b["windows"]:
         parts.append("hours " + "; ".join(f"{days_text(w['days'])} {w['start']}-{w['end']}"
                                           for w in b["windows"]) if b["windows"] else "hours: none")
@@ -406,7 +407,7 @@ def _emergency_tiers(old, new):
 SLEEP_LABELS = {"on": "reminder", "bedtime": "bedtime", "wake": "wake-up", "before": "warn (min) before",
                 "repeat_sec": "repeat every (s)", "mode": "mode", "warn_text": "warning text", "text": "text",
                 "tiers": "bedtime steps", "guarded": "important", "dismiss_wait": "Dismiss waits (s)",
-                "grey": "grey screen"}
+                "grey": "grey screen", "block_behind": "block clicks behind"}
 BREAK_LABELS = {"on": "reminder", "every_sec": "every (s)", "length": "length (min)", "strict": "strict", "snooze_sec": "snooze (s)",
                 "max_snooze": "snoozes", "twenty": "20-20-20", "text": "text", "twenty_text": "20-20-20 text",
                 "guarded": "important", "allow": "apps allowed during breaks"}
@@ -414,7 +415,7 @@ CUSTOM_LABELS = {"on": "reminder", "text": "text", "kind": "kind", "every_sec": 
                  "window": "window", "snooze": "snooze (min)", "max_snooze": "snoozes", "check": "check", "packs": "quotes",
                  "quotes": "own quotes", "hours": "only between the hours", "per_day": "stop after (per day)",
                  "guarded": "important"}
-FLAGS = ("on", "strict", "twenty", "guarded", "hours", "grey")
+FLAGS = ("on", "strict", "twenty", "guarded", "hours", "grey", "block_behind")
 TEXTS = ("warn_text", "text", "twenty_text", "quotes")
 
 

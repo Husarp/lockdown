@@ -1,5 +1,6 @@
 // Dashboard (BLUEPRINT 3.1): "how am I doing today?" - the numbers, today's timeline, limits, what is coming up, the last
-// 7 days, blocked visits, a quick glance, and the designer's Active blocks / Bedtime / Pause / Emergency cards.
+// 7 days, blocked visits, a quick glance, the most used apps today, and the designer's Active blocks / Bedtime / Pause /
+// Emergency cards.
 //
 // mount() builds the static frame once (header, the notices, the grid). load() is ONE Api call (dashboard_get) and fills
 // the cards IN PLACE: a card element is made the first time it is shown and kept; rows are keyed and reused; charts get
@@ -10,13 +11,15 @@
 // Nothing reloads on a timer: the agent pushes usage_tick every ~5 s while the window is shown, and a page that was
 // left while things changed is marked and reloads on its next show.
 // The shell owns the "Lockdown is off" and "service stopped" banners; this page only says it in the Blocked-now number.
-// Cards the owner hid are not in dashboard_get's answer (Python does not compute them).
+// Cards the owner hid are not in dashboard_get's answer (Python does not compute them). Customise opens a list of every card
+// (up / down and a switch each, Reset to default) like the phone's Edit Home; each change saves at once (display_set).
 import { wireIconReady, iconImg } from "../appicon.js";
 import { ld } from "../bridge.js";
 import { barChart, timelineChart } from "../charts.js";
+import { openDialog } from "../dialog.js";
 import { openDisplay } from "../display.js";
 import { hhmm, parseNaive, trustedNow } from "../shell.js";
-import { el, empty, esc, fmt, ic, setText } from "../ui.js";
+import { el, empty, esc, fmt, ic, setText, sw } from "../ui.js";
 
 export const freshMs = 10_000;
 export const events = ["usage_tick", "status", "blocks_changed", "mode_changed"];
@@ -78,15 +81,12 @@ export function syncRows(host, rows, build, update) {
 
 // ---------------------------------------------------------------- the page
 const STYLE = `<style>
-.dash-page .dash { grid-auto-flow: row dense; }
+.dash-page .dash { grid-auto-flow: row dense; grid-auto-rows: 1px; row-gap: 0; }   /* masonry: rows are 1 px, see fit() */
 .dash .span-3 { grid-column: 1 / -1; }
 .dash-item { min-width: 0; display: grid; gap: var(--sp-2); align-content: start; }
 .dash-item[hidden] { display: none; }
-.dash-eh, .dash-item .card-tools { display: none; }
-.dash-edit .dash-eh { display: flex; align-items: center; gap: var(--sp-2); }
-.dash-edit .dash-eh h3 { flex: 1; }
-.dash-edit .dash-item .card-tools { display: flex; }
 .dash-item .card-h .sub-note { color: var(--text-2); font-size: var(--fs-sm); }
+.dash-item .card-h:has(+ .card-b[hidden]) { padding-bottom: var(--sp-4); }   /* a folded card (Blocked visits): the body's bottom padding */
 .t-ok { color: var(--ok); } .t-warn { color: var(--k-limit); } .t-bad { color: var(--k-block); }
 .stat .d.t-ok, .stat .d.t-warn, .stat .d.t-bad { font-weight: var(--fw-semibold); }
 .dash-lg { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
@@ -113,28 +113,26 @@ const STYLE = `<style>
 .dash-note { color: var(--text-2); font-size: var(--fs-sm); }
 .dash-empty-btns { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: center; margin-top: var(--sp-2); }
 .dash-empty-btns .btn { margin-top: 0; }
+.cust-rows { display: grid; gap: 2px; }
+.cust-row { display: flex; align-items: center; gap: var(--sp-1); min-height: calc(36px * var(--s)); }
+.cust-row .name { flex: 1; min-width: 0; }
+.cust-row .switch { margin-left: var(--sp-2); }
 </style>`;
 
 let root = null, page = null, grid = null;
 let data = null;                         // the last dashboard_get answer
 const cards = new Map();                 // key -> {node, update(d), tick?()}
-let editing = false;
 let status = {};                         // what the cards were last loaded for (to tell a push that matters)
 let savedLayout = Promise.resolve();
+let fitter = null;                       // ResizeObserver: a card's grid rows follow its height (fit)
 
 const q = (k) => root.querySelector(`[data-k="${k}"]`);
 const nowMs = () => trustedNow();
 
-function tools(key) {
-  return `<span class="card-tools"><button class="icon-btn icon-btn-sm" type="button" data-move="-1" data-card-key="${key}" aria-label="Move earlier">${ic("chev-l")}</button>` +
-    `<button class="icon-btn icon-btn-sm" type="button" data-move="1" data-card-key="${key}" aria-label="Move later">${ic("chev-r")}</button>` +
-    `<button class="icon-btn icon-btn-sm" type="button" data-hide="${key}" aria-label="Hide this card">${ic("x")}</button></span>`;
-}
-
-/** A card: header (title, an optional note, the edit tools) and a body. Returns [wrapper, body, header]. */
+/** A card: header (title, an optional note) and a body. Returns [wrapper, body, header]. */
 function frame(key, title, note = false) {
   const wrap = el(`<div class="dash-item${SPAN[key] ? " span-" + SPAN[key] : ""}" data-card="${key}"><section class="card">
-    <header class="card-h"><h3>${esc(title)}</h3>${note ? '<span class="sub-note" data-n="note"></span>' : ""}${tools(key)}</header>
+    <header class="card-h"><h3>${esc(title)}</h3>${note ? '<span class="sub-note" data-n="note"></span>' : ""}</header>
     <div class="card-b" data-n="body"></div></section></div>`);
   return [wrap, wrap.querySelector('[data-n="body"]'), wrap.querySelector(".card-h")];
 }
@@ -160,7 +158,7 @@ const iconBox = (icon, cls = "aic-sm") => `<span class="aic ${cls}">${iconImg(ic
 // ---------------------------------------------------------------- the cards (one builder each: mount once, update(d) in place)
 const BUILD = {
   stats(title) {
-    const wrap = el(`<div class="dash-item span-3" data-card="stats"><header class="dash-eh"><h3>${esc(title)}</h3>${tools("stats")}</header>
+    const wrap = el(`<div class="dash-item span-3" data-card="stats">
       <div class="grid-4">${STAT_LABELS.map(([k, label]) => `<div class="card stat" data-stat="${k}"><span class="cap">${esc(label)}</span><span class="v" data-n="v"></span><span class="d" data-n="d"></span></div>`).join("")}</div></div>`);
     const boxes = Object.fromEntries(STAT_LABELS.map(([k]) => [k, wrap.querySelector(`[data-stat="${k}"]`)]));
     const put = (k, s) => {
@@ -268,11 +266,9 @@ const BUILD = {
 
   visits(title) {
     const [wrap, body, head] = frame("visits", title);
-    const tool = head.querySelector(".card-tools");
     const count = el('<span class="vis-count num" data-n="count"></span>');
     const toggle = el('<button class="btn btn-sm" type="button" data-n="toggle"></button>');
-    head.insertBefore(count, tool);
-    head.insertBefore(toggle, tool);
+    head.append(count, toggle);
     body.innerHTML = `<div data-n="rows"></div><p class="muted small" data-n="none" hidden>No blocked visits today.</p>`;
     let open = false, got = null;
     const shown = () => {
@@ -430,6 +426,25 @@ const BUILD = {
       },
     };
   },
+
+  apps(title) {
+    const [wrap, body] = frame("apps", title);
+    body.innerHTML = `<div data-n="rows"></div><p class="muted small" data-n="none" hidden>No app use yet today.</p>`;
+    return {
+      node: wrap,
+      update(d) {
+        n(wrap, "none").hidden = d.rows.length > 0;
+        syncRows(n(wrap, "rows"), d.rows, () => el(`<div class="vis-row"><span class="aic aic-sm" data-n="icon"></span><span class="ellip grow" data-n="name"></span><span class="muted small num" data-n="text"></span></div>`),
+          (node, r) => {
+            const icon = n(node, "icon");
+            const sig = r.icon.join("|");
+            if (icon.dataset.sig !== sig) { icon.dataset.sig = sig; icon.innerHTML = iconImg(r.icon[0], r.icon[1]); }
+            setText(n(node, "name"), r.name);
+            setText(n(node, "text"), r.time);
+          });
+      },
+    };
+  },
 };
 
 const resetText = (iso) => {
@@ -443,54 +458,35 @@ export function mount(el_, pg) {
   page = pg;
   root.innerHTML = `${STYLE}<div class="page dash-page">
     <div class="page-h"><div class="grow"><h1>Dashboard</h1><div class="sub" data-k="sub"></div></div>
-      <button class="btn" type="button" data-k="customise">${ic("dashboard")}<span data-k="customise-t">Customise</span></button>
+      <button class="btn" type="button" data-k="customise">${ic("dashboard")}Customise</button>
       <button class="icon-btn" type="button" data-k="gear" aria-label="Display settings" title="Display settings">${ic("settings")}</button></div>
-    <div class="notice k-brand" data-k="editnote" hidden>${ic("info")}<div class="grow"><b>Choose and order your cards</b>
-      <div class="small muted">Use the arrows to move a card, x to hide it.<span data-k="hidden-lead"> Hidden:</span></div>
-      <div class="pills" data-k="hidden-pills" style="margin-top:var(--sp-2)"></div></div></div>
     <div class="dash" data-k="grid"></div>
     <div class="card" data-k="empty" hidden>${empty("k-mode", "chart", "Tracking started", "Your first numbers show up here in a few minutes, and the 7-day chart fills in as the week goes on. Nothing to do in the meantime.",
       `<div class="dash-empty-btns"><button class="btn btn-primary" type="button" data-k="first-block">Set up your first block</button><button class="btn" type="button" data-k="categories">Choose categories for your apps</button></div>`)}</div>
   </div>`;
   grid = q("grid");
   q("gear").addEventListener("click", () => openDisplay());
-  q("customise").addEventListener("click", () => setEditing(!editing));
+  q("customise").addEventListener("click", () => { if (data) openCustomise(); });
   q("first-block").addEventListener("click", () => page.go("blocking", { tab: "add" }));
   q("categories").addEventListener("click", () => page.go("screentime", { tab: "apps" }));
-  grid.addEventListener("click", (e) => {
-    const hide = e.target.closest("[data-hide]");
-    if (hide) return hideCard(hide.dataset.hide);
-    const move = e.target.closest("[data-move]");
-    if (move) moveCard(move.dataset.cardKey, +move.dataset.move);
-  });
-  q("hidden-pills").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-show]");
-    if (b) showCard(b.dataset.show);
-  });
+  fitter = new ResizeObserver(fit);
   wireIconReady(ld.on, root);
   window.addEventListener("ld:display", () => { if (data) page.reload(); });
   page.every(tick);
 }
 
-function setEditing(on) {
-  editing = on;
-  grid.classList.toggle("dash-edit", on);
-  setText(q("customise-t"), on ? "Done" : "Customise");
-  q("customise").classList.toggle("btn-primary", on);
-  renderEditNote();
+/** Masonry without holes: the grid's rows are 1 px and each card spans its own height plus the card spacing, so the dense
+ *  flow puts every card (in the owner's order) right under the shortest column it fits. Runs when a card's height changes:
+ *  data in, a window resize, a card shown again. */
+function fit(entries) {
+  const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+  for (const e of entries) {
+    const h = e.borderBoxSize[0].blockSize;
+    if (h) e.target.style.gridRowEnd = `span ${Math.ceil(h + gap)}`;
+  }
 }
 
-function renderEditNote() {
-  const hidden = data ? data.hidden : [];
-  q("editnote").hidden = !editing;
-  q("hidden-lead").hidden = !hidden.length;
-  syncRows(q("hidden-pills"), hidden.map((k) => ({ key: k })), (r) => el(`<button class="pill" type="button" data-show="${r.key}"></button>`), (node, r) => {
-    const label = data.titles[r.key];
-    if (node.textContent !== label) { node.innerHTML = ic("plus"); node.append(label); }
-  });
-}
-
-// ---------------------------------------------------------------- customising: hide, move, show (display_set)
+// ---------------------------------------------------------------- Customise: every card in a list (display_set)
 function saveLayout() {
   const body = [data.hidden, data.order];
   savedLayout = savedLayout.then(() => ld.call("display_set", ...body)).catch(() => page.reload());
@@ -501,40 +497,63 @@ function applyLayout() {
   const shown = data.order.filter((k) => !data.hidden.includes(k));
   for (const [k, c] of cards) c.node.hidden = data.hidden.includes(k);
   let prev = null;
-  shown.forEach((k, i) => {
+  for (const k of shown) {
     const c = cards.get(k);
-    if (!c) return;
+    if (!c) continue;
     const want = prev ? prev.nextSibling : grid.firstChild;
     if (c.node !== want) grid.insertBefore(c.node, want);
     prev = c.node;
-    const [back, forward] = c.node.querySelectorAll("[data-move]");
-    if (back) back.disabled = i === 0;
-    if (forward) forward.disabled = i === shown.length - 1;
+  }
+}
+
+/** A change from the Customise list: the grid follows at once and it is saved; a card shown again (or a reset that shows
+ *  one) has no data yet, so the page asks again once it is saved. */
+function setLayout(order, hidden) {
+  const missing = order.some((k) => !hidden.includes(k) && !cards.has(k));
+  data.order = order;
+  data.hidden = order.filter((k) => hidden.includes(k));
+  applyLayout();
+  const saved = saveLayout();
+  if (missing) saved.then(() => page.reload());
+}
+
+/** The Customise list (the phone's Edit Home): every card with up / down and a switch, and Reset to default. */
+function openCustomise() {
+  const body = el(`<div class="stack-sm"><p class="small muted">Choose the cards on the Dashboard and their order. Saved at once.</p>
+    <div class="cust-rows" data-n="rows"></div></div>`);
+  const rows = n(body, "rows");
+  const render = () => syncRows(rows, data.order.map((key, i) => ({ key, i })), (r) => {
+    const title = esc(data.titles[r.key]);
+    return el(`<div class="cust-row" data-card="${r.key}"><span class="name ellip">${title}</span>` +
+      `<button class="icon-btn icon-btn-sm" type="button" data-cust="up" aria-label="Move ${title} up">${ic("chev-u")}</button>` +
+      `<button class="icon-btn icon-btn-sm" type="button" data-cust="down" aria-label="Move ${title} down">${ic("chev-d")}</button>` +
+      `${sw(false, `data-cust="on" aria-label="Show ${title}"`)}</div>`);
+  }, (node, r) => {
+    node.querySelector('[data-cust="up"]').disabled = r.i === 0;
+    node.querySelector('[data-cust="down"]').disabled = r.i === data.order.length - 1;
+    node.querySelector('[data-cust="on"]').checked = !data.hidden.includes(r.key);
   });
-  renderEditNote();
-}
-
-function hideCard(key) {
-  if (data.hidden.includes(key)) return;
-  data.hidden = data.order.filter((k) => k === key || data.hidden.includes(k));
-  applyLayout();
-  saveLayout();
-}
-
-function showCard(key) {
-  data.hidden = data.hidden.filter((k) => k !== key);
-  applyLayout();
-  saveLayout().then(() => page.reload());          // (a card that was hidden has no data yet)
-}
-
-function moveCard(key, by) {
-  const shown = data.order.filter((k) => !data.hidden.includes(k));
-  const i = shown.indexOf(key), j = i + by;
-  if (i < 0 || j < 0 || j >= shown.length) return;
-  const a = data.order.indexOf(shown[i]), b = data.order.indexOf(shown[j]);
-  [data.order[a], data.order[b]] = [data.order[b], data.order[a]];
-  applyLayout();
-  saveLayout();
+  body.addEventListener("click", (e) => {
+    const b = e.target.closest('[data-cust="up"],[data-cust="down"]');
+    if (!b) return;
+    const order = [...data.order];
+    const i = order.indexOf(b.closest(".cust-row").dataset.card), j = i + (b.dataset.cust === "up" ? -1 : 1);
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    setLayout(order, data.hidden);
+    render();
+    if (b.disabled) b.closest(".cust-row").querySelector(`[data-cust="${b.dataset.cust === "up" ? "down" : "up"}"]`).focus();
+  });
+  body.addEventListener("change", (e) => {
+    if (!e.target.matches('[data-cust="on"]')) return;
+    const key = e.target.closest(".cust-row").dataset.card;
+    setLayout(data.order, e.target.checked ? data.hidden.filter((k) => k !== key) : [...data.hidden, key]);
+  });
+  render();
+  openDialog({ key: "dash-customise", title: "Customise Dashboard", body, buttons: [
+    { label: "Reset to default", kind: "text", onClick: () => { setLayout(Object.keys(data.titles), []); render(); return false; } },
+    { label: "Done", kind: "primary" },
+  ] });
 }
 
 // ---------------------------------------------------------------- loading and patching
@@ -556,6 +575,7 @@ export async function load() {
       c = BUILD[key](d.titles[key]);
       cards.set(key, c);
       grid.append(c.node);
+      fitter.observe(c.node);
     }
     c.update(info);
   }

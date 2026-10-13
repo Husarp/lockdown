@@ -4,7 +4,8 @@ refreshed on a background thread of its own (below normal priority) a little aft
 plain in-memory loop over a prepared index: a few milliseconds even for 1 500 apps.
 
 Also here: the one-off pass that puts the owner's Steam games into the Games category (distracting.seed_games - the old
-window did it five seconds after opening), and `path_for(exe)` for the icon service (where a program lives).
+window did it five seconds after opening), and `path_for(exe)` / `icon_sources(exe)` for the icon service (where a
+program lives, and the other places its icon can be taken from: its shortcut's icon, Steam's, the uninstall entry's).
 
 Apps that are open right now (the "Running" filter, the RUNNING mark) come from a window scan at most every few
 seconds; apps that are running but not in the catalog yet (just installed) are added to the answer.
@@ -25,7 +26,7 @@ RUNNING_SEC = 4            # the open-windows scan is redone when older than thi
 MAX_SHOWN = 60
 MAX_QUERY = 100
 FILTERS = ("all", "running", "games")
-FORMAT = 1
+FORMAT = 2                 # 2: apps carry "icons" (a file of format 1 is used, but scanned again at once)
 _WORD = re.compile(r"[a-z0-9]+")
 
 
@@ -96,6 +97,7 @@ class AppCatalog:
         self.loaded = threading.Event()
         self._entries: list[_Entry] = []
         self._by_exe: dict[str, str] = {}      # exe -> path
+        self._icons: dict[str, list] = {}      # exe -> its icon places, best first (only when there is more than the path)
         self._known: set = set()               # every exe in the catalog
         self._running: dict[str, str] = {}     # exe -> path of what is open now
         self._seen: dict[str, str] = {}        # exe -> path of every program ever seen open (per-user installs such as osu!)
@@ -145,7 +147,8 @@ class AppCatalog:
             from monitor.applist import list_apps
             self._list_apps = list_apps
         self.scans += 1
-        apps = [{"name": a["name"], "exe": a["exe"], "path": a.get("path") or "", "steam": bool(a.get("steam"))}
+        apps = [{"name": a["name"], "exe": a["exe"], "path": a.get("path") or "", "steam": bool(a.get("steam")),
+                 **({"icons": [str(i) for i in a["icons"]]} if a.get("icons") else {})}
                 for a in self._list_apps()]
         self._write_file(apps)
         self._set(apps)
@@ -154,7 +157,11 @@ class AppCatalog:
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
             apps = [{"name": str(a["name"]), "exe": str(a["exe"]), "path": str(a.get("path") or ""),
-                     "steam": bool(a.get("steam"))} for a in data["apps"]]
+                     "steam": bool(a.get("steam")),
+                     **({"icons": [str(i) for i in a["icons"]]} if isinstance(a.get("icons"), list) and a["icons"] else {})}
+                    for a in data["apps"]]
+            if data.get("v") == 1:
+                return 0.0, apps            # (no icon places yet: shown now, scanned again at once)
             return float(data["saved"]), apps if data.get("v") == FORMAT else None
         except (OSError, ValueError, KeyError, TypeError):
             return 0.0, None
@@ -171,6 +178,7 @@ class AppCatalog:
     def _set(self, apps: list):
         entries = [_Entry(a) for a in apps]
         self._by_exe = {a["exe"]: a["path"] for a in apps if a["path"]}
+        self._icons = {a["exe"]: a["icons"] for a in apps if a.get("icons")}
         self._entries = entries
         self._known = {a["exe"] for a in apps}
         self._extras = []
@@ -215,6 +223,11 @@ class AppCatalog:
             return row[0] if row else None
         except Exception:
             return None
+
+    def icon_sources(self, exe: str) -> list:
+        """The places the catalog knows to take this program's icon from, best first ("path" or "path,index"); [] when
+        it knows only the program's own path (path_for)."""
+        return list(self._icons.get(exe.lower(), ()))
 
     def running(self) -> dict:
         """{exe: path} of the programs with a window open. The first call scans at once; later calls return the last

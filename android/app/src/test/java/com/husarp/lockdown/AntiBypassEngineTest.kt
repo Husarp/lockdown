@@ -13,6 +13,7 @@ import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.engine.SchedMode
 import com.husarp.lockdown.engine.Schedule
 import com.husarp.lockdown.engine.Window
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -67,9 +68,28 @@ class AntiBypassEngineTest {
 
     @Test fun own_phrase_is_free_when_turning_the_phrase_on_but_not_after() {
         val off = AntiBypassCfg(phrase = false)
-        assertFalse(AntiBypass.settingsLooser(off, off.copy(phrase = true, customPhrase = "my own words")))   // on with yours
+        assertFalse(AntiBypass.settingsLooser(off, off.copy(phrase = true, useOwn = true, customPhrase = "my own words")))   // on with yours
         val random = off.copy(phrase = true)
-        assertTrue(AntiBypass.settingsLooser(random, random.copy(customPhrase = "my own words")))             // random -> yours
+        assertTrue(AntiBypass.settingsLooser(random, random.copy(useOwn = true, customPhrase = "my own words")))             // random -> yours
+    }
+
+    @Test fun a_random_phrase_picked_keeps_yours_saved_and_never_asks_it() {
+        val words = "I promised myself one focused evening and I keep my promises"           // 50 letters
+        val yours = AntiBypassCfg(phrase = true, customPhrase = words)
+        val random = yours.copy(useOwn = false)
+        assertTrue(yours.useOwn)                                                             // set with a phrase: on
+        assertEquals(words, AntiBypass.phraseFor(yours))
+        assertEquals("", AntiBypass.ownPhrase(random))
+        assertEquals(60, AntiBypass.phraseFor(random).replace(" ", "").length)              // kept, but a random one is asked
+        assertFalse(AntiBypass.settingsLooser(yours, random))                               // a random 60 instead of your 50
+        assertTrue(AntiBypass.settingsLooser(yours, random.copy(length = 30)))              // ... unless it's shorter
+        assertTrue(AntiBypass.settingsLooser(random, yours))                                // yours again: the challenge
+        assertFalse(AntiBypass.settingsLooser(random, random.copy(customPhrase = "other words")))   // not in use: free
+        // saved before the picker kept it (an older config, an import, the Island copy): a saved phrase is on
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        assertTrue(json.decodeFromString(AntiBypassCfg.serializer(), """{"phrase":true,"customPhrase":"my words"}""").useOwn)
+        assertFalse(json.decodeFromString(AntiBypassCfg.serializer(), """{"phrase":true}""").useOwn)
+        assertEquals(random, json.decodeFromString(AntiBypassCfg.serializer(), json.encodeToString(AntiBypassCfg.serializer(), random)))
     }
 
     @Test fun rule_looser_cases() {
