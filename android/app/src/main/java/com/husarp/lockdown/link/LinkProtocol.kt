@@ -48,6 +48,7 @@ data class SyncBody(
     val useHours: List<com.husarp.lockdown.engine.IslandHourRow>? = null,   // Island seconds per hour, today and yesterday, only when changed
     val endPause: com.husarp.lockdown.engine.BlockPause? = null,   // "Resume now" in Island: main ends this pause only (Pause.endEarly)
     val fronts: List<com.husarp.lockdown.engine.IslandFront>? = null,   // Island's recent visits: does main see them itself? (IslandSight)
+    val opens: List<com.husarp.lockdown.engine.IslandOpen>? = null,     // Island apps opened that ended after main's opensMark (Activity log, IslandOpens)
 )
 
 /** Main -> helper. */
@@ -62,6 +63,7 @@ data class StateBody(
     val unlink: Boolean = false,
     val app: Long = 0,
     val covers: Boolean = false,                        // main sees and blocks Island apps itself: the helper needs no service (IslandSight)
+    val opensMark: Long? = null,                        // the latest end of an Island app visit main has (IslandOpens); null: an older main, send none
 )
 
 class FrameTooBig(len: Int) : IOException("frame of $len bytes")

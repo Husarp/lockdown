@@ -4,6 +4,7 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.CrossProfileApps
 import android.os.Build
 import android.os.Handler
@@ -23,9 +24,12 @@ import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
+import com.husarp.lockdown.engine.AppSpan
 import com.husarp.lockdown.engine.AppTime
 import com.husarp.lockdown.engine.IslandFront
 import com.husarp.lockdown.engine.IslandHourRow
+import com.husarp.lockdown.engine.IslandOpen
+import com.husarp.lockdown.engine.IslandOpens
 import com.husarp.lockdown.engine.IslandSight
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
@@ -368,6 +372,7 @@ object IslandLink {
         body.apps?.let { saveIslandApps(it) }
         body.use?.let { saveIslandUse(it) }
         body.useHours?.let { saveIslandHours(it) }
+        body.opens?.let { saveIslandOpens(it) }
         // "Resume now" in Island: ends only the pause it names (a tightening, no challenge); never starts or lengthens one.
         body.endPause?.let { asked ->
             val before = Store.config.pause
@@ -386,7 +391,7 @@ object IslandLink {
             ack = lastSeq, usage = usage,
             cfg = cfgJson.takeIf { body.cfg != cfgHash }, cfgHash = cfgHash,
             modes = modesJson.takeIf { body.modes != modesHash }, modesHash = modesHash,
-            unlink = unlinking, app = versionCode(app), covers = covers,
+            unlink = unlinking, app = versionCode(app), covers = covers, opensMark = islandOpensMark(),
         )
         LinkProtocol.write(out, LinkProtocol.signed("state", secret, LinkProtocol.M2H, nM, nH, json.encodeToString(state)))
 
@@ -469,6 +474,30 @@ object IslandLink {
     /** Main: all of Island's per-day, per-app rows that came over the link (empty when not linked). */
     fun islandRows(ctx: Context): List<IslandUseRow> = if (!isMain) emptyList() else readIslandUse(ctx)
 
+    // ---------- Island apps opened, for the Activity log ----------
+
+    private fun islandOpensFile(ctx: Context) = File(ctx.filesDir, "island_opens.json")
+
+    private fun readIslandOpens(ctx: Context): List<IslandOpen> = islandOpensFile(ctx).takeIf { it.exists() }?.let { f ->
+        runCatching { json.decodeFromString<List<IslandOpen>>(f.readText()) }.getOrNull()
+    } ?: emptyList()
+
+    @Volatile private var opensMark: Long? = null          // IslandOpens.mark of the file, once read (it is read at every check-in)
+
+    @Synchronized private fun saveIslandOpens(rows: List<IslandOpen>) = runCatching {
+        val now = System.currentTimeMillis()
+        val merged = IslandOpens.merge(readIslandOpens(app), IslandOpens.clean(rows, now), now)
+        islandOpensFile(app).writeText(json.encodeToString(merged))
+        opensMark = IslandOpens.mark(merged, now)
+    }
+
+    /** Main: the latest end of an Island app visit it has; the helper sends only visits that ended after it. */
+    @Synchronized private fun islandOpensMark(): Long =
+        opensMark ?: IslandOpens.mark(readIslandOpens(app), System.currentTimeMillis()).also { opensMark = it }
+
+    /** Main: Island apps opened that came over the link (empty in the Island copy, or when nothing came yet). */
+    fun islandOpens(ctx: Context): List<IslandOpen> = if (!isMain) emptyList() else readIslandOpens(ctx)
+
     /** Main: apps installed only in Island, named "Label (Island)", for the app pickers. */
     fun islandOnly(ctx: Context, mine: Set<String>): List<InstalledApp> {
         if (!isMain) return emptyList()
@@ -496,6 +525,7 @@ object IslandLink {
         val mainApp: Long = 0,
         val linkedAt: Long = 0,               // wall ms this copy was linked (0: by an older version)
         val covered: Boolean = false,         // main said at the last check-in that it covers Island itself
+        val opensMark: Long? = null,          // main's latest Island visit end at the last check-in (IslandOpens); null: not known yet, or an older main
     )
 
     /** When the link was made (wall ms), on either side; 0 if not linked or linked before this was kept. */
@@ -517,7 +547,7 @@ object IslandLink {
     @Volatile private var cfgHash = ""
     @Volatile private var modesHash = ""
     @Volatile private var cfgFailed: String? = null
-    @Volatile private var useCache: Pair<Long, Pair<List<IslandUseRow>, List<IslandHourRow>>>? = null
+    @Volatile private var useCache: Pair<Long, IslandRead>? = null
     @Volatile private var appsCache: Pair<Long, List<IslandApp>>? = null
     /** "Resume now" tapped here: the pause to end, sent to main until it answers. */
     @Volatile private var endPauseAsked: com.husarp.lockdown.engine.BlockPause? = null
@@ -703,7 +733,8 @@ object IslandLink {
         var asked: com.husarp.lockdown.engine.BlockPause? = null
         val apps = islandApps(ctx)
         val appsHash = LinkCrypto.sha256(apps.joinToString("\n") { it.pkg + "\t" + it.label })
-        val (use, hours) = islandUseRows(ctx)
+        val (use, hours, opensAll) = islandUseRows(ctx)
+        val opens = IslandOpens.toSend(opensAll, st.opensMark)
         val hoursHash = LinkCrypto.sha256(hours.joinToString("\n") { "${it.day}\t${it.hour}\t${it.sec}" })
         val useHash = LinkCrypto.sha256(use.joinToString("\n") { "${it.day}\t${it.pkg}\t${it.sec}" })
         val body = json.encodeToString(SyncBody(
@@ -714,6 +745,7 @@ object IslandLink {
             useHours = hours.takeIf { it.isNotEmpty() && hoursHash != st.hoursHash },
             endPause = endPauseAsked.also { asked = it },
             fronts = recentFronts(ctx, st.lastOk).takeIf { it.isNotEmpty() },
+            opens = opens.takeIf { it.isNotEmpty() },
         ))
         val (reply, problem) = exchange(st.port,
             { nM, nH -> LinkProtocol.signed("sync", secret, LinkProtocol.H2M, nM, nH, body) },
@@ -747,7 +779,7 @@ object IslandLink {
             UsageStore.inflight = LinkUsage.acked(UsageStore.inflight, sb.ack)
             UsageStore.base = sb.usage          // already holds every acked batch: nothing counts twice
             val cur = helperState ?: return@onMain
-            helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash, hoursHash = hoursHash, covered = sb.covers)
+            helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash, hoursHash = hoursHash, covered = sb.covers, opensMark = sb.opensMark)
             saveHelper()
         }
         coveredNow = sb.covers
@@ -776,14 +808,35 @@ object IslandLink {
     private fun canBlock(ctx: Context): Boolean = BlockService.connected ||
         (Usage.hasAccess(ctx) && android.provider.Settings.canDrawOverlays(ctx))
 
-    /** The helper's per-day app time, read at most every 5 minutes (needs usage access; none without it). */
-    private fun islandUseRows(ctx: Context): Pair<List<IslandUseRow>, List<IslandHourRow>> {
+    private data class IslandRead(val use: List<IslandUseRow> = emptyList(), val hours: List<IslandHourRow> = emptyList(), val opens: List<IslandOpen> = emptyList())
+
+    /** The helper's per-day app time and its app visits that are over (for main's Activity log), read at most every
+     *  5 minutes (needs usage access; none without it). */
+    private fun islandUseRows(ctx: Context): IslandRead {
         val c = useCache
         if (c != null && SystemClock.elapsedRealtime() - c.first < 5 * 60_000L) return c.second
-        val list = runCatching { if (com.husarp.lockdown.usage.Usage.hasAccess(ctx)) com.husarp.lockdown.usage.Usage.islandRows(ctx) else emptyList<IslandUseRow>() to emptyList<IslandHourRow>() }
-            .getOrDefault(emptyList<IslandUseRow>() to emptyList<IslandHourRow>())
-        useCache = SystemClock.elapsedRealtime() to list
-        return list
+        val read = runCatching {
+            if (!Usage.hasAccess(ctx)) return@runCatching IslandRead()
+            val spans = ArrayList<AppSpan>()
+            val (use, hours) = Usage.islandRows(ctx, spans)
+            IslandRead(use, hours, runCatching { islandOpensFrom(ctx, spans) }.getOrDefault(emptyList()))
+        }.getOrDefault(IslandRead())
+        useCache = SystemClock.elapsedRealtime() to read
+        return read
+    }
+
+    /** The visits in [spans] that are over, named here (main may not have the app); Lockdown itself, the system bar
+     *  and the home screen left out, as in main's log. */
+    private fun islandOpensFrom(ctx: Context, spans: List<AppSpan>): List<IslandOpen> {
+        val pm = ctx.packageManager
+        val home = runCatching {
+            pm.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
+        }.getOrNull()
+        val leave = setOfNotNull(ctx.packageName, "com.android.systemui", home)
+        val labels = HashMap<String, String>()
+        return IslandOpens.finished(spans, System.currentTimeMillis(), { pkg ->
+            labels.getOrPut(pkg) { runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg) }
+        }) { it in leave }
     }
 
     /** The helper's launchable apps, read at most every 30 minutes. */

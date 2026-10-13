@@ -37,6 +37,7 @@ import com.husarp.lockdown.engine.LogItem
 import com.husarp.lockdown.engine.LogKind
 import com.husarp.lockdown.engine.LogRow
 import com.husarp.lockdown.guard.TrustedTime
+import com.husarp.lockdown.link.IslandLink
 import com.husarp.lockdown.ui.AppIcon
 import com.husarp.lockdown.ui.Chip
 import com.husarp.lockdown.ui.IconTile
@@ -73,6 +74,8 @@ private fun load(ctx: Context, cfg: Config): LogData {
         Usage.spans(ctx, from.atStartOfDay(zone).toInstant().toEpochMilli(), System.currentTimeMillis())
     }.getOrDefault(emptyList())
     val apps = ActivityLog.appRows(spans, zone, ::label) { it in leave }
+    // Island apps opened: Lockdown in Island sends them over the link (this phone's usage data only has this profile's)
+    val island = ActivityLog.islandRows(runCatching { IslandLink.islandOpens(ctx) }.getOrDefault(emptyList()), zone)
     val detail = runCatching { History.detail(from, today) }.getOrDefault(emptyMap())
     val sites = ActivityLog.siteRows(detail.values.flatMap { it.switches }, now, ::label)
     val byId = cfg.items.associateBy { it.id }
@@ -84,7 +87,7 @@ private fun load(ctx: Context, cfg: Config): LogData {
     }, ::label)
     val uses = ActivityLog.emergencyRows(cfg.allUses(), from)
     val bypasses = ActivityLog.bypassRows(BypassLog.read(ctx), from)
-    return LogData(ActivityLog.merge(today, apps, sites, blocks, uses, bypasses), today, usageOk)
+    return LogData(ActivityLog.merge(today, apps, island, sites, blocks, uses, bypasses), today, usageOk)
 }
 
 /** "Activity log": what was used in the last 7 days, newest first, grouped by day. Beyond what Lockdown already
@@ -126,7 +129,7 @@ fun ActivityLogScreen() {
                 }
                 item {
                     Text(
-                        "Apps come from Android's usage data. Sites are seen from the browser's address bar, so other apps' " +
+                        "Apps come from Android's usage data (Island's from Lockdown in Island, while linked). Sites are seen from the browser's address bar, so other apps' " +
                             "connections aren't listed, and private or incognito tabs are left out where the browser says so.",
                         Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                     )

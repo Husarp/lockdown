@@ -10,6 +10,9 @@ import java.util.Locale
 /** A stretch of one app in the foreground, from Android's usage events (epoch ms). */
 data class AppSpan(val pkg: String, val fromMs: Long, val toMs: Long)
 
+/** One visit to an app: its spans from [fromMs] to [toMs] (epoch ms), [ms] of them in the foreground. */
+data class AppVisit(val pkg: String, val fromMs: Long, val toMs: Long, val ms: Long)
+
 enum class LogKind { APP, SITE, BLOCK, EMERGENCY, BYPASS }
 
 /** A way round the blocks that Lockdown records for the log itself (data/BypassLog.kt); [label] names the row. */
@@ -74,14 +77,14 @@ object ActivityLog {
 
     private fun local(ms: Long, zone: ZoneId) = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), zone)
 
-    /** Apps opened: [spans] of one app that follow each other closer than [APP_GAP_SEC] are one visit, its time the
+    /** Visits: [spans] of one app that follow each other closer than [APP_GAP_SEC] are one visit, its time the
      *  foreground time added up. [skip] leaves out Lockdown itself, the system bar and the home screen. */
-    fun appRows(spans: List<AppSpan>, zone: ZoneId, label: (String) -> String, skip: (String) -> Boolean = { false }): List<LogRow> {
-        val out = ArrayList<LogRow>()
+    fun visits(spans: List<AppSpan>, skip: (String) -> Boolean = { false }): List<AppVisit> {
+        val out = ArrayList<AppVisit>()
         for ((pkg, mine) in spans.filter { it.toMs > it.fromMs && !skip(it.pkg) }.groupBy { it.pkg }) {
             var start = 0L; var end = 0L; var ms = 0L; var open = false
             fun close() {
-                if (open && ms / 1000 >= MIN_VISIT_SEC) out.add(LogRow(local(start, zone), LogKind.APP, label(pkg), pkg, seconds = (ms / 1000).toInt()))
+                if (open) out.add(AppVisit(pkg, start, end, ms))
                 open = false
             }
             for (s in mine.sortedBy { it.fromMs }) {
@@ -90,8 +93,17 @@ object ActivityLog {
             }
             close()
         }
-        return newest(out)
+        return out
     }
+
+    /** Apps opened: the [visits] of at least [MIN_VISIT_SEC]. */
+    fun appRows(spans: List<AppSpan>, zone: ZoneId, label: (String) -> String, skip: (String) -> Boolean = { false }): List<LogRow> =
+        newest(visits(spans, skip).filter { it.ms / 1000 >= MIN_VISIT_SEC }
+            .map { LogRow(local(it.fromMs, zone), LogKind.APP, label(it.pkg), it.pkg, seconds = (it.ms / 1000).toInt()) })
+
+    /** Island apps opened, as Lockdown in Island sent them over the link ([IslandOpens]), named "Label (Island)". */
+    fun islandRows(opens: List<IslandOpen>, zone: ZoneId): List<LogRow> =
+        newest(opens.map { LogRow(local(it.at, zone), LogKind.APP, "${it.label} (Island)", it.pkg, seconds = it.sec) })
 
     /** Sites visited: each switch event that has a site starts a visit, which lasts until the next event (another site
      *  or app, or the end of the visit: screen off, home, a block) - at most [MAX_VISIT_SEC], and not past [now].

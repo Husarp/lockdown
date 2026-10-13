@@ -145,12 +145,13 @@ object Usage {
     }
 
     /** Helper: this profile's foreground seconds per app and day over the last [IslandUse.DAYS] days, and per hour
-     *  for today and yesterday (one query). */
-    fun islandRows(ctx: Context): Pair<List<IslandUseRow>, List<IslandHourRow>> {
+     *  for today and yesterday (one query). The spans of the Activity log's days go into [spans] when given. */
+    fun islandRows(ctx: Context, spans: MutableList<AppSpan>? = null): Pair<List<IslandUseRow>, List<IslandHourRow>> {
         val zone = java.time.ZoneId.systemDefault()
         val today = java.time.LocalDate.now()
         val start = today.minusDays(IslandUse.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
         val hourFrom = today.minusDays(IslandUse.HOUR_DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
+        val spansFrom = today.minusDays(com.husarp.lockdown.engine.ActivityLog.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
         val end = System.currentTimeMillis()
         val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val events = usm.queryEvents(start, end)
@@ -160,6 +161,7 @@ object Usage {
         fun span(pkg: String, from: Long, to: Long) {
             IslandUse.addSpan(totals, pkg, from, to, zone)
             IslandUse.addHourSpan(hours, from, to, hourFrom, zone)
+            if (spans != null && from >= spansFrom && to > from) spans.add(AppSpan(pkg, from, to))
         }
         val e = UsageEvents.Event()
         while (events.hasNextEvent()) {

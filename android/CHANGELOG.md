@@ -1,5 +1,8 @@
 # Changelog — Lockdown Mobile
 
+## Unreleased
+- **Island apps in the Activity log.** Apps opened in Island now show in the main app's Activity log as "Name (Island)": the Island copy sends its finished visits (last 7 days, only what is new, at most 500 a check-in) and the main app keeps them once each (8 days, newest 1000). They start showing from the second check-in after linking. Island sites still show only while the main app covers Island (the Island copy reads no addresses). Older copies on either side simply send/get nothing. Tests: new `IslandOpensTest`.
+
 ## 0.5.19 - 2026-10-13 03:10
 - **Activity log: "Bypass used".** A new chip lists emergency unlocks, pauses ("Pause my blocks", with the length), passed challenges and Lockdown switched off - the last three are now recorded (newest 500). The chip row scrolls sideways on a narrow phone. Tests: `ActivityLogTest`.
 - **Bedtime screen looks like the PC's.** Centred, a round icon (moon / cup for a break / bell), the big clock (a break: its countdown), and full-width buttons in the PC's order: Dismiss with its wait, Disable alerts, then Emergency as a pink link. The strict-break screen matches. Look only.
