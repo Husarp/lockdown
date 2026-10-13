@@ -12,6 +12,12 @@ Rules kept here, never in the page:
 - The screen is taken down FIRST and only then does the engine hear the answer (as the corner window does), so a
   challenge or question that follows can never sit behind it.
 - Only the buttons the engine gave can be used; an answer works once (a second click finds the screen gone).
+- "Challenge before Dismiss" (reminders.sleep `challenge`): the list is fixed WHEN THE SCREEN COMES UP (`challenge_for`,
+  read next to the wait: the own list of the bedtime step active then, else the general one), so a screen that stays up
+  across the next step's time keeps asking its own. After the wait, Dismiss does not dismiss: `dismiss()` hands the list
+  to the Api, which puts it behind the guard's plain challenge, and only a PASSED challenge dismisses (`dismiss_passed`,
+  once). While the screen has a challenge, Cancel (backing out of Disable alerts' choice / the emergency list) is never
+  a Dismiss either - it goes back to the screen. Disable alerts stays the Anti-Bypass challenge; Emergency is free.
 
 The window is shown only once its page has said it is ready (`page_loaded`, from the page's `page_ready` call after it
 drew what is up): a cover shown before is a solid dark screen, always on top, Alt+F4 ignored - a black screen with no
@@ -33,6 +39,8 @@ import sys
 import threading
 import time
 from datetime import datetime
+
+import challenges
 
 # The page background (css --bg in tokens.css) per theme: the window and the covers on other monitors are painted with
 # it, so the cover matches the page exactly. js/theme.js resolves "system" the same way (prefers-color-scheme).
@@ -74,6 +82,17 @@ def clean_buttons(buttons) -> list[dict]:
     return [{"label": str(label), "action": str(action)} for label, action in list(buttons)[:MAX_BUTTONS]]
 
 
+def bedtime_challenge(sleep: dict, now: datetime) -> dict | None:
+    """The challenge Dismiss asks for a bedtime screen coming up at `now`: {steps, complex, grid} - the own list of the
+    "Comes back" step active then (reminders.active_step, the one that also sets the wait), else the general list - or
+    None while "Challenge before Dismiss" is off. The phrase extras are the bedtime ones (no own phrase)."""
+    import reminders
+    steps = reminders.challenge_steps_now(sleep, now)
+    if not steps:
+        return None
+    return {"steps": steps, "complex": bool(sleep.get("challenge_complex")), "grid": bool(sleep.get("challenge_grid"))}
+
+
 def plan_rects(found, fallback=DEFAULT_RECT):
     """(the rectangle of the monitor that gets the message, [rectangles of the others that get a plain cover]), in
     physical pixels (left, top, right, bottom) - gui/screens.plan decides which one is the main one."""
@@ -91,15 +110,17 @@ class Overlay:
     clock: a monotonic clock in seconds (tests drive it).
     page_ready: is the page known to work? The agent passes False: the window is then only shown after `page_loaded()`.
     fallback(kind, title, text): tells the owner another way when the page is not ready within `ready_wait` seconds.
-    block_for(key): does that screen block the clicks behind it ("Block clicks behind the bedtime screen")?"""
+    block_for(key): does that screen block the clicks behind it ("Block clicks behind the bedtime screen")?
+    challenge_for(key): the challenge Dismiss asks for that screen, {steps, complex, grid}, or None (no challenge)."""
 
     def __init__(self, publisher=None, host=None, answer=None, now=None, wait_for=None, clock=time.monotonic,
                  background=saved_background, log=None, page_ready=True, fallback=None, ready_wait=PAGE_READY_SEC,
-                 block_for=None):
+                 block_for=None, challenge_for=None):
         self.publisher, self.host, self._answer = publisher, host, answer
         self._now = now or datetime.now
         self._wait_for = wait_for or (lambda key: 0)
         self._block_for = block_for or (lambda key: False)
+        self._challenge_for = challenge_for or (lambda key: None)
         self._clock = clock
         self._background = background
         self.log = log or (lambda text: None)
@@ -163,6 +184,8 @@ class Overlay:
         if cur["kind"] == "sleep":
             now = self._trusted_now()
             out["clock_sec"] = now.hour * 3600 + now.minute * 60 + now.second
+        if cur.get("challenge"):
+            out["asks"] = challenges.steps_text(cur["challenge"]["steps"])      # ("After the wait, Dismiss asks: ...")
         return out
 
     def _trusted_now(self) -> datetime:
@@ -185,12 +208,18 @@ class Overlay:
             block = bool(self._block_for(key))
         except Exception:
             block = False
+        try:
+            challenge = self._challenge_for(key) if kind == "sleep" else None
+        except Exception:
+            challenge = None
+        if challenge is not None and not challenges.read_steps(challenge.get("steps")):
+            challenge = None
         ms = left_ms(until, self._trusted_now())
         mono = self._clock()
         with self._lock:
             self._token += 1
             screen = {"key": key, "kind": kind, "title": str(title), "text": str(text), "token": self._token,
-                      "buttons": clean_buttons(buttons), "wait_total": wait, "block": block,
+                      "buttons": clean_buttons(buttons), "wait_total": wait, "block": block, "challenge": challenge,
                       "wait_end": mono + wait if wait > 0 else None,
                       "until_end": mono + ms / 1000 if ms is not None else None}
             cur = self._cur
@@ -218,18 +247,35 @@ class Overlay:
     # ------------------------------------------------------------------ answers from the page
     def dismiss(self) -> dict:
         """The Dismiss button. Refused (nothing changes) while its wait runs. Raises ValueError when the screen has no
-        Dismiss or is gone."""
+        Dismiss or is gone. A screen with a bedtime challenge is NOT dismissed here: after the wait it answers
+        {challenge: {token, steps, complex, grid}} - the Api asks the guard for exactly that challenge, and only
+        `dismiss_passed(token)` (once it is passed) takes the screen down."""
         with self._lock:
             cur = self._screen("dismiss")
             if self._waiting():
                 return {"early": True, "wait_ms": self._wait_left_ms()}
-            token, key = cur["token"], cur["key"]
+            token, key, challenge = cur["token"], cur["key"], cur.get("challenge")
+        if challenge:
+            return {"challenge": {"token": token, "steps": [dict(s) for s in challenge["steps"]],
+                                  "complex": bool(challenge.get("complex")), "grid": bool(challenge.get("grid"))}}
+        self.accept("dismiss", token)
+        return {"done": True, "key": key}
+
+    def dismiss_passed(self, token: int) -> dict:
+        """The bedtime challenge was passed: the same as Dismiss, once. Raises ValueError when the screen it was for has
+        gone (or been replaced by a newer one): nothing is dismissed."""
+        with self._lock:
+            cur = self._cur
+            if cur is None or cur["token"] != token or not cur.get("challenge"):
+                raise ValueError("That is not on screen any more.")
+            key = cur["key"]
         self.accept("dismiss", token)
         return {"done": True, "key": key}
 
     def cancel(self) -> dict:
         """Cancel in Disable alerts' choice or the emergency list. While the Dismiss wait runs it is no way round it: the
-        screen stays and the wait starts over. After the wait it is the same as Dismiss."""
+        screen stays and the wait starts over. After the wait it is the same as Dismiss - unless the screen has a bedtime
+        challenge: then it is only a way back to the screen (Dismiss still asks its challenge)."""
         with self._lock:
             if self._cur is None:
                 raise ValueError("That is not on screen any more.")
@@ -239,6 +285,8 @@ class Overlay:
             if self._waiting():
                 self._restart_wait()
                 result = {"back": True}
+            elif cur.get("challenge"):
+                return {"back": True}           # (the challenge stands between you and Dismiss: no shortcut through here)
             else:
                 token = cur["token"]
                 result = None
@@ -671,9 +719,14 @@ def attach(win, hub, ctx, ui, log=None):
             return False
         return bool(reminders.load(ui.worker.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP).get("block_behind"))
 
+    def challenge_for(key):     # (the reminder worker's thread, as wait_for: the list of the bedtime step active NOW)
+        if key != "sleep" or ui.worker is None:
+            return None
+        return bedtime_challenge(reminders.load(ui.worker.db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP), now())
+
     host = OverlayHost(win.overlay, log=log, blocking=lambda: overlay.blocking)
     overlay = Overlay(publisher, host, answer, now, wait_for, log=log, page_ready=False, fallback=fallback,
-                      block_for=block_for)
+                      block_for=block_for, challenge_for=challenge_for)
     ctx.overlay = overlay
     ui.overlay_handler = overlay
     win.overlay_ctl, win.overlay_publisher = overlay, publisher

@@ -13,6 +13,7 @@ ticket; otherwise it is saved at once. The page never says "confirmed". Deleting
 import uuid
 from datetime import datetime, timedelta
 
+import challenges
 import modes
 import reminders
 from rules import TIME_FMT, parse_hhmm
@@ -204,10 +205,12 @@ def _loosens(old: dict, new: dict, kind: str) -> bool:
 
 def _changes_text(name, old, new, kind) -> list:
     out = []
-    if reminders.loosens_reminder({**old, "dismiss_wait": 0}, new):     # (no old wait: only the guard is asked about)
+    if reminders.loosens_reminder({**old, "dismiss_wait": 0, "challenge": False}, new):   # (no old wait / challenge)
         out.append(f"Turn off / un-flag the important {name}")
     if reminders.dismiss_waits_shorter(old, new):
         out.append("Shorten the wait before Dismiss on the bedtime screen")
+    if kind == "sleep" and old.get("guarded") and reminders.challenge_looser(old, new):
+        out.append("Make the challenge before Dismiss on the bedtime screen easier")
     if kind == "sleep" and old.get("guarded") and old.get("grey") and not new.get("grey"):
         out.append("Turn off the grey screen at bedtime")
     if kind == "sleep" and old.get("guarded") and old.get("block_behind") and not new.get("block_behind"):
@@ -236,11 +239,14 @@ def _sleep_view(s: dict) -> dict:
     return {"on": bool(s["on"]), "guarded": bool(s.get("guarded")), "bedtime": s["bedtime"], "wake": s["wake"],
             "before": reminders.minutes_text(s["before"]),
             "tiers": [{"every": reminders.seconds_text(t.get("every_sec", 300)), "after": t.get("from", "21:00"),
-                       "wait": "" if reminders.step_wait(t) is None else reminders.seconds_text(reminders.step_wait(t))}
+                       "wait": "" if reminders.step_wait(t) is None else reminders.seconds_text(reminders.step_wait(t)),
+                       "challenge_steps": reminders.tier_steps(t)}      # (its own list; [] = uses the general one)
                       for t in reminders.tiers_of(s)],
             "dismiss_wait": reminders.dismiss_wait(s), "warn_text": s.get("warn_text") or "",
             "text": s.get("text") or "", "mode": s.get("mode") or "", "grey": bool(s.get("grey")),
-            "block_behind": bool(s.get("block_behind"))}
+            "block_behind": bool(s.get("block_behind")),
+            "challenge": bool(s.get("challenge")), "challenge_steps": reminders.general_steps(s),
+            "challenge_complex": bool(s.get("challenge_complex")), "challenge_grid": bool(s.get("challenge_grid"))}
 
 
 def _break_view(b: dict, today_count: int) -> dict:
@@ -278,7 +284,8 @@ def reminders_get(ctx):
             "custom": [_custom_view(r, counts) for r in items], "modes": modes_brief(ctx),
             "defaults": {"sleep_warn_text": reminders.SLEEP_WARN_TEXT, "sleep_text": reminders.SLEEP_TEXT,
                          "break_text": reminders.BREAK_TEXT, "twenty_text": reminders.TWENTY_TEXT},
-            "packs": list(reminders.PACKS), "max_dismiss_wait": reminders.MAX_DISMISS_WAIT}
+            "packs": list(reminders.PACKS), "max_dismiss_wait": reminders.MAX_DISMISS_WAIT,
+            "challenge_options": challenges.options()}
 
 
 @core.read
@@ -296,6 +303,35 @@ def _save_or_ask(ctx, old, new, kind, name, apply):
     return ctx.guard.request(_changes_text(name, old, new, kind), apply)
 
 
+def _steps(value, label) -> list:
+    try:
+        return challenges.validate_steps(value)
+    except ValueError as e:
+        raise ApiError(f"{label}: {e}") from None
+
+
+def _own_steps(t: dict, old: dict, after: str) -> list:
+    """A "Comes back" step's own challenge list as the page sent it ([] / null = it uses the general list). A step the
+    page sent without the key at all keeps the list the stored step at that time had."""
+    if "challenge_steps" not in t:
+        return next((reminders.tier_steps(o) for o in reminders.tiers_of(old) if o.get("from") == after), [])
+    return _steps(t["challenge_steps"], "A step's challenge") if t["challenge_steps"] else []
+
+
+def _challenge_fields(cfg: dict, old: dict) -> dict:
+    """"Challenge before Dismiss": the switch, the general list and the phrase extras, each kept as stored when the
+    page doesn't send it."""
+    out = {}
+    if "challenge" in cfg:
+        out["challenge"] = _flag(cfg["challenge"], "Challenge before Dismiss")
+    if "challenge_steps" in cfg:
+        out["challenge_steps"] = _steps(cfg["challenge_steps"], "Challenge before Dismiss")
+    for key, label in (("challenge_complex", "Numbers & CAPITALS"), ("challenge_grid", "3×3 grid")):
+        if key in cfg:
+            out[key] = _flag(cfg[key], label)
+    return out
+
+
 @core.loosen
 def reminder_save_sleep(ctx, cfg):
     """Save the Sleep card (cfg = what is in its boxes, as text). Weakening an important one needs the challenge."""
@@ -307,6 +343,7 @@ def reminder_save_sleep(ctx, cfg):
         before = reminders.parse_minutes(str(cfg.get("before") or "off"), most=MAX_HEADS_UP_MIN)
     except ValueError as e:
         raise ApiError(f"Heads-up: {e}") from None
+    old = _stored(db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
     tiers_in = cfg.get("tiers") or []
     if not isinstance(tiers_in, list) or len(tiers_in) > MAX_TIERS or not all(isinstance(t, dict) for t in tiers_in):
         raise ApiError("Steps need how often (5 min, 30s - at least 5s) and a time like 21:00.")
@@ -323,6 +360,9 @@ def reminder_save_sleep(ctx, cfg):
                 step["wait_sec"] = reminders.parse_seconds(str(t["wait"]))
             except ValueError as e:
                 raise ApiError(f"A step's wait before Dismiss: {e}") from None
+        own = _own_steps(t, old, after)
+        if own:
+            step["challenge_steps"] = own
         tiers.append(step)
     tiers = reminders.sort_tiers(tiers, bedtime)
     try:
@@ -332,14 +372,14 @@ def reminder_save_sleep(ctx, cfg):
     mode = cfg.get("mode") or ""
     if not isinstance(mode, str) or (mode and mode not in _mode_ids(db)):
         raise ApiError("That mode doesn't exist any more.")
-    old = _stored(db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
     new = {**old, "on": _flag(cfg.get("on"), "Remind me to go to bed"), "bedtime": bedtime, "wake": wake,
            "before": before, "tiers": tiers, "warn_text": _text(cfg.get("warn_text"), "Heads-up says"),
            "text": _text(cfg.get("text"), "Bedtime says"), "guarded": _flag(cfg.get("guarded"), "Important"),
            "dismiss_wait": wait, "mode": mode,
            "grey": _flag(cfg["grey"], "Grey screen during bedtime") if "grey" in cfg else bool(old.get("grey")),
            "block_behind": _flag(cfg["block_behind"], "Block clicks behind the bedtime screen") if "block_behind" in cfg
-           else bool(old.get("block_behind"))}
+           else bool(old.get("block_behind")),
+           **_challenge_fields(cfg, old)}
     new.setdefault("repeat_sec", 300)
 
     def apply():

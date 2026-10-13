@@ -36,6 +36,7 @@ import com.husarp.lockdown.engine.BlockWatcher
 import com.husarp.lockdown.engine.BreakAllow
 import com.husarp.lockdown.engine.Browsers
 import com.husarp.lockdown.engine.Cadence
+import com.husarp.lockdown.engine.ChallengeRun
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
@@ -78,6 +79,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private var breakDismissed = false                // the strict break's cover was dismissed: it comes back for a not-allowed app only
     private var breakCovered = false                  // the strict break's cover is wanted on screen now (call / lock screen aside)
     private var breakFront = ""                       // what is in front since the dismiss ("" = not known yet: counts as allowed)
+    private var challenge: CoverChallenge? = null     // the bedtime screen is asking its challenge before Dismiss (inside the cover)
     private var dialing = false                       // "Phone" was tapped on a strict break
     private var dialUntil = 0L                        // ... and the dialer has until then to come up
     private var lastInUse = 0L                        // the screen was last on and unlocked (elapsed ms)
@@ -195,9 +197,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if ((IslandLink.islandInFront() && !onScreen(pkg)) ||
             (IslandLink.isHelper && pkg != IslandLink.localFront && com.husarp.lockdown.usage.Usage.hasAccess(this))) {
             UsageStore.record(emptyList(), now); watchPip(cfg, now, mode)
-            // main keeps the history for both profiles, and warns about the Island app in front
+            // main keeps the history for both profiles (an Island browser's site too, when main can read its bar),
+            // and warns about the Island app in front
             val island = IslandLink.islandFront?.takeIf { !IslandLink.isHelper && IslandLink.islandInFront() }
-            if (island != null) History.record(now, island, "", dt)
+            if (island != null) History.record(now, island, islandSite(island), dt)
             inUseIds = setOfNotNull(island?.let { p -> cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(p, true) }?.id })
             // the helper can't grey the screen: main greys it while an Island app that greys is in front (not
             // Lockdown itself over it), or while one of main's that greys is still on screen (picture-in-picture)
@@ -350,6 +353,16 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         val text = browserBarText(pkg, root) ?: return
         if (fresh || text != lastUrl[pkg]) markPrivate(pkg, root)
         lastUrl[pkg] = text
+    }
+
+    /** The site in Island browser [pkg]'s address bar, read now from the window in front ("" when this service can't
+     *  read it, or [pkg] isn't a browser): [com.husarp.lockdown.engine.IslandSight.islandSite]. */
+    private fun islandSite(pkg: String): String {
+        if (!isBrowser(pkg)) return ""
+        val root = rootInActiveWindow
+        val live = browserBarText(pkg, root)
+        if (live != null) { if (live != lastUrl[pkg]) markPrivate(pkg, root); lastUrl[pkg] = live }
+        return com.husarp.lockdown.engine.IslandSight.islandSite(pkg, live, pkg in privateTabs)
     }
 
     /** Does [pkg]'s toolbar say the tab in front is private (incognito, InPrivate)? Best effort: a browser that says
@@ -609,6 +622,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                             ReminderRunner.spendEmergency(this, tier)
                         }
                         "dismiss" -> if (RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime()) == 0) {
+                            // "Challenge before Dismiss": after the wait, the list is solved inside this screen first
+                            if (p.challenge.isNotEmpty()) { startChallenge(p); return@remindButton }
                             closeRemind(p.key); ReminderRunner.answer(this, p.key, b.action)
                         }
                         else -> { closeRemind(p.key); ReminderRunner.answer(this, p.key, b.action) }
@@ -643,6 +658,47 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 CoverLook.Role.PLAIN, enabled = u.left > 0) { onPause(t.id) })
         }
         buttons.addView(remindButton("Cancel", CoverLook.Role.GHOST) { back() })
+    }
+
+    /** Dismiss with "Challenge before Dismiss" on, after the wait: the list ([RPrompt.challenge]) runs inside the bedtime
+     *  screen, which is the window's own content swapped for it (nothing else can cover it). Passing = the usual dismiss,
+     *  once. Cancel drops the run: the bedtime screen is back and the next Dismiss starts the list again from step 1.
+     *  The window takes the keyboard while it is up ([remindParams]) and gives that back after. If the challenge can't be
+     *  shown, Dismiss stays shut (a bug must not be a way round it); Emergency and Disable alerts still work. */
+    private fun startChallenge(p: RPrompt) {
+        endChallenge()
+        val root = remindViews[p.key] as? FrameLayout
+        val bedtime = root?.getChildAt(0)
+        if (root == null || bedtime == null) return
+        val c = runCatching {
+            val run = ChallengeRun(p.challenge, p.challengePhrase, kotlin.random.Random.Default, SystemClock.elapsedRealtime())
+            // (posted: the panel is still in the middle of its own click when it calls these)
+            CoverChallenge(this, p.key, run, "Solve this to dismiss",
+                onPassed = { handler.post { if (challenge?.key == p.key) { closeRemind(p.key); ReminderRunner.answer(this, p.key, "dismiss") } } },
+                onCancel = { handler.post { if (challenge?.key == p.key) endChallenge() } })
+        }.getOrNull()
+        // the window takes the keyboard first, so the first field to ask for it finds a window that can have it
+        val block = Store.config.sleep.blockBehind
+        val onScreen = p.key in onScreenKeys
+        if (onScreen) runCatching { wm?.updateViewLayout(root, remindParams(block, typing = true)) }
+        val shown = c != null && runCatching { c.show(root, bedtime) }.isSuccess
+        if (!shown) {
+            runCatching { c?.close() }
+            if (onScreen) runCatching { wm?.updateViewLayout(root, remindParams(block)) }
+            Toast.makeText(this, "Couldn't open the challenge.", Toast.LENGTH_LONG).show()
+            return
+        }
+        challenge = c
+    }
+
+    /** The bedtime challenge is over or dropped (cancelled, passed, the screen hidden or closed): the bedtime screen is
+     *  shown again and, when the window is still up and [restore]d, gets its usual flags back. */
+    private fun endChallenge(restore: Boolean = true) {
+        val c = challenge ?: return
+        challenge = null
+        runCatching { c.close() }
+        val root = remindViews[c.key]
+        if (restore && root != null && c.key in onScreenKeys) runCatching { wm?.updateViewLayout(root, remindParams(Store.config.sleep.blockBehind)) }
     }
 
     override fun close(key: String) = closeRemind(key)
@@ -734,7 +790,11 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         for ((key, v) in remindViews.entries.toList()) {
             val want = !remindHidden && (key != STRICT_BREAK || breakCovered)
             if (want && key !in onScreenKeys) { if (runCatching { wm?.addView(v, remindParams(Store.config.sleep.blockBehind)) }.isSuccess) onScreenKeys.add(key) }
-            else if (!want && onScreenKeys.remove(key)) runCatching { wm?.removeView(v) }
+            else if (!want && onScreenKeys.remove(key)) {
+                // out of the way (a call, the lock screen): a bedtime challenge in progress is dropped, as the wait starts again
+                if (challenge?.key == key) endChallenge(restore = false)
+                runCatching { wm?.removeView(v) }
+            }
         }
     }
 
@@ -768,14 +828,17 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
      *  navigation (and a display cutout) is left to the app under it, taps included. [block] ("Block taps behind the
      *  bedtime screen"): focusable, so Back and keys stop here, and over everything but what can be tapped of the
      *  system bars (the status bar, 3-button navigation) - those still get their taps (not touch-modal), and the
-     *  swipes of gesture navigation are the system's own, never this window's. */
-    private fun remindParams(block: Boolean) = WindowManager.LayoutParams(
+     *  swipes of gesture navigation are the system's own, never this window's. [typing]: the bedtime challenge is up and
+     *  needs the keyboard, so the window is focusable (whatever [block] says) and shrinks to leave the keyboard free. */
+    private fun remindParams(block: Boolean, typing: Boolean = false) = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         if (block) WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        else if (typing) 0
         else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
         PixelFormat.OPAQUE,
     ).apply {
+        if (typing) softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         if (!block) return@apply
         if (Build.VERSION.SDK_INT >= 30) {
             fitInsetsTypes = WindowInsets.Type.tappableElement()
@@ -784,6 +847,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     }
 
     private fun closeRemind(key: String) {
+        if (challenge?.key == key) endChallenge(restore = false)   // (the window goes: nothing to give back)
         onScreenKeys.remove(key)
         remindViews.remove(key)?.let { runCatching { wm?.removeView(it) } }   // (not on screen while hidden: fails, harmlessly)
         if (key == STRICT_BREAK) { breakDismissed = false; breakCovered = false; breakFront = "" }

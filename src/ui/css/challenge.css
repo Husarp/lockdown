@@ -35,6 +35,48 @@
 }
 html[data-hidden] .ch-box.lit { animation-play-state: paused; }
 
+/* progress line + step strip (a list of steps, or one step done several times) */
+.ch-prog { font-size: var(--fs-body); color: var(--text-2); }
+.ch-prog b { color: var(--text); font-weight: var(--fw-semibold); }
+.ch-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2) calc(6px * var(--s)); }
+.ch-stp { display: inline-flex; align-items: center; gap: calc(6px * var(--s)); padding: calc(3px * var(--s)) var(--sp-3); border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-sm); }
+.ch-stp small { font-size: var(--fs-cap); opacity: .85; }
+.ch-stp.done { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.ch-stp.cur { background: var(--brand-soft); border-color: var(--brand); color: var(--on-brand-soft); font-weight: var(--fw-semibold); }
+
+/* math: the sum is a picture */
+.ch-sum { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-4);
+  border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); }
+.ch-pic { color: var(--text); font-family: var(--font-display); max-width: 100%; user-select: none; -webkit-user-select: none; border-radius: var(--r-sm); }
+.ch-eq { font: var(--fw-semibold) var(--fs-num) var(--font-display); color: var(--text); user-select: none; }
+.ch-ans { width: calc(130px * var(--s)); height: calc(40px * var(--s)); text-align: center; font: var(--fw-semibold) var(--fs-title) var(--font-display);
+  font-variant-numeric: tabular-nums; }
+
+/* memory grid */
+.ch-mem { display: grid; gap: calc(6px * var(--s)); margin: 0 auto; width: min(calc(280px * var(--s)), 100%); }
+.ch-mem.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ch-mem.g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ch-cell { aspect-ratio: 1; padding: 0; border-radius: var(--r-md); background: var(--surface-2); border: 2px solid var(--line); cursor: pointer;
+  display: grid; place-items: center; font: var(--fw-semibold) var(--fs-body) var(--font-display); color: var(--on-k); user-select: none; }
+.ch-cell:hover:not(:disabled) { border-color: var(--text-3); }
+.ch-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.ch-cell.lit { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.ch-cell.pick { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.ch-cell.miss { border-color: var(--k-block); background: var(--k-block-soft); }
+.ch-cell:disabled { cursor: default; }
+
+/* sorting */
+.ch-sorta { display: flex; flex-wrap: wrap; gap: calc(6px * var(--s)); min-height: calc(42px * var(--s)); padding: var(--sp-2); border-radius: var(--r-md);
+  border: 1px dashed var(--line-strong); background: var(--surface-2); }
+.ch-pool { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: center; }
+.ch-tile { min-width: calc(56px * var(--s)); height: calc(40px * var(--s)); padding: 0 var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--line-strong);
+  background: var(--surface-3); color: var(--text); font: var(--fw-semibold) calc(17px * var(--s)) var(--font-display); font-variant-numeric: tabular-nums; cursor: pointer; user-select: none; }
+.ch-tile:hover:not(:disabled) { border-color: var(--brand); }
+.ch-tile:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.ch-tile.in { background: var(--ok-soft); border-color: transparent; color: var(--ok); height: calc(32px * var(--s)); min-width: calc(44px * var(--s));
+  font-size: var(--fs-body); cursor: default; opacity: 1; }
+
 /* the standalone window (uninstaller): nothing behind the dialog */
 html[data-standalone], html[data-standalone] body { background: var(--bg); }
 html[data-standalone] .dialog { box-shadow: none; }

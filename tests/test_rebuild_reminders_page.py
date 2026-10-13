@@ -115,7 +115,8 @@ def test_sleep_boxes_round_trip(api, ctx):
     assert [(t["from"], t["every_sec"]) for t in s["tiers"]] == [("00:00", 30), ("21:00", 900)]
     got = data(api.reminders_get())["sleep"]
     assert got["before"] == "45s" and got["dismiss_wait"] == 90
-    assert got["tiers"] == [{"every": "30s", "after": "00:00", "wait": ""}, {"every": "15 min", "after": "21:00", "wait": ""}]
+    assert got["tiers"] == [{"every": "30s", "after": "00:00", "wait": "", "challenge_steps": []},
+                            {"every": "15 min", "after": "21:00", "wait": "", "challenge_steps": []}]
 
 
 def test_heads_up_goes_up_to_12_hours_and_dismiss_wait_to_600(api):
@@ -417,7 +418,7 @@ def test_a_stale_ticket_cannot_be_used_twice_and_the_page_has_no_confirmed_flag(
 def test_reminders_get_shape_and_texts(api, ctx):
     a = add(api, text="Stretch", kind="times", times=["09:00", "21:00"], days=[0, 1, 2])
     got = data(api.reminders_get())
-    assert set(got) == {"sleep", "break", "custom", "modes", "defaults", "packs", "max_dismiss_wait"}
+    assert set(got) == {"sleep", "break", "custom", "modes", "defaults", "packs", "max_dismiss_wait", "challenge_options"}
     row = got["custom"][0]
     assert row["id"] == a and row["schedule"].endswith("at 09:00, 21:00")
     assert row["stats"] == "done 0x in 7 days"

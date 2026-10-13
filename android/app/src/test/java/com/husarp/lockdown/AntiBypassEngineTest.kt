@@ -2,6 +2,7 @@ package com.husarp.lockdown
 
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
+import com.husarp.lockdown.engine.ChallengeStep
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.EmergencyTier
 import com.husarp.lockdown.engine.EmergencyUse
@@ -90,6 +91,23 @@ class AntiBypassEngineTest {
         assertTrue(json.decodeFromString(AntiBypassCfg.serializer(), """{"phrase":true,"customPhrase":"my words"}""").useOwn)
         assertFalse(json.decodeFromString(AntiBypassCfg.serializer(), """{"phrase":true}""").useOwn)
         assertEquals(random, json.decodeFromString(AntiBypassCfg.serializer(), json.encodeToString(AntiBypassCfg.serializer(), random)))
+    }
+
+    @Test fun the_one_phrase_of_before_is_the_one_step_of_now() {
+        val old = AntiBypassCfg(phrase = true, length = 60)
+        val listed = old.copy(steps = old.stepList)                                           // the same, written out as a list
+        assertEquals(listOf(ChallengeStep("s0", "phrase", 60, 1)), old.stepList)
+        assertFalse(AntiBypass.settingsLooser(old, listed)); assertFalse(AntiBypass.settingsLooser(listed, old))
+        assertTrue(AntiBypass.settingsLooser(old, listed.copy(steps = listOf(ChallengeStep("s0", "phrase", 40, 1)))))   // a shorter phrase
+        assertFalse(AntiBypass.settingsLooser(old, listed.copy(steps = listOf(ChallengeStep("s0", "phrase", 90, 1), ChallengeStep("n", "math", 3, 4)))))   // longer, plus a math step: free
+        assertTrue(AntiBypass.settingsLooser(old, listed.copy(steps = listOf(ChallengeStep("n", "math", 3, 20)))))   // the phrase is gone
+        // the list in force decides, not `length`: it is only the default of a new phrase step
+        val mixed = old.copy(steps = listOf(ChallengeStep("a", "math", 1, 3)))
+        assertFalse(AntiBypass.settingsLooser(mixed, mixed.copy(length = 30)))
+        assertFalse(AntiBypass.settingsLooser(old.copy(length = 30), old.copy(length = 30, steps = listOf(ChallengeStep("s0", "phrase", 30, 1)))))
+        // a status of "phrase" still means "a challenge is due", whatever the list is
+        assertEquals("phrase", AntiBypass.status(mixed, t0))
+        assertEquals("free", AntiBypass.status(mixed.copy(phrase = false), t0))
     }
 
     @Test fun rule_looser_cases() {

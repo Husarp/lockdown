@@ -321,4 +321,16 @@ class IslandSightTest {
         // but a pass takes it down with the screen off too
         assertEquals(0 to IslandSight.Notice.CANCEL, IslandSight.noticeStep(2, bad = false, screenOn = false))
     }
+
+    // ---------- an Island browser's site, while the Island copy counts it ----------
+
+    @Test fun an_island_browsers_site_comes_only_from_its_bar_read_just_now() {
+        val chrome = "com.android.chrome"
+        assertEquals("example.com", IslandSight.islandSite(chrome, "https://www.example.com/page", privateTab = false))
+        // main couldn't read that window: no site, never the address it kept (that may be the personal copy's)
+        assertEquals("", IslandSight.islandSite(chrome, null, privateTab = false))
+        // a search phrase isn't a site; a private tab's site isn't kept (the browser is)
+        assertEquals("", IslandSight.islandSite(chrome, "cheap flights", privateTab = false))
+        assertEquals("", IslandSight.islandSite(chrome, "example.com", privateTab = true))
+    }
 }

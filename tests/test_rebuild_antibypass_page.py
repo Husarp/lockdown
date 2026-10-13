@@ -109,7 +109,8 @@ def test_the_page_data_has_everything(api, ctx):
     d = data(api.antibypass_get())
     assert d["now"] == "2026-10-11T15:42:17"
     assert d["config"] == {"phrase": False, "length": 60, "grid": False, "complex": False, "use_own": False,
-                           "custom_phrase": "", "hours": False, "windows": SUN_EVENING, "wait_min": 0, "wait_text": "Off"}
+                           "custom_phrase": "", "hours": False, "windows": SUN_EVENING, "wait_min": 0, "wait_text": "Off",
+                           "steps": [{"id": "s0", "kind": "phrase", "level": 60, "times": 1}]}
     assert d["status"] == "free" and d["banner"]["kind"] == "off"
     assert d["lengths"] == {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
     assert (d["min_length"], d["max_length"], d["unlock_min"]) == (30, 2000, 5)

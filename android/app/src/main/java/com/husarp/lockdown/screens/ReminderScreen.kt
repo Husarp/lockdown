@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.BedtimeChallenge
 import com.husarp.lockdown.engine.CustomCfg
 import com.husarp.lockdown.engine.Interval
 import com.husarp.lockdown.engine.ReminderTier
@@ -87,6 +89,7 @@ import com.husarp.lockdown.ui.Kinds
 import com.husarp.lockdown.ui.Pill
 import com.husarp.lockdown.ui.theme.Hue
 import com.husarp.lockdown.ui.theme.tone
+import com.husarp.lockdown.ui.StepListEditor
 import com.husarp.lockdown.ui.SwitchRowInline
 import com.husarp.lockdown.ui.UnsavedChanges
 import com.husarp.lockdown.ui.rememberDraft
@@ -214,8 +217,8 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     val guard = rememberGuard()
     val cs = MaterialTheme.colorScheme
     // A draft, saved with Save (one challenge for the whole edit). Steps, heads-up, texts and the mode are ordinary
-    // edits, as on the PC; only un-flagging Important, a shorter wait before Dismiss, or letting taps through the
-    // bedtime screen asks for the challenge.
+    // edits, as on the PC; only un-flagging Important, a shorter wait before Dismiss, letting taps through the
+    // bedtime screen, or an easier challenge before Dismiss asks for the challenge.
     val d = rememberDraft(BedtimeDraft(cfg.sleep, cfg.settings.bedtimeGrayscale))
     val s = d.value.sleep
     // the steps re-order as soon as a step is added or its time changes
@@ -223,6 +226,7 @@ private fun BedtimeEditor(onClose: () -> Unit) {
     fun save(then: () -> Unit) {
         val new = d.value.let { it.copy(sleep = it.sleep.copy(tiers = RemindersEngine.sortSteps(it.sleep.tiers, it.sleep.bedtime))) }
         val old = Store.config.let { BedtimeDraft(it.sleep, it.settings.bedtimeGrayscale) }
+        BedtimeChallenge.error(new.sleep)?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show(); return }
         guard(RemindersEngine.bedtimeLooser(old.sleep, new.sleep)) {
             Store.update { c -> c.copy(sleep = new.sleep.copy(on = c.sleep.on), settings = c.settings.copy(bedtimeGrayscale = new.grayscale)) }
             if (new.grayscale != old.grayscale) { if (new.grayscale) Grayscale.sync(ctx) else Grayscale.switchedOff(ctx) }
@@ -261,7 +265,8 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 TextButton(onClick = { set { c -> c.copy(tiers = c.tiers + newStep(c)) } }) { Text("+ Add step") }
                 Text("The later it is, the more often the bedtime screen returns after you dismiss it. " +
                     "A step earlier in the evening than bedtime counts from bedtime. Type how often like 30 s, 5 min or 1h (at least 5 s)." +
-                    (if (s.dismissWait > 0) " Wait: the step's own wait before Dismiss, like 10 s or 2 min; empty uses the one below." else ""),
+                    (if (s.dismissWait > 0) " Wait: the step's own wait before Dismiss, like 10 s or 2 min; empty uses the one below." else "") +
+                    (if (s.challenge) " Challenge: the step uses the general list below, or its own." else ""),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             Card(color = cs.surfaceContainerLow) {
@@ -283,6 +288,29 @@ private fun BedtimeEditor(onClose: () -> Unit) {
                 Text("Dismiss on the bedtime screen counts down and works only when it ends, from the start each time " +
                     "the screen comes up. Disable alerts and Emergency don't wait. Longer is free; shorter or off needs the challenge.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            Card(color = cs.surfaceContainerLow) {
+                // easier (a step or level or count less, another kind, off) loosens bedtime while it is Important; harder is free
+                CardTitle(Icons.Filled.Extension, "Challenge before Dismiss")
+                SwitchRowInline("Ask a challenge before Dismiss", s.challenge) { on -> set { if (on) BedtimeChallenge.turnOn(it) else it.copy(challenge = false) } }
+                Text("After the wait, Dismiss asks you to solve these on the bedtime screen first. Passing dismisses it; Cancel drops it, and " +
+                    "the next time the screen comes back it asks the whole list again. Disable alerts keeps the Anti-Bypass challenge; " +
+                    "Emergency never asks one.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                if (s.challenge) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Steps, done top to bottom", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
+                    StepListEditor(s.challengeSteps, onChange = { l -> set { it.copy(challengeSteps = l) } },
+                        phrase = s.challengePhrase, newPhraseLength = BEDTIME_PHRASE)
+                    if (BedtimeChallenge.hasPhraseStep(s)) {
+                        Spacer(Modifier.height(12.dp))
+                        BedtimePhraseExtras(s) { f -> set(f) }
+                    }
+                    Text("This is the general list: each \"Comes back\" step above uses it, or has its own. Adding a step, a higher level " +
+                        "or more times, or moving steps is free. Removing a step, a lower level, fewer times, another kind or turning it " +
+                        "off needs the challenge when bedtime is Important.",
+                        Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
             }
             Card(color = cs.surfaceContainerLow) {
                 CardTitle(Kinds.MODE.icon, "Turn on a mode at bedtime, until wake-up", tone(Kinds.MODE.hue).accent)
@@ -344,7 +372,51 @@ private fun TierRow(s: SleepCfg, t: ReminderTier, onChange: (ReminderTier) -> Un
     }
     if (RemindersEngine.stepFromBedtime(s, t.from))
         Text("Before bedtime: counts from ${s.bedtime}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (s.challenge) TierChallenge(s, t, onChange)
 }
+
+/** What a "Comes back" step's Dismiss asks (with "Challenge before Dismiss" on): the general list, or its own - a copy of
+ *  the general list to start from, edited here. The step in force when the bedtime screen comes up decides. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TierChallenge(s: SleepCfg, t: ReminderTier, onChange: (ReminderTier) -> Unit) {
+    val own = BedtimeChallenge.hasOwn(t)
+    Text("Challenge before Dismiss", Modifier.padding(top = 4.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip("Uses the general list", !own) { if (own) onChange(BedtimeChallenge.useGeneral(t)) }
+        Chip("Own list", own) { if (!own) onChange(BedtimeChallenge.useOwn(t, s.generalChallenge)) }
+    }
+    if (own) {
+        Spacer(Modifier.height(8.dp))
+        StepListEditor(t.challengeSteps.orEmpty(), onChange = { l -> onChange(t.copy(challengeSteps = l)) },
+            phrase = s.challengePhrase, newPhraseLength = BEDTIME_PHRASE)
+    }
+    Spacer(Modifier.height(6.dp))
+}
+
+/** The typed phrase's extras at bedtime, shared by every phrase step in any bedtime list: capitals + numbers and the 3×3
+ *  grid (Table writing). No own phrase at bedtime. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BedtimePhraseExtras(s: SleepCfg, set: ((SleepCfg) -> SleepCfg) -> Unit) {
+    Column {
+        Text("Typed phrase", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Numbers and capitals", s.challengeComplex) { set { it.copy(challengeComplex = !it.challengeComplex) } }
+            Chip("Table writing", s.challengeGrid) { set { it.copy(challengeGrid = !it.challengeGrid) } }
+        }
+        Text("Every phrase step at bedtime (the general list and the steps' own) types a random phrase" +
+            (if (s.challengeComplex) ", with numbers and capitals" else "") + "." +
+            (if (s.challengeGrid) " Typed word by word into a 3×3 grid (no paste/macros)." else "") +
+            " Turning these off needs the challenge when bedtime is Important.",
+            Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A new phrase step at bedtime starts at the shortest phrase (you are half asleep); raise it in the list. */
+private const val BEDTIME_PHRASE = 30
 
 /** A step's own wait before Dismiss: empty = the general one ([general], shown as the hint), else like 10 s or 2 min
  *  ([RemindersEngine.parseStepWait]). Only a wait (or empty) reaches [onChange]; something else shows the error. */

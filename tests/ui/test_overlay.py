@@ -43,10 +43,11 @@ class Env:
     def __init__(self, harness, page, push):
         self.harness, self.page, self._push = harness, page, push
         self.host, self.answers, self.t = Host(), [], 1000.0                    # self.t: Python's own steady clock
+        self.wait, self.challenge, self.block = 25, None, False          # (the bedtime challenge: {steps, complex, grid} or None)
         self.overlay = Overlay(Publisher(), self.host, lambda key, action: self.answers.append((key, action)),
                                now=lambda: harness.now, wait_for=lambda key: self.wait if key == "sleep" else 0,
-                               clock=lambda: self.t, background=lambda: "#191817")
-        self.wait = 25
+                               clock=lambda: self.t, background=lambda: "#191817",
+                               block_for=lambda key: self.block, challenge_for=lambda key: self.challenge if key == "sleep" else None)
         harness.ctx.overlay = self.overlay
 
     def open(self, width=1280, height=800):
@@ -340,6 +341,143 @@ def test_a_challenge_the_tray_asks_for_opens_on_the_cover(ov, page, push):
     push("challenge_open", {"needs_challenge": True, "ticket": ticket, "changes": ["Quit Lockdown"], "more": 0})
     page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
     assert "Quit Lockdown" in page.inner_text("#dlg")
+    page.keyboard.press("Escape")
+
+
+# ================================================================ Challenge before Dismiss: inside the cover
+
+PHRASE_STEP = [{"id": "p1", "kind": "phrase", "level": 30, "times": 1}]
+MATH_STEP = [{"id": "m1", "kind": "math", "level": 0, "times": 2}]
+
+
+def answers_soon(ov, count=1, timeout=3):
+    deadline = time.time() + timeout
+    while len(ov.answers) < count and time.time() < deadline:
+        time.sleep(0.02)
+    return ov.answers
+
+
+def test_the_screen_says_what_dismiss_will_ask_and_nothing_without_a_challenge(ov, page):
+    ov.open()
+    ov.bedtime()
+    assert page.locator(".fs-asks").is_hidden()
+    ov.challenge = {"steps": MATH_STEP, "complex": False, "grid": False}
+    ov.bedtime()
+    assert ov.text(".fs-asks") == "After the wait, Dismiss asks: Math (Easy) ×2."
+    ov.challenge = None
+    ov.bedtime()
+    assert page.locator(".fs-asks").is_hidden()
+
+
+def test_dismiss_after_the_wait_opens_the_challenge_inside_the_cover_and_passing_dismisses_once(ov, page):
+    ov.wait = 0
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    ov.dismiss().click()
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    inside = page.evaluate("""() => { const d = document.getElementById('dlg'); return d.matches(':modal') && document.body.contains(d) }""")
+    assert inside and ov.answers == []                                                 # nothing is dismissed by asking
+    assert "Solve this to dismiss" in page.inner_text("#dlg .dlg-h")
+    body = page.inner_text("#dlg")
+    assert "Passing dismisses the bedtime screen once." in body and "unlock" not in body.lower()
+    type_challenge(page)
+    assert answers_soon(ov) == [("sleep", "dismiss")]
+    ov.sync()
+    ov.wait_gone()
+
+
+def test_the_bedtime_challenge_can_be_typed_while_the_cover_blocks_the_clicks_behind_it(ov, page):
+    ov.wait, ov.block = 0, True
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    assert ov.overlay.blocking
+    ov.dismiss().click()
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    type_challenge(page)                                                                # (the real window keeps the keyboard: Windows only)
+    assert answers_soon(ov) == [("sleep", "dismiss")]
+
+
+def test_a_math_step_opens_the_picture_and_the_right_number_dismisses(ov, page, harness):
+    ov.wait = 0
+    ov.challenge = {"steps": MATH_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    ov.dismiss().click()
+    page.wait_for_selector("#dlg[open] canvas.ch-pic", timeout=5000)
+    assert page.locator("#dlg .ch-pic").count() == 1 and "Math" in page.inner_text("#dlg")
+    for _ in range(2):
+        page.wait_for_selector("#dlg[open] input.ch-ans", timeout=5000)
+        time.sleep(1.4)                                                                # (a sum answered in under 1.2 s is refused)
+        page.fill("#dlg input.ch-ans", str(harness.ctx.guard._open.run.puzzle.answer))
+        page.press("#dlg input.ch-ans", "Enter")
+        time.sleep(0.2)
+    assert answers_soon(ov) == [("sleep", "dismiss")]
+
+
+def test_cancelling_the_bedtime_challenge_leaves_the_screen_and_dismisses_nothing(ov, page):
+    ov.wait = 0
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    ov.dismiss().click()
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#dlg[open]", state="detached", timeout=3000)
+    assert page.is_visible("#fs") and ov.answers == []
+    ov.dismiss().click()                                                               # pressing again asks again
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    page.keyboard.press("Escape")
+
+
+def test_an_early_press_asks_no_challenge_and_the_wait_still_wins(ov, page):
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    ov.t += 5
+    page.evaluate("document.querySelector('button[data-action=dismiss]').disabled = false")      # (a page forced past the wait)
+    ov.dismiss().click()
+    page.wait_for_function("document.querySelector('button[data-action=dismiss]').disabled === true", timeout=3000)
+    assert page.locator("#dlg[open]").count() == 0 and ov.answers == []
+
+
+def test_cancel_in_the_choice_after_the_wait_goes_back_when_the_screen_has_a_challenge(ov, page):
+    ov.wait = 0
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    page.click('button[data-action="disable"]')
+    page.click("button[data-action='cancel']")
+    page.wait_for_selector('#fs button[data-action="dismiss"]')
+    time.sleep(0.3)
+    assert ov.answers == [] and page.is_visible("#fs") and page.locator(".fs-panel").is_hidden()
+
+
+def test_cancel_in_the_emergency_list_after_the_wait_goes_back_when_the_screen_has_a_challenge(ov, page):
+    ov.wait = 0
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open()
+    ov.bedtime()
+    page.click('button[data-action="emergency"]')
+    page.wait_for_selector(".fs .kinds .rcard, .fs-panel button[data-action='cancel']")
+    page.click(".fs-panel button[data-action='cancel']")
+    page.wait_for_selector('#fs button[data-action="dismiss"]')
+    time.sleep(0.3)
+    assert ov.answers == [] and page.is_visible("#fs")
+
+
+@pytest.mark.parametrize("size", [(1280, 800), (800, 600), (640, 480)])
+def test_the_bedtime_challenge_fits_inside_the_cover(ov, page, size):
+    ov.wait = 0
+    ov.challenge = {"steps": PHRASE_STEP, "complex": False, "grid": False}
+    ov.open(*size)
+    ov.bedtime()
+    ov.dismiss().click()
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    box = page.evaluate("""() => { const r = document.getElementById('dlg').getBoundingClientRect();
+        return {t: r.top, b: r.bottom, l: r.left, r: r.right, w: innerWidth, h: innerHeight} }""")
+    assert box["t"] >= 0 and box["l"] >= 0 and box["b"] <= box["h"] and box["r"] <= box["w"], box
     page.keyboard.press("Escape")
 
 

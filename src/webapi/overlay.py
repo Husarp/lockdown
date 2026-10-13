@@ -7,7 +7,12 @@ says "confirmed". Disable alerts asks for the challenge FIRST (inside the overla
 15 min; both are asked of the guard again when they are pressed, so calling them without the challenge changes nothing.
 
 Emergency is the sanctioned way out (no challenge, it costs one use of the kind picked): the kinds and the uses left
-come from `emergency`, the page never sends minutes."""
+come from `emergency`, the page never sends minutes.
+
+"Challenge before Dismiss" (reminders.sleep `challenge`): once the Dismiss wait is over, `dismiss` is not a dismissal -
+the screen gives the list it fixed when it came up, the guard's PLAIN challenge asks exactly that (inside the cover,
+always, whatever Anti-Bypass says) and only a passed one dismisses the screen, once. `cancel` never dismisses such a
+screen."""
 import emergency
 from resident.overlay import SNOOZE_MIN
 
@@ -19,6 +24,8 @@ MAX_ID = 40
 OFF_TEXT = "Turn off tonight's bedtime alerts"
 SNOOZE_TEXT = f"Snooze tonight's bedtime alerts for {SNOOZE_MIN} min"
 SNOOZE_ACTION = f"snooze:{SNOOZE_MIN}"
+DISMISS_TITLE = "Solve this to dismiss"
+DISMISS_NOTE = "Passing dismisses the bedtime screen once."
 ACTIONS = ("dismiss", "cancel", "off_tonight", SNOOZE_ACTION)
 
 
@@ -44,18 +51,36 @@ def overlay_ready(ctx):
     return {"look": get_theme(ctx), **_overlay(ctx).payload()}
 
 
+def _dismiss_challenge(ctx, overlay, ask: dict):
+    """The bedtime challenge before Dismiss: the guard's plain variant with the list the screen fixed when it came up.
+    Passing runs the Dismiss (once); cancelling it only drops the run - the screen stays."""
+    token = ask["token"]
+
+    def apply():
+        try:
+            return overlay.dismiss_passed(token)
+        except ValueError as error:      # (the screen went away while the challenge was open)
+            _refuse(error)
+    return ctx.guard.request([], apply, cancel=lambda: overlay.challenge_cancelled(token), steps=ask["steps"],
+                             phrase_opts={"complex": ask["complex"], "grid": ask["grid"]}, plain=True,
+                             title=DISMISS_TITLE, note=DISMISS_NOTE)
+
+
 @core.loosen
 def overlay_answer(ctx, action):
     """A button on the cover. `dismiss` is ungated but Python refuses it while the wait runs ({early: true, wait_ms});
-    `cancel` backs out of the choice / emergency list (the wait starts over if it still runs, else it is a Dismiss);
-    `off_tonight` and `snooze:15` turn the bedtime alerts off for tonight / 15 min - behind the challenge whenever
-    Anti-Bypass is not free. -> {done: true} | {early: true, wait_ms} | {back: true} | {needs_challenge, ticket}."""
+    with "Challenge before Dismiss" on it then asks that challenge first (below); `cancel` backs out of the choice /
+    emergency list (the wait starts over if it still runs, else it is a Dismiss - but never when the screen has a bedtime
+    challenge: it only goes back); `off_tonight` and `snooze:15` turn the bedtime alerts off for tonight / 15 min -
+    behind the challenge whenever Anti-Bypass is not free.
+    -> {done: true} | {early: true, wait_ms} | {back: true} | {needs_challenge, ticket}."""
     if not isinstance(action, str) or action not in ACTIONS:
         raise ApiError("Bad request: that is not a button.")
     overlay = _overlay(ctx)
     try:
         if action == "dismiss":
-            return overlay.dismiss()
+            reply = overlay.dismiss()
+            return _dismiss_challenge(ctx, overlay, reply["challenge"]) if "challenge" in reply else reply
         if action == "cancel":
             return overlay.cancel()
         token = overlay.allows(action)

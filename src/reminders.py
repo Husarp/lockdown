@@ -14,6 +14,7 @@ import sys
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
+import challenges
 import emergency
 import pause
 from rules import TIME_FMT, days_text, parse_hhmm
@@ -47,7 +48,13 @@ DEFAULT_SLEEP = {"on": False, "bedtime": "23:00", "wake": "07:00", "before": 30,
                  "guarded": False,   # dismissing the bedtime screen needs the Anti-Bypass challenge
                  "dismiss_wait": 0,  # seconds before the bedtime screen's Dismiss works (0 = at once)
                  "grey": False,      # the whole screen goes grey from bedtime to wake-up time (resident/grayscale.py)
-                 "block_behind": False}   # the cover (bedtime / strict break) takes every click and key (resident/overlay.py)
+                 "block_behind": False,   # the cover (bedtime / strict break) takes every click and key (resident/overlay.py)
+                 # "Challenge before Dismiss": after the Dismiss wait, Dismiss asks a challenge (challenges.py) inside the
+                 # bedtime screen. The general step list; a "Comes back" tier may have its own, "challenge_steps" (the
+                 # list for the tier active when the screen came up, challenge_steps_at); without it the general one
+                 # applies. The extras are for phrase steps (no own phrase at bedtime).
+                 "challenge": False, "challenge_steps": challenges.default_bedtime_steps(),
+                 "challenge_complex": False, "challenge_grid": False}
 # Apps that stay usable during a strict break ("Allowed during breaks"): the break settings' "allow" list, program
 # (.exe) names. A list saved before it existed has none, so it reads as this default; the user can take either out.
 BREAK_ALLOW_DEFAULT = ("lockdown.exe", "systemsettings.exe")
@@ -224,6 +231,85 @@ def dismiss_waits_shorter(old: dict, new: dict) -> bool:
     return False
 
 
+def tier_steps(t: dict | None) -> list[dict]:
+    """A bedtime step's OWN challenge list, or [] (the step has none and the general list applies - also an old
+    config, a step saved without one, an empty or damaged list)."""
+    return challenges.read_steps((t or {}).get("challenge_steps"))
+
+
+def general_steps(s: dict) -> list[dict]:
+    """The general challenge list ("Math Easy x2" until one is saved, or when it can't be read)."""
+    return challenges.read_steps(s.get("challenge_steps")) or challenges.default_bedtime_steps()
+
+
+def challenge_steps_at(s: dict, bed: datetime, now: datetime) -> list[dict]:
+    """The challenge steps for a bedtime screen coming up at `now` in the night that starts at `bed`: the own list of the
+    step active then (active_step, the same one that sets the wait and how often it comes back), else the general
+    list. [] while "Challenge before Dismiss" is off."""
+    if not s.get("challenge"):
+        return []
+    return tier_steps(active_step(s, bed, now)) or general_steps(s)
+
+
+def challenge_steps_now(s: dict, now: datetime) -> list[dict]:
+    """challenge_steps_at for the night we are in at `now` (the general list outside one)."""
+    night = Engine._night(None, s, now)
+    if night:
+        return challenge_steps_at(s, night[0], now)
+    return general_steps(s) if s.get("challenge") else []
+
+
+def challenge_run(s: dict, bed: datetime, now: datetime, rng=random, clock=None):
+    """A challenges.Run for the bedtime screen coming up at `now`, or None while "Challenge before Dismiss" is off."""
+    steps = challenge_steps_at(s, bed, now)
+    if not steps:
+        return None
+    return challenges.Run(steps, grid=bool(s.get("challenge_grid")), complex=bool(s.get("challenge_complex")),
+                          rng=rng, **({"clock": clock} if clock else {}))
+
+
+def _night_challenge(s: dict, minute: int) -> list[dict] | None:
+    """The challenge steps at this minute of the day, or None when the night (bedtime up to wake) doesn't cover it."""
+    bed_t, wake_t = parse_hhmm(s["bedtime"]), parse_hhmm(s["wake"])
+    bed_min = bed_t.hour * 60 + bed_t.minute
+    span = (wake_t.hour * 60 + wake_t.minute - bed_min) % 1440 or 1440
+    off = (minute - bed_min) % 1440
+    if off >= span:
+        return None
+    bed = datetime(2000, 1, 1, bed_t.hour, bed_t.minute)
+    return challenge_steps_at(s, bed, bed + timedelta(minutes=off))
+
+
+def challenge_looser(old: dict, new: dict) -> bool:
+    """Is the bedtime screen's challenge easier to pass in the new settings? (Asked only while the old bedtime is
+    Important: loosens_reminder.) The challenge switched off; the phrase extras (capitals and digits, the 3x3 grid)
+    off while an old list has a phrase step; or - at ANY minute of the old night - the list in force in the new
+    settings is looser than the one in force in the old (challenges.steps_looser, rows matched by id: a step removed,
+    of another kind, lower or with fewer times; a step added or moved is free). A step switched from its own list to
+    the general one, or moved so that another list applies, is compared by id, so it asks - which is safe. A minute
+    the new night doesn't cover has no screen: not a question here. The lists only change where a step starts or the
+    night begins / ends: exactly those minutes are looked at."""
+    if not old.get("challenge"):
+        return False                     # (nothing was asked: turning it on or editing its lists is free)
+    if not new.get("challenge"):
+        return True
+    old_lists = [general_steps(old)] + [tier_steps(t) for t in tiers_of(old)]
+    if any(challenges.has_phrase(steps) for steps in old_lists) and (
+            (old.get("challenge_complex") and not new.get("challenge_complex"))
+            or (old.get("challenge_grid") and not new.get("challenge_grid"))):
+        return True
+    marks = {parse_hhmm(x[k]) for x in (old, new) for k in ("bedtime", "wake")}
+    marks |= {parse_hhmm(t["from"]) for x in (old, new) for t in tiers_of(x)}
+    for m in {t.hour * 60 + t.minute for t in marks}:
+        was = _night_challenge(old, m)
+        if was is None:
+            continue
+        now = _night_challenge(new, m)
+        if now is not None and challenges.steps_looser(was, now):
+            return True
+    return False
+
+
 def message(custom: str, default: str, **values) -> str:
     """What a reminder says: your own wording if you wrote any, otherwise the standard one. A {placeholder}
     that doesn't exist leaves the text as you typed it rather than breaking the reminder."""
@@ -380,12 +466,13 @@ def loosens_reminder(old: dict, new: dict) -> bool:
     """A change that weakens an IMPORTANT alert - turning it off, or removing its "important" flag.
     Those need the Anti-Bypass challenge; ordinary edits (times, message, frequency) do not. A shorter wait
     before the bedtime screen's Dismiss (or none) needs it too, important or not - the general wait or a step's own,
-    at any moment of the night (dismiss_waits_shorter); a longer one is free."""
+    at any moment of the night (dismiss_waits_shorter); a longer one is free. A bedtime challenge made easier
+    (challenge_looser) asks while the bedtime is important."""
     if dismiss_waits_shorter(old, new):
         return True
     if not old.get("guarded"):
         return False
-    return bool((old.get("on") and not new.get("on")) or not new.get("guarded"))
+    return bool((old.get("on") and not new.get("on")) or not new.get("guarded") or challenge_looser(old, new))
 
 
 def sort_tiers(tiers: list[dict], bedtime: str) -> list[dict]:

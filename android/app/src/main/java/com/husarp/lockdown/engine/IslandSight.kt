@@ -107,6 +107,12 @@ object IslandSight {
     /** Island copy: it counts and blocks only while main doesn't cover Island (else main counts it: never both). */
     fun helperCounts(mainCovers: Boolean) = !mainCovers
 
+    /** Main, an Island browser in front that the Island copy counts: the site main's history keeps with it. Only from
+     *  [live], its address bar read just now (null: main can't read that window) - never the address main kept for
+     *  the package, which may be the personal copy's. A search phrase or a private tab: none. */
+    fun islandSite(pkg: String, live: String?, privateTab: Boolean): String =
+        if (privateTab) "" else Browsers.hostOf(pkg, live) ?: ""
+
     /** Main's quiet-helper alert: how much screen-on time without a check-in means it stopped. */
     fun quietMs(mainCovers: Boolean) = if (mainCovers) HelperWatch.COVERED_QUIET_ON_MS else HelperWatch.QUIET_ON_MS
 

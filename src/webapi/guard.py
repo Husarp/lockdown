@@ -3,12 +3,19 @@
 Anything that loosens a block asks `ctx.guard.request(changes, action, cancel)`. If the challenge isn't needed the
 action runs at once; otherwise the SERVER-BUILT action (a closure over validated data) is kept here under a one-time
 ticket and the page only gets the ticket. The page then opens the challenge, which shows what Python issued
-(`challenge_begin`) and hands back what was typed (`challenge_submit`). Python compares it, checks it took a
-plausible time to type, unlocks (antibypass.unlock) and only then runs the stored action. The page never says
-"confirmed" - there is no such argument anywhere.
+(`challenge_begin`) and hands back what was typed or tapped (`challenge_submit`). The challenge is a list of steps
+(challenges.py: math, memory grid, sorting, typed phrase); a `challenges.Run` per open ticket holds the puzzle, the
+answer and the progress, and Python judges every answer. When the last step is passed it unlocks (antibypass.unlock)
+and only then runs the stored action. The page never says "confirmed" - there is no such argument anywhere.
 
 One challenge is open at a time (a new request cancels the old one), a ticket works once and expires after 10
 minutes. Grace (an exact revert of a tightening within 10 s needs no challenge) lives here too.
+
+The bedtime screen's "Challenge before Dismiss" uses the same service with the PLAIN variant of `request` (steps=,
+phrase_opts=, plain=True): it always asks (whatever Anti-Bypass says - there is no Anti-Bypass wait or hours question
+for it), the list is the one the caller gives (reminders.challenge_steps_at), passing it opens NO unlock and starts no
+wait (it only runs the action: the Dismiss, once), and the App log says "Bedtime challenge ..." instead of the
+Anti-Bypass lines.
 """
 import random
 import secrets
@@ -17,12 +24,13 @@ import time
 
 import antibypass
 import applog
+import challenges
 from rules import days_text
 
 from . import core
 from .core import Envelope, fail, ok
 
-MIN_MS_PER_CHAR = 35        # typing the phrase faster than this per character isn't a human ("Too fast")
+MIN_MS_PER_CHAR = challenges.PHRASE_MS_PER_CHAR   # typing the phrase faster than this per character isn't a human
 TICKET_TTL_SEC = 600        # an open challenge is forgotten after 10 minutes
 GRACE_SEC = 10              # after a tightening change, this long to undo it (revert only) without the challenge
 SHOWN_CHANGES = 5           # lines listed in the challenge; the rest is "and N more"
@@ -31,14 +39,23 @@ SHOWN_CHANGES = 5           # lines listed in the challenge; the rest is "and N 
 class _Pending:
     """One request waiting for its challenge."""
 
-    def __init__(self, changes, action, cancel, force, now, dry=False):
+    def __init__(self, changes, action, cancel, force, now, dry=False, plain=None):
         self.changes, self.action, self.cancel, self.force = changes, action, cancel, force
         self.dry = dry              # a dry run ("Try the challenge"): a pass opens no unlock and starts no wait
+        self.plain = plain          # the bedtime variant: {steps, complex, grid, title, note}, else None (Anti-Bypass)
         self.created = now
-        self.mode = None            # set by begin(): phrase | grid | waiting | closed
-        self.phrase = None          # what must be typed (phrase mode) ...
-        self.words = None           # ... or the words, one at a time (grid mode)
-        self.started = 0.0          # when begin() showed it (the typing-time check counts from here)
+        self.mode = None            # set by begin(): phrase | grid | math | memory | sort | waiting | closed
+        self.run = None             # the challenges.Run (steps, puzzle, progress) while a puzzle is up
+
+    @property
+    def phrase(self):
+        """What must be typed now (a phrase puzzle), else None."""
+        return self.run.puzzle.view.get("phrase") if self.run else None
+
+    @property
+    def words(self):
+        """The words to type one at a time now (a phrase puzzle in grid mode), else None."""
+        return self.run.puzzle.view.get("grid_words") if self.run else None
 
 
 class GuardService:
@@ -63,25 +80,51 @@ class GuardService:
 
     # ---------------- asking
 
-    def request(self, changes: list[str], action, cancel=None, force: bool = False, dry: bool = False) -> Envelope:
+    def request(self, changes: list[str], action, cancel=None, force: bool = False, dry: bool = False, steps=None,
+                phrase_opts=None, plain: bool = False, title: str | None = None, note: str | None = None) -> Envelope:
         """Run `action` now if Anti-Bypass allows it (status "free"; with force - a locked mode - only while a passed
         challenge is still unlocked), else keep it under a ticket for the challenge. `cancel` undoes whatever the
         page shows if the challenge is cancelled or never passed. `dry`: always the challenge, and passing it only runs
-        `action` - no unlock is opened and no wait is started (nothing is allowed by it)."""
+        `action` - no unlock is opened and no wait is started (nothing is allowed by it).
+
+        The bedtime variant (`plain=True`, with `steps`, and `phrase_opts` = {"complex", "grid"}; there is no own phrase):
+        it ALWAYS asks, with exactly these steps - Anti-Bypass being free, closed (hours) or waiting changes nothing; a
+        pass opens no unlock and starts no wait, it only runs `action`; `title` / `note` are what the dialog says
+        (begin's data) and the App log says "Bedtime challenge ..." instead of the Anti-Bypass lines."""
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
-        if not dry and antibypass.status(cfg, now) == "free" and not (force and not antibypass.unlocked_until(cfg, now)):
+        variant = None
+        if plain:
+            rows = challenges.read_steps(steps)
+            if not rows:
+                raise ValueError("A bedtime challenge needs at least one step.")
+            opts = phrase_opts or {}
+            variant = {"steps": rows, "complex": bool(opts.get("complex")), "grid": bool(opts.get("grid")),
+                       "title": title, "note": note}
+        elif not dry and antibypass.status(cfg, now) == "free" and not (force and not antibypass.unlocked_until(cfg, now)):
             return ok(action())
         changes = [str(c) for c in changes]
-        pending = _Pending(changes, action, cancel, force, self._mono(), dry)
+        pending = _Pending(changes, action, cancel, force, self._mono(), dry, variant)
         ticket = secrets.token_urlsafe(18)
         with self._lock:
             previous, self._ticket, self._open = self._open, ticket, pending
         self._run_cancel(previous)          # one challenge at a time: a new request cancels the one still open
-        return ok({"needs_challenge": True, "ticket": ticket, "changes": changes[:SHOWN_CHANGES],
-                   "more": max(0, len(changes) - SHOWN_CHANGES)})
+        out = {"needs_challenge": True, "ticket": ticket, "changes": changes[:SHOWN_CHANGES],
+               "more": max(0, len(changes) - SHOWN_CHANGES)}
+        if variant:
+            out.update(self._plain_text(variant))
+        return ok(out)
+
+    @staticmethod
+    def _plain_text(variant: dict) -> dict:
+        """What the bedtime variant tells the dialog: plain (never mention unlocking), and its title / note if any."""
+        out = {"plain": True}
+        out.update({k: variant[k] for k in ("title", "note") if variant.get(k)})
+        return out
 
     def _run_cancel(self, pending):
+        if pending is not None:
+            pending.run = None          # (the run goes with the ticket: a new one starts at step 1 with new puzzles)
         if pending is not None and pending.cancel is not None:
             try:
                 pending.cancel()
@@ -105,8 +148,10 @@ class GuardService:
     # ---------------- the challenge
 
     def begin(self, ticket) -> Envelope:
-        """What the challenge shows: {mode: phrase | grid | waiting | closed, changes, more, ...}. Phrase and grid words
-        are made and kept here, fresh on every call for a random phrase."""
+        """What the challenge shows: {mode: phrase | grid | math | memory | sort | waiting | closed, changes, more, ...}.
+        A fresh run of the step list is made and kept here (new puzzles every call). The first puzzle's fields are at
+        the top as before (phrase | grid_words + length, expr + find_x, size + lit + ordered, items) and `run` has the
+        whole view (challenges.Run.view: the steps strip, the step, how many are done)."""
         pending = self._live(ticket)
         if pending is None:
             return fail("This challenge has expired. Start the change again.")
@@ -114,9 +159,16 @@ class GuardService:
         cfg, now = antibypass.settings(db), self._now(db)
         data = {"changes": pending.changes[:SHOWN_CHANGES], "more": max(0, len(pending.changes) - SHOWN_CHANGES),
                 "unlock_min": antibypass.UNLOCK_MIN, "now": now.isoformat(timespec="seconds")}
-        waiting, phrase = antibypass.waiting_until(cfg, now), None
-        if waiting:
-            mode = "waiting"        # passed already: never show the phrase again (typing it again restarts the wait)
+        waiting, run = antibypass.waiting_until(cfg, now), None
+        if pending.plain:           # the bedtime screen's own list: no Anti-Bypass wait / hours, and nothing is unlocked
+            plain = pending.plain
+            run = challenges.Run(plain["steps"], grid=plain["grid"], complex=plain["complex"], rng=self._rng,
+                                 clock=lambda: self._mono())
+            mode = self._mode(run)
+            data.update(self._shown(run))
+            data.update(self._plain_text(plain))
+        elif waiting:
+            mode = "waiting"        # passed already: never show the challenge again (doing it again restarts the wait)
             data["waiting_until"] = waiting.isoformat(timespec="seconds")
         elif antibypass.status(cfg, now) == "closed":
             mode = "closed"
@@ -124,55 +176,77 @@ class GuardService:
             data["next_open"] = nxt.isoformat(timespec="seconds") if nxt else None
             data["hours_text"] = ", ".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in cfg["windows"])
         else:
-            phrase = antibypass.phrase_for(cfg, self._rng)
-            if not phrase.strip():       # (a blank own phrase would pass by typing nothing)
-                phrase = antibypass.new_phrase(cfg["length"], cfg.get("complex", False), self._rng)
-            mode = "grid" if cfg["grid"] else "phrase"
-            data["length"] = len(phrase)
-            if mode == "grid":
-                data["grid_words"] = phrase.split()
-            else:
-                data["phrase"] = phrase
+            run = challenges.Run(cfg["steps"], grid=bool(cfg["grid"]), complex=bool(cfg.get("complex")),
+                                 own=antibypass.own_phrase(cfg), rng=self._rng, clock=lambda: self._mono())
+            mode = self._mode(run)
+            data.update(self._shown(run))
         data["mode"] = mode
         with self._lock:
             if self._open is not pending:        # replaced while we were working
                 return fail("This challenge has expired. Start the change again.")
             pending.mode = mode
-            pending.phrase = phrase
-            pending.words = phrase.split() if mode == "grid" else None
-            pending.started = self._mono()
+            pending.run = run
         return ok(data)
 
+    def _mode(self, run) -> str:
+        """How the page shows the puzzle that is up: grid | phrase | math | memory | sort."""
+        kind = run.puzzle.kind
+        return ("grid" if run.grid else "phrase") if kind == "phrase" else kind
+
+    def _shown(self, run) -> dict:
+        """The puzzle that is up, for the page: its own fields at the top and the whole run view under `run`."""
+        view = run.view()
+        out = {k: view[k] for k in run.puzzle.view}
+        if run.puzzle.kind == "phrase":
+            out["length"] = len(out.get("phrase") or " ".join(out["grid_words"]))
+        out["mode"] = self._mode(run)
+        out["run"] = view
+        return out
+
     def submit(self, ticket, typed) -> Envelope:
-        """The phrase as typed (a string), or in grid mode the words in order (a list). Exact compare, plausible
-        typing time, then unlock and run the stored action - or, if a wait is set, cancel it and say when."""
+        """The answer to the puzzle that is up: the phrase as typed (a string; in grid mode the words in order, a list),
+        a number typed for a sum, the cells tapped in order (memory), the items tapped in order (sorting). Python judges
+        it. A phrase that doesn't match / came too fast is refused (fix it and send again). Any other puzzle that is
+        wrong or too quick gives {wrong: true, next: <view>, message} (a new puzzle of that step); a right one with more
+        to do gives {passed: false, next: <view>}. The last one right unlocks and runs the stored action - or, if a wait
+        is set, cancels it and says when."""
         pending = self._live(ticket)
         if pending is None:
             return fail("This challenge has expired. Start the change again.")
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
-        if pending.mode not in ("phrase", "grid"):
+        if pending.mode not in ("phrase", "grid", "math", "memory", "sort") or pending.run is None:
             return fail("There is nothing to type right now.")
-        if antibypass.waiting_until(cfg, now) or antibypass.status(cfg, now) == "closed":
+        if not pending.plain and (antibypass.waiting_until(cfg, now) or antibypass.status(cfg, now) == "closed"):
             return fail("Changes like this aren't possible right now.")
-        if pending.mode == "grid":
-            right = (isinstance(typed, list) and all(isinstance(w, str) for w in typed) and typed == pending.words)
-            chars = sum(len(w) for w in pending.words)
-        else:
-            right = isinstance(typed, str) and typed == pending.phrase
-            chars = len(pending.phrase)
-        if not right:
-            applog.record("challenge_failed", f"Anti-Bypass challenge failed: what was typed didn't match ({self._for(pending)})", db)
-            return fail("That doesn't match - try again.")
+        run = pending.run
         with self._lock:
             if self._open is not pending:
                 return fail("This challenge has expired. Start the change again.")
-            took = self._mono() - pending.started
-            if took < chars * MIN_MS_PER_CHAR / 1000:
-                pending.started = self._mono()      # (the clock starts over: a macro has to wait the full time again)
-                applog.record("challenge_failed", f"Anti-Bypass challenge failed: typed too fast ({self._for(pending)})", db)
-                return fail("Too fast - type it yourself.")
-            self._ticket = self._open = None        # one use: whatever happens next, this ticket is gone
+            was = run.step
+            result = run.answer(typed)
+            if result == challenges.PASSED:
+                self._ticket = self._open = None    # one use: whatever happens next, this ticket is gone
+            else:
+                pending.mode = self._mode(run)
+            shown = None if result == challenges.PASSED else self._shown(run)
+        if result == challenges.MISMATCH:
+            applog.record("challenge_failed", self._failed(pending, "what was typed didn't match"), db)
+            return fail("That doesn't match - try again.")
+        if result == challenges.TOO_FAST:
+            applog.record("challenge_failed", self._failed(pending, "typed too fast"), db)
+            return fail("Too fast - type it yourself.")
+        if result == challenges.WRONG:
+            how = "answered too fast" if run.last_too_fast else "wrong answer"
+            applog.record("challenge_failed", self._failed(pending, f"{how} in {challenges.step_label(was)}"), db)
+            return ok({"wrong": True, "next": shown,
+                       "message": "Too fast - take a proper look. Here is a new one." if run.last_too_fast
+                       else "Not right - here is a new one."})
+        if result == challenges.RIGHT:
+            return ok({"passed": False, "next": shown})
+        if pending.plain:           # the bedtime Dismiss: no unlock, no wait - just the action, once
+            applog.record("challenge_passed", "Bedtime challenge passed (before Dismiss)", db)
+            return ok({"passed": True, "result": pending.action()})
         if pending.dry:
             applog.record("challenge_passed", "Anti-Bypass challenge passed (a practice run, nothing was changed)", db)
             return ok({"passed": True, "dry": True, "result": pending.action()})
@@ -184,6 +258,13 @@ class GuardService:
             return ok({"passed": True, "waiting_until": waiting.isoformat(timespec="seconds")})
         applog.record("challenge_passed", f"Anti-Bypass challenge passed ({self._for(pending)})", db)
         return ok({"passed": True, "result": pending.action()})
+
+    def _failed(self, pending, how: str) -> str:
+        """The App log line for a failed try: "Anti-Bypass challenge failed: <how> (for: ...)"; the bedtime Dismiss's
+        own list says "Bedtime challenge failed: <how>"."""
+        if pending.plain:
+            return f"Bedtime challenge failed: {how}"
+        return f"Anti-Bypass challenge failed: {how} ({self._for(pending)})"
 
     @staticmethod
     def _for(pending) -> str:
@@ -235,7 +316,8 @@ def challenge_begin(ctx, ticket):
 
 @core.ui
 def challenge_submit(ctx, ticket, typed):
-    """The phrase typed (or the grid words, in order). Python decides; on a pass the stored change is made."""
+    """The answer to the puzzle that is up (the phrase typed, the grid words in order, a number, the cells or items
+    tapped in order). Python decides; after the last one the stored change is made."""
     return ctx.guard.submit(ticket, typed)
 
 

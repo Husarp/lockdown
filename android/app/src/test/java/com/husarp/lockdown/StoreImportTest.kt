@@ -5,6 +5,11 @@ import com.husarp.lockdown.data.HomeCard
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
+import com.husarp.lockdown.engine.ChallengeStep
+import com.husarp.lockdown.engine.ReminderTier
+import com.husarp.lockdown.engine.SleepCfg
+import com.husarp.lockdown.link.LinkProtocol
+import com.husarp.lockdown.link.applyConfig
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -56,6 +61,23 @@ class StoreImportTest {
         // an older copy (the Island helper before this version) ignores what it doesn't know
         val lenient = Json { ignoreUnknownKeys = true }
         assertEquals("Social", lenient.decodeFromString<OldGroup>(json.encodeToString(c.groups.single())).name)
+    }
+
+    @Test fun an_old_config_reads_its_challenge_as_one_phrase_step_and_lists_reach_the_island_copy() {
+        val old = """{"antibypass":{"phrase":true,"length":90,"complex":true},"sleep":{"on":true,"guarded":true,"tiers":[{"from":"23:00","every":15}]}}"""
+        val got = Store.decodeImport(old, Config())!!
+        assertEquals(listOf(ChallengeStep("s0", "phrase", 90, 1)), got.antibypass.stepList)      // nothing changes until it is edited
+        assertFalse(got.sleep.challenge)
+        assertNull(got.sleep.tiers.single().challengeSteps)
+        val c = Config(antibypass = AntiBypassCfg(phrase = true, steps = listOf(ChallengeStep("a", "math", 2, 5), ChallengeStep("b", "memory", 1, 2))),
+            sleep = SleepCfg(on = true, challenge = true, challengeGrid = true, challengeSteps = listOf(ChallengeStep("g", "sort", 0, 1)),
+                tiers = listOf(ReminderTier("23:00", everySec = 900, challengeSteps = listOf(ChallengeStep("t", "math", 0, 2))))))
+        val imported = Store.decodeImport(json.encodeToString(c), Config())!!
+        assertEquals(c.antibypass, imported.antibypass); assertEquals(c.sleep, imported.sleep)
+        // the Island helper gets main's config as JSON and applies it as it is
+        val copy = LinkProtocol.json.decodeFromString<Config>(LinkProtocol.json.encodeToString(c))
+        val applied = applyConfig(copy, Config())
+        assertEquals(c.antibypass.steps, applied.antibypass.steps); assertEquals(c.sleep, applied.sleep)
     }
 
     @kotlinx.serialization.Serializable

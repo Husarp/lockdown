@@ -1,9 +1,12 @@
 """Anti-Bypass: anything that loosens a block needs a challenge first; tightening is always instant.
 
 Challenges (any combination, both off = Anti-Bypass off):
-- phrase: type a random phrase (no pasting). Passing it unlocks loosening changes for UNLOCK_MIN minutes.
-  Optional "3×3 grid" (off by default): one word at a time into a box picked at random (you have to click it).
-  Or "Use my own phrase" (use_own): a phrase you saved instead; switched off, it stays saved and isn't asked.
+- phrase: the challenge, an ordered list of steps ("steps", see challenges.py: math, memory grid, sorting, typed
+  phrase - each with a level and how many times). Passing all of it unlocks loosening changes for UNLOCK_MIN minutes.
+  A config with no steps (from before lists) reads as one phrase step of its "length", once.
+  A typed phrase step has the options "3×3 grid" (off by default: one word at a time into a box picked at random -
+  you have to click it) and "Numbers & CAPITALS", or "Use my own phrase" (use_own): a phrase you saved instead;
+  switched off, it stays saved and isn't asked. They apply to every phrase step.
 - hours: loosening changes only during the chosen time windows (e.g. Sunday 18:00-20:00).
 - wait: passing the challenge doesn't open at once - the unlock starts this many minutes later (a cooling-off
   period; the wait runs in the database, so closing Lockdown or rebooting doesn't skip it).
@@ -33,15 +36,16 @@ The emergency unlock stays outside (it has its own limits). UI-free, so it can b
 """
 import json
 import random
-import string
 from datetime import datetime, timedelta
 
 import block_method
+import challenges
 from blocker.site_block import site_flags
 from rules import (ALLOW, OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, day_limits,
                    load_schedule, next_window_start, parse_hhmm, window_until)
 
-SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool, "length": chars, "hours": bool, "windows": [...],
+SETTINGS_KEY = "antibypass"   # JSON {"phrase": bool (the challenge is on), "steps": [{id, kind, level, times}],
+#                                     "length": chars, "hours": bool, "windows": [...],
 #                                     "wait_min": minutes, "unlocked_from"/"unlocked_until": "Y-m-d H:M:S"}
 UNLOCK_MIN = 5
 EXITED_KEY = "agent.exited"   # "1" after tray Exit: no tray icon until you open Lockdown again or log in (blocking keeps
@@ -49,11 +53,11 @@ EXITED_KEY = "agent.exited"   # "1" after tray Exit: no tray icon until you open
 OFF_KEY = "app.off"           # "" or when Lockdown was switched off entirely - nothing is enforced until you
                               # switch it back on. Turning it off needs the challenge; turning it back on never
                               # does (coming back to your rules is never the thing to stand in the way of).
-LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}   # quick picks; any length in between works
-MIN_LENGTH, MAX_LENGTH = 30, 2000
+LENGTHS = challenges.PHRASE_LENGTHS   # quick picks; any length in between works
+MIN_LENGTH, MAX_LENGTH = challenges.PHRASE_MIN, challenges.PHRASE_MAX
 DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "wait_min": 0,
-            "unlocked_from": None, "unlocked_until": None}   # (+ "use_own", see with_defaults)
+            "unlocked_from": None, "unlocked_until": None}   # (+ "use_own" and "steps", see with_defaults)
 
 
 def settings(db) -> dict:
@@ -66,11 +70,31 @@ def settings(db) -> dict:
 
 def with_defaults(cfg: dict) -> dict:
     """A stored config (or a backup's) with every key. One from before the "Use my own phrase" switch has no use_own:
-    a saved own phrase was always used then, so it reads as on."""
-    return {**DEFAULTS, "use_own": bool(cfg.get("custom_phrase")), **cfg}
+    a saved own phrase was always used then, so it reads as on. One from before step lists has no steps: it reads as
+    one phrase step of its length (steps_of), so nothing changes until it is edited."""
+    out = {**DEFAULTS, "use_own": bool(cfg.get("custom_phrase")), **cfg}
+    out["steps"] = steps_of(out)
+    return out
+
+
+def steps_of(cfg: dict) -> list[dict]:
+    """The challenge's step list: the stored one (read leniently), else - no steps, or none readable - a single phrase
+    step of `length`. Works on a config that has not been through with_defaults too."""
+    return challenges.read_steps(cfg.get("steps")) or challenges.default_steps(cfg.get("length", DEFAULTS["length"]))
 
 
 def save(db, cfg: dict):
+    """Store the config. A step list that is still the one a config from before lists reads as (one phrase step of its
+    length) is not written: such a config stays as it is, and its length keeps being the phrase's length, until the
+    steps are really edited."""
+    if "steps" in cfg:
+        try:
+            stored = json.loads(db.get_setting(SETTINGS_KEY, "") or "{}")
+        except ValueError:
+            stored = {}
+        if isinstance(stored, dict) and "steps" not in stored \
+                and cfg["steps"] == challenges.default_steps(with_defaults(stored)["length"]):
+            cfg = {k: v for k, v in cfg.items() if k != "steps"}
     db.set_setting(SETTINGS_KEY, json.dumps(cfg))
 
 
@@ -136,12 +160,7 @@ def lock(db):
     save(db, cfg)
 
 
-def new_phrase(length: int, complex: bool = False, rng=random) -> str:
-    """Random phrase in groups of 5 ("kqzph mxacd ..."). Lowercase letters by default; complex also adds capital
-    letters and digits (harder to read and type)."""
-    charset = string.ascii_lowercase + (string.ascii_uppercase + string.digits if complex else "")
-    chars = "".join(rng.choice(charset) for _ in range(length))
-    return " ".join(chars[i:i + 5] for i in range(0, length, 5))
+new_phrase = challenges.new_phrase      # (the phrase maker lives with the other puzzles)
 
 
 def parse_length(text) -> int:
@@ -166,10 +185,14 @@ def phrase_for(cfg: dict, rng=random) -> str:
     return own_phrase(cfg) or new_phrase(cfg["length"], cfg.get("complex", False), rng)
 
 
+def _own_length(cfg: dict) -> int:
+    """The non-space length of the own phrase in use, 0 when a random one is asked."""
+    return len(own_phrase(cfg).replace(" ", ""))
+
+
 def _phrase_strength(cfg: dict) -> int:
     """How long the phrase is in characters (an own phrase in use counts its non-space characters)."""
-    custom = own_phrase(cfg)
-    return len(custom.replace(" ", "")) if custom else cfg["length"]
+    return _own_length(cfg) or cfg["length"]
 
 
 # ---------- what loosens a block ----------
@@ -395,10 +418,13 @@ def settings_looser(old: dict, new: dict) -> bool:
     """Anti-Bypass itself: a challenge switched off, a shorter / simpler phrase, your own phrase switched on (one you
     know - and could have typed by a macro - is weaker than a fresh random one, whatever its length), the grid
     dropped, other hours, or less waiting before the unlock opens. Switching your own phrase off is free unless the
-    random phrase is shorter."""
+    random phrase is shorter. The step list is compared row by row (challenges.steps_looser): a step removed, of
+    another kind, at a lower level or with fewer times is looser; a step added, raised or moved is not."""
     return (((new.get("wait_min") or 0) < (old.get("wait_min") or 0))
             or (old["phrase"] and (not new["phrase"] or _phrase_strength(new) < _phrase_strength(old)
                                 or (own_phrase(new) and not own_phrase(old))
                                 or (old["grid"] and not new["grid"])
-                                or (old.get("complex") and not new.get("complex"))))
+                                or (old.get("complex") and not new.get("complex"))
+                                or challenges.steps_looser(steps_of(old), steps_of(new),
+                                                           _own_length(old), _own_length(new))))
             or (old["hours"] and (not new["hours"] or new["windows"] != old["windows"])))

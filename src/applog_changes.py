@@ -190,12 +190,25 @@ AB_LABELS = {"phrase": "challenge", "length": "phrase length", "grid": "word gri
              "wait_min": "wait (min)"}
 
 
+def _steps_line(steps, empty: str = "none") -> str:
+    """A challenge's steps in a line: "Math Hard x5, Typed phrase Medium x1"."""
+    import challenges
+    return ", ".join(f"{challenges.LABELS[s['kind']]} {challenges.level_label(s['kind'], s['level'])} x{s['times']}"
+                     for s in steps) or empty
+
+
+def _steps_part(label: str, old, new, empty: str = "none") -> list[str]:
+    """["challenge steps: Typed phrase Medium x1 → Math Hard x5, Typed phrase Medium x1"] when the lists differ."""
+    return [f"{label}: {_steps_line(old, empty)} {ARROW} {_steps_line(new, empty)}"] if old != new else []
+
+
 def _antibypass(old, new):
     import antibypass
     from rules import days_text
     a, b = antibypass.with_defaults(_dict(old)), antibypass.with_defaults(_dict(new))
     parts = _fields(a, b, {k: v for k, v in AB_LABELS.items() if k != "windows"},
                     flags=("phrase", "grid", "complex", "use_own", "hours"), hidden=("custom_phrase",))
+    parts += _steps_part("challenge steps", a["steps"], b["steps"])
     if a["windows"] != b["windows"]:
         parts.append("hours " + "; ".join(f"{days_text(w['days'])} {w['start']}-{w['end']}"
                                           for w in b["windows"]) if b["windows"] else "hours: none")
@@ -407,7 +420,9 @@ def _emergency_tiers(old, new):
 SLEEP_LABELS = {"on": "reminder", "bedtime": "bedtime", "wake": "wake-up", "before": "warn (min) before",
                 "repeat_sec": "repeat every (s)", "mode": "mode", "warn_text": "warning text", "text": "text",
                 "tiers": "bedtime steps", "guarded": "important", "dismiss_wait": "Dismiss waits (s)",
-                "grey": "grey screen", "block_behind": "block clicks behind"}
+                "grey": "grey screen", "block_behind": "block clicks behind",
+                "challenge": "challenge before Dismiss", "challenge_complex": "challenge capitals and digits",
+                "challenge_grid": "challenge word grid"}
 BREAK_LABELS = {"on": "reminder", "every_sec": "every (s)", "length": "length (min)", "strict": "strict", "snooze_sec": "snooze (s)",
                 "max_snooze": "snoozes", "twenty": "20-20-20", "text": "text", "twenty_text": "20-20-20 text",
                 "guarded": "important", "allow": "apps allowed during breaks"}
@@ -415,12 +430,20 @@ CUSTOM_LABELS = {"on": "reminder", "text": "text", "kind": "kind", "every_sec": 
                  "window": "window", "snooze": "snooze (min)", "max_snooze": "snoozes", "check": "check", "packs": "quotes",
                  "quotes": "own quotes", "hours": "only between the hours", "per_day": "stop after (per day)",
                  "guarded": "important"}
-FLAGS = ("on", "strict", "twenty", "guarded", "hours", "grey", "block_behind")
+FLAGS = ("on", "strict", "twenty", "guarded", "hours", "grey", "block_behind", "challenge", "challenge_complex",
+         "challenge_grid")
 TEXTS = ("warn_text", "text", "twenty_text", "quotes")
 
 
 def _reminder_named(head: str, labels: dict, defaults: dict, old, new):
-    parts = _fields({**defaults, **_dict(old)}, {**defaults, **_dict(new)}, labels, flags=FLAGS, hidden=TEXTS)
+    a, b = {**defaults, **_dict(old)}, {**defaults, **_dict(new)}
+    parts = _fields(a, b, labels, flags=FLAGS, hidden=TEXTS)
+    if "challenge_steps" in defaults:       # (the bedtime challenge's lists: the general one, then each step's own)
+        import reminders
+        parts += _steps_part("challenge steps", reminders.general_steps(a), reminders.general_steps(b))
+        was, now = ({t.get("from"): reminders.tier_steps(t) for t in reminders.tiers_of(x)} for x in (a, b))
+        parts += [p for at in dict.fromkeys([*was, *now]) for p in
+                  _steps_part(f"challenge steps from {at}", was.get(at, []), now.get(at, []), "the general list")]
     return _line("change", f"Reminder - {head}", parts)
 
 

@@ -12,8 +12,10 @@
 import { ld } from "./bridge.js";
 import { openDialog } from "./dialog.js";
 import { esc } from "./ui.js";
+import { runHeaderHtml, mountMath, mountMemory, mountSort } from "./challenge_kinds.js";
 
 export const CANCELLED = Symbol("challenge-cancelled");
+const TITLE = "This loosens your blocks";
 const BLOCKED_INPUT = new Set(["insertFromPaste", "insertFromDrop", "insertFromPasteAsQuotation", "insertFromYank"]);
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -75,6 +77,14 @@ export function whenText(iso, nowMs) {
   return `${DAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]} ${hm}`;
 }
 
+/** The line about what passing does: `info.note` when Python gave one ("" = none), else "Passing unlocks changes like
+ *  these for N minutes." - never the unlock sentence for a `plain` challenge (the bedtime Dismiss unlocks nothing). */
+export function noteText(info, steps = 1) {
+  if (info && typeof info.note === "string") return info.note;
+  if (!info || info.plain) return "";
+  return `${steps > 1 ? "Passing all of them" : "Passing"} unlocks changes like these for ${info.unlock_min} minutes.`;
+}
+
 // ---------------------------------------------------------------- the dialog
 
 let active = null;      // {ticket, promise}
@@ -118,7 +128,7 @@ function run(info) {
   let inflight = false;         // challenge_submit is out: Python may pass it any moment, so Esc / Cancel / X wait for the reply
 
   const handle = openDialog({     // stack: its own layer, so an editor dialog underneath is left exactly as it was
-    key: "challenge:" + ticket, title: "This loosens your blocks", wide: true, dismissable: () => !inflight, stack: true,
+    key: "challenge:" + ticket, title: TITLE, wide: true, dismissable: () => !inflight, stack: true,
     body: changesHtml(info) + '<p class="small muted">One moment\u2026</p>', onClose,
   });
   if (!handle) {                // (no dialog could be opened: the change does not happen)
@@ -163,12 +173,7 @@ function run(info) {
     ld.call("challenge_cancel", ticket).catch(() => {}).then(done);
   }
 
-  function view(title, html, buttons) {
-    if (closed) return null;
-    dlg.querySelector(".dlg-h h2").textContent = title;
-    body.innerHTML = changesHtml(begun.info || info) + html;
-    let foot = dlg.querySelector(".dlg-f");
-    if (!foot) { foot = document.createElement("div"); foot.className = "dlg-f"; dlg.append(foot); }
+  function fillFoot(foot, buttons) {
     foot.textContent = "";
     for (const b of buttons) {
       const btn = document.createElement("button");
@@ -180,8 +185,17 @@ function run(info) {
       if (b.primary) btn.dataset.primary = "1";
       foot.append(btn);
     }
+  }
+  function view(title, html, buttons) {
+    if (closed) return null;
+    dlg.querySelector(".dlg-h h2").textContent = title;
+    body.innerHTML = changesHtml(begun.info || info) + html;
+    let foot = dlg.querySelector(".dlg-f");
+    if (!foot) { foot = document.createElement("div"); foot.className = "dlg-f"; dlg.append(foot); }
+    fillFoot(foot, buttons);
     return foot;
   }
+  const titleOf = () => (begun.info && typeof begun.info.title === "string" && begun.info.title) || TITLE;
   const onlyOk = (foot) => {            // the ticket is gone: all that is left is OK
     foot.textContent = "";
     const btn = document.createElement("button");
@@ -200,20 +214,21 @@ function run(info) {
     try {
       data = await ld.call("challenge_begin", ticket);
     } catch (err) {
-      view("This loosens your blocks", `<p class="ch-err">${esc(err.message || "That didn't work.")}</p>`, [closeBtn()]);
+      view(titleOf(), `<p class="ch-err">${esc(err.message || "That didn't work.")}</p>`, [closeBtn()]);
       return;
     }
     if (closed) return;
     begun = { now: data.now, at: performance.now(), info: data };
-    if (data.mode === "phrase") showPhrase(data);
-    else if (data.mode === "grid") showGrid(data);
+    if (["phrase", "grid", "math", "memory", "sort"].includes(data.mode)) showPuzzle(data, "");
     else if (data.mode === "waiting") await showWaiting(data.waiting_until, false);
     else showClosed(data);
   }
 
-  /** The typing went to Python. Resolves true when the challenge is over (passed or waiting), false to keep typing. */
-  async function submit(typed, onError) {
+  /** The typing went to Python. A refused try goes to `onError(text, gone)`; a right or wrong answer with more to do draws the
+   *  next puzzle (`wrongText` replaces the server's line after a wrong one); the last right one closes the dialog. */
+  async function submit(typed, onError, wrongText) {
     let res;
+    if (closed) return;
     inflight = true;
     try {
       res = await ld.call("challenge_submit", ticket, typed);
@@ -226,17 +241,46 @@ function run(info) {
       return;
     }
     inflight = false;
+    if (res && res.next && !res.passed) {               // not over: a right one with more to do, or a wrong one (new puzzle)
+      if (closed) return conclude();
+      return showPuzzle(res.next, res.wrong ? (wrongText || res.message || "") : "");
+    }
     settled = true;                                     // the ticket is used up, whatever follows
     if (res && res.waiting_until) return closed ? conclude() : showWaiting(res.waiting_until, true);
     outcome = res ? res.result : undefined;
     if (closed) conclude(); else handle.close();
   }
 
+  // ---- one puzzle -----------------------------------------------------------------------
+  let current = null;           // the puzzle on screen (begin's data, or `next` of a reply): its `run` draws the progress
+  const stepsIn = () => ((begun.info && begun.info.run && begun.info.run.steps) || []).length;
+  const lead = (text) => [text, noteText(begun.info, stepsIn())].filter(Boolean).join(" ");
+  /** The instruction line (with the note about what passing does), then the progress line and the step strip. */
+  const frame = (text) => `<p class="small muted ch-lead">${esc(lead(text))}</p>${runHeaderHtml(current && current.run)}`;
+
+  function showPuzzle(data, message) {
+    if (closed) return;
+    current = data;
+    if (data.mode === "phrase") return showPhrase(data);
+    if (data.mode === "grid") return showGrid(data);
+    const host = {
+      frame, lead, q, cancelBtn, onlyOk, message,
+      html: (html, buttons) => view(titleOf(), html, buttons),
+      foot: () => dlg.querySelector(".dlg-f"),
+      setButtons: (buttons) => fillFoot(dlg.querySelector(".dlg-f"), buttons),
+      send: (value, onError, wrongText) => submit(value, onError, wrongText),
+      closed: () => closed,
+    };
+    if (data.mode === "math") mountMath(host, data);
+    else if (data.mode === "memory") mountMemory(host, data);
+    else mountSort(host, data);
+  }
+
   // ---- phrase ---------------------------------------------------------------------------
   function showPhrase(data) {
     const P = data.phrase;
-    const foot = view("This loosens your blocks", `
-      <p class="small muted">Type this phrase to continue (no pasting). Passing unlocks changes like these for ${data.unlock_min} minutes.</p>
+    const foot = view(titleOf(), `
+      ${frame("Type this phrase to continue (no pasting).")}
       <div class="phrase ch-phrase"><span class="done"></span><i class="ch-cur"></i><span class="bad"></span><span class="rest"></span></div>
       <textarea class="textarea typed" rows="3" placeholder="Start typing\u2026" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Type the phrase"></textarea>
       <div class="meter"><i class="ch-fill" style="width:0"></i></div>
@@ -296,8 +340,8 @@ function run(info) {
   // ---- 3x3 grid -------------------------------------------------------------------------
   function showGrid(data) {
     const words = data.grid_words || [];
-    const foot = view("This loosens your blocks", `
-      <p class="small muted">Type each word into the highlighted box (click it first, no pasting). Passing unlocks changes like these for ${data.unlock_min} minutes.</p>
+    const foot = view(titleOf(), `
+      ${frame("Type each word into the highlighted box (click it first, no pasting).")}
       <div class="ch-ghead"><span class="small muted ch-wi"></span><span class="ch-chip"></span><span class="grow"></span><span class="small muted ch-status"></span></div>
       <div class="ch-board">${'<input class="input ch-box" tabindex="-1" autocomplete="off" spellcheck="false" autocapitalize="off" disabled aria-label="Word box">'.repeat(9)}</div>`,
       [cancelBtn, { label: "Continue", primary: true, disabled: true, onClick: go }]);

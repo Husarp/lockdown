@@ -10,6 +10,7 @@ body { display: grid; place-items: center; overflow-x: hidden; overflow-y: auto;
 .fs .hero { font: var(--fw-semibold) var(--fs-hero)/1 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .fs p { color: var(--text-2); font-size: var(--fs-lg); text-wrap: pretty; overflow-wrap: anywhere; }
 .fs p.fs-text { white-space: pre-wrap; }
+.fs p.fs-asks { font-size: var(--fs-body); color: var(--text-3); }
 .fs .btn-row { justify-content: center; }
 .fs .btn-row:empty { display: none; }
 .fs .btn-lg:disabled { opacity: .55; cursor: not-allowed; }

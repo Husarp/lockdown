@@ -2,9 +2,10 @@
 // Python owns what is on it (resident/overlay.py) and pushes it whole (`overlay` event); this file draws it, ticks the
 // numbers locally from "ms left" values on the page's own steady clock (performance.now) - the Dismiss wait, the break
 // countdown, the bedtime clock - and tells Python what was pressed. Python decides everything: Dismiss only works when
-// its wait is over (an early press comes back {early}), Disable alerts and the "Off tonight / Snooze" that follow are
-// behind the Anti-Bypass challenge (js/challenge.js, opened INSIDE this page so nothing can hide it), Emergency spends
-// the use in Python.
+// its wait is over (an early press comes back {early}; with "Challenge before Dismiss" on, the press after the wait
+// comes back as a challenge ticket - the bedtime list, and only a passed one dismisses), Disable alerts and the "Off
+// tonight / Snooze" that follow are behind the Anti-Bypass challenge (js/challenge.js, opened INSIDE this page so
+// nothing can hide it), Emergency spends the use in Python.
 // Nothing animates and nothing redraws continuously: one timer that wakes only when a shown number changes (every
 // second while a wait or a break countdown runs, then once a minute for the clock) and none once Python has taken the
 // cover down (it hides the window and pushes `shown: false`). The page does not trust `document.visibilityState` to stop
@@ -87,6 +88,7 @@ export function createOverlay(env = {}) {
   let sig = "";
   let dismissBtn = null;
   let shownText = { hero: "", dismiss: "" };
+  let asking = "";                 // the bedtime challenge in words ("Math (Easy) ×2"), shown under the buttons
 
   // ------------------------------------------------------------ skeleton, built once
   const halo = h("span", "halo");
@@ -95,10 +97,12 @@ export function createOverlay(env = {}) {
   const text = h("p", "fs-text");
   const row = h("div", "btn-row");
   const extra = h("div", "btn-row");
+  const asks = h("p", "fs-asks");
+  asks.hidden = true;
   const panel = h("div", "fs-panel");
   panel.hidden = true;
   const card = h("div", "fs");
-  card.append(halo, hero, title, text, row, extra, panel);
+  card.append(halo, hero, title, text, row, extra, asks, panel);
   root.append(card);
 
   // ------------------------------------------------------------ the numbers
@@ -152,8 +156,9 @@ export function createOverlay(env = {}) {
   }
 
   async function dismiss() {
-    const res = await call("overlay_answer", "dismiss");
+    const res = await askGuard(call("overlay_answer", "dismiss"));      // (a bedtime challenge opens here, inside the cover)
     if (res && res.early) { setWait(res.wait_ms); }       // Python says the wait is not over: its number wins
+    // otherwise the challenge was passed (Python takes the cover down) or cancelled (the screen stays as it is)
   }
 
   function setWait(ms) {
@@ -192,6 +197,7 @@ export function createOverlay(env = {}) {
     panel.textContent = "";
     panel.hidden = next === "main";
     row.hidden = extra.hidden = next !== "main";
+    asks.hidden = next !== "main" || !asking;
     if (next === "main") focusFirst();
   }
 
@@ -302,6 +308,9 @@ export function createOverlay(env = {}) {
     halo.replaceChildren(icon(data.kind === "break" ? "coffee" : "moon"));
     title.textContent = data.title || "";
     text.textContent = data.text || "";
+    asking = data.asks ? `After the wait, Dismiss asks: ${data.asks}.` : "";
+    asks.textContent = asking;
+    asks.hidden = !asking || view !== "main";
     const next = JSON.stringify((data.buttons || []).map((b) => [b.action, b.label]));
     dismissBtn = null;
     if (next !== sig || first || view !== "main") {

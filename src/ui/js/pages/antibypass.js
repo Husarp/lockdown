@@ -1,6 +1,6 @@
 // Anti-Bypass page (BLUEPRINT 3.4): the lock banner, the challenges, Pause my blocks, Turn Lockdown off and two static
-// cards. Python decides everything that matters: what the page sends is the changed settings only (a switch, a length,
-// the phrase, the wait as TEXT, the hours), and Python says whether that weakens Anti-Bypass (-> a challenge ticket that
+// cards. Python decides everything that matters: what the page sends is the changed settings only (a switch, the list
+// of challenge steps, the phrase, the wait as TEXT, the hours), and Python says whether that weakens Anti-Bypass (-> a challenge ticket that
 // `guarded()` turns into the challenge dialog), needs a yes first (-> {needs_confirm, line}) or is just saved. This file
 // never compares old with new.
 //
@@ -11,7 +11,8 @@
 import { ld } from "../bridge.js";
 import { CANCELLED, clockOf, countdownText, guarded, parseNaive, whenText } from "../challenge.js";
 import { openDialog } from "../dialog.js";
-import { days as dayChips, esc, field, fmt, ic, kic, seg, setText, stepper, sw, toast, tpRange } from "../ui.js";
+import { stepListEditor, stepsLooser } from "../steplist.js";
+import { days as dayChips, esc, field, fmt, ic, kic, seg, setText, sw, toast, tpRange } from "../ui.js";
 
 export const freshMs = 5000;
 export const events = ["status"];
@@ -37,8 +38,6 @@ const HELP = {
   own: "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - no pasting. With the 3×3 grid it's split into words by the spaces. While it's switched on, the length and the numbers & capitals option don't apply; switched off, it stays saved and a random phrase is asked. Switching it on needs the challenge (a phrase you know is easier than a fresh random one).",
   wait: "Off, or a time like 10, 1h or 1h30. Passing the challenge starts the wait instead of unlocking at once, and you come back when it ends - an easy phrase plus a long wait stops more than a hard phrase does. The wait is kept in the database, so closing Lockdown or restarting the PC doesn't skip it.",
 };
-const SLIDER_STEP = 10;
-const LENGTH_DEBOUNCE_MS = 700;           // the +/- buttons: one save after the last click (a shorter phrase may open the challenge)
 const REASK_MS = 2000;                    // a countdown that ended but the new state still says the same: ask again after this
 
 // ---------------------------------------------------------------- plain helpers (node tests)
@@ -106,7 +105,12 @@ const STYLE = `<style>
 .ab .ab-dim .field-c { opacity: .55; }
 .ab .ab-wins { display: grid; gap: var(--sp-2); align-items: start; }
 .ab .ab-wins [data-k="wins"] { display: grid; }
-.ab input[type="range"] { width: min(calc(160px * var(--s)), 30vw); accent-color: var(--brand); }
+.ab .ab-sub { margin: 0; padding: var(--sp-2) var(--sp-4); background: var(--surface-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.ab .ab-steps { border-top: 0; }
+.ab .ab-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); }
+.ab .ab-why { flex: 1 1 calc(180px * var(--s)); min-width: 0; margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
+.ab .ab-why.loose { color: var(--on-brand-soft); }
+.ab [data-k="px"][hidden] { display: none; }
 .ab .ab-ownrow .field-c { flex: 1 1 calc(300px * var(--s)); flex-wrap: nowrap; }
 .ab .ab-own { flex: 1 1 auto; min-width: 0; }
 .ab .ab-box { width: calc(88px * var(--s)); text-align: center; }
@@ -135,7 +139,8 @@ let lastWait = "";                           // the wait as last saved (what the
 let inflight = "";                           // the settings change on its way to Python
 let firedFor = "", firedAt = 0;              // the countdown end the page already asked about
 let pendingFocus = false;
-let lengthTimer = 0;
+let steps = null;                            // the step-list editor (steplist.js), made with the first load (it needs Python's options)
+let stepsEdited = false;                     // the list was edited and not saved yet
 let seenPauseLeft = -1;
 
 const q = (k) => root.querySelector(`[data-k="${k}"]`);
@@ -161,18 +166,23 @@ export function mount(el_, pg) {
 function challengeCard() {
   return `<section class="card" data-card="challenges"><header class="card-h">${kic("k-brand", "keyboard")}<h3>Challenges</h3></header>
     <div class="card-b" style="padding:0">
-      ${field("Type a random phrase", "What you type before a loosening change - no pasting.", sw(false, 'data-k="phrase" aria-label="Type a random phrase"'))}
-      ${field("Length", `Any length from 30 to 2000 characters. Longer is instant; shorter needs the challenge.`,
-        `${seg("length", [["30", "Short 30"], ["60", "Medium 60"], ["120", "Long 120"], ["250", "Very long 250"]], "")}` +
-        `<input type="range" min="30" max="2000" step="${SLIDER_STEP}" value="60" data-k="len-range" aria-label="Phrase length">` +
-        `<span data-k="len">${stepper(60, "characters", { step: SLIDER_STEP, min: 30, max: 2000, label: "Phrase length in characters" })}</span>`, "ab-len")}
-      ${field("Numbers & CAPITALS", "Adds digits and capital letters to a random phrase - harder to type quickly.", sw(false, 'data-k="complex" aria-label="Numbers and capitals"'), "ab-cx")}
-      ${field("3×3 grid", "One word at a time into a random box of a 3×3 grid - you click the box first.", sw(false, 'data-k="grid" aria-label="3 by 3 grid"'))}
-      ${field("Use my own phrase", "Instead of a random one. Switched off, it stays saved.", sw(false, 'data-k="own" aria-label="Use my own phrase"'))}
-      ${field("Your own phrase", "Asked while the switch above is on.",
-        `<input class="input ab-own" data-k="custom" maxlength="2000" placeholder="a phrase only you know" autocomplete="off" spellcheck="false" aria-label="Your own phrase">` +
-        `<button class="btn btn-sm" type="button" data-act="save-phrase">Save phrase</button>${help("own", "your own phrase")}`, "ab-ownrow")}
-      ${helpRow("own")}
+      ${field("Ask a challenge", "Before anything that loosens a block - the steps below, one after another.", sw(false, 'data-k="phrase" aria-label="Ask a challenge"'))}
+      <p class="ab-sub">Steps - done top to bottom</p>
+      <div class="ab-steps" data-k="steps"></div>
+      <div class="ab-savebar"><p class="ab-why" data-k="steps-why" role="status"></p>
+        <button class="btn" type="button" data-act="undo-steps" data-k="undo-steps" disabled>Undo</button>
+        <button class="btn" type="button" data-act="save-steps" data-k="save-steps" disabled>Save steps</button></div>
+      <div data-k="px">
+        <p class="ab-sub">Typed phrase - shown because the list has a phrase step</p>
+        ${field("Numbers & CAPITALS", "Adds digits and capital letters to a random phrase - harder to type quickly.", sw(false, 'data-k="complex" aria-label="Numbers and capitals"'), "ab-cx")}
+        ${field("3×3 grid", "One word at a time into a random box of a 3×3 grid - you click the box first.", sw(false, 'data-k="grid" aria-label="3 by 3 grid"'))}
+        ${field("Use my own phrase", "Instead of a random one. Switched off, it stays saved.", sw(false, 'data-k="own" aria-label="Use my own phrase"'))}
+        ${field("Your own phrase", "Asked while the switch above is on.",
+          `<input class="input ab-own" data-k="custom" maxlength="2000" placeholder="a phrase only you know" autocomplete="off" spellcheck="false" aria-label="Your own phrase">` +
+          `<button class="btn btn-sm" type="button" data-act="save-phrase">Save phrase</button>${help("own", "your own phrase")}`, "ab-ownrow")}
+        ${helpRow("own")}
+      </div>
+      <p class="ab-sub">Also</p>
       ${field("Then wait", "Off, 10, 1h, 1h30 ... before it actually unlocks.",
         `<input class="input ab-box" data-k="wait" autocomplete="off" spellcheck="false" aria-label="Then wait">${help("wait", "the wait")}`)}
       ${helpRow("wait")}
@@ -277,13 +287,13 @@ function paintChallenges(keepTyped, committed) {
   setSwitch(q("grid"), c.grid);
   setSwitch(q("own"), c.use_own);
   setSwitch(q("hours"), c.hours);
-  paintLength(c.length, keepTyped, committed);
+  paintSteps();
   if (!keepTyped) {
     setBox(q("custom"), c.custom_phrase, committed);
     setBox(q("wait"), c.wait_text, committed);
     lastWait = c.wait_text;
   }
-  for (const f of root.querySelectorAll(".ab-len, .ab-cx")) f.classList.toggle("ab-dim", c.use_own);
+  for (const f of root.querySelectorAll(".ab-cx")) f.classList.toggle("ab-dim", c.use_own);
   const key = JSON.stringify(c.windows);
   if (!hoursDirty && key !== winKey) {
     winKey = key;
@@ -293,11 +303,42 @@ function paintChallenges(keepTyped, committed) {
   q("save-hours").classList.toggle("btn-primary", hoursDirty);
 }
 
-function paintLength(n, keepTyped, committed) {
-  for (const b of root.querySelector(".ab-len .seg").children) b.setAttribute("aria-pressed", String(b.dataset.v === String(n)));
-  const range = q("len-range");
-  if (range.value !== String(n)) range.value = String(n);
-  if (!keepTyped) setBox(q("len").querySelector("input"), String(n), committed);
+/** The step list: made once Python's options are here; the draft is left alone while the owner has edits not saved yet. */
+function paintSteps() {
+  const c = d.config;
+  const info = { length: c.length, grid: c.grid, own_length: c.use_own ? c.custom_phrase.replace(/\s/g, "").length : 0 };
+  if (!steps) {
+    steps = stepListEditor({ steps: c.steps, options: d.challenge, onChange: stepsChanged, phrase: info, label: "Challenge steps" });
+    q("steps").append(steps.el);
+  } else {
+    steps.setPhrase(info);
+    if (!stepsEdited && JSON.stringify(steps.get()) !== JSON.stringify(c.steps)) steps.set(c.steps);
+  }
+  steps.setSaved(c.steps);
+  steps.setDisabled(!c.phrase);
+  paintStepsBar();
+}
+
+function stepsChanged() {
+  stepsEdited = true;
+  paintStepsBar();
+}
+
+/** The save bar under the list: whether anything changed, and (display only) whether Python will ask the challenge. */
+function paintStepsBar() {
+  const c = d.config;
+  const now = steps.get();
+  const changed = JSON.stringify(now) !== JSON.stringify(c.steps);
+  const looser = c.phrase ? stepsLooser(c.steps, now, d.challenge) : [];
+  const why = q("steps-why");
+  why.classList.toggle("loose", looser.length > 0);
+  setText(why, !changed ? "No changes." : looser.length ? `Looser: ${looser.join("; ")}.` : c.phrase ? "Only harder or moved - free." : "Saved for when the challenge is on.");
+  const save = q("save-steps");
+  save.disabled = !changed;
+  setText(save, looser.length ? "Save - asks the challenge" : "Save steps");
+  save.classList.toggle("btn-primary", changed);
+  q("undo-steps").disabled = !changed;
+  q("px").hidden = !steps.hasPhrase();
 }
 
 function paintPause() {
@@ -421,6 +462,7 @@ async function save(patch_, confirmed = false) {
       return save(patch_, true);
     }
     if ("windows" in patch_) hoursDirty = false;
+    if ("steps" in patch_) stepsEdited = false;
     apply(res, false, true);
     return true;
   } catch (err) {
@@ -443,14 +485,6 @@ function confirmChange(line) {
 
 async function refreshShell() {
   try { (await import("../shell.js")).refreshStatus(); } catch (_) { /* the shell catches up with the next status push */ }
-}
-
-function commitLength() {
-  clearTimeout(lengthTimer);
-  const box = q("len").querySelector("input");
-  const n = box.value.trim();
-  if (n === String(d.config.length)) return;
-  save({ length: n === "" || Number.isNaN(Number(n)) ? n : Number(n) });
 }
 
 function commitWait() {
@@ -548,6 +582,12 @@ function wire() {
         ld.call("antibypass_lock").then((res) => apply(res)).catch((err) => toast(err.message || "That didn't work."));
         break;
       case "save-phrase": commitPhrase(); break;
+      case "save-steps": save({ steps: steps.get() }); break;
+      case "undo-steps":
+        stepsEdited = false;
+        steps.set(d.config.steps);
+        paintStepsBar();
+        break;
       case "help": {
         const open = b.getAttribute("aria-expanded") !== "true";
         b.setAttribute("aria-expanded", String(open));
@@ -574,8 +614,7 @@ function wire() {
 
   root.addEventListener("seg", (e) => {
     const { name, value } = e.detail;
-    if (name === "length") save({ length: Number(value) });
-    else if (name === "pause") pauseMinutes = value === "day" ? null : Number(value);
+    if (name === "pause") pauseMinutes = value === "day" ? null : Number(value);
   });
 
   root.addEventListener("press", (e) => { if (e.target.closest("[data-win]")) windowsEdited(); });
@@ -583,18 +622,6 @@ function wire() {
   root.addEventListener("input", (e) => {
     const t = e.target;
     if (t.closest("[data-win]")) { windowsEdited(); return; }
-    if (t.dataset.k === "len-range") {                       // dragging: show the number, save when let go (change)
-      q("len").querySelector("input").value = t.value;
-      return;
-    }
-    if (t.closest('[data-k="len"]')) {
-      const n = Number(t.value);
-      if (Number.isInteger(n) && n >= 30 && n <= 2000) q("len-range").value = String(n);
-      if (!(e instanceof InputEvent)) {                      // the +/- buttons: one save after the last click
-        clearTimeout(lengthTimer);
-        lengthTimer = setTimeout(commitLength, LENGTH_DEBOUNCE_MS);
-      }
-    }
   });
 
   root.addEventListener("change", (e) => {
@@ -602,10 +629,8 @@ function wire() {
     const k = t.dataset && t.dataset.k;
     if (k === "phrase" || k === "complex" || k === "grid" || k === "hours") save({ [k]: t.checked });
     else if (k === "own") commitOwn(t.checked);
-    else if (k === "len-range") save({ length: Number(t.value) });
     else if (k === "wait") commitWait();
     else if (k === "lockdown") switchLockdown(t.checked);
-    else if (k === "len" || t.closest('[data-k="len"]')) commitLength();
   });
 
   root.addEventListener("keydown", (e) => {
@@ -613,6 +638,5 @@ function wire() {
     const k = e.target.dataset && e.target.dataset.k;
     if (k === "wait") { e.preventDefault(); commitWait(); }
     else if (k === "custom") { e.preventDefault(); commitPhrase(); }
-    else if (e.target.closest && e.target.closest('[data-k="len"]')) { e.preventDefault(); commitLength(); }
   });
 }

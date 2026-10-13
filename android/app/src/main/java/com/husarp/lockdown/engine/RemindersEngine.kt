@@ -21,9 +21,11 @@ import kotlin.random.Random
 /** A bedtime "comes back" step. Intervals are in seconds now: [every] (minutes) is a step saved before that, read
  *  through [seconds] when [everySec] is missing; it stays in the file so an older copy (in Island) still reads it.
  *  [waitSec]: the step's own wait before Dismiss (null: none, the general [SleepCfg.dismissWait] applies - also a step
- *  saved before steps had one). */
+ *  saved before steps had one). [challengeSteps]: the step's own challenge list for "Challenge before Dismiss" (null or
+ *  empty: it uses the general [SleepCfg.challengeSteps]). */
 @Serializable
-data class ReminderTier(val from: String, val every: Int = 0, val everySec: Int? = null, val waitSec: Int? = null) {
+data class ReminderTier(val from: String, val every: Int = 0, val everySec: Int? = null, val waitSec: Int? = null,
+                        val challengeSteps: List<ChallengeStep>? = null) {
     val seconds: Int get() = everySec ?: (every * 60)
 }
 
@@ -44,8 +46,20 @@ data class SleepCfg(
     val dismissWait: Int = 0,                   // seconds before Dismiss works on the bedtime screen (0 = off)
     val repeatSec: Int? = null,                 // fallback interval (seconds) when no step applies yet
     val blockBehind: Boolean = false,           // the bedtime screen (and a strict break) takes every tap and key
+    // "Challenge before Dismiss": after the wait, Dismiss runs a challenge list (Challenges.kt) inside the bedtime screen.
+    // Off by default; no own phrase here. A step of [tiers] may have its own list.
+    val challenge: Boolean = false,
+    val challengeSteps: List<ChallengeStep> = Challenges.BEDTIME_DEFAULT,   // the general list: Math Easy x2 when first turned on
+    val challengeComplex: Boolean = false,      // phrase steps: capitals + digits
+    val challengeGrid: Boolean = false,         // phrase steps: the 3x3 grid
 ) {
     val repeatSeconds: Int get() = repeatSec ?: (repeat * 60)
+
+    /** The general challenge list as in force: [challengeSteps] read leniently, Math Easy x2 when none is readable. */
+    val generalChallenge: List<ChallengeStep> get() = Challenges.read(challengeSteps, Challenges.BEDTIME_DEFAULT)
+
+    /** The extras of a bedtime phrase step. */
+    val challengePhrase: PhraseOpts get() = PhraseOpts(challengeGrid, challengeComplex)
 }
 
 /** Should bedtime grayscale be on at [mins] (minutes since midnight)? Only with the toggle on, Bedtime on, and inside bedtime→wake. */
@@ -154,6 +168,8 @@ data class RPrompt(
     val overlay: Boolean = false,
     val until: LocalDateTime? = null,
     val wait: Int = 0,                          // seconds before its Dismiss works, from each time it's shown
+    val challenge: List<ChallengeStep> = emptyList(),   // bedtime: what Dismiss asks after the wait (empty: nothing, it dismisses)
+    val challengePhrase: PhraseOpts = PhraseOpts(),     // ... and the extras of its phrase steps
 )
 
 /** What a tick decided. The platform layer shows [show], dismisses [close], toasts [toasts], and acts on the rest. */
@@ -332,7 +348,7 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             if (emergencyLeft > 0) buttons.add(RButton("Emergency ($emergencyLeft left)", "emergency"))
             overlay("sleep", "Time for bed",
                 message(s.text, SLEEP_TEXT, "time" to hhmm(now), "bedtime" to hhmm(bed), "wake" to hhmm(wake)),
-                null, buttons, out, wait = dismissWaitAt(s, bed, now))
+                null, buttons, out, wait = dismissWaitAt(s, bed, now), challenge = challengeAt(s, bed, now).orEmpty(), phrase = s.challengePhrase)
         }
     }
 
@@ -560,10 +576,11 @@ class RemindersEngine(private val rng: Random = Random.Default) {
         if (key == "break" || key.startsWith("custom:")) lastInterruption = now(out)
     }
 
-    private fun overlay(key: String, title: String, text: String, until: LocalDateTime?, buttons: List<RButton>, out: Out, wait: Int = 0) {
+    private fun overlay(key: String, title: String, text: String, until: LocalDateTime?, buttons: List<RButton>, out: Out, wait: Int = 0,
+                        challenge: List<ChallengeStep> = emptyList(), phrase: PhraseOpts = PhraseOpts()) {
         if (key in open) return
         open.add(key)
-        out.show.add(RPrompt(key, title, text, buttons, overlay = true, until = until, wait = wait))
+        out.show.add(RPrompt(key, title, text, buttons, overlay = true, until = until, wait = wait, challenge = challenge, challengePhrase = phrase))
     }
 
     private fun close(key: String, out: Out) { if (open.remove(key)) out.close.add(key) }
@@ -682,6 +699,46 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             return marks.any { m -> val was = nightWait(old, m); val now = nightWait(new, m); was != null && now != null && now < was }
         }
 
+        /** The challenge Dismiss runs for a bedtime screen coming up at [now] (night from [bed]): the own list of the step
+         *  active then ([activeStep], the same choice as its wait), else the general one - also before the first step and
+         *  with no steps. Null with "Challenge before Dismiss" off. Never empty. */
+        fun challengeAt(s: SleepCfg, bed: LocalDateTime, now: LocalDateTime): List<ChallengeStep>? {
+            if (!s.challenge) return null
+            return Challenges.clean(activeStep(s, bed, now)?.challengeSteps).ifEmpty { s.generalChallenge }
+        }
+
+        /** The challenge at [minute] of the day, or null when the night (bedtime up to wake) doesn't cover it. */
+        private fun nightChallenge(s: SleepCfg, minute: Int): List<ChallengeStep>? {
+            val bedT = hm(s.bedtime) ?: return null
+            val wakeT = hm(s.wake) ?: return null
+            val span = sinceBed(bedT, wakeT).let { if (it == 0) 1440 else it }
+            val off = Math.floorMod(minute - (bedT.hour * 60 + bedT.minute), 1440)
+            if (off >= span) return null
+            val bed = LocalDateTime.of(2000, 1, 1, bedT.hour, bedT.minute)
+            return challengeAt(s, bed, bed.plusMinutes(off.toLong()))
+        }
+
+        /** Would the challenge before Dismiss be easier? Only while the OLD bedtime is Important (guarded; otherwise bedtime
+         *  challenge edits are free, as its other settings): the challenge turned off, the phrase extras (capitals + digits,
+         *  the grid) off while an old list has a phrase step, or - at ANY minute of the old night - the list in force
+         *  easier than the old one ([Challenges.stepsLooser]: a step removed / another kind / lower / fewer times, by id; a
+         *  step moved to the general list is compared by id too, and so normally asks). Like [dismissWaitsShorter] it looks
+         *  at the minutes where a step starts or the night begins / ends in either; a minute the new night doesn't cover
+         *  shows nothing. Adding steps, raising, reordering is free. */
+        fun challengeLooser(old: SleepCfg, new: SleepCfg): Boolean {
+            if (!old.guarded || !old.challenge) return false
+            if (!new.challenge) return true
+            val lists = listOf(old.generalChallenge) + old.tiers.map { Challenges.clean(it.challengeSteps) }
+            if (lists.any { l -> l.any { it.kind == Challenges.PHRASE } } &&
+                ((old.challengeComplex && !new.challengeComplex) || (old.challengeGrid && !new.challengeGrid))) return true
+            val marks = listOf(old, new).flatMap { c -> listOf(c.bedtime, c.wake) + c.tiers.map { it.from } }
+                .mapNotNull { hm(it)?.let { t -> t.hour * 60 + t.minute } }.toSet()
+            return marks.any { m ->
+                val was = nightChallenge(old, m); val now = nightChallenge(new, m)
+                was != null && now != null && Challenges.stepsLooser(was, now)
+            }
+        }
+
         /** A step in the daytime gap before bedtime (wake → bedtime): it counts from bedtime, as the bedtime screen
          *  only starts then. The same test the engine uses. */
         fun stepFromBedtime(s: SleepCfg, from: String): Boolean {
@@ -713,11 +770,12 @@ class RemindersEngine(private val rng: Random = Random.Default) {
             oldGuarded && ((oldOn && !newOn) || !newGuarded)
 
         /** A bedtime editor draft that weakens bedtime: its guard dropped, a shorter wait before Dismiss at any moment of
-         *  the night (the general one or a step's own, [dismissWaitsShorter]), or taps let through the bedtime screen
-         *  while it is important. Times, steps, heads-up, texts and the mode are otherwise ordinary edits (as on the PC). */
+         *  the night (the general one or a step's own, [dismissWaitsShorter]), taps let through the bedtime screen
+         *  while it is important, or an easier challenge before Dismiss ([challengeLooser], also only while important).
+         *  Times, steps, heads-up, texts and the mode are otherwise ordinary edits (as on the PC). */
         fun bedtimeLooser(old: SleepCfg, new: SleepCfg): Boolean =
             loosensReminder(old.on, old.guarded, old.on, new.guarded) || dismissWaitsShorter(old, new) ||
-                (old.guarded && old.blockBehind && !new.blockBehind)
+                (old.guarded && old.blockBehind && !new.blockBehind) || challengeLooser(old, new)
 
         /** A breaks editor draft that weakens breaks: dropping its guard, or an app added to "Allowed during breaks"
          *  (removing one is free). */

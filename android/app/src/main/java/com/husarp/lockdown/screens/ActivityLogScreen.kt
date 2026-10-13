@@ -61,8 +61,10 @@ private fun load(ctx: Context, cfg: Config): LogData {
     val from = today.minusDays(ActivityLog.DAYS - 1L)
     val pm = ctx.packageManager
     val labels = HashMap<String, String>()
+    // an app installed only in Island (a browser its sites were seen in) is named as the pickers name it: "Label (Island)"
+    val islandOnly by lazy { runCatching { IslandLink.islandOnly(ctx, emptySet()) }.getOrDefault(emptyList()).associate { it.pkg to it.label } }
     fun label(pkg: String) = labels.getOrPut(pkg) {
-        runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg)
+        runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrNull() ?: islandOnly[pkg] ?: pkg
     }
     val home = runCatching {
         pm.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName

@@ -6,9 +6,16 @@
 //
 // Page contract: mount() builds the static structure once, load() = one Api call (reminders_get) that fills it. The
 // rows of "Your reminders" are keyed by id and reused; a field you are typing in is never overwritten by a reload.
+//
+// "Challenge before Dismiss" (Sleep card): an On/Off switch, the general step list (js/steplist.js) and, in each "Comes
+// back" step, a choice "Uses the general list" / "Own list" (that step's own list, starting as a copy of the general
+// one). The lists save like every other box here (a short pause after the last edit); Python validates them and asks
+// the challenge when a save makes the bedtime challenge easier while the bedtime is Important - this file never
+// compares old with new.
 import { ld } from "../bridge.js";
 import { iconImg } from "../appicon.js";
 import { guarded } from "../challenge.js";
+import { stepListEditor } from "../steplist.js";
 import { check, confirmButton, el, empty, esc, field, ic, kic, seg, setText, sw, tp, toast } from "../ui.js";
 
 // ---------------------------------------------------------------- time pickers (the designer's hh : mm boxes)
@@ -40,6 +47,7 @@ export function setRange(node, range) {
 export const freshMs = 10_000;
 export const events = ["mode_changed"];     // a mode was added / renamed / deleted: the "Turn on a mode" list is read again
 const DEBOUNCE_MS = 500;
+const LIST_DEBOUNCE_MS = 700;               // after the last edit in a step list (a few clicks on a stepper make one save)
 const WAITS = [[0, "Off"], [10, "10 s"], [30, "30 s"], [60, "60 s"]];
 const LENGTHS = [2, 5, 10, 15];
 const BREAK_SNOOZES = [1, 2, 3, 5];
@@ -49,6 +57,8 @@ let rows = new Map();                       // id -> {node, refs}
 let modesKey = "";
 const timers = {};
 let touched = 0;                            // counts what you do in the cards: a reload that started before it must not overwrite it
+let generalEd = null;                       // the step list editor of "Challenge before Dismiss" (made on the first load)
+const ownEds = new WeakMap();               // a "Comes back" item -> the editor of its own list
 let inflight = 0;                           // saves on their way to Python
 
 const q = (k) => root.querySelector(`[data-k="${k}"]`);
@@ -69,6 +79,15 @@ const STYLE = `<style>
 .rem .step .step-wait[hidden] { display: none; }
 .rem .step .step-wait input { border: 0; background: transparent; font-weight: var(--fw-semibold); width: calc(52px * var(--s)); }
 .rem .step .step-wait input:focus { outline: 0; }
+.rem .tier-item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.rem .tier-item.has-own { flex: 1 1 100%; }
+.rem .tier-list[hidden], .rem .tier-own[hidden] { display: none; }
+.rem .tier-list { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.rem .tier-own { flex: 1 1 100%; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.rem .chal-list { border-top: 1px solid var(--line); }
+.rem .tier-own .sl-row { padding-left: var(--sp-3); padding-right: var(--sp-3); gap: var(--sp-1); }
+.rem .tier-own .sl-kind { width: calc(116px * var(--s)); }
+.rem .tier-own .sl-level { width: calc(124px * var(--s)); }
 </style>`;
 
 function sleepCard() {
@@ -79,11 +98,20 @@ function sleepCard() {
       ${field("Important", "Turning it off or making it ask for less needs the challenge.", flag("s-guarded", "sleep", "Important"))}
       ${field("Bedtime", "", `<span data-k="s-bed">${tp("23:00", "Bedtime")}</span><span class="muted small">Wake up</span><span data-k="s-wake">${tp("07:00", "Wake up")}</span><button class="btn btn-sm" type="button" data-act="save-times">Save times</button>`)}
       ${field("Heads-up", "Off, 30, 1h or 45s before bedtime (up to 12 h).", `${num("s-before", 90)}<span class="muted small">before bedtime</span>`)}
-      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Comes back</b><span>The later it is, the more often the bedtime screen returns after you dismiss it. Write how often (30s, 5 min, 1h30; at least 5s) and after what time. With a Dismiss wait on, a step can have its own (10s, 2 min); empty uses the Dismiss wait below.</span></div>
+      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Comes back</b><span>The later it is, the more often the bedtime screen returns after you dismiss it. Write how often (30s, 5 min, 1h30; at least 5s) and after what time. With a Dismiss wait on, a step can have its own (10s, 2 min); empty uses the Dismiss wait below. With Challenge before Dismiss on, a step can also have its own list of challenge steps.</span></div>
         <div class="steps" data-k="tiers"></div>
         <div><button class="btn btn-sm" type="button" data-act="tier-add">${ic("plus")}Add step</button></div></div>
       ${field("Dismiss wait", "Dismiss on the bedtime screen works only after this many seconds. A shorter wait (or Off) needs the challenge; a longer one is free.",
         `${seg("wait", WAITS.map(([v, t]) => [String(v), t]), "")}${num("s-wait", 56)}<span class="muted small">s</span>`)}
+      ${field("Challenge before Dismiss", "After the wait, Dismiss asks these steps first, inside the bedtime screen (its own list, separate from Anti-Bypass). Passing dismisses it once; the next time it comes back it asks again. Making it easier while this is Important needs the challenge. Disable alerts still asks the Anti-Bypass challenge; Emergency never asks one.",
+        seg("chal", [["0", "Off"], ["1", "On"]], "0"))}
+      <div data-k="c-body" hidden>
+        <div class="chal-list" data-k="c-general"></div>
+        <div data-k="c-px" hidden>
+          ${field("Numbers &amp; CAPITALS", "For a Typed phrase step: capitals and digits in the phrase. Turning it off while this is Important needs the challenge.", flag("c-complex", "sleep", "Numbers and capitals"))}
+          ${field("3×3 grid", "For a Typed phrase step: one word at a time in a grid. Turning it off while this is Important needs the challenge.", flag("c-grid", "sleep", "3 by 3 grid"))}
+        </div>
+      </div>
       ${field("Turn on a mode", "at bedtime, until wake-up time", select("s-mode", "sleep", [["", "No mode"]]))}
       ${field("Grey screen during bedtime", "The whole screen goes grey from bedtime until wake-up time, and gets its colour back after. Turning it off while this is Important needs the challenge. Windows may also have its own Color filters (Settings > Accessibility): Lockdown's grey is separate, and goes away when Lockdown gives the colour back.", flag("s-grey", "sleep", "Grey screen during bedtime"))}
       ${field("Block clicks behind the bedtime screen", "The bedtime screen (and a strict break) takes every click and key, and keeps itself in front, so nothing behind it can be used unseen. Its own buttons keep working. Turning it off while this is Important needs the challenge.", flag("s-block", "sleep", "Block clicks behind the bedtime screen"))}
@@ -132,6 +160,11 @@ export function mount(host, p) {
   root.addEventListener("change", onChange);
   root.addEventListener("input", onInput);
   root.addEventListener("seg", (e) => {
+    if (e.detail.name === "chal") {
+      touched++;
+      showChallenge();
+      return saveSleep();
+    }
     if (e.detail.name !== "wait") return;
     q("s-wait").value = e.detail.value === "0" ? "Off" : e.detail.value;
     saveSleep();
@@ -145,13 +178,79 @@ function tierRow(every, after, wait = "") {
   return n;
 }
 
+/** One "Comes back" step as the card shows it: the step itself, its choice of challenge list (only with Challenge before
+ *  Dismiss on) and, with "Own list", that list's editor under it. `[data-tier]` is the step. */
+function tierItem(every, after, wait = "") {
+  const item = el(`<div class="tier-item" data-tier-item></div>`);
+  item.append(tierRow(every, after, wait), el(`<label class="tier-list" data-k="t-listbox" hidden><span class="lbl muted small">Challenge</span><select class="select select-sm" data-k="t-list" aria-label="Challenge list for this step"><option value="general">Uses the general list</option><option value="own">Own list</option></select></label>`),
+    el(`<div class="tier-own" data-k="t-own" hidden></div>`));
+  return item;
+}
+
+const phraseInfo = () => ({ grid: !!q("c-grid").checked, own_length: 0 });
+const chalOn = () => root.querySelector('.seg[data-seg="chal"] button[aria-pressed="true"]')?.dataset.v === "1";
+
+function listChanged() {                                    // a step list was edited: save it a moment after the last edit
+  touched++;
+  showChallenge();
+  clearTimeout(timers.sleep);
+  timers.sleep = setTimeout(() => flush("sleep"), LIST_DEBOUNCE_MS);
+}
+
+function makeEditor(steps, label) {
+  return stepListEditor({ steps, options: data.challenge_options, onChange: listChanged, phrase: phraseInfo(), label });
+}
+
+/** Give a step its own list (`steps`, starting as a copy of the general one) or take it away (null = the general list). */
+function setOwn(item, steps) {
+  const box = item.querySelector('[data-k="t-own"]');
+  let ed = ownEds.get(item);
+  if (steps && data.challenge_options) {
+    if (!ed) {
+      ed = makeEditor(steps, "This step's challenge steps");
+      ownEds.set(item, ed);
+      box.replaceChildren(ed.el);
+    } else if (!typingIn(ed.el) && JSON.stringify(ed.get()) !== JSON.stringify(steps)) ed.set(steps);
+  } else if (ed) {
+    ownEds.delete(item);
+    box.replaceChildren();
+  }
+  const own = !!ownEds.get(item);
+  item.querySelector('[data-k="t-list"]').value = own ? "own" : "general";
+  box.hidden = !own || !chalOn();
+  item.classList.toggle("has-own", own && chalOn());
+}
+
+/** What depends on the switch and the lists: the step choices, the phrase extras (only while some list holds a phrase). */
+function showChallenge() {
+  const on = chalOn();
+  q("c-body").hidden = !on;
+  let phrase = !!generalEd && generalEd.hasPhrase();
+  for (const item of root.querySelectorAll("[data-tier-item]")) {
+    const ed = ownEds.get(item);
+    item.querySelector('[data-k="t-listbox"]').hidden = !on;
+    item.querySelector('[data-k="t-own"]').hidden = !on || !ed;
+    item.classList.toggle("has-own", on && !!ed);
+    if (ed && ed.hasPhrase()) phrase = true;
+  }
+  q("c-px").hidden = !on || !phrase;
+  const info = phraseInfo();
+  if (generalEd) generalEd.setPhrase(info);
+  for (const item of root.querySelectorAll("[data-tier-item]")) { const ed = ownEds.get(item); if (ed) ed.setPhrase(info); }
+}
+
 function sleepCfg() {
   return {
     on: q("s-on").checked, guarded: q("s-guarded").checked, bedtime: getTp(q("s-bed")), wake: getTp(q("s-wake")),
     before: q("s-before").value, mode: q("s-mode").value, dismiss_wait: q("s-wait").value, grey: q("s-grey").checked,
     block_behind: q("s-block").checked,
     warn_text: q("s-warn").value, text: q("s-text").value,
-    tiers: [...root.querySelectorAll("[data-tier]")].map((t) => ({ every: t.querySelector("input").value, after: getTp(t.querySelector(".tp")), wait: t.querySelector('[data-k="t-wait"]').value })),
+    tiers: [...root.querySelectorAll("[data-tier-item]")].map((item) => {
+      const t = item.querySelector("[data-tier]"), ed = ownEds.get(item);
+      return { every: t.querySelector("input").value, after: getTp(t.querySelector(".tp")), wait: t.querySelector('[data-k="t-wait"]').value,
+        ...(generalEd ? { challenge_steps: ed ? ed.get() : null } : {}) };       // (null = this step uses the general list)
+    }),
+    ...(generalEd ? { challenge: chalOn(), challenge_steps: generalEd.get(), challenge_complex: q("c-complex").checked, challenge_grid: q("c-grid").checked } : {}),
   };
 }
 
@@ -195,6 +294,14 @@ function onChange(e) {
   if (k === "s-on" || k === "b-on") {                       // the two main switches: their own call, no form to validate
     return run(() => ld.call("reminder_set_on", k === "s-on" ? "sleep" : "break", t.checked), null);
   }
+  if (k === "t-list") {                                      // "Uses the general list" / "Own list" on a step
+    if (!generalEd) return;
+    const item = t.closest("[data-tier-item]");
+    setOwn(item, t.value === "own" ? generalEd.get() : null);       // (an own list starts as a copy of the general one)
+    showChallenge();
+    return flush("sleep");
+  }
+  if (k === "c-grid") showChallenge();
   const which = t.dataset.save || (t.closest("[data-tier]") ? "sleep" : "");
   if (which) flush(which);
   else if (t.dataset.rowSwitch !== undefined) {
@@ -224,10 +331,12 @@ function onClick(e) {
   if (act === "save-times") flush("sleep");
   else if (act === "tier-add") {
     const last = root.querySelectorAll("[data-tier]");
-    b.closest(".field").querySelector('[data-k="tiers"]').append(tierRow(last.length ? "5 min" : "15 min", "21:00"));
+    b.closest(".field").querySelector('[data-k="tiers"]').append(tierItem(last.length ? "5 min" : "15 min", "21:00"));
+    showChallenge();
     flush("sleep");
   } else if (act === "tier-x") {
-    b.closest("[data-tier]").remove();
+    b.closest("[data-tier-item]").remove();
+    showChallenge();
     flush("sleep");
   } else if (act === "allow-add") {
     import("../appbrowser.js").then((m) => m.openAppBrowser({ mode: "pick", onPick: (app) => run(() => ld.call("break_allow_add", app.exe), "allow-err") }));
@@ -242,6 +351,11 @@ function onClick(e) {
 
 // ---------------------------------------------------------------- filling (never touches a box you are typing in)
 const idle = (node) => node !== document.activeElement;
+/** Is a box inside `node` being typed in? (A focused button or choice is not: a refused save may snap those back.) */
+const typingIn = (node) => {
+  const a = document.activeElement;
+  return !!a && node.contains(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
+};
 function put(node, value) {
   if (idle(node) && node.value !== String(value)) node.value = String(value);
 }
@@ -255,19 +369,34 @@ function fillTiers(tiers, general) {
     for (const w of box.querySelectorAll('[data-k="t-waitbox"]')) { w.hidden = !(general > 0); w.querySelector("input").placeholder = `${general}s`; }
   };
   waitBoxes();
-  if (box.contains(document.activeElement)) return;
-  const have = [...box.querySelectorAll("[data-tier]")];
+  if (typingIn(box)) return;
+  const have = [...box.querySelectorAll("[data-tier-item]")];
   tiers.forEach((t, i) => {
-    let n = have[i];
-    if (!n) { n = tierRow(t.every, t.after, t.wait); box.append(n); }
+    let item = have[i];
+    if (!item) { item = tierItem(t.every, t.after, t.wait); box.append(item); }
+    const n = item.querySelector("[data-tier]");
     const input = n.querySelector("input");
     if (input.value !== t.every) input.value = t.every;
     const wait = n.querySelector('[data-k="t-wait"]');
     if (wait.value !== (t.wait || "")) wait.value = t.wait || "";
     setTp(n.querySelector(".tp"), t.after);
+    setOwn(item, t.challenge_steps && t.challenge_steps.length ? t.challenge_steps : null);
   });
   have.slice(tiers.length).forEach((n) => n.remove());
   waitBoxes();
+}
+
+/** "Challenge before Dismiss": the switch, the general list and the phrase extras; each step's choice is set by fillTiers. */
+function fillChallenge(s) {
+  if (!data.challenge_options) return;
+  if (!generalEd) {
+    generalEd = makeEditor(s.challenge_steps, "Bedtime challenge steps");
+    q("c-general").replaceChildren(generalEd.el);
+  } else if (!typingIn(generalEd.el) && JSON.stringify(generalEd.get()) !== JSON.stringify(s.challenge_steps)) generalEd.set(s.challenge_steps);
+  for (const b of root.querySelectorAll('.seg[data-seg="chal"] button')) b.setAttribute("aria-pressed", String(b.dataset.v === (s.challenge ? "1" : "0")));
+  putChecked(q("c-complex"), s.challenge_complex);
+  putChecked(q("c-grid"), s.challenge_grid);
+  showChallenge();
 }
 
 function fillModes(list, current) {
@@ -294,7 +423,9 @@ function fillSleep(s, modes) {
     if (!q(k).contains(document.activeElement)) setTp(q(k), value);
   }
   put(q("s-before"), s.before);
+  fillChallenge(s);
   fillTiers(s.tiers, s.dismiss_wait);
+  showChallenge();
   put(q("s-wait"), s.dismiss_wait ? s.dismiss_wait : "Off");
   for (const b of root.querySelectorAll('.seg[data-seg="wait"] button')) b.setAttribute("aria-pressed", String(b.dataset.v === String(s.dismiss_wait)));
   fillModes(modes, s.mode);

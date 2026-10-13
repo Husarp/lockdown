@@ -11,6 +11,7 @@ import com.husarp.lockdown.data.inSavedOrder
 import com.husarp.lockdown.engine.AntiBypass
 import com.husarp.lockdown.engine.AntiBypassCfg
 import com.husarp.lockdown.engine.BreakCfg
+import com.husarp.lockdown.engine.ChallengeStep
 import com.husarp.lockdown.engine.EmergencyTier
 import com.husarp.lockdown.engine.KeywordsCfg
 import com.husarp.lockdown.engine.RemindersEngine
@@ -114,6 +115,36 @@ class DraftsTest {
         assertFalse(RemindersEngine.breaksLooser(b, b.copy(every = 90, strict = false)))
         assertTrue(RemindersEngine.breaksLooser(b, b.copy(guarded = false)))
         assertFalse(RemindersEngine.breaksLooser(BreakCfg(), BreakCfg(guarded = true)))
+    }
+
+    @Test fun the_challenge_list_is_one_draft_that_asks_once_if_any_row_loosens() {
+        val rows = listOf(ChallengeStep("a", "math", 2, 5), ChallengeStep("b", "phrase", 60, 1))
+        val saved = gr(base.copy(antibypass = AntiBypassCfg(phrase = true, steps = rows)))
+        fun with(steps: List<ChallengeStep>) = saved.copy(ab = saved.ab.copy(steps = steps))
+        assertFalse(with(rows + ChallengeStep("n", "memory", 0, 1)).looser(saved))               // a step added: free
+        assertFalse(with(rows.reversed()).looser(saved))                                         // moved: free
+        assertFalse(with(listOf(rows[0].copy(level = 3, times = 9), rows[1])).looser(saved))     // raised: free
+        assertTrue(with(listOf(rows[0].copy(times = 4), rows[1])).looser(saved))                 // fewer times: the challenge
+        // two edits, one of them a loosening: the whole draft asks, once
+        assertTrue(with(listOf(rows[0].copy(level = 3), rows[1].copy(level = 30))).looser(saved))
+        assertEquals(setOf("challenge"), with(rows.reversed()).changedSections(saved))
+        // a config from before lists: the one phrase step is what is compared and what Save keeps
+        val old = gr(base.copy(antibypass = AntiBypassCfg(phrase = true, length = 120)))
+        assertNull(old.ab.steps)
+        assertFalse(old.copy(ab = old.ab.copy(steps = old.ab.stepList + ChallengeStep("n", "math", 1, 3))).looser(old))
+        assertTrue(old.copy(ab = old.ab.copy(steps = listOf(ChallengeStep("n", "math", 3, 20)))).looser(old))
+        val edited = old.copy(ab = old.ab.copy(steps = old.ab.stepList + ChallengeStep("n", "math", 1, 3)))
+        val out = edited.applyTo(base.copy(antibypass = old.ab.copy(unlockedFrom = "2026-10-09T10:00", unlockedUntil = "2026-10-09T10:05")))
+        assertEquals(edited.ab.steps, out.antibypass.steps)
+        assertEquals("2026-10-09T10:05", out.antibypass.unlockedUntil)                          // the open unlock window is kept
+    }
+
+    @Test fun bedtime_challenge_edits_ride_on_the_one_bedtime_check() {
+        val s = SleepCfg(on = true, guarded = true, challenge = true, challengeSteps = listOf(ChallengeStep("g", "math", 1, 3)))
+        assertFalse(RemindersEngine.bedtimeLooser(s, s.copy(challengeSteps = s.challengeSteps + ChallengeStep("n", "sort", 0, 1))))
+        assertTrue(RemindersEngine.bedtimeLooser(s, s.copy(challengeSteps = listOf(ChallengeStep("g", "math", 1, 2)))))
+        assertTrue(RemindersEngine.bedtimeLooser(s, s.copy(challenge = false)))
+        assertFalse(RemindersEngine.bedtimeLooser(s.copy(guarded = false), s.copy(guarded = false, challenge = false)))   // not Important: free
     }
 
     @Test fun blocked_words_loosen_by_anything_off_or_an_exception() {

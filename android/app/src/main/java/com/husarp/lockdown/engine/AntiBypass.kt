@@ -7,7 +7,8 @@ import kotlin.random.Random
 /**
  * Anti-Bypass, ported from the PC antibypass.py: anything that *loosens* a block needs a challenge first;
  * tightening is always instant. Challenges (any combination; both off = anti-bypass off):
- *  - phrase: type a random phrase (no pasting). Passing unlocks loosening for [UNLOCK_MIN] minutes.
+ *  - phrase: the challenge list (Challenges.kt: Math, Memory grid, Sorting, Typed phrase, mixed; a config with no list
+ *    asks today's one phrase, no pasting). Passing unlocks loosening for [UNLOCK_MIN] minutes.
  *  - hours: loosening only inside chosen time windows.
  *  - wait: passing doesn't open at once - a cooling-off period first.
  * The emergency unlock (Emergency.kt) is separate, with its own limits. Pure and testable.
@@ -38,7 +39,13 @@ data class AntiBypassCfg(
     val waitMin: Int = 0,
     val unlockedFrom: String? = null,
     val unlockedUntil: String? = null,
-)
+    // The challenge list while [phrase] is on. Null (a config from before lists, an old backup, the Island copy): read as one
+    // phrase step of [length] ([stepList]). [grid], [complex] and the own phrase apply to every phrase step.
+    val steps: List<ChallengeStep>? = null,
+) {
+    /** The list as in force: [steps] read leniently, or - none (or none readable) - the one phrase step of [length]. */
+    val stepList: List<ChallengeStep> get() = Challenges.read(steps, listOf(Challenges.migrated(length)))
+}
 
 object AntiBypass {
     const val UNLOCK_MIN = 5L
@@ -101,18 +108,27 @@ object AntiBypass {
     fun phraseFor(cfg: AntiBypassCfg, rng: Random = Random.Default): String =
         ownPhrase(cfg).ifEmpty { newPhrase(cfg.length, cfg.complex, rng) }
 
-    private fun phraseStrength(cfg: AntiBypassCfg): Int =
-        ownPhrase(cfg).ifEmpty { null }?.replace(" ", "")?.length ?: cfg.length
+    /** The phrase extras every phrase step is asked with. */
+    fun phraseOpts(cfg: AntiBypassCfg) = PhraseOpts(cfg.grid, cfg.complex, ownPhrase(cfg))
+
+    /** A run of the challenge list for [cfg] (the screen's clock [nowMs] when it is first drawn). */
+    fun newRun(cfg: AntiBypassCfg, nowMs: Long, rng: Random = Random.Default) = ChallengeRun(cfg.stepList, phraseOpts(cfg), rng, nowMs)
+
+    /** "Takes about ..." for the list as in force, in seconds. */
+    fun takesSeconds(cfg: AntiBypassCfg) = Challenges.takesSeconds(cfg.stepList, phraseOpts(cfg))
 
     /** A challenge field's edit was typed (one character at a time, or a deletion), not a pasted chunk (PC block_paste). */
     fun typedNotPasted(old: String, new: String): Boolean = new.length - old.length <= 1
 
-    /** Anti-Bypass itself weakened: a challenge off, a shorter/simpler phrase, grid dropped, other hours, less wait.
-     *  Setting, changing or picking your own phrase again counts too: one you know is weaker than a random one of the
-     *  same length. Picking a random one (yours stays saved) is free unless it is shorter. */
+    /** Anti-Bypass itself weakened: a challenge off, an easier list, grid dropped, other hours, less wait. An easier list
+     *  ([Challenges.stepsLooser], row by row): a step removed, another kind, a lower level or fewer times - a phrase step
+     *  by its strength, your own phrase's letters or its length. Adding a step, raising a level or its times, reordering
+     *  is free. Setting, changing or picking your own phrase again counts too: one you know is weaker than a random one of
+     *  the same length. Picking a random one (yours stays saved) is free unless it is shorter. */
     fun settingsLooser(old: AntiBypassCfg, new: AntiBypassCfg): Boolean =
         (new.waitMin < old.waitMin) ||
-            (old.phrase && (!new.phrase || phraseStrength(new) < phraseStrength(old) ||
+            (old.phrase && (!new.phrase ||
+                Challenges.stepsLooser(old.stepList, new.stepList, Challenges.ownLetters(ownPhrase(old)), Challenges.ownLetters(ownPhrase(new))) ||
                 (ownPhrase(new).isNotEmpty() && ownPhrase(new) != ownPhrase(old)) ||
                 (old.grid && !new.grid) || (old.complex && !new.complex))) ||
             (old.hours && (!new.hours || new.windows != old.windows))

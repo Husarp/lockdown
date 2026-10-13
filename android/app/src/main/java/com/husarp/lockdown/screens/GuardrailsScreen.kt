@@ -87,6 +87,7 @@ import com.husarp.lockdown.ui.SectionLabel
 import com.husarp.lockdown.ui.SwitchRowInline
 import com.husarp.lockdown.ui.HairlineSpacer
 import com.husarp.lockdown.ui.SaveBar
+import com.husarp.lockdown.ui.StepListEditor
 import com.husarp.lockdown.ui.UnsavedChanges
 import com.husarp.lockdown.ui.rememberDraft
 import java.time.Duration
@@ -120,15 +121,17 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
     fun setAb(f: (AntiBypassCfg) -> AntiBypassCfg) = d.update { it.copy(ab = f(it.ab)) }
     val ownPhrase = dab.useOwn          // "My own phrase" picked ("A random phrase" keeps it saved)
     var ownText by remember(d.resets) { mutableStateOf(dab.customPhrase) }
-    var lengthText by remember(d.resets, dab.length) { mutableStateOf(dab.length.toString()) }
+    val steps = dab.stepList                                  // the challenge list as edited (an unlisted config reads as one phrase step)
 
     fun save(then: () -> Unit) {
         val new = d.value
         val problem = new.problem() ?: when {
             !new.ab.phrase -> null
-            new.ab.useOwn && new.ab.customPhrase.isEmpty() -> "Type your own phrase, or pick a random one."
-            !new.ab.useOwn && AntiBypass.parseLength(lengthText) == null -> "The phrase length must be ${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH}."
-            else -> null
+            else -> com.husarp.lockdown.engine.Challenges.validate(new.ab.stepList) ?: when {
+                new.ab.stepList.any { it.kind == com.husarp.lockdown.engine.Challenges.PHRASE } &&
+                    new.ab.useOwn && new.ab.customPhrase.isEmpty() -> "Type your own phrase, or pick a random one."
+                else -> null
+            }
         }
         if (problem != null) { Toast.makeText(ctx, problem, Toast.LENGTH_LONG).show(); return }
         val old = GuardrailsEdit.of(Store.config)
@@ -204,7 +207,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
         SectionCard(Icons.Filled.HealthAndSafety, Hue.GREEN, "Reliability",
             if (failing.isEmpty()) "All good" else failing.first() + if (failing.size > 1) " · ${failing.size - 1} more" else "",
             alert = failing.isNotEmpty(), dot = if (failing.isNotEmpty()) cs.error else null) { section = "reliability" }
-        SectionCard(Icons.Filled.Password, Hue.VIOLET, "Before loosening (challenge)", challengeSummary(dab, ownPhrase),
+        SectionCard(Icons.Filled.Password, Hue.VIOLET, "Before loosening (challenge)", challengeSummary(dab),
             dot = if ("challenge" in changed) warnDot else null) { section = "challenge" }
         run {
             val em = cfg.emergency
@@ -260,7 +263,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
             Text("Tightening a rule never asks. Loosening needs:", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Type a phrase", dab.phrase) { setAb { it.copy(phrase = !it.phrase) } }
+                Chip("Ask a challenge", dab.phrase) { setAb { it.copy(phrase = !it.phrase) } }
                 Chip("Only in hours", dab.hours) { setAb { it.copy(hours = !it.hours, windows = it.windows.ifEmpty { listOf(DEFAULT_HOURS) }) } }
                 Chip("Cool-off", dab.waitMin > 0) {
                     setAb { it.copy(waitMin = if (it.waitMin > 0) 0 else d.saved.ab.waitMin.takeIf { m -> m > 0 } ?: DEFAULT_WAIT) }
@@ -268,40 +271,15 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
             }
             if (dab.phrase) {
                 Spacer(Modifier.height(14.dp))
-                // random or your own, chosen before Save: nothing is locked in half-set
-                com.husarp.lockdown.ui.Segmented(listOf("A random phrase", "My own phrase"), if (ownPhrase) 1 else 0) { i ->
-                    setAb { it.copy(useOwn = i == 1) }
+                Text("Steps, done top to bottom", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                StepListEditor(steps, onChange = { l -> setAb { c -> com.husarp.lockdown.ui.StepEdit.cfgWith(c, l, d.saved.ab) } },
+                    phrase = AntiBypass.phraseOpts(dab), newPhraseLength = dab.length) {
+                    PhraseExtras(dab, ownText, { ownText = it }) { f -> setAb(f) }
                 }
-                Spacer(Modifier.height(12.dp))
-                if (!ownPhrase) {          // a random phrase's settings; your own phrase has none
-                    Text("Phrase length", style = MaterialTheme.typography.titleSmall)
-                    Spacer(Modifier.height(6.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((label, n) in PHRASE_LENGTHS) Chip("$label · $n", dab.length == n) { setAb { it.copy(length = n) } }
-                    }
-                    OutlinedTextField(lengthText, { v ->
-                            lengthText = v.filter(Char::isDigit).take(4)
-                            AntiBypass.parseLength(lengthText)?.let { n -> setAb { it.copy(length = n) } }
-                        },
-                        label = { Text("Or any length") }, singleLine = true, isError = AntiBypass.parseLength(lengthText) == null,
-                        supportingText = { Text("${AntiBypass.MIN_LENGTH} to ${AntiBypass.MAX_LENGTH} characters. Longer is free; shorter needs the challenge.") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(8.dp))
-                } else {
-                    OutlinedTextField(ownText, { v -> ownText = v; setAb { it.copy(customPhrase = cleanPhrase(v)) } },
-                        label = { Text("Your own phrase") }, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(10.dp))
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!ownPhrase) Chip("Numbers and capitals", dab.complex) { setAb { it.copy(complex = !it.complex) } }
-                    Chip("Table writing", dab.grid) { setAb { it.copy(grid = !it.grid) } }
-                }
-                Text(
-                    (if (ownPhrase) "Your own phrase, typed exactly each time (no pasting). Once saved, changing it or picking it again needs the challenge; a random phrase keeps it saved."
-                        else "A random phrase of ${dab.length} characters" + (if (dab.complex) ", with numbers and capitals" else "") + ".") +
-                        if (dab.grid) " Typed word by word into a 3×3 grid (no paste/macros)." else "",
-                    Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                )
+                Text("Adding a step, a higher level or more times, or moving steps is free. Removing a step, a lower level, fewer times " +
+                    "or another kind needs the challenge.",
+                    Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             if (dab.waitMin > 0) {
                 Spacer(Modifier.height(14.dp))
@@ -311,7 +289,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                     for (m in (WAIT_OPTIONS + dab.waitMin).distinct().sorted())
                         Chip("$m min", dab.waitMin == m) { setAb { it.copy(waitMin = m) } }
                 }
-                Text("The change goes through this long after the phrase is right, with the app left open.",
+                Text("The change goes through this long after the challenge is passed, with the app left open.",
                     Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             if (dab.hours) {
@@ -407,9 +385,15 @@ private val RESET_FMT = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM 
 private val GUARD_SECTIONS = mapOf("reliability" to "Reliability", "challenge" to "Before loosening anything",
     "emergency" to "Emergency unlock", "switches" to "Switches")
 
-/** The challenge as set (in the page's draft) in a line: "Random phrase, 40 characters · 5 min cool-off", or "Off". */
-private fun challengeSummary(ab: AntiBypassCfg, own: Boolean): String = listOfNotNull(
-    if (!ab.phrase) null else if (own) "Your own phrase" else "Random phrase, ${ab.length} characters",
+/** The challenge as set (in the page's draft) in a line: "Random phrase, 40 characters · 5 min cool-off", "3 steps · about
+ *  4 min", or "Off". */
+private fun challengeSummary(ab: AntiBypassCfg): String = listOfNotNull(
+    if (!ab.phrase) null else ab.stepList.let { l ->
+        val one = l.singleOrNull()
+        if (one != null && one.kind == com.husarp.lockdown.engine.Challenges.PHRASE && one.times == 1) {
+            if (AntiBypass.ownPhrase(ab).isNotBlank()) "Your own phrase" else "Random phrase, ${one.level} characters"
+        } else "${l.size} ${if (l.size == 1) "step" else "steps"} · ${com.husarp.lockdown.engine.Challenges.takesText(AntiBypass.takesSeconds(ab))}"
+    },
     if (ab.hours) "only in set hours" else null,
     if (ab.waitMin > 0) "${ab.waitMin} min cool-off" else null,
 ).joinToString(" · ").ifEmpty { "Off" }
@@ -449,7 +433,36 @@ private fun TierEditor(t: EmergencyTier, left: Emergency.Uses?, onChange: (Emerg
     }
 }
 
-private val PHRASE_LENGTHS = listOf("Short" to 30, "Medium" to 60, "Long" to 120, "Very long" to 250)   // as the PC
+/** The phrase extras every phrase step shares: a random phrase or your own (its text), Numbers and capitals, Table writing. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PhraseExtras(dab: AntiBypassCfg, ownText: String, onOwnText: (String) -> Unit, setAb: ((AntiBypassCfg) -> AntiBypassCfg) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val own = dab.useOwn
+    Column {
+        Text("Typed phrase", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(6.dp))
+        // random or your own, chosen before Save: nothing is locked in half-set
+        com.husarp.lockdown.ui.Segmented(listOf("A random phrase", "My own phrase"), if (own) 1 else 0) { i -> setAb { it.copy(useOwn = i == 1) } }
+        Spacer(Modifier.height(10.dp))
+        if (own) {
+            OutlinedTextField(ownText, { v -> onOwnText(v); setAb { it.copy(customPhrase = cleanPhrase(v)) } },
+                label = { Text("Your own phrase") }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!own) Chip("Numbers and capitals", dab.complex) { setAb { it.copy(complex = !it.complex) } }
+            Chip("Table writing", dab.grid) { setAb { it.copy(grid = !it.grid) } }
+        }
+        Text(
+            (if (own) "Your own phrase, typed exactly each time (no pasting) - it replaces the random one in every phrase step. Once saved, changing it or picking it again needs the challenge; a random phrase keeps it saved."
+                else "A random phrase" + (if (dab.complex) ", with numbers and capitals" else "") + ".") +
+                if (dab.grid) " Typed word by word into a 3×3 grid (no paste/macros)." else "",
+            Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+        )
+    }
+}
+
 private val WAIT_OPTIONS = listOf(1, 2, 5, 10, 15, 30, 60)
 
 /**

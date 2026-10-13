@@ -19,6 +19,7 @@ turned on, `force`); ending a pause and switching Lockdown on are free (`pause_r
 live in webapi/shell.py, as the top bar uses them).
 """
 import antibypass
+import challenges
 import modes
 import pause
 import reminders
@@ -29,7 +30,7 @@ from .core import ApiError
 
 MAX_PHRASE_CHARS = 2000              # the longest own phrase (as long as the longest random one)
 MAX_WINDOWS = 14
-SAVE_KEYS = ("phrase", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait")
+SAVE_KEYS = ("phrase", "steps", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait")
 OFF_CHANGE = "Turn Lockdown off entirely (no blocking, no limits, no reminders, until you turn it back on)"
 
 
@@ -44,12 +45,19 @@ def hours_text(cfg: dict) -> str:
 
 @core.internal
 def describe(cfg: dict) -> str:
-    """What loosening a block needs, in one line (the same words as the old window's confirm)."""
+    """What loosening a block needs, in one line (the same words as the old window's confirm). A list of steps is told
+    step by step; a single phrase is told as before."""
     parts = []
     if cfg["phrase"]:
-        which = "your own phrase" if antibypass.own_phrase(cfg) else (
-            f"a {cfg['length']}-character phrase" + (" (with numbers & capitals)" if cfg.get("complex") else ""))
-        parts.append(f"typing {which}" + (" in a 3×3 grid" if cfg["grid"] else ""))
+        steps = antibypass.steps_of(cfg)
+        if len(steps) == 1 and steps[0]["kind"] == "phrase" and steps[0]["times"] == 1:
+            length = steps[0]["level"]
+            which = "your own phrase" if antibypass.own_phrase(cfg) else (
+                f"a {length}-character phrase" + (" (with numbers & capitals)" if cfg.get("complex") else ""))
+            parts.append(f"typing {which}" + (" in a 3×3 grid" if cfg["grid"] else ""))
+        else:
+            parts.append(f"doing {challenges.steps_text(steps)}" + (
+                " (the phrase in a 3×3 grid)" if cfg["grid"] and challenges.has_phrase(steps) else ""))
     if cfg["hours"]:
         parts.append(f"only {hours_text(cfg)}")
     return "Loosening a block needs: " + " · ".join(parts) if parts else "Off - loosening a block needs nothing."
@@ -110,7 +118,8 @@ def _page(ctx) -> dict:
     cfg = antibypass.settings(db)
     return {
         "now": _iso(now),
-        "config": {"phrase": bool(cfg["phrase"]), "length": cfg["length"], "grid": bool(cfg["grid"]),
+        "config": {"phrase": bool(cfg["phrase"]), "steps": cfg["steps"], "length": cfg["length"],
+                   "grid": bool(cfg["grid"]),
                    "complex": bool(cfg.get("complex")), "use_own": bool(antibypass.own_phrase(cfg)),
                    "custom_phrase": cfg.get("custom_phrase") or "",
                    "hours": bool(cfg["hours"]), "windows": cfg["windows"], "wait_min": cfg.get("wait_min") or 0,
@@ -121,6 +130,8 @@ def _page(ctx) -> dict:
         "banner": _banner(cfg, now),
         "unlock_min": antibypass.UNLOCK_MIN,
         "lengths": antibypass.LENGTHS, "min_length": antibypass.MIN_LENGTH, "max_length": antibypass.MAX_LENGTH,
+        "challenge": {**challenges.options(), "estimate": challenges.estimate(
+            cfg["steps"], bool(cfg["grid"]), len(antibypass.own_phrase(cfg).replace(" ", "")))},
         "pause": _pause_data(db, now),
         "lockdown": _off_data(db),
     }
@@ -151,6 +162,13 @@ def _length(value) -> int:
         raise ApiError(f"Phrase length: a number from {antibypass.MIN_LENGTH} to {antibypass.MAX_LENGTH}.")
     try:
         return antibypass.parse_length(value)
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+
+
+def _steps(value) -> list:
+    try:
+        return challenges.validate_steps(value)
     except ValueError as e:
         raise ApiError(str(e)) from None
 
@@ -214,6 +232,8 @@ def _fields(sent: dict, old: dict) -> dict:
     new = {}
     if "phrase" in sent:
         new["phrase"] = _flag(sent["phrase"], "Random phrase")
+    if "steps" in sent:
+        new["steps"] = _steps(sent["steps"])
     if "length" in sent:
         new["length"] = _length(sent["length"])
     if "grid" in sent:
@@ -248,22 +268,30 @@ def _apply(ctx, fields: dict) -> dict:
 
 
 def _asked(cfg: dict) -> dict:
-    """The challenge settings as they are met: your own phrase while it's on, else the random one's length and numbers."""
+    """The challenge settings as they are met: the steps (in any order; a phrase's length is not met while your own
+    phrase is on), your own phrase while it's on, else the random one's length and numbers."""
     own = antibypass.own_phrase(cfg)
+    steps = sorted(({**s, "level": 0} if own and s["kind"] == "phrase" else s for s in antibypass.steps_of(cfg)),
+                   key=lambda s: s["id"])
     return {**{k: cfg[k] for k in ("phrase", "grid", "hours", "windows", "wait_min")},
+            **({"steps": steps} if cfg["phrase"] else {}),
             **({"own": own} if own else {"length": cfg["length"], "complex": cfg.get("complex")})}
 
 
 @core.loosen
 def antibypass_save(ctx, cfg, confirmed=False):
-    """Change the challenges: `cfg` holds only what changed (phrase, length, grid, complex, use_own, custom_phrase,
-    hours, windows, wait). -> the page data once saved; {needs_challenge, ticket, ...} when it weakens Anti-Bypass;
-    {needs_confirm, line} when it is a stricter change that wants a yes first (send it again with confirmed=True)."""
+    """Change the challenges: `cfg` holds only what changed (phrase, steps, length, grid, complex, use_own,
+    custom_phrase, hours, windows, wait). `steps` is the whole list [{id, kind, level, times}], checked strictly
+    (challenges.validate_steps) and compared row by row with the stored one. -> the page data once saved;
+    {needs_challenge, ticket, ...} when it weakens Anti-Bypass; {needs_confirm, line} when it is a stricter change
+    that wants a yes first (send it again with confirmed=True)."""
     confirmed = _flag(confirmed, "Confirmed")
     old = antibypass.settings(ctx.db)
     fields = {k: v for k, v in _fields(cfg, old).items() if old.get(k) != v}
     if not fields:
         return _page(ctx)
+    if "length" in fields and "steps" not in fields and old["steps"] == challenges.default_steps(old["length"]):
+        fields["steps"] = challenges.default_steps(fields["length"])   # (a page that knows only a length)
     new = {**old, **fields}
     if new["use_own"] and not new["custom_phrase"]:
         if fields.get("use_own"):

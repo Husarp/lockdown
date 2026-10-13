@@ -88,6 +88,27 @@ def escape_challenge(page):
     dialog_closed(page)
 
 
+def step_rows(page):
+    """The step list as the page shows it: [{kind, level (the select's value), times}]."""
+    return page.eval_on_selector_all("[data-step]", """rows => rows.map(r => ({
+        kind: r.querySelector('[data-f=kind]').value, level: r.querySelector('[data-f=level]').value,
+        times: r.querySelector('.stepper input').value}))""")
+
+
+def escape_dialog(page):
+    """Whatever dialog is open (the challenge in any of its shapes): Escape."""
+    page.wait_for_selector("#dlg[open]", timeout=5000)
+    page.keyboard.press("Escape")
+    dialog_closed(page)
+
+
+def stored_steps(harness):
+    return [(s["kind"], s["level"], s["times"]) for s in stored(harness)["steps"]]
+
+
+MIXED = [{"id": "a1", "kind": "phrase", "level": 30, "times": 1}, {"id": "b2", "kind": "math", "level": 1, "times": 3}]
+
+
 def tone(page):
     return page.get_attribute('[data-k="banner"]', "class")
 
@@ -103,7 +124,7 @@ def test_the_page_shows_every_part(shell, page, harness):
     heads = page.eval_on_selector_all(".ab .card-h h3", "els => els.map(e => e.textContent)")
     assert heads == ["Challenges", "Always on", "Pause my blocks", "Turn Lockdown off", "What needs the challenge",
                      "Keeping Lockdown running"]
-    for label in ("Type a random phrase", "Length", "Short 30", "Medium 60", "Long 120", "Very long 250", "characters",
+    for label in ("Ask a challenge", "Steps - done top to bottom", "Add a step", "How long", "Save steps", "Undo",
                   "Numbers & CAPITALS", "3×3 grid", "Use my own phrase", "Your own phrase", "Save phrase", "Then wait",
                   "Only during these hours", "Add time window", "Save hours", "Try the challenge",
                   "Silence all notifications", "Resume blocking", "Uninstall protection", "Trusted time"):
@@ -112,8 +133,10 @@ def test_the_page_shows_every_part(shell, page, harness):
     assert page.locator('.ab .card:has(h3:text("Keeping Lockdown running")) li').count() == 4
     assert page.locator('[data-k="p-seg"] button').all_inner_texts() == ["30 min", "1 h", "2 h", "4 h", "Rest of the day"]
     # the saved values
-    assert page.input_value('[data-k="len"] input') == "60" and page.input_value('[data-k="wait"]') == "Off"
-    assert page.get_attribute('.ab-len .seg button[data-v="60"]', "aria-pressed") == "true"
+    assert page.input_value('[data-k="wait"]') == "Off"
+    assert step_rows(page) == [{"kind": "phrase", "level": "60", "times": "1"}]        # the old single phrase, as a list
+    assert page.inner_text('[data-k="sl-time"]') == "under 1 min" and page.is_hidden('[data-k="sl-note"]')
+    assert page.is_disabled('[data-k="save-steps"]') and page.inner_text('[data-k="steps-why"]') == "No changes."
     assert page.locator("[data-win]").count() == 1
     assert page.locator('[data-win] [data-act="win-x"]').is_hidden()          # no x on the only window
     assert page.is_hidden('[data-act="lock"]') and page.is_hidden('[data-act="unlock"]')
@@ -272,61 +295,201 @@ def test_a_weaker_change_while_locked_opens_the_challenge_and_snaps_back(shell, 
     assert stored(harness)["phrase"] is False and page.is_checked('[data-k="phrase"]') is False
 
 
-def test_a_shorter_phrase_while_locked_is_the_challenge_not_the_question(shell, page, harness):
-    lock(harness, length=120)
+# ---------------------------------------------------------------- the step list
+
+def test_the_stored_steps_are_shown_with_their_kind_level_and_times(shell, page, harness):
+    lock(harness, steps=MIXED)
     open_page(shell, page)
-    page.click('.ab-len .seg button[data-v="30"]')
-    escape_challenge(page)
-    wait_for(page, "document.querySelector('.ab-len .seg button[data-v=\"120\"]').getAttribute('aria-pressed') === 'true'")
-    assert stored(harness)["length"] == 120
+    assert step_rows(page) == [{"kind": "phrase", "level": "30", "times": "1"}, {"kind": "math", "level": "1", "times": "3"}]
+    assert page.locator('[data-step] [data-f="kind"]').first.locator("option").all_inner_texts() == [
+        "Math", "Memory grid", "Sorting", "Typed phrase"]
+    assert page.locator('[data-step] [data-f="level"]').nth(1).locator("option").all_inner_texts() == [
+        "Easy", "Medium", "Hard", "Very hard"]
+    assert page.locator('[data-step] [data-f="level"]').first.locator("option").all_inner_texts() == [
+        "Short 30", "Medium 60", "Long 120", "Very long 250", "Custom length"]
+    assert page.inner_text('[data-k="sl-time"]') == "under 1 min"                        # 15 + 3 x 10 s = 45 s
+    assert page.locator('[data-step] [data-act="sl-up"]').first.is_disabled()
+    assert page.locator('[data-step] [data-act="sl-down"]').last.is_disabled()
 
 
-def test_a_longer_phrase_only_asks_are_you_sure(shell, page, harness):
+def test_adding_a_step_is_free_and_only_asks_are_you_sure(shell, page, harness):
     lock(harness)
     open_page(shell, page)
-    page.click('.ab-len .seg button[data-v="120"]')
-    answer_yes(page)
-    wait_for(page, "document.querySelector('[data-k=\"len\"] input').value === '120'")
-    assert stored(harness)["length"] == 120
-    assert page.get_attribute('.ab-len .seg button[data-v="120"]', "aria-pressed") == "true"
-    assert page.input_value('[data-k="len-range"]') == "120"
+    page.click('[data-act="sl-add"]')
+    assert step_rows(page)[1] == {"kind": "math", "level": "0", "times": "3"}
+    assert page.inner_text('[data-k="steps-why"]') == "Only harder or moved - free."
+    assert page.inner_text('[data-k="save-steps"]') == "Save steps"
+    assert page.locator('[data-step].chg').count() == 1                                  # the new row is marked
+    page.click('[data-k="save-steps"]')
+    answer_yes(page)                                                                     # (stricter: a yes, not the challenge)
+    assert eventually(lambda: len(stored(harness)["steps"]) == 2)
+    assert stored_steps(harness)[1] == ("math", 0, 3) and stored_steps(harness)[0] == ("phrase", 30, 1)
+    assert len({s["id"] for s in stored(harness)["steps"]}) == 2 and len(stored(harness)["steps"][1]["id"]) == 8
+    wait_for(page, "document.querySelectorAll('[data-step].chg').length === 0")
+    assert page.inner_text('[data-k="steps-why"]') == "No changes."
 
 
-def test_length_2000_is_accepted_and_29_is_refused_with_the_error(shell, page, harness):
+def test_removing_a_step_asks_the_challenge_and_cancelling_keeps_the_edit(shell, page, harness):
+    lock(harness, steps=MIXED)
     open_page(shell, page)
-    box = page.locator('[data-k="len"] input')
-    box.fill("2000")
-    box.press("Enter")
-    answer_yes(page)
-    wait_for(page, "document.querySelector('.ab-len .seg button[aria-pressed=true]') === null")
-    assert stored(harness)["length"] == 2000 and page.input_value('[data-k="len"] input') == "2000"
-    box.fill("29")
-    box.press("Enter")
-    wait_for(page, "document.querySelector('[data-k=\"err\"]').textContent.length > 0")
-    assert "30 to 2000" in page.inner_text('[data-k="err"]')
-    assert stored(harness)["length"] == 2000 and not dialog_open(page)
-    assert page.input_value('[data-k="len"] input') == "29"                    # what was typed stays to be fixed
-    box.fill("abc")
-    box.press("Enter")
-    wait_for(page, "document.querySelector('[data-k=\"err\"]').textContent.includes('30 to 2000')")
-    box.fill("90")
-    box.press("Enter")
-    answer_yes(page)
-    assert eventually(lambda: stored(harness)["length"] == 90)
-    wait_for(page, "document.querySelector('[data-k=\"err\"]').textContent === ''")
+    page.locator('[data-step] [data-act="sl-x"]').nth(1).click()
+    assert [r["kind"] for r in step_rows(page)] == ["phrase"]
+    assert page.inner_text('[data-k="steps-why"]') == "Looser: removed Math ×3."
+    assert page.inner_text('[data-k="save-steps"]') == "Save - asks the challenge"
+    page.click('[data-k="save-steps"]')
+    escape_dialog(page)
+    assert len(stored(harness)["steps"]) == 2 and [r["kind"] for r in step_rows(page)] == ["phrase"]   # the draft stays
+    page.click('[data-act="undo-steps"]')
+    assert [r["kind"] for r in step_rows(page)] == ["phrase", "math"]
+    assert page.is_disabled('[data-k="save-steps"]')
 
 
-def test_the_plus_button_saves_once_after_the_last_click(shell, page, harness):
+def test_removing_a_step_is_saved_after_the_challenge(shell, page, harness):
+    lock(harness, steps=[{"id": "a1", "kind": "phrase", "level": 30, "times": 1}, {"id": "b2", "kind": "phrase", "level": 30, "times": 1}])
     open_page(shell, page)
-    plus = page.locator('[data-k="len"] button[data-d="10"]')
-    for _ in range(3):
-        plus.click()
-    page.wait_for_selector("#dlg[open]", timeout=5000)
-    assert page.input_value('[data-k="len"] input') == "90"
+    page.locator('[data-step] [data-act="sl-x"]').nth(1).click()
+    page.click('[data-k="save-steps"]')
+    page.wait_for_selector("#dlg[open] textarea.typed", timeout=5000)
+    for _ in range(2):                                                                   # both steps are asked (the old list)
+        text = page.evaluate("document.querySelector('.ch-phrase').textContent")
+        page.focus("#dlg textarea.typed")
+        page.keyboard.type(text, delay=45)
+        page.keyboard.press("Enter")
+        page.wait_for_function("(old) => !document.getElementById('dlg').open || "
+                               "document.querySelector('.ch-phrase')?.textContent !== old", arg=text, timeout=8000)
+        if not dialog_open(page):
+            break
+    dialog_closed(page)
+    assert eventually(lambda: stored_steps(harness) == [("phrase", 30, 1)])
+    assert [r["kind"] for r in step_rows(page)] == ["phrase"]
+
+
+def test_moving_a_step_is_free_and_saves_without_a_question(shell, page, harness):
+    lock(harness, steps=MIXED)
+    open_page(shell, page)
+    page.locator('[data-step] [data-act="sl-down"]').first.click()
+    assert [r["kind"] for r in step_rows(page)] == ["math", "phrase"]
+    assert page.inner_text('[data-k="steps-why"]') == "Only harder or moved - free."
+    page.click('[data-k="save-steps"]')
+    assert eventually(lambda: stored_steps(harness) == [("math", 1, 3), ("phrase", 30, 1)])
+    assert not dialog_open(page)
+    page.locator('[data-step] [data-act="sl-up"]').nth(1).click()
+    page.click('[data-k="save-steps"]')
+    assert eventually(lambda: stored_steps(harness) == [("phrase", 30, 1), ("math", 1, 3)])
+    assert not dialog_open(page)
+
+
+def test_raising_a_level_is_free_of_the_challenge(shell, page, harness):
+    lock(harness, steps=MIXED)
+    open_page(shell, page)
+    page.locator('[data-step] [data-f="level"]').nth(1).select_option("3")
+    assert page.inner_text('[data-k="steps-why"]') == "Only harder or moved - free."
+    page.click('[data-k="save-steps"]')
     answer_yes(page)
-    wait_for(page, "document.querySelector('.ab-len .seg button[aria-pressed=true]') === null")
-    assert stored(harness)["length"] == 90
-    assert page.input_value('[data-k="len-range"]') == "90"
+    assert eventually(lambda: stored_steps(harness) == [("phrase", 30, 1), ("math", 3, 3)])
+
+
+def test_lowering_the_level_or_the_times_or_changing_the_kind_asks_the_challenge(shell, page, harness):
+    lock(harness, steps=MIXED)
+    open_page(shell, page)
+    page.locator('[data-step] [data-f="level"]').nth(1).select_option("0")
+    assert page.inner_text('[data-k="steps-why"]') == "Looser: lowered the level of Math ×3."
+    page.click('[data-act="undo-steps"]')
+    page.locator('[data-step]').nth(1).locator('[data-act="step"][data-d="-1"]').click()
+    assert page.locator('[data-step] .stepper input').nth(1).input_value() == "2"
+    assert page.inner_text('[data-k="steps-why"]') == "Looser: fewer times on Math."
+    page.click('[data-k="save-steps"]')
+    escape_dialog(page)
+    assert stored_steps(harness)[1] == ("math", 1, 3)
+    page.click('[data-act="undo-steps"]')
+    page.locator('[data-step] [data-f="kind"]').nth(1).select_option("sort")
+    assert page.inner_text('[data-k="steps-why"]') == "Looser: changed Math ×3 to Sorting."
+    assert step_rows(page)[1] == {"kind": "sort", "level": "1", "times": "3"}
+    page.click('[data-k="save-steps"]')
+    escape_dialog(page)
+    assert stored_steps(harness)[1] == ("math", 1, 3)
+
+
+def test_more_times_is_free_and_the_times_box_can_be_typed(shell, page, harness):
+    lock(harness, steps=MIXED)
+    open_page(shell, page)
+    box = page.locator('[data-step] .stepper input').nth(1)
+    box.fill("12")
+    assert page.inner_text('[data-k="steps-why"]') == "Only harder or moved - free."
+    box.fill("")                                                                          # mid-typing: nothing changes yet
+    assert page.inner_text('[data-k="steps-why"]') == "Only harder or moved - free."
+    page.click("h1")
+    assert box.input_value() == "12"
+    page.click('[data-k="save-steps"]')
+    answer_yes(page)
+    assert eventually(lambda: stored_steps(harness)[1] == ("math", 1, 12))
+
+
+def test_at_most_six_steps_and_at_least_one(shell, page, harness):
+    lock(harness)
+    open_page(shell, page)
+    assert page.locator('[data-step] [data-act="sl-x"]').first.is_disabled()             # the only step can't go
+    for _ in range(5):
+        page.click('[data-act="sl-add"]')
+    assert page.locator("[data-step]").count() == 6
+    assert page.is_disabled('[data-act="sl-add"]') and page.inner_text('[data-k="sl-addnote"]') == "6 steps is the most."
+    assert page.locator('[data-step] [data-act="sl-x"]:disabled').count() == 0
+    assert len({r["id"] for r in page.eval_on_selector_all("[data-step]", "rows => rows.map(r => ({id: r.dataset.step}))")}) == 6
+    for _ in range(5):
+        page.locator('[data-step] [data-act="sl-x"]').last.click()
+    assert page.locator("[data-step]").count() == 1 and page.locator('[data-step] [data-act="sl-x"]').first.is_disabled()
+
+
+def test_the_estimate_follows_the_list_and_a_long_one_gets_the_soft_note(shell, page, harness):
+    lock(harness, steps=[{"id": "m1", "kind": "math", "level": 3, "times": 20}])        # 20 x 35 s = 700 s
+    open_page(shell, page)
+    assert page.inner_text('[data-k="sl-time"]') == "about 12 min"
+    assert page.inner_text('[data-k="sl-note"]') == "This will take about 12 min."
+    page.locator('[data-step] [data-f="level"]').select_option("0")
+    assert page.inner_text('[data-k="sl-time"]') == "about 2 min" and page.is_hidden('[data-k="sl-note"]')
+
+
+def test_the_phrase_extras_only_show_while_the_list_has_a_phrase_step(shell, page, harness):
+    lock(harness, steps=[{"id": "m1", "kind": "math", "level": 0, "times": 2}])
+    open_page(shell, page)
+    assert page.is_hidden('[data-k="px"]') and page.is_hidden('[data-k="own"]') and page.is_hidden('[data-k="grid"]')
+    page.click('[data-act="sl-add"]')
+    page.locator('[data-step] [data-f="kind"]').nth(1).select_option("phrase")
+    assert page.is_visible('[data-k="px"]') and page.is_visible('[data-k="grid"]') and page.is_visible('[data-k="custom"]')
+    assert step_rows(page)[1] == {"kind": "phrase", "level": "30", "times": "3"}         # a new phrase takes the current length (30 here)
+    page.locator('[data-step] [data-act="sl-x"]').nth(1).click()
+    assert page.is_hidden('[data-k="px"]')
+
+
+def test_a_phrase_step_can_have_a_custom_length(shell, page, harness):
+    lock(harness)
+    open_page(shell, page)
+    level = page.locator('[data-step] [data-f="level"]')
+    level.select_option("custom")
+    box = page.locator('[data-step] [data-f="len"]')
+    assert box.input_value() == "30"
+    box.fill("2500")
+    box.press("Tab")
+    assert box.input_value() == "2000"                                                    # kept inside 30..2000
+    box.fill("10")
+    box.press("Tab")
+    assert box.input_value() == "30"
+    box.fill("45")
+    box.press("Tab")
+    assert page.inner_text('[data-k="sl-time"]') == "under 1 min"
+    page.click('[data-k="save-steps"]')
+    answer_yes(page)
+    assert eventually(lambda: stored_steps(harness) == [("phrase", 45, 1)])
+    wait_for(page, "document.querySelector('[data-step] [data-f=len]') !== null")        # (45 is no preset: the box stays)
+    assert page.locator('[data-step] [data-f="len"]').input_value() == "45"
+    level.select_option("120")
+    assert page.locator('[data-step] [data-f="len"]').count() == 0 and step_rows(page)[0]["level"] == "120"
+
+
+def test_a_stored_phrase_length_of_the_old_config_is_one_phrase_step(shell, page, harness):
+    lock(harness, length=120)
+    open_page(shell, page)
+    assert step_rows(page) == [{"kind": "phrase", "level": "120", "times": "1"}]
 
 
 def test_numbers_and_the_grid_are_switches(shell, page, harness):
@@ -349,14 +512,14 @@ def test_the_own_phrase_is_kept_while_off_and_its_switch_dims_the_random_options
     page.click('[data-act="save-phrase"]')                                     # switched off: saved, nothing asked
     assert eventually(lambda: stored(harness)["custom_phrase"].startswith("I promised myself"))
     assert stored(harness)["use_own"] is False and not dialog_open(page)
-    assert "ab-dim" not in page.get_attribute(".ab-len", "class")
+    assert "ab-dim" not in page.get_attribute(".ab-cx", "class") and "sl-own" not in page.get_attribute(".sl", "class")
     page.click('[data-k="own"]')
     answer_yes(page)                                                           # (no phrase asked yet: only a yes)
-    wait_for(page, "document.querySelector('.ab-len').classList.contains('ab-dim')")
+    wait_for(page, "document.querySelector('.ab-cx').classList.contains('ab-dim') && document.querySelector('.sl').classList.contains('sl-own')")
     assert stored(harness)["use_own"] is True and page.is_checked('[data-k="own"]')
     page.click('[data-k="own"]')
     answer_yes(page)
-    wait_for(page, "!document.querySelector('.ab-len').classList.contains('ab-dim')")
+    wait_for(page, "!document.querySelector('.ab-cx').classList.contains('ab-dim')")
     assert stored(harness)["use_own"] is False and stored(harness)["custom_phrase"].startswith("I promised myself")
     assert page.input_value('[data-k="custom"]').startswith("I promised myself")
     page.click('[data-act="help"][data-help="own"]')

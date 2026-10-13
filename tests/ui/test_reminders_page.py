@@ -1,4 +1,5 @@
 """R26: the Reminders page, headless in Chrome against the real Python Api (see harness.py)."""
+import challenges
 import reminders
 import antibypass as ab
 
@@ -230,6 +231,145 @@ def test_letting_clicks_through_while_important_and_locked_asks_for_the_challeng
     page.wait_for_function("!document.querySelector('#dlg').open")
     wait_for(page, "document.querySelector('[data-k=\"s-block\"]').checked === true")     # the switch snapped back
     assert sleep_saved(harness)["block_behind"] is True
+
+
+# ---------------------------------------------------------------- Sleep: Challenge before Dismiss
+
+GENERAL = [{"id": "g1", "kind": "math", "level": 0, "times": 2}]
+BODY = '[data-k="c-body"]'
+
+
+def chal_seg(page, on):
+    page.click(f'.seg[data-seg="chal"] button[data-v="{1 if on else 0}"]')
+
+
+def saved_wait(page, harness, test, timeout=4000):
+    """Wait (the lists save a moment after the last edit) until test(sleep settings) holds."""
+    for _ in range(timeout // 100):
+        if test(sleep_saved(harness)):
+            return
+        page.wait_for_timeout(100)
+    assert test(sleep_saved(harness)), sleep_saved(harness)
+
+
+def test_challenge_before_dismiss_is_off_by_default_and_the_switch_shows_the_general_list(shell, page, harness):
+    open_page(shell, page)
+    assert page.locator(f'{BODY}').is_hidden()
+    assert page.locator('.seg[data-seg="chal"] button[aria-pressed="true"]').get_attribute("data-v") == "0"
+    assert page.locator('[data-tier] ~ [data-k="t-listbox"]').first.is_hidden()           # no list choices while it is off
+    chal_seg(page, True)
+    saved_wait(page, harness, lambda s: s["challenge"] is True)
+    assert page.locator(BODY).is_visible()
+    assert reminders.general_steps(sleep_saved(harness)) == challenges.default_bedtime_steps()      # Math Easy x2 to start
+    rows = page.locator(f'{BODY} [data-k="c-general"] [data-step]')
+    assert rows.count() == 1 and rows.first.locator('[data-f="kind"]').input_value() == "math"
+    assert rows.first.locator(".stepper input").input_value() == "2"                       # Math, Easy, x2: the start
+    assert page.locator('[data-k="c-px"]').is_hidden()                                       # no phrase step: no phrase extras
+    assert page.locator('[data-tier-item] [data-k="t-listbox"]').first.is_visible()
+    assert "How long" in page.inner_text(BODY)
+    chal_seg(page, False)
+    saved_wait(page, harness, lambda s: s["challenge"] is False)
+    assert page.locator(BODY).is_hidden()
+
+
+def test_the_general_list_is_edited_and_saved_with_its_ids_kept(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "challenge": True, "challenge_steps": GENERAL})
+    open_page(shell, page)
+    page.click(f'{BODY} [data-act="sl-add"]')                                                # a step added
+    saved_wait(page, harness, lambda s: len(s["challenge_steps"]) == 2)
+    s = sleep_saved(harness)
+    assert s["challenge_steps"][0] == GENERAL[0] and s["challenge_steps"][1]["id"] != "g1"
+    page.locator(f'{BODY} [data-step]').first.locator('[data-f="level"]').select_option("2")    # Math Easy -> Hard: free
+    saved_wait(page, harness, lambda s: s["challenge_steps"][0]["level"] == 2)
+    page.locator(f'{BODY} [data-step]').nth(1).locator('[data-act="sl-x"]').click()
+    saved_wait(page, harness, lambda s: len(s["challenge_steps"]) == 1)                      # bedtime is not Important: free
+    assert sleep_saved(harness)["challenge_steps"] == [{**GENERAL[0], "level": 2}]
+
+
+def test_the_phrase_extras_show_only_when_a_list_has_a_phrase_step(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "challenge": True, "challenge_steps": GENERAL})
+    open_page(shell, page)
+    assert page.locator('[data-k="c-px"]').is_hidden()
+    page.locator(f'{BODY} [data-step]').first.locator('[data-f="kind"]').select_option("phrase")
+    saved_wait(page, harness, lambda s: s["challenge_steps"][0]["kind"] == "phrase")
+    assert page.locator('[data-k="c-px"]').is_visible()
+    assert "own phrase" not in page.inner_text('[data-k="c-px"]').lower()                    # no own phrase at bedtime
+    page.click('[data-k="c-complex"]')
+    page.click('[data-k="c-grid"]')
+    saved_wait(page, harness, lambda s: s["challenge_complex"] is True and s["challenge_grid"] is True)
+    page.locator(f'{BODY} [data-step]').first.locator('[data-f="kind"]').select_option("math")
+    saved_wait(page, harness, lambda s: s["challenge_steps"][0]["kind"] == "math")
+    assert page.locator('[data-k="c-px"]').is_hidden()
+
+
+def test_a_step_can_use_the_general_list_or_have_its_own(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "bedtime": "20:00", "challenge": True,
+                                                     "challenge_steps": GENERAL})      # (steps in the order 21:00, 00:00, 03:00)
+    open_page(shell, page)
+    item = page.locator("[data-tier-item]").nth(1)                                           # the 00:00 step
+    assert item.locator('[data-k="t-list"]').input_value() == "general" and item.locator('[data-k="t-own"]').is_hidden()
+    item.locator('[data-k="t-list"]').select_option("own")
+    saved_wait(page, harness, lambda s: any(reminders.tier_steps(t) for t in s["tiers"]))
+    s = sleep_saved(harness)
+    owns = {t["from"]: reminders.tier_steps(t) for t in reminders.tiers_of(s)}
+    assert owns["00:00"] == GENERAL and owns["21:00"] == [] and owns["03:00"] == []         # a copy of the general list
+    assert item.locator('[data-k="t-own"]').is_visible() and item.locator("[data-step]").count() == 1
+    item.locator('[data-step]').first.locator('[data-f="kind"]').select_option("sort")        # its own list is its own
+    saved_wait(page, harness, lambda s: reminders.tier_steps(reminders.tiers_of(s)[1])[0]["kind"] == "sort")
+    s = sleep_saved(harness)
+    assert reminders.general_steps(s) == GENERAL                                              # the general one is untouched
+    assert [reminders.tier_steps(t) for t in reminders.tiers_of(s)][0] == []
+    page.locator('[data-tier-item] [data-k="t-list"]').nth(0).focus()                         # (focus out: the reload fills)
+    item.locator('[data-k="t-list"]').select_option("general")
+    saved_wait(page, harness, lambda s: not any(reminders.tier_steps(t) for t in s["tiers"]))
+    assert item.locator('[data-k="t-own"]').is_hidden()
+
+
+def test_a_steps_own_list_is_kept_while_its_time_is_edited_and_a_phrase_there_shows_the_extras(shell, page, harness):
+    own = [{"id": "o1", "kind": "phrase", "level": 30, "times": 1}]
+    reminders.save(harness.db, reminders.SLEEP_KEY, {
+        **reminders.DEFAULT_SLEEP, "bedtime": "20:00", "challenge": True, "challenge_steps": GENERAL,
+        "tiers": [{"from": "21:00", "every_sec": 900}, {"from": "00:00", "every_sec": 300, "challenge_steps": own}]})
+    open_page(shell, page)
+    assert page.locator('[data-k="c-px"]').is_visible()                                       # the phrase is in a step's list
+    item = page.locator("[data-tier-item]").nth(1)
+    assert item.locator('[data-k="t-list"]').input_value() == "own" and item.locator('[data-k="t-own"]').is_visible()
+    item.locator(".tp-h").fill("01")
+    item.locator(".tp-h").press("Enter")
+    saved_wait(page, harness, lambda s: reminders.tiers_of(s)[1]["from"] == "01:00")
+    assert reminders.tier_steps(reminders.tiers_of(sleep_saved(harness))[1]) == own           # the list moved with its step
+
+
+def test_making_the_bedtime_challenge_easier_while_important_asks_the_challenge_and_snaps_back(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "guarded": True,
+                                                     "challenge": True, "challenge_steps": GENERAL})
+    lock(harness)
+    open_page(shell, page)
+    page.locator(f'{BODY} [data-step]').first.locator('.stepper [data-act="step"][data-d="-1"]').click()     # 2 sums -> 1
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=6000)
+    assert "challenge before dismiss" in page.inner_text("#dlg").lower() and "easier" in page.inner_text("#dlg").lower()
+    assert reminders.general_steps(sleep_saved(harness)) == GENERAL
+    page.keyboard.press("Escape")
+    page.wait_for_function("!document.querySelector('#dlg').open")
+    wait_for(page, "document.querySelector('[data-k=\"c-general\"] .stepper input').value === '2'")      # snapped back
+    assert reminders.general_steps(sleep_saved(harness)) == GENERAL
+
+
+def test_turning_the_bedtime_challenge_off_while_important_asks_and_a_harder_list_does_not(shell, page, harness):
+    reminders.save(harness.db, reminders.SLEEP_KEY, {**reminders.DEFAULT_SLEEP, "on": True, "guarded": True,
+                                                     "challenge": True, "challenge_steps": GENERAL})
+    lock(harness)
+    open_page(shell, page)
+    page.locator(f'{BODY} [data-step]').first.locator('.stepper [data-act="step"][data-d="1"]').click()     # 2 -> 3: free
+    saved_wait(page, harness, lambda s: s["challenge_steps"][0]["times"] == 3)
+    assert not page.locator("#dlg[open]").count()
+    chal_seg(page, False)
+    page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
+    assert sleep_saved(harness)["challenge"] is True
+    page.keyboard.press("Escape")
+    page.wait_for_function("!document.querySelector('#dlg').open")
+    wait_for(page, "document.querySelector('.seg[data-seg=\"chal\"] button[aria-pressed=\"true\"]').dataset.v === '1'")
+    assert sleep_saved(harness)["challenge"] is True
 
 
 # ---------------------------------------------------------------- Breaks

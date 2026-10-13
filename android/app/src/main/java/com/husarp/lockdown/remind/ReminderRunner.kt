@@ -120,11 +120,13 @@ object ReminderRunner {
 
     /** The app's answer to "Disable alerts": "off_tonight", "snooze:15", or "dismiss" (cancelled / timed out).
      *  Asked while Dismiss was still waiting, cancelling isn't a way round the wait: the bedtime screen comes
-     *  straight back. After the wait it counts as a Dismiss, as on the PC. */
+     *  straight back. After the wait it counts as a Dismiss, as on the PC - unless "Challenge before Dismiss" is on:
+     *  then cancelling isn't a way round the challenge either, and the bedtime screen comes straight back too. */
     fun askAnswered(ctx: Context, action: String) {
         if (!_asking.value) return
         _asking.value = false
-        answer(ctx, "sleep", if (action == "dismiss" && askEarly) "back" else action)
+        val back = action == "dismiss" && (askEarly || Store.config.sleep.challenge)
+        answer(ctx, "sleep", if (back) "back" else action)
     }
 
     /** "Emergency (N left)": the uses left of every kind together (0 while off). */
