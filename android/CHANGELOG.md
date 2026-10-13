@@ -1,5 +1,9 @@
 # Changelog — Lockdown Mobile
 
+## Unreleased
+- **Each app's bar shows its own time.** Apps sharing a limit (a group) all showed the limit's bar; now every bar is that app's time today on the card's scale, while "N min left" still shows the shared limit (amber, red once blocked).
+- **All apps page.** "Show all (N)" on Home's Time per app today and on Insights' Top apps opens a full list: Today / Yesterday / 7 / 30 days, sort by most time, most opens or recently opened, and a kind filter (All apps / Only apps I installed - hides Settings, the launcher and other system apps - and Personal / Island while Island is linked). Each row shows the opens and when it was last opened. The kind you pick also filters the two cards; the choices are remembered. Tests: new `AppListTest`.
+
 ## 0.5.20 - 2026-10-13 14:15
 - **Lighter protection lists.** Malware and Gambling now use HaGeZi's "mini" lists (236k and 128k sites instead of 1.9M and 583k): all six lists on together take about 5 MB of memory instead of ~26 MB. An old full list is replaced at the next weekly refresh (deleted at once if its switch is off), and switching a list off frees its memory. Tests: `ProtectionListsTest`.
 - **Calls no longer hide the bedtime / strict-break screens.** App calls (WhatsApp, Discord...) don't hide them at all. A ringing phone call still does, so you can answer; during a phone call the screen steps aside only while the call screen is in front, and comes back the moment the call ends. Tests: `CallCoverTest`.

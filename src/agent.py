@@ -323,7 +323,7 @@ def _run(argv: list[str], events, state: dict) -> int:
     ctx.catalog = app_catalog = catalog.AppCatalog(on_ready=apps_ready, seed_games=True)
     icon_service = icons.IconService(on_ready=lambda key: win.publisher.publish("icon_ready", {"key": key}),
                                      path_of=app_catalog.path_for, sources_of=app_catalog.icon_sources,
-                                     download=icons.download_on(ctx.db))
+                                     download=icons.download_on(ctx.db), log=_log)
     server.add_icon_routes(icon_service)
     site_icons = icon_prefetch.attach(ctx, icon_service)   # UP15: real icons for your sites (starts in start_up; after ctx.publish)
 

@@ -22,6 +22,10 @@ An app icon is taken big (up to 256 px) and kept at ICON_SIZE: from the places t
 shortcut's icon, Steam's icon of the game, the uninstall entry's DisplayIcon - see monitor/applist.py) and the program
 itself. APP_CACHE_VERSION marks the app icons on disk: older (32 px) ones are deleted once and made again when asked.
 When the catalog has loaded, the app icons that failed for want of a path are tried again (`retry_apps`).
+Where no place gives a picture, each way is tried in turn (extract_exe_icon: big -> ExtractIconEx -> the app package's
+logo for Store / system apps -> SHGetFileInfo), a picture with no visible pixels counts as none, and a program the
+catalog doesn't know is also looked for in SystemApps, the App Paths registry and PATH. Every app icon that can't be
+made, or needed a fallback, is written to lockdown.log once per run with the reason ("icon firefox.exe: ...").
 
 The page is untrusted: only plain names are accepted (an exe name - anything Windows allows in a file name except
 path characters - or a host name; no folders, no "..", no control characters), and the page never says WHERE an exe is
@@ -35,7 +39,7 @@ import sys
 import threading
 import time
 from html import escape
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from resident.assets import Response
 
@@ -58,7 +62,7 @@ OWN_EXES = frozenset({"lockdown.exe", "lockdownservice.exe", "lockdownsetup.exe"
 ICON_SIZE = 64          # app icons are kept this big (sharp at 40 px on a 150% screen)
 EXTRACT_SIZE = 256      # ... and taken from the program this big, then scaled down
 OWN_ICON_SIZE = ICON_SIZE   # as the extracted icons
-APP_CACHE_VERSION = "2"     # 2: big icons (version 1 kept 32 px ones) - older app icons are made again, once
+APP_CACHE_VERSION = "3"     # 2: big icons (version 1 kept 32 px ones); 3: 0.91.0's misses and blank ones made again, once
 APP_MARK = "app_icons.version"
 IMAGE_TYPES = (".ico", ".png", ".jpg", ".jpeg", ".bmp")   # icon files read as they are (Steam's, a shortcut's .ico)
 KINDS = {"app": ".png", "site": ".png", "letter": ".svg"}
@@ -163,6 +167,77 @@ def system_exe_path(name: str) -> str | None:
     return None
 
 
+def find_exe(name: str) -> str | None:
+    """Where a program the app catalog doesn't know may be (Windows only): %SystemRoot% / System32, a system app's
+    package folder (SystemApps - LockApp.exe), the App Paths registry (browsers register theirs), the folders on PATH
+    (a JDK's javaw.exe)."""
+    if not name.endswith(".exe"):
+        return None
+    import os
+    ways = (system_exe_path, system_app_path) + ((registered_path, lambda n: path_on(n, os.environ.get("PATH", "")))
+                                                 if sys.platform == "win32" else ())
+    for way in ways:
+        try:
+            found = way(name)
+        except Exception:
+            found = None
+        if found:
+            return found
+    return None
+
+
+def system_app_path(name: str, root: Path | None = None) -> str | None:
+    """%SystemRoot%\\SystemApps\\<package>\\<exe> (Windows' own packaged apps: LockApp.exe, the Start menu...)."""
+    root = root if root is not None else _system_root()
+    if root is None:
+        return None
+    try:
+        for package in sorted((root / "SystemApps").iterdir()):
+            path = package / name
+            if path.is_file():
+                return str(path)
+    except OSError:
+        pass
+    return None
+
+
+def registered_path(name: str, read=None) -> str | None:
+    """The program's App Paths entry (HKCU, then HKLM: "...\\App Paths\\firefox.exe" = its full path), if the file is there."""
+    for value in (read or _app_paths)(name):
+        path = split_location(value)[0]
+        if path and Path(path).is_file():
+            return path
+    return None
+
+
+def _app_paths(name: str) -> list:
+    import winreg
+    out = []
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{name}") as key:
+                out.append(str(winreg.QueryValueEx(key, "")[0] or ""))
+        except OSError:
+            continue
+    return out
+
+
+def path_on(name: str, path_env: str) -> str | None:
+    """The program in one of the folders of PATH (full folders only - never the current one)."""
+    import os
+    for folder in path_env.split(os.pathsep):
+        folder = folder.strip().strip('"')
+        if not folder or not PureWindowsPath(folder).is_absolute() and not Path(folder).is_absolute():
+            continue
+        try:
+            path = Path(folder) / name
+            if path.is_file():
+                return str(path)
+        except OSError:
+            continue
+    return None
+
+
 def _system_root() -> Path | None:
     import os
     base = os.environ.get("SystemRoot") if sys.platform == "win32" else None
@@ -216,13 +291,17 @@ class IconService:
 
     def __init__(self, cache_dir: Path | None = None, on_ready=None, path_of=None, extract=None, fetch=None,
                  old_dir: Path | None = None, start: bool = True, clock=time.monotonic, download: bool = True,
-                 wall=time.time, sleep=time.sleep, pause: float = PAUSE_SEC, sources_of=None):
+                 wall=time.time, sleep=time.sleep, pause: float = PAUSE_SEC, sources_of=None, log=None):
         self.dir = Path(cache_dir) if cache_dir else default_dir()
         self.old_dir = old_dir if old_dir is not None else old_window_dir()
         self.on_ready = on_ready or (lambda key: None)
         self.path_of = path_of or (lambda exe: None)
         self.sources_of = sources_of or (lambda exe: [])
         self.extract = extract or extract_exe_icon
+        self._notes = extract is None      # (the real extractor says why a way gave nothing; a test's fake doesn't)
+        self.log = log or (lambda text: None)
+        self._logged: set = set()          # the apps whose icon trouble is in the log already (once per run)
+        self._waiting: dict = {}           # app icons asked for while MAX_QUEUED were queued: made after those
         self.fetch = fetch or _default_fetch
         self.clock, self.wall, self.sleep, self.pause = clock, wall, sleep, pause
         self.download = bool(download)
@@ -359,7 +438,9 @@ class IconService:
             failed = self._failed.get(key)
             if key in self._pending or (failed is not None and self.clock() - failed < RETRY_SEC):
                 return
-            if len(self._pending) >= MAX_QUEUED:
+            if sum(1 for k in self._pending if k.startswith(kind)) >= MAX_QUEUED:   # (sites and apps: each their own)
+                if kind == "app" and len(self._waiting) < MAX_FAILED:
+                    self._waiting[key] = None          # (made when there is room - never just dropped)
                 return
             self._pending.add(key)
             if kind == "site":
@@ -488,6 +569,9 @@ class IconService:
         refresh = ok is False and kind == "site" and self._has(kind, name)   # (it keeps its old icon)
         with self._lock:
             self._pending.discard(key)
+            later = next(iter(self._waiting), None) if kind == "app" else None
+            if later is not None:
+                del self._waiting[later]
             if ok is False:
                 now = self.clock()
                 self._failed.pop(key, None)
@@ -501,6 +585,8 @@ class IconService:
                 self.on_ready(key)
             except Exception:
                 pass
+        if later is not None:
+            self._enqueue("app", later[4:])
 
     def _make(self, kind: str, name: str) -> bool | None:
         """True: the icon is in the cache now. False: it could not be got (retried later). None: nothing to do (it was
@@ -514,20 +600,43 @@ class IconService:
                 self._save(target, data)
                 return True
         places = list(self.sources_of(name) or [])
-        path = self.path_of(name) or system_exe_path(name)
+        path = self.path_of(name) or find_exe(name)
         if path and path not in places:
             places.append(path)
+        tried = []                     # "place: what each way gave", for the log
         for place in places:
-            data = self.extract(place)
+            notes: list = []
+            try:
+                data = self.extract(place, notes) if self._notes else self.extract(place)
+            except Exception as error:
+                data = None
+                notes.append(f"failed ({error!r})")
+            tried.append(f"{place}: {'; '.join(notes) or ('ok' if data else 'nothing')}")
             if data:
                 self._save(target, data)
+                if len(tried) > 1 or len(notes) > 1:   # (the first way of the first place did not do it)
+                    self._log_once(name, " | ".join(tried))
                 return True
         if self.old_dir is not None:   # the old window may have it (its names: app_<exe>.png, <host>.png; 32 px)
             old = self.old_dir / f"app_{name}.png"
             if old.is_file() and old.stat().st_size:
                 self._save(target, old.read_bytes())
+                self._log_once(name, " | ".join(tried + ["the old window's 32 px icon used"]))
                 return True
+        self._log_once(name, "no icon - " + (" | ".join(tried) if tried else
+                                             "no path known (not in the app catalog, no open window, not in Windows' "
+                                             "folders, SystemApps, App Paths or PATH)"))
         return False
+
+    def _log_once(self, name: str, text: str):
+        """One line per app per run in lockdown.log: why its icon could not be made, or which fallback made it."""
+        if name in self._logged or len(self._logged) >= MAX_FAILED:
+            return
+        self._logged.add(name)
+        try:
+            self.log(f"icon {name}: {text}")
+        except Exception:
+            pass
 
     def _make_site(self, target: Path, name: str) -> bool | None:
         have = self._has("site", name)
@@ -615,24 +724,141 @@ def image_file_icon(path: str) -> bytes | None:
         return None
 
 
-def extract_exe_icon(location: str) -> bytes | None:
+def extract_exe_icon(location: str, notes: list | None = None) -> bytes | None:
     """The icon at `location` ("path" or "path,index") as PNG bytes, ICON_SIZE at most. An icon file is read as it is;
-    a program's (or a .dll's) icon is taken big (SHDefExtractIcon at EXTRACT_SIZE, Windows only) and scaled down, and
-    when that fails the 32 px one is taken as before (ExtractIconEx)."""
+    a program's (or a .dll's) icon goes through `icon_chain` (Windows only): big (SHDefExtractIcon at EXTRACT_SIZE,
+    scaled down), else the 32 px one (ExtractIconEx), else the logo of its app package (Store and system apps, from
+    AppxManifest.xml), else the icon Explorer shows for the file (SHGetFileInfo). `notes` gets what each way gave."""
+    notes = [] if notes is None else notes
     path, index = split_location(location)
     if not path:
+        notes.append("no file named")
         return None
     if path.lower().endswith(IMAGE_TYPES):
-        return image_file_icon(path)
+        data = image_file_icon(path)
+        notes.append("icon file ok" if data else "icon file missing or unreadable")
+        return data
     if sys.platform != "win32":
+        notes.append("not Windows")
         return None
+    image = icon_chain([("big extract", lambda: _exe_icon_large(path, index)),
+                        ("ExtractIconEx", lambda: _exe_icon(path, index)),
+                        ("app package logo", lambda: _logo_image(path)),
+                        ("SHGetFileInfo", lambda: _shell_icon(path))], notes)
+    return _png(fit(image)) if image is not None else None
+
+
+def icon_chain(ways, notes: list):
+    """The first picture one of `ways` ([(label, fn)], fn() -> Pillow image | None) gives that has visible pixels; each
+    way that fails, gives nothing or gives a blank picture is noted ("big extract gave no pixels") and the next is tried."""
+    for label, way in ways:
+        try:
+            image = way()
+        except Exception as error:
+            notes.append(f"{label} failed ({type(error).__name__}: {error})")
+            continue
+        if image is None:
+            notes.append(f"{label} gave nothing")
+        elif not visible(image):
+            notes.append(f"{label} gave no pixels")
+        else:
+            notes.append(f"{label} ok")
+            return image
+    return None
+
+
+def visible(image) -> bool:
+    """Does the picture show anything (some pixel not fully transparent)?"""
+    image = image.convert("RGBA")
+    return image.getextrema()[3][1] > 0
+
+
+# ---------------------------------------------------------------- app packages (Store apps, Windows' SystemApps)
+
+LOGO_ATTRS = ("Square44x44Logo", "Square150x150Logo")   # the app list's icon first, then the Start tile's
+
+
+def package_logo(exe_path: str, levels: int = 4) -> str | None:
+    """The logo file of the app package the program belongs to - the AppxManifest.xml in its folder or one above
+    (C:\\Windows\\SystemApps\\Microsoft.LockApp_cw5n1h2txyewy\\LockApp.exe): its <Application>'s
+    Square44x44Logo (else Square150x150Logo), else the package's <Logo>; the biggest scale / target size there is."""
+    exe = Path(exe_path)
+    folder = exe.parent
+    for _ in range(levels):
+        manifest = folder / "AppxManifest.xml"
+        try:
+            found = manifest.is_file()
+        except OSError:
+            found = False
+        if found:
+            rel = exe.relative_to(folder).as_posix() if exe.is_relative_to(folder) else exe.name
+            for logo in manifest_logos(manifest.read_bytes(), rel):
+                path = resolve_asset(folder, logo)
+                if path:
+                    return path
+            return None
+        if folder.parent == folder:
+            break
+        folder = folder.parent
+    return None
+
+
+def manifest_logos(text: bytes, exe_rel: str) -> list:
+    """The logo places an AppxManifest.xml names for the program `exe_rel` (its path in the package, any slashes),
+    best first: the matching <Application>'s (else the first one's) VisualElements logos, then <Properties><Logo>."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(text)
+    local = lambda el: el.tag.rsplit("}", 1)[-1]
+    norm = lambda value: (value or "").replace("\\", "/").lower()
+    want = norm(exe_rel)
+    apps = [el for el in root.iter() if local(el) == "Application"]
+    match = [a for a in apps if norm(a.get("Executable")) in (want, want.rsplit("/", 1)[-1])
+             or norm(a.get("Executable")).rsplit("/", 1)[-1] == want.rsplit("/", 1)[-1]]
+    out = []
+    for app in (match or apps)[:1]:
+        for el in app.iter():
+            if local(el) == "VisualElements":
+                out += [el.get(attr) for attr in LOGO_ATTRS if el.get(attr)]
+    out += [(el.text or "").strip() for el in root.iter() if local(el) == "Logo" and (el.text or "").strip()]
+    return out
+
+
+_QUALIFIED = re.compile(r"(?:targetsize-(\d+)|scale-(\d+))")
+
+
+def resolve_asset(package: Path, rel: str) -> str | None:
+    """A package asset ("Assets\\Logo.png") as a file: itself, else its biggest qualified copy next to it
+    ("Logo.scale-200.png", "Logo.targetsize-256_altform-unplated.png"; high-contrast copies left out)."""
+    rel = rel.replace("\\", "/").strip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    path = package / rel
     try:
-        image = _exe_icon_large(path, index)
-    except Exception:
-        image = None
-    if image is None:
-        image = _exe_icon(path, index)
-    return _png(fit(image)) if image else None
+        if path.is_file():
+            return str(path)
+        stem, ext = path.stem.lower(), path.suffix.lower()
+        best = None
+        for file in path.parent.iterdir():
+            name = file.name.lower()
+            if not (name.startswith(stem + ".") and name.endswith(ext)) or "contrast-" in name:
+                continue
+            sizes = [int(a or 0) or int(b or 0) * 44 // 100 for a, b in _QUALIFIED.findall(name)] or [0]
+            score = (max(sizes), "unplated" in name)
+            if best is None or score > best[0]:
+                best = (score, file)
+        return str(best[1]) if best else None
+    except (OSError, ValueError):
+        return None
+
+
+def _logo_image(exe_path: str):
+    """The app package's logo as a Pillow image (None for a program that isn't in a package)."""
+    logo = package_logo(exe_path)
+    if logo is None:
+        return None
+    from PIL import Image
+    with Image.open(logo) as image:
+        return image.convert("RGBA")
 
 
 def _gdi():
@@ -650,6 +876,9 @@ def _gdi():
     user32.DrawIconEx.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_int, wintypes.HANDLE, ctypes.c_int,
                                   ctypes.c_int, wintypes.UINT, wintypes.HANDLE, wintypes.UINT]
     user32.DestroyIcon.argtypes = [wintypes.HANDLE]
+    shell32.ExtractIconExW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HANDLE),
+                                       ctypes.POINTER(wintypes.HANDLE), wintypes.UINT]
+    shell32.ExtractIconExW.restype = wintypes.UINT
     shell32.SHDefExtractIconW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.UINT, ctypes.POINTER(wintypes.HANDLE),
                                           ctypes.POINTER(wintypes.HANDLE), wintypes.UINT]
     shell32.SHDefExtractIconW.restype = ctypes.c_long
@@ -674,17 +903,57 @@ def _exe_icon(path: str, index: int = 0):
     from ctypes import wintypes
     shell32, _user32, _gdi32 = _gdi()
     large = wintypes.HANDLE()
-    if shell32.ExtractIconExW(path, index, ctypes.byref(large), None, 1) < 1 or not large.value:
+    got = shell32.ExtractIconExW(path, index, ctypes.byref(large), None, 1)
+    if got in (0, 0xFFFFFFFF) or not large.value:
         return None
     return _draw_icon(large, 32)
 
 
+class _SHFILEINFOW:   # (made on first use: ctypes is only imported on Windows' background thread)
+    cls = None
+
+
+def _shell_icon(path: str):
+    """The icon Explorer shows for the file (SHGetFileInfo, the large one - a program without an icon gets Windows'
+    generic one), as a picture. Last of the ways: COM is started on this thread for it."""
+    import ctypes
+    from ctypes import wintypes
+    if _SHFILEINFOW.cls is None:
+        class SHFILEINFOW(ctypes.Structure):
+            _fields_ = [("hIcon", wintypes.HANDLE), ("iIcon", ctypes.c_int), ("dwAttributes", wintypes.DWORD),
+                        ("szDisplayName", wintypes.WCHAR * 260), ("szTypeName", wintypes.WCHAR * 80)]
+        _SHFILEINFOW.cls = SHFILEINFOW
+    _com_on()
+    shell32, user32, _gdi32 = _gdi()
+    shell32.SHGetFileInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p, wintypes.UINT, wintypes.UINT]
+    shell32.SHGetFileInfoW.restype = ctypes.c_size_t
+    info = _SHFILEINFOW.cls()
+    if not shell32.SHGetFileInfoW(path, 0, ctypes.byref(info), ctypes.sizeof(info), 0x100) or not info.hIcon:
+        return None                                          # (SHGFI_ICON | SHGFI_LARGEICON)
+    user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    return _draw_icon(wintypes.HANDLE(info.hIcon), max(32, min(user32.GetSystemMetrics(11), 256)))   # SM_CXICON
+
+
+_com = threading.local()
+
+
+def _com_on():
+    """COM for this thread, once (SHGetFileInfo wants it)."""
+    if not getattr(_com, "on", False):
+        import ctypes
+        ctypes.windll.ole32.CoInitializeEx(None, 2)          # COINIT_APARTMENTTHREADED (already on: harmless)
+        _com.on = True
+
+
 def _draw_icon(icon, size: int):
-    """Draw an HICON into a size x size RGBA picture (Pillow); the icon is destroyed."""
+    """Draw an HICON into a size x size RGBA picture (Pillow); the icon is destroyed. It is drawn twice, on black and on
+    white, and the transparency is what differs: right for 32-bit icons with alpha (PNG ones too), old ones with a
+    mask, and whatever DrawIconEx does with the alpha byte of the bitmap."""
     import ctypes
     from ctypes import wintypes
     from PIL import Image
     _shell32, user32, gdi32 = _gdi()
+    gdi32.GdiFlush.argtypes = []
 
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
@@ -695,18 +964,39 @@ def _draw_icon(icon, size: int):
 
     hdr = BITMAPINFOHEADER(biSize=ctypes.sizeof(BITMAPINFOHEADER), biWidth=size, biHeight=-size, biPlanes=1,
                            biBitCount=32)
+    count = size * size * 4
     bits = ctypes.c_void_p()
     dc = gdi32.CreateCompatibleDC(None)
     bmp = gdi32.CreateDIBSection(dc, ctypes.byref(hdr), 0, ctypes.byref(bits), None, 0)
+    old = None
     try:
-        gdi32.SelectObject(dc, bmp)
-        user32.DrawIconEx(dc, 0, 0, icon, size, size, 0, None, 3)   # DI_NORMAL
-        raw = ctypes.string_at(bits, size * size * 4)
+        if not dc or not bmp or not bits.value:
+            return None
+        old = gdi32.SelectObject(dc, bmp)
+        drawn = []
+        for fill in (0x00, 0xFF):                         # black, then white
+            ctypes.memset(bits, fill, count)
+            if not user32.DrawIconEx(dc, 0, 0, icon, size, size, 0, None, 3):   # DI_NORMAL
+                return None
+            gdi32.GdiFlush()                               # (GDI may batch: the bits are read only after this)
+            drawn.append(Image.frombuffer("RGBA", (size, size), ctypes.string_at(bits, count), "raw", "BGRA", 0, 1)
+                         .convert("RGB"))
     finally:
-        gdi32.DeleteObject(bmp)
-        gdi32.DeleteDC(dc)
+        if old:
+            gdi32.SelectObject(dc, old)
+        if bmp:
+            gdi32.DeleteObject(bmp)
+        if dc:
+            gdi32.DeleteDC(dc)
         user32.DestroyIcon(icon)
-    image = Image.frombuffer("RGBA", (size, size), raw, "raw", "BGRA", 0, 1)
-    if image.getextrema()[3][1] == 0:   # old icons without alpha: make drawn pixels opaque
-        image.putalpha(Image.eval(image.convert("L"), lambda v: 255 if v else 0))
-    return image.copy()
+    return from_black_and_white(*drawn)
+
+
+def from_black_and_white(on_black, on_white):
+    """The RGBA picture that, drawn on black and on white, gave these two RGB pictures: alpha = 255 - (white - black)
+    (the brightest channel's difference), the colour = the one on black with the alpha taken out (premultiplied)."""
+    from PIL import Image, ImageChops
+    diff = ImageChops.subtract(on_white, on_black)
+    alpha = ImageChops.invert(ImageChops.lighter(ImageChops.lighter(*diff.split()[:2]), diff.split()[2]))
+    r, g, b = on_black.split()
+    return Image.merge("RGBa", (r, g, b, alpha)).convert("RGBA")

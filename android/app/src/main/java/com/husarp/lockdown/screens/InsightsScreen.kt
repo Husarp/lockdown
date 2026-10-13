@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -36,7 +37,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.ui.text.style.TextOverflow
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.SiteTop
-import com.husarp.lockdown.engine.TopRow
+import com.husarp.lockdown.engine.AppList
+import com.husarp.lockdown.engine.AppStat
 import com.husarp.lockdown.ui.AppIcon
 import com.husarp.lockdown.ui.Card
 import com.husarp.lockdown.ui.Chip
@@ -54,10 +56,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private data class Bar(val label: String, val ms: Long)
-private data class InsightData(val total: Long, val days: Int, val perApp: List<TopRow>, val bars: List<Bar>, val hourly: Boolean, val islandNotInBars: Long = 0L)
+private data class InsightData(val total: Long, val days: Int, val perApp: List<AppStat>, val bars: List<Bar>, val hourly: Boolean, val islandNotInBars: Long = 0L)
 
 @Composable
-fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
+fun InsightsScreen(onOpenActivity: () -> Unit = {}, onOpenApps: (range: Int) -> Unit = {}) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var range by remember { mutableIntStateOf(0) }
@@ -81,9 +83,8 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
             val islandDays = com.husarp.lockdown.engine.DayBounds.days(today, back, len)
             val islandPerDay = runCatching { com.husarp.lockdown.engine.IslandUse.perDay(com.husarp.lockdown.link.IslandLink.islandRows(ctx), islandDays) }
                 .getOrDefault(List(len) { 0L })
-            val allApps = com.husarp.lockdown.engine.IslandUse.topApps(
-                du?.apps?.map { com.husarp.lockdown.engine.AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island,
-            )
+            val mine = du?.apps?.map { com.husarp.lockdown.engine.AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList()
+            val allApps = com.husarp.lockdown.engine.IslandUse.topApps(mine, island)
             // Sites instead of browsers: the time per site Lockdown's history has for the range (the browser's address
             // bar), each browser keeping only what no site was read for.
             val sites = if (!showSites) emptyMap() else runCatching {
@@ -91,9 +92,11 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
                 SiteTop.msByBrowser(com.husarp.lockdown.data.History.detail(last.minusDays(len - 1L), last).values.flatMap { it.rows })
             }.getOrDefault(emptyMap())
             val pm = ctx.packageManager
-            val apps = SiteTop.rows(allApps, sites, showSites) { pkg ->
+            val rows = SiteTop.rows(allApps, sites, showSites) { pkg ->
                 runCatching { pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString() }.getOrDefault(pkg)
-            }.take(6)
+            }
+            // every row, with its kind: the list shows the top 6 of the kind chosen on "All apps"
+            val apps = AppList.stats(rows, mine.map { it.pkg }.toSet(), island.keys, systemPkgs(ctx, rows.map { it.pkg }.toSet()))
             val hourly = len == 1
             // Today/Yesterday: the helper's hourly rows (when it sent them for that day) fill the bars and the total
             val islandHours = if (hourly) runCatching { com.husarp.lockdown.link.IslandLink.islandHours(ctx, today.minusDays(back.toLong())) }.getOrNull() else null
@@ -156,8 +159,11 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
             }
             Card(color = cs.surfaceContainerLow, padding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)) {
                 SectionLabel("Top apps", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                val topMax = (d.perApp.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
-                d.perApp.forEach { a ->
+                val kind = remember { AppList.effective(AppListPrefs.kind(ctx), AppList.kinds(islandLinked(ctx))) }
+                val ofKind = remember(d, kind) { AppList.filter(d.perApp, kind) }
+                val top = ofKind.take(6)
+                val topMax = (top.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
+                top.forEach { a ->
                     val site = a.site
                     val barColor = tone(Kinds.category(if (site != null) siteCategory(cfg, site) else appCategory(cfg, a.pkg)).hue).accent
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -172,14 +178,16 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
                             }
                             Spacer(Modifier.height(5.dp))
                             Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(cs.surfaceContainerHighest)) {
-                                Box(Modifier.fillMaxWidth((a.ms.toFloat() / topMax).coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(barColor))
+                                Box(Modifier.fillMaxWidth(AppList.bar(a.ms, topMax)).height(4.dp).clip(CircleShape).background(barColor))
                             }
                         }
                         CategoryMenu(a.pkg, site)
                     }
                 }
                 if (d.perApp.isEmpty()) Text("No usage yet. Grant usage access in Settings.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
-                else Text("Mark an app Distracting and modes like Work and Focus block it.", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                else if (top.isEmpty()) Text("No apps of this kind used in this range.", Modifier.padding(16.dp), color = cs.onSurfaceVariant)
+                if (d.perApp.isNotEmpty()) TextButton(onClick = { onOpenApps(range) }, Modifier.padding(horizontal = 8.dp)) { Text("Show all (${ofKind.size})") }
+                if (d.perApp.isNotEmpty()) Text("Mark an app Distracting and modes like Work and Focus block it.", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
             SectionCard(Icons.Filled.History, Hue.TEAL, "Activity log", "Apps opened, sites visited and blocks, last 7 days", onClick = onOpenActivity)

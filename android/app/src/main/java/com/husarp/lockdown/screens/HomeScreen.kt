@@ -62,6 +62,8 @@ import com.husarp.lockdown.data.HomeLayout
 import com.husarp.lockdown.data.Live
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.AppList
+import com.husarp.lockdown.engine.AppStat
 import com.husarp.lockdown.engine.AppTime
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.IslandUse
@@ -72,6 +74,7 @@ import com.husarp.lockdown.engine.Pause
 import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.engine.TimeLeft
+import com.husarp.lockdown.engine.TopRow
 import com.husarp.lockdown.guard.Perms
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.guard.rememberGuard
@@ -112,7 +115,7 @@ internal val HOME_CARDS: Map<String, HomeCardInfo> = mapOf(
 
 @Composable
 fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardrails: () -> Unit, onOpenInsights: () -> Unit = {},
-               onOpenReminders: () -> Unit = {}, onOpenSettings: (String?) -> Unit = {}) {
+               onOpenReminders: () -> Unit = {}, onOpenSettings: (String?) -> Unit = {}, onOpenApps: () -> Unit = {}) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     ModesStore.active.collectAsStateWithLifecycle().value                // a mode started or stopped shows at once
@@ -140,7 +143,7 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
             "mode" -> ModeCard(modeState, onOpenModes)
             "blocked" -> BlockedCard(cfg, now, tick, modeState, onOpenBlocking)
             "low" -> LowCard(cfg, now, modeState)
-            "apps" -> AppsCard(cfg, now, today, modeState, onOpenInsights)
+            "apps" -> AppsCard(cfg, now, today, modeState, onOpenInsights, onOpenApps)
             "bedtime" -> BedtimeCard(cfg, now, onOpenReminders)
             "quick" -> QuickCard(onOpenModes, onOpenBlocking, onOpenGuardrails)
             "pause" -> PauseHomeCard(cfg, now, onOpenGuardrails)
@@ -153,16 +156,18 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
     }
 }
 
-/** Today's screen time and per-app time, main's and Island's together (as Insights' "Today"). */
-private data class TodayUse(val totalMs: Long, val apps: List<AppTime>)
+/** Today's screen time and per-app time, main's and Island's together (as Insights' "Today"), each app with its kind. */
+private data class TodayUse(val totalMs: Long, val apps: List<AppStat>)
 
 private fun todayUse(ctx: Context): TodayUse {
     val du = runCatching { val (s, e) = Usage.dayBounds(ctx, 0); Usage.range(ctx, s, e) }.getOrNull()
     val day = com.husarp.lockdown.guard.TrustedTime.local(ctx).toLocalDate()      // trusted time's day (as the limits)
     val island = runCatching { IslandLink.islandUse(ctx, day, day) }.getOrDefault(emptyMap())
-    val apps = IslandUse.topApps(du?.apps?.map { AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island)
+    val mine = du?.apps?.map { AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList()
+    val apps = IslandUse.topApps(mine, island).map { TopRow(it.pkg, it.label, it.ms) }
+    val stats = AppList.stats(apps, mine.map { it.pkg }.toSet(), island.keys, systemPkgs(ctx, apps.map { it.pkg }))
     val main = du?.totalMs ?: 0L
-    return TodayUse(runCatching { IslandLink.withIsland(ctx, main, listOf(day)) }.getOrDefault(main), apps)
+    return TodayUse(runCatching { IslandLink.withIsland(ctx, main, listOf(day)) }.getOrDefault(main), stats)
 }
 
 /** Always first: the master switch, today's screen time and the goal bar. */
@@ -371,16 +376,21 @@ private fun LowCard(cfg: Config, now: LocalDateTime, modeState: ModeState?) {
     }
 }
 
-/** Today's top 5 apps (main and Island merged, as Insights' Top apps): time, and for an app with a daily limit the time left (amber, red once blocked). */
+/** Today's top 5 apps (main and Island merged, as Insights' Top apps; only the kind chosen on "All apps"): time, and for
+ *  an app with a limit the time left (amber, red once blocked). Each bar is the app's OWN time on the card's scale - apps
+ *  sharing a group limit share its "min left", not its bar. "Show all" opens the full list. */
 @Composable
-private fun AppsCard(cfg: Config, now: LocalDateTime, today: TodayUse?, modeState: ModeState?, onOpenInsights: () -> Unit) {
+private fun AppsCard(cfg: Config, now: LocalDateTime, today: TodayUse?, modeState: ModeState?, onOpenInsights: () -> Unit, onOpenApps: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    val ctx = LocalContext.current
     val info = HOME_CARDS.getValue("apps")
     val listed = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.associateBy { it.target.lowercase() } }
-    HomePanel(info.name, info.icon, info.hue, onClick = onOpenInsights) {
-        val apps = today?.apps.orEmpty().take(5)
+    val kind = remember { AppList.effective(AppListPrefs.kind(ctx), AppList.kinds(islandLinked(ctx))) }
+    val all = remember(today, kind) { AppList.filter(today?.apps.orEmpty(), kind) }
+    HomePanel(info.name, info.icon, info.hue, action = if (today?.apps.orEmpty().isNotEmpty()) "Show all (${all.size})" else null, onAction = onOpenApps, onClick = onOpenInsights) {
+        val apps = all.take(5)
         if (today == null) Text("Loading…", color = cs.onSurfaceVariant)
-        else if (apps.isEmpty()) Text(if (Usage.hasAccess(LocalContext.current)) "No screen time yet today." else "Allow usage access in Settings to see it.",
+        else if (apps.isEmpty()) Text(if (today.apps.isNotEmpty()) "No apps of this kind used today." else if (Usage.hasAccess(ctx)) "No screen time yet today." else "Allow usage access in Settings to see it.",
             style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
         val top = (apps.maxOfOrNull { it.ms } ?: 1L).coerceAtLeast(1L)
         apps.forEach { a ->
@@ -401,9 +411,8 @@ private fun AppsCard(cfg: Config, now: LocalDateTime, today: TodayUse?, modeStat
                         Text(fmtDuration(a.ms), style = MaterialTheme.typography.titleSmall)
                     }
                     Spacer(Modifier.height(5.dp))
-                    val frac = left?.fraction ?: (a.ms.toFloat() / top)
                     Box(Modifier.fillMaxWidth().height(4.dp).background(cs.surfaceContainerHighest, CircleShape)) {
-                        Box(Modifier.fillMaxWidth(frac.coerceIn(0.02f, 1f)).height(4.dp).background(bar, CircleShape))
+                        Box(Modifier.fillMaxWidth(AppList.bar(a.ms, top)).height(4.dp).background(bar, CircleShape))
                     }
                 }
             }

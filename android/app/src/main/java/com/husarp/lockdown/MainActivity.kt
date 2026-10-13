@@ -159,7 +159,7 @@ fun App(askOff: MutableState<Boolean>) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(when (route) { "blockcal" -> "Block calendar"; "activity" -> "Activity log"; else -> here.label }) },
+                title = { Text(when (route) { "blockcal" -> "Block calendar"; "activity" -> "Activity log"; "apps" -> "All apps"; else -> here.label }) },
                 actions = {
                     for (d in listOf(Dest.GUARDRAILS, Dest.SETTINGS)) {
                         IconButton(onClick = { nav.go(d) }) { Icon(d.icon, d.label) }
@@ -172,7 +172,7 @@ fun App(askOff: MutableState<Boolean>) {
                 for (d in Dest.entries.filter { it.inBottomBar }) {
                     val t = tone(d.hue)
                     NavigationBarItem(
-                        selected = (when (route) { "blockcal" -> Dest.BLOCKING; "activity" -> Dest.INSIGHTS; else -> here }) == d,
+                        selected = (when (route) { "blockcal" -> Dest.BLOCKING; "activity", "apps" -> Dest.INSIGHTS; else -> here }) == d,
                         onClick = { nav.go(d) },
                         icon = { Icon(d.icon, d.label) },
                         label = { Text(d.label) },
@@ -194,13 +194,17 @@ fun App(askOff: MutableState<Boolean>) {
                     onOpenInsights = { nav.go(Dest.INSIGHTS) },
                     onOpenReminders = { nav.go(Dest.REMINDERS) },
                     onOpenSettings = { section -> nav.goSettings(section) },
+                    onOpenApps = { nav.navigate("apps?range=0") },
                 )
             }
             composable(Dest.BLOCKING.route) { BlockingScreen(onOpenNetLog = { nav.navigate("netlog") }, onOpenCalendar = { nav.navigate("blockcal") }) }
             composable("blockcal") { BlockCalendarScreen() }
             composable("netlog") { NetLogScreen() }
             composable(Dest.MODES.route) { ModesScreen() }
-            composable(Dest.INSIGHTS.route) { InsightsScreen(onOpenActivity = { nav.navigate("activity") }) }
+            composable(Dest.INSIGHTS.route) { InsightsScreen(onOpenActivity = { nav.navigate("activity") }, onOpenApps = { r -> nav.navigate("apps?range=$r") }) }
+            composable("apps?range={range}", arguments = listOf(navArgument("range") { type = NavType.IntType; defaultValue = 0 })) { entry ->
+                com.husarp.lockdown.screens.AllAppsScreen(entry.arguments?.getInt("range") ?: 0)
+            }
             composable("activity") { com.husarp.lockdown.screens.ActivityLogScreen() }
             composable(Dest.REMINDERS.route) { ReminderScreen() }
             composable(Dest.GUARDRAILS.route) { GuardrailsScreen(onBack = { nav.popBackStack() }) }
