@@ -170,6 +170,8 @@ def test_grey_screen_during_bedtime_is_a_switch_on_the_sleep_card(shell, page, h
     open_page(shell, page)
     assert page.locator(".rem :text('Grey screen during bedtime')").count() >= 1
     assert not page.is_checked('[data-k="s-grey"]') and sleep_saved(harness)["grey"] is False
+    assert "Color filters" not in page.inner_text('[data-card="sleep"]')            # the long text waits behind (i)
+    page.click('[data-act="help"][data-help="grey"]')
     text = page.inner_text('[data-card="sleep"]')
     assert "Color filters" in text and "separate" in text                         # (Windows' own colour filters)
     page.click('[data-k="s-grey"]')                                                # on: free

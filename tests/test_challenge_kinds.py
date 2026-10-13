@@ -928,7 +928,7 @@ def api_data(reply):
 def test_the_page_data_has_the_list_the_kinds_and_the_estimate(page_env):
     d = api_data(page_env.api.antibypass_get())
     assert d["config"]["steps"] == [{"id": "s0", "kind": "phrase", "level": 60, "times": 1}]
-    assert [k["id"] for k in d["challenge"]["kinds"]] == ["math", "memory", "sort", "phrase"]
+    assert [k["id"] for k in d["challenge"]["kinds"]] == ["math", "memory", "sort", "phrase", "password", "totp"]
     assert d["challenge"]["max_steps"] == 6 and d["challenge"]["estimate"]["text"] == "under 1 min"
     ab.save(page_env.db, {**ab.settings(page_env.db), "steps": MIXED, "grid": True})
     d = api_data(page_env.api.antibypass_get())

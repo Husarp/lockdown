@@ -28,6 +28,7 @@ import java.time.LocalTime
 data class Config(
     val enabled: Boolean = true,                       // master switch (Home / tile). false = nothing enforced
     val items: List<Item> = emptyList(),               // blocked apps + sites
+    val imported: List<String> = emptyList(),          // sites from Import sites, blocked for good: one name each (data/ImportedSites.kt)
     val groups: List<Group> = emptyList(),             // shared rule sets
     val keywords: KeywordsCfg = KeywordsCfg(),
     val sleep: SleepCfg = SleepCfg(),

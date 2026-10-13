@@ -16,7 +16,7 @@ import { ld } from "../bridge.js";
 import { iconImg } from "../appicon.js";
 import { guarded } from "../challenge.js";
 import { stepListEditor } from "../steplist.js";
-import { check, confirmButton, el, empty, esc, field, ic, kic, seg, setText, sw, tp, toast } from "../ui.js";
+import { check, confirmButton, csec, csecNote, el, empty, esc, field, helpBtn, helpText, ic, kic, seg, setText, sw, toast, toggleHelp, tp } from "../ui.js";
 
 // ---------------------------------------------------------------- time pickers (the designer's hh : mm boxes)
 export const pad2 = (n) => String(n).padStart(2, "0");
@@ -68,10 +68,9 @@ const text = (k, save, label) => `<input class="input" data-k="${k}" data-save="
 const flag = (k, save, label) => sw(false, `data-k="${k}" data-save="${save}" aria-label="${esc(label)}"`);
 
 const STYLE = `<style>
-.rem .help { padding: 0 var(--sp-4) var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }
 .rem .field .field-c.wide { flex: 1 1 100%; justify-content: flex-start; margin-left: 0; }
-.rem .tip { margin: var(--sp-3) var(--sp-4) var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); color: var(--text-2); font-size: var(--fs-sm); }
-.rem .err { color: var(--k-block); font-size: var(--fs-sm); padding: 0 var(--sp-4) var(--sp-2); min-height: 0; }
+.rem .err { margin: 0; color: var(--k-block); font-size: var(--fs-sm); padding: 0 var(--sp-5) var(--sp-3); min-height: 0; }
+.rem .field .err { padding: 0; }
 .rem .err:empty { display: none; }
 .rem .step input.in-step { width: calc(64px * var(--s)); text-align: center; }
 .rem .step .lbl { color: var(--text-2); font-size: var(--fs-sm); }
@@ -84,63 +83,88 @@ const STYLE = `<style>
 .rem .tier-list[hidden], .rem .tier-own[hidden] { display: none; }
 .rem .tier-list { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .rem .tier-own { flex: 1 1 100%; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
-.rem .chal-list { border-top: 1px solid var(--line); }
-.rem .tier-own .sl-row { padding-left: var(--sp-3); padding-right: var(--sp-3); gap: var(--sp-1); }
-.rem .tier-own .sl-kind { width: calc(116px * var(--s)); }
-.rem .tier-own .sl-level { width: calc(124px * var(--s)); }
+.rem .chal-list { margin: var(--sp-1) var(--sp-5) var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-md); }
+.rem .tier-own .sl-row { padding-left: var(--sp-2); padding-right: var(--sp-2); }
+.rem .tier-own .sl-foot, .rem .tier-own .sl-time { padding-left: var(--sp-3); padding-right: var(--sp-3); }
 </style>`;
 
+const HELP = {
+  tiers: "The later it is, the more often the bedtime screen returns after you dismiss it. Write how often (30s, 5 min, 1h30; at least 5s) and after what time. With a Dismiss wait on, a step can have its own (10s, 2 min); empty uses the Dismiss wait. With Challenge before Dismiss on, a step can also have its own list of challenge steps.",
+  wait: "A shorter wait (or Off) needs the challenge; a longer one is free.",
+  chal: "Its own list, separate from Anti-Bypass. Passing dismisses it once; the next time it comes back it asks again. Making it easier while this is Important needs the challenge. Disable alerts still asks the Anti-Bypass challenge; Emergency never asks one.",
+  grey: "From bedtime until wake-up time, and it gets its colour back after. Turning it off while this is Important needs the challenge. Windows may also have its own Color filters (Settings > Accessibility): Lockdown's grey is separate, and goes away when Lockdown gives the colour back.",
+  block: "The bedtime screen (and a strict break) takes every click and key, and keeps itself in front, so nothing behind it can be used unseen. Its own buttons keep working. Turning it off while this is Important needs the challenge.",
+};
+const DEFAULT_WORDS = csecNote("Leave a box empty for the default words.");
+
 function sleepCard() {
-  return `<section class="card" data-card="sleep">
-    <header class="card-h">${kic("sched", "moon")}<h3>Sleep</h3></header>
-    <div class="card-b" style="padding:0">
-      ${field("Remind me to go to bed", "A bedtime screen, also over games.", flag("s-on", "", "Remind me to go to bed"))}
-      ${field("Important", "Turning it off or making it ask for less needs the challenge.", flag("s-guarded", "sleep", "Important"))}
-      ${field("Bedtime", "", `<span data-k="s-bed">${tp("23:00", "Bedtime")}</span><span class="muted small">Wake up</span><span data-k="s-wake">${tp("07:00", "Wake up")}</span><button class="btn btn-sm" type="button" data-act="save-times">Save times</button>`)}
-      ${field("Heads-up", "Off, 30, 1h or 45s before bedtime (up to 12 h).", `${num("s-before", 90)}<span class="muted small">before bedtime</span>`)}
-      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Comes back</b><span>The later it is, the more often the bedtime screen returns after you dismiss it. Write how often (30s, 5 min, 1h30; at least 5s) and after what time. With a Dismiss wait on, a step can have its own (10s, 2 min); empty uses the Dismiss wait below. With Challenge before Dismiss on, a step can also have its own list of challenge steps.</span></div>
-        <div class="steps" data-k="tiers"></div>
-        <div><button class="btn btn-sm" type="button" data-act="tier-add">${ic("plus")}Add step</button></div></div>
-      ${field("Dismiss wait", "Dismiss on the bedtime screen works only after this many seconds. A shorter wait (or Off) needs the challenge; a longer one is free.",
-        `${seg("wait", WAITS.map(([v, t]) => [String(v), t]), "")}${num("s-wait", 56)}<span class="muted small">s</span>`)}
-      ${field("Challenge before Dismiss", "After the wait, Dismiss asks these steps first, inside the bedtime screen (its own list, separate from Anti-Bypass). Passing dismisses it once; the next time it comes back it asks again. Making it easier while this is Important needs the challenge. Disable alerts still asks the Anti-Bypass challenge; Emergency never asks one.",
-        seg("chal", [["0", "Off"], ["1", "On"]], "0"))}
-      <div data-k="c-body" hidden>
-        <div class="chal-list" data-k="c-general"></div>
-        <div data-k="c-px" hidden>
-          ${field("Numbers &amp; CAPITALS", "For a Typed phrase step: capitals and digits in the phrase. Turning it off while this is Important needs the challenge.", flag("c-complex", "sleep", "Numbers and capitals"))}
-          ${field("3×3 grid", "For a Typed phrase step: one word at a time in a grid. Turning it off while this is Important needs the challenge.", flag("c-grid", "sleep", "3 by 3 grid"))}
-        </div>
-      </div>
-      ${field("Turn on a mode", "at bedtime, until wake-up time", select("s-mode", "sleep", [["", "No mode"]]))}
-      ${field("Grey screen during bedtime", "The whole screen goes grey from bedtime until wake-up time, and gets its colour back after. Turning it off while this is Important needs the challenge. Windows may also have its own Color filters (Settings > Accessibility): Lockdown's grey is separate, and goes away when Lockdown gives the colour back.", flag("s-grey", "sleep", "Grey screen during bedtime"))}
-      ${field("Block clicks behind the bedtime screen", "The bedtime screen (and a strict break) takes every click and key, and keeps itself in front, so nothing behind it can be used unseen. Its own buttons keep working. Turning it off while this is Important needs the challenge.", flag("s-block", "sleep", "Block clicks behind the bedtime screen"))}
-      ${field("Heads-up says", "Your own words, or leave empty. {bedtime}, {wake} and {time} are filled in.", text("s-warn", "sleep", "Heads-up says"))}
-      ${field("Bedtime says", "", text("s-text", "sleep", "Bedtime says"))}
+  const k = "k-sched";
+  return `<section class="card card-x" data-card="sleep">
+    <header class="card-h">${kic("sched", "moon")}<h3>Sleep</h3><span class="chip chip-soft" data-k="s-chip"></span></header>
+    <div class="card-b">
+      ${field("Remind me to go to bed", "A bedtime screen, also over games.", flag("s-on", "", "Remind me to go to bed"), "lead")}
+      ${csec(k, "clock", "Schedule", `
+        ${field("Bedtime", "", `<span data-k="s-bed">${tp("23:00", "Bedtime")}</span><span class="muted small">Wake up</span><span data-k="s-wake">${tp("07:00", "Wake up")}</span><button class="btn btn-sm" type="button" data-act="save-times">Save times</button>`)}
+        ${field("Heads-up", "before bedtime: Off, 30, 1h or 45s (up to 12 h)", num("s-before", 90))}
+        ${field("Turn on a mode", "at bedtime, until wake-up time", select("s-mode", "sleep", [["", "No mode"]]))}`)}
+      ${csec(k, "refresh", "After you dismiss it", `
+        ${field("Dismiss wait", "Dismiss works only after this many seconds.",
+          `${seg("wait", WAITS.map(([v, t]) => [String(v), t]), "")}${num("s-wait", 56)}<span class="muted small">s</span>${helpBtn("wait", "the Dismiss wait")}`)}
+        ${helpText("wait", HELP.wait)}
+        <div class="field col"><div class="field-l"><b>Comes back</b><span>The later it is, the more often it returns. How often, after what time, and (optional) its own Dismiss wait.</span></div>
+          <div class="steps" data-k="tiers"></div>
+          <div class="hstack"><button class="btn btn-sm" type="button" data-act="tier-add">${ic("plus")}Add step</button>${helpBtn("tiers", "Comes back")}</div></div>
+        ${helpText("tiers", HELP.tiers)}`)}
+      ${csec(k, "keyboard", "Challenge", `
+        ${field("Challenge before Dismiss", "After the wait, Dismiss asks these steps first, inside the bedtime screen.",
+          `${seg("chal", [["0", "Off"], ["1", "On"]], "0")}${helpBtn("chal", "Challenge before Dismiss")}`)}
+        ${helpText("chal", HELP.chal)}
+        <div data-k="c-body" hidden>
+          <div class="chal-list" data-k="c-general"></div>
+          <div data-k="c-px" hidden>
+            ${field("Numbers &amp; CAPITALS", "For a Typed phrase step: capitals and digits in the phrase.", flag("c-complex", "sleep", "Numbers and capitals"))}
+            ${field("3×3 grid", "For a Typed phrase step: one word at a time in a grid.", flag("c-grid", "sleep", "3 by 3 grid"))}
+          </div>
+        </div>`)}
+      ${csec(k, "moon", "Bedtime screen", `
+        ${field("Grey screen during bedtime", "The whole screen goes grey until wake-up time.", `${helpBtn("grey", "the grey screen")}${flag("s-grey", "sleep", "Grey screen during bedtime")}`)}
+        ${helpText("grey", HELP.grey)}
+        ${field("Block clicks behind the bedtime screen", "Takes every click and key - nothing behind it can be used unseen. Also for a strict break.",
+          `${helpBtn("block", "blocking clicks")}${flag("s-block", "sleep", "Block clicks behind the bedtime screen")}`)}
+        ${helpText("block", HELP.block)}`)}
+      ${csec(k, "lock", "Protection", field("Important", "Turning it off or making it ask for less needs the challenge (also the Dismiss wait, the challenge, the grey screen and click blocking).", flag("s-guarded", "sleep", "Important")))}
+      ${csec(k, "message", "Messages", `
+        ${field("Heads-up says", "{bedtime}, {wake} and {time} are filled in.", text("s-warn", "sleep", "Heads-up says"), "col")}
+        ${field("Bedtime says", "On the dimmed screen, also over games.", text("s-text", "sleep", "Bedtime says"), "col")}
+        ${DEFAULT_WORDS}`)}
       <p class="err" data-k="s-err" role="alert"></p>
-      <p class="tip">At bedtime the screen dims with a “Time for bed” message (also over games).</p>
     </div></section>`;
 }
 
 function breaksCard() {
-  return `<section class="card" data-card="break">
+  const k = "k-ok";
+  return `<section class="card card-x" data-card="break">
     <header class="card-h">${kic("k-ok", "coffee")}<h3>Breaks</h3><span class="chip chip-soft" data-k="b-today"></span></header>
-    <div class="card-b" style="padding:0">
-      ${field("Remind me to take breaks", "", flag("b-on", "", "Remind me to take breaks"))}
-      ${field("After", "of use without a break: 45 min, 30s, 1h30", num("b-every", 90))}
-      ${field("Snooze", "each time", num("b-snooze", 90))}
-      ${field("Break length", "", select("b-length", "break", LENGTHS.map((n) => [n, `${n} min`])))}
-      ${field("It says", "Your own words, or leave empty. {every} and {length} are filled in.", text("b-text", "break", "It says"))}
+    <div class="card-b">
+      ${field("Remind me to take breaks", "", flag("b-on", "", "Remind me to take breaks"), "lead")}
+      ${csec(k, "clock", "Timing", `
+        ${field("After", "of use without a break: 45 min, 30s, 1h30", num("b-every", 90))}
+        ${field("Break length", "", select("b-length", "break", LENGTHS.map((n) => [n, `${n} min`])))}
+        ${field("Snooze", "each time", num("b-snooze", 90))}`)}
+      ${csec(k, "minimize", "Strict break", `
+        ${field("Strict break", "Minimises everything until the break is over - you can't just dismiss it.", flag("b-strict", "break", "Strict break"))}
+        ${field("Snoozes first", "before a strict break starts on its own", select("b-max", "break", BREAK_SNOOZES.map((n) => [n, String(n)])), "sub")}
+        <div class="field col sub"><div class="field-l"><b>Allowed during breaks</b><span>Not minimised and don't bring the break screen back. Adding one needs the challenge; taking one off does not.</span></div>
+          <div data-k="allow"></div>
+          <div class="hstack"><button class="btn btn-sm" type="button" data-act="allow-add">${ic("plus")}Add app…</button><button class="btn btn-sm" type="button" data-act="allow-restore" hidden>Add Lockdown + Settings back</button></div>
+          <p class="err" data-k="allow-err" role="alert"></p></div>`)}
+      ${csec(k, "eye", "Eyes", field("20-20-20", "Every 20 min, look 20 feet (6 m) away for 20 seconds.", flag("b-twenty", "break", "20-20-20")))}
+      ${csec(k, "lock", "Protection", field("Important", "Turning it off or making it ask for less needs the challenge.", flag("b-guarded", "break", "Important")))}
+      ${csec(k, "message", "Messages", `
+        ${field("It says", "{every} and {length} are filled in.", text("b-text", "break", "It says"), "col")}
+        ${field("20-20-20 says", "", text("b-twenty-text", "break", "20-20-20 says"), "col")}
+        ${DEFAULT_WORDS}`)}
       <p class="err" data-k="b-err" role="alert"></p>
-      ${field("Important", "Turning it off or making it ask for less needs the challenge.", flag("b-guarded", "break", "Important"))}
-      ${field("Strict break", "Minimises everything until the break is over - you can't just dismiss it.", flag("b-strict", "break", "Strict break"))}
-      ${field("Snoozes first", "before a strict break starts on its own", select("b-max", "break", BREAK_SNOOZES.map((n) => [n, String(n)])))}
-      <div class="field" style="display:grid;gap:var(--sp-2);align-items:start"><div class="field-l"><b>Allowed during breaks</b><span>These apps are not minimised during a strict break and don't bring the break screen back. Adding one needs the challenge; taking one off does not.</span></div>
-        <div data-k="allow"></div>
-        <div class="hstack"><button class="btn btn-sm" type="button" data-act="allow-add">${ic("plus")}Add app…</button><button class="btn btn-sm" type="button" data-act="allow-restore" hidden>Add Lockdown + Settings back</button></div>
-        <p class="err" data-k="allow-err" role="alert"></p></div>
-      ${field("20-20-20", "Every 20 min, look 20 feet (6 m) away for 20 seconds.", flag("b-twenty", "break", "20-20-20"))}
-      ${field("20-20-20 says", "Your own words, or leave empty.", text("b-twenty-text", "break", "20-20-20 says"))}
     </div></section>`;
 }
 
@@ -328,7 +352,8 @@ function onClick(e) {
   const b = e.target.closest("[data-act]");
   if (!b) return;
   const act = b.dataset.act;
-  if (act === "save-times") flush("sleep");
+  if (act === "help") toggleHelp(root, b);
+  else if (act === "save-times") flush("sleep");
   else if (act === "tier-add") {
     const last = root.querySelectorAll("[data-tier]");
     b.closest(".field").querySelector('[data-k="tiers"]').append(tierItem(last.length ? "5 min" : "15 min", "21:00"));
@@ -422,6 +447,7 @@ function fillSleep(s, modes) {
   for (const [k, value] of [["s-bed", s.bedtime], ["s-wake", s.wake]]) {
     if (!q(k).contains(document.activeElement)) setTp(q(k), value);
   }
+  setText(q("s-chip"), `${s.bedtime} – ${s.wake}`);
   put(q("s-before"), s.before);
   fillChallenge(s);
   fillTiers(s.tiers, s.dismiss_wait);

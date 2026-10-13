@@ -6,7 +6,8 @@ package com.husarp.lockdown.engine
  * A strict break covers the screen with "Break time". Its Dismiss button is free: the cover goes and the phone goes
  * home. After that the cover only comes back when an app that is NOT allowed comes to the front. Allowed: the
  * built-in set (Lockdown, the home screen, Settings, the dialer, the clock, the system pieces that must never be
- * covered, the keyboard, the emergency apps), anything in a call, and the user's own "Allowed during breaks" list.
+ * covered, the keyboard, the emergency apps), anything while the phone rings (engine/CallCover.kt: not an app's
+ * voice call), and the user's own "Allowed during breaks" list.
  */
 object BreakAllow {
     /** In-call screens and the emergency dialer, besides the default dialer app. */
@@ -20,7 +21,8 @@ object BreakAllow {
         "com.android.emergency") + CALL_PKGS
 
     /** Is [pkg] fine to be in front during a break? An unknown front (null / empty) is allowed: nothing is known to be
-     *  wrong with it. [builtIn] is the phone's resolved set, [user] the user's list, [inCall] a ringing / ongoing call. */
+     *  wrong with it. [builtIn] is the phone's resolved set, [user] the user's list, [inCall] a call the
+     *  screens step aside for (CallCover.stepsAside). */
     fun allowed(pkg: String?, builtIn: Set<String>, user: Collection<String>, inCall: Boolean): Boolean =
         pkg.isNullOrEmpty() || inCall || pkg in KNOWN || pkg in builtIn || pkg in user
 

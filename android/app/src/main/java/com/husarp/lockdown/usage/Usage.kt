@@ -12,7 +12,7 @@ import com.husarp.lockdown.engine.AppSpan
 import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
-import java.util.Calendar
+import com.husarp.lockdown.guard.TrustedTime
 
 /** One app's usage over a period: total foreground time and how many times it was opened. */
 data class AppUse(val pkg: String, val label: String, val totalMs: Long, val opens: Int)
@@ -98,28 +98,18 @@ object Usage {
         spreadHours(from, to, hourly, java.time.ZoneId.systemDefault())
     }
 
-    /** Start-of-day for a day [daysAgo] days back (0 = today), and the exclusive end. */
-    fun dayBounds(daysAgo: Int): Pair<Long, Long> {
-        val cal = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -daysAgo)
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        val end = if (daysAgo == 0) System.currentTimeMillis() else start + 86_400_000L
-        return start to end
-    }
+    /** Start-of-day for a day [daysAgo] days back (0 = today), and the exclusive end - days of trusted time
+     *  (engine/DayBounds.kt); today ends at the phone's "now", the clock the usage stats are stamped by. */
+    fun dayBounds(ctx: Context, daysAgo: Int): Pair<Long, Long> =
+        com.husarp.lockdown.engine.DayBounds.of(daysAgo, TrustedTime.now(ctx), TrustedTime.zone(), System.currentTimeMillis())
 
     /** Start of the period spanning the last [days] days up to now. */
-    fun lastDaysStart(days: Int): Long = dayBounds(days - 1).first
+    fun lastDaysStart(ctx: Context, days: Int): Long = dayBounds(ctx, days - 1).first
 
     /** Total foreground ms for each of the last [days] days (oldest first). One query, bucketed by day. */
     fun dailyTotals(ctx: Context, days: Int): List<Long> {
-        val cal = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -(days - 1))
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        val end = System.currentTimeMillis()
+        val start = lastDaysStart(ctx, days)
+        val end = System.currentTimeMillis()          // (the usage stats' own clock)
         val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val events = usm.queryEvents(start, end)
         val totals = LongArray(days)
@@ -147,12 +137,13 @@ object Usage {
     /** Helper: this profile's foreground seconds per app and day over the last [IslandUse.DAYS] days, and per hour
      *  for today and yesterday (one query). The spans of the Activity log's days go into [spans] when given. */
     fun islandRows(ctx: Context, spans: MutableList<AppSpan>? = null): Pair<List<IslandUseRow>, List<IslandHourRow>> {
-        val zone = java.time.ZoneId.systemDefault()
-        val today = java.time.LocalDate.now()
+        // the days are trusted time's (as main's Insights asks for them); the spans are stamped by the phone's clock
+        val zone = TrustedTime.zone()
+        val today = com.husarp.lockdown.engine.DayBounds.today(TrustedTime.now(ctx), zone)
+        val end = System.currentTimeMillis()
         val start = today.minusDays(IslandUse.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
         val hourFrom = today.minusDays(IslandUse.HOUR_DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
         val spansFrom = today.minusDays(com.husarp.lockdown.engine.ActivityLog.DAYS - 1L).atStartOfDay(zone).toInstant().toEpochMilli()
-        val end = System.currentTimeMillis()
         val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val events = usm.queryEvents(start, end)
         val totals = HashMap<Pair<String, String>, Long>()

@@ -12,7 +12,8 @@ import { ld } from "../bridge.js";
 import { CANCELLED, clockOf, countdownText, guarded, parseNaive, whenText } from "../challenge.js";
 import { openDialog } from "../dialog.js";
 import { stepListEditor, stepsLooser } from "../steplist.js";
-import { days as dayChips, esc, field, fmt, ic, kic, seg, setText, sw, toast, tpRange } from "../ui.js";
+import { paintSecrets, secretsSection, wireSecrets } from "./antibypass_secrets.js";
+import { csec, csecNote, days as dayChips, esc, field, fmt, helpBtn, helpText, ic, kic, seg, setText, sw, toast, toggleHelp, tpRange } from "../ui.js";
 
 export const freshMs = 5000;
 export const events = ["status"];
@@ -98,21 +99,18 @@ const STYLE = `<style>
 .ab .ab-bar { flex: 1 1 100%; }
 .ab .btn-red { border-color: var(--k-block); color: var(--k-block); }
 .ab .btn-red:hover { background: var(--k-block-soft); }
-.ab .ab-help { margin: 0; padding: 0 var(--sp-4) var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
-.ab .ab-help[hidden] { display: none; }
-.ab .ab-err { margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); color: var(--k-block); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.ab .ab-err { margin: 0; padding: var(--sp-2) var(--sp-5) var(--sp-3); color: var(--k-block); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .ab .ab-err:empty { display: none; }
 .ab .ab-dim .field-c { opacity: .55; }
 .ab .ab-wins { display: grid; gap: var(--sp-2); align-items: start; }
 .ab .ab-wins [data-k="wins"] { display: grid; }
-.ab .ab-sub { margin: 0; padding: var(--sp-2) var(--sp-4); background: var(--surface-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
-.ab .ab-steps { border-top: 0; }
-.ab .ab-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); }
+.ab .ab-steps { margin: var(--sp-1) var(--sp-5) 0; border: 1px solid var(--line); border-radius: var(--r-md); }
+.ab .ab-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-5) var(--sp-1); }
 .ab .ab-why { flex: 1 1 calc(180px * var(--s)); min-width: 0; margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
 .ab .ab-why.loose { color: var(--on-brand-soft); }
 .ab [data-k="px"][hidden] { display: none; }
 .ab .ab-ownrow .field-c { flex: 1 1 calc(300px * var(--s)); flex-wrap: nowrap; }
-.ab .ab-own { flex: 1 1 auto; min-width: 0; }
+.ab .ab-own { flex: 1 1 auto; min-width: 0; width: calc(120px * var(--s)); }
 .ab .ab-box { width: calc(88px * var(--s)); text-align: center; }
 .ab .ab-note { margin: 0; font-weight: var(--fw-semibold); }
 .ab .ab-note.ok { color: var(--ok); }
@@ -125,8 +123,8 @@ const STYLE = `<style>
 .ab .ab-foot { margin: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); color: var(--text-2); font-size: var(--fs-sm); }
 </style>`;
 
-const help = (key, label) => `<button class="icon-btn icon-btn-sm" type="button" data-act="help" data-help="${key}" aria-expanded="false" aria-label="More about ${esc(label)}">${ic("info")}</button>`;
-const helpRow = (key) => `<p class="ab-help" data-helptext="${key}" hidden>${esc(HELP[key])}</p>`;
+const help = helpBtn;
+const helpRow = (key) => helpText(key, HELP[key]);
 const win = (w) => `<div class="win-row" data-win role="group">${dayChips(Array.from({ length: 7 }, (_, i) => w.days.includes(i)))}${tpRange(w.start, w.end)}<span class="grow"></span>` +
   `<button class="icon-btn icon-btn-sm" type="button" data-act="win-x" aria-label="Remove this time window">${ic("trash")}</button></div>`;
 
@@ -160,36 +158,39 @@ export function mount(el_, pg) {
     <div class="grid-2"><div class="stack">${challengeCard()}${alwaysCard()}</div>
       <div class="stack">${pauseCard()}${offCard()}${protectsCard()}${keepingCard()}</div></div></div>`;
   wire();
+  wireSecrets(root, (res) => apply(res, false, true));
   page.every(tick);
 }
 
 function challengeCard() {
-  return `<section class="card" data-card="challenges"><header class="card-h">${kic("k-brand", "keyboard")}<h3>Challenges</h3></header>
-    <div class="card-b" style="padding:0">
-      ${field("Ask a challenge", "Before anything that loosens a block - the steps below, one after another.", sw(false, 'data-k="phrase" aria-label="Ask a challenge"'))}
-      <p class="ab-sub">Steps - done top to bottom</p>
-      <div class="ab-steps" data-k="steps"></div>
-      <div class="ab-savebar"><p class="ab-why" data-k="steps-why" role="status"></p>
-        <button class="btn" type="button" data-act="undo-steps" data-k="undo-steps" disabled>Undo</button>
-        <button class="btn" type="button" data-act="save-steps" data-k="save-steps" disabled>Save steps</button></div>
-      <div data-k="px">
-        <p class="ab-sub">Typed phrase - shown because the list has a phrase step</p>
+  const k = "k-brand";
+  return `<section class="card card-x" data-card="challenges"><header class="card-h">${kic("k-brand", "keyboard")}<h3>Challenges</h3></header>
+    <div class="card-b">
+      ${field("Ask a challenge", "Before anything that loosens a block - the steps below, one after another.", sw(false, 'data-k="phrase" aria-label="Ask a challenge"'), "lead")}
+      ${csec(k, "layers", "Steps - done top to bottom", `
+        <div class="ab-steps" data-k="steps"></div>
+        <div class="ab-savebar"><p class="ab-why" data-k="steps-why" role="status"></p>
+          <button class="btn" type="button" data-act="undo-steps" data-k="undo-steps" disabled>Undo</button>
+          <button class="btn" type="button" data-act="save-steps" data-k="save-steps" disabled>Save steps</button></div>`)}
+      ${csec(k, "type", "Typed phrase", `
         ${field("Numbers & CAPITALS", "Adds digits and capital letters to a random phrase - harder to type quickly.", sw(false, 'data-k="complex" aria-label="Numbers and capitals"'), "ab-cx")}
         ${field("3×3 grid", "One word at a time into a random box of a 3×3 grid - you click the box first.", sw(false, 'data-k="grid" aria-label="3 by 3 grid"'))}
         ${field("Use my own phrase", "Instead of a random one. Switched off, it stays saved.", sw(false, 'data-k="own" aria-label="Use my own phrase"'))}
         ${field("Your own phrase", "Asked while the switch above is on.",
           `<input class="input ab-own" data-k="custom" maxlength="2000" placeholder="a phrase only you know" autocomplete="off" spellcheck="false" aria-label="Your own phrase">` +
-          `<button class="btn btn-sm" type="button" data-act="save-phrase">Save phrase</button>${help("own", "your own phrase")}`, "ab-ownrow")}
+          `<button class="btn btn-sm" type="button" data-act="save-phrase">Save phrase</button>${help("own", "your own phrase")}`, "ab-ownrow sub")}
         ${helpRow("own")}
-      </div>
-      <p class="ab-sub">Also</p>
-      ${field("Then wait", "Off, 10, 1h, 1h30 ... before it actually unlocks.",
-        `<input class="input ab-box" data-k="wait" autocomplete="off" spellcheck="false" aria-label="Then wait">${help("wait", "the wait")}`)}
-      ${helpRow("wait")}
-      ${field("Only during these hours", "Outside these times nothing can be loosened at all. An end before the start means overnight.", sw(false, 'data-k="hours" aria-label="Only during these hours"'))}
-      <div class="field sub ab-wins"><div data-k="wins"></div>
-        <div class="hstack wrap"><button class="btn btn-sm" type="button" data-act="win-add">${ic("plus")}Add time window</button>
-          <button class="btn btn-sm" type="button" data-act="save-hours" data-k="save-hours">Save hours</button></div></div>
+        ${csecNote("Shown because the list has a phrase step.")}`, 'data-k="px"')}
+      ${secretsSection(k)}
+      ${csec(k, "hourglass", "After passing", `
+        ${field("Then wait", "Off, 10, 1h, 1h30 ... before it actually unlocks.",
+          `<input class="input ab-box" data-k="wait" autocomplete="off" spellcheck="false" aria-label="Then wait">${help("wait", "the wait")}`)}
+        ${helpRow("wait")}`)}
+      ${csec(k, "calendar", "Allowed hours", `
+        ${field("Only during these hours", "Outside these times nothing can be loosened at all. An end before the start means overnight.", sw(false, 'data-k="hours" aria-label="Only during these hours"'))}
+        <div class="field sub ab-wins"><div data-k="wins"></div>
+          <div class="hstack wrap"><button class="btn btn-sm" type="button" data-act="win-add">${ic("plus")}Add time window</button>
+            <button class="btn btn-sm" type="button" data-act="save-hours" data-k="save-hours">Save hours</button></div></div>`)}
       <p class="ab-err" data-k="err" role="alert"></p>
     </div></section>`;
 }
@@ -251,6 +252,7 @@ function apply(next, keepTyped = false, committed = false) {
   if (!Number.isNaN(t)) clock = { base: t, at: performance.now() };
   paintBanner();
   paintChallenges(keepTyped, committed);
+  paintSecrets(root, d);
   paintPause();
   paintOff();
   if (pendingFocus) { pendingFocus = false; focusPause(); }
@@ -315,6 +317,7 @@ function paintSteps() {
     if (!stepsEdited && JSON.stringify(steps.get()) !== JSON.stringify(c.steps)) steps.set(c.steps);
   }
   steps.setSaved(c.steps);
+  steps.setReady(["password", "totp"].filter((k) => d.secrets && d.secrets[k].set));
   steps.setDisabled(!c.phrase);
   paintStepsBar();
 }
@@ -588,12 +591,7 @@ function wire() {
         steps.set(d.config.steps);
         paintStepsBar();
         break;
-      case "help": {
-        const open = b.getAttribute("aria-expanded") !== "true";
-        b.setAttribute("aria-expanded", String(open));
-        root.querySelector(`[data-helptext="${b.dataset.help}"]`).hidden = !open;
-        break;
-      }
+      case "help": toggleHelp(root, b); break;
       case "win-add": {
         q("wins").insertAdjacentHTML("beforeend", win({ days: [6], start: "18:00", end: "20:00" }));
         markWindows();

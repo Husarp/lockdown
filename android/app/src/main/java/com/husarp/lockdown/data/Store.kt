@@ -21,7 +21,13 @@ object Store {
 
     fun init(ctx: Context) {
         file = File(ctx.filesDir, "config.json")
-        if (file.exists()) runCatching { _state.value = json.decodeFromString<Config>(file.readText()) }
+        if (file.exists()) runCatching {
+            val read = json.decodeFromString<Config>(file.readText())
+            // imported sites kept as one item each (up to 0.5.19): moved into the compact list once, and saved so
+            val c = ImportedSites.migrate(read)
+            _state.value = c
+            if (c !== read) persist()
+        }
     }
 
     // Saves run on one background thread (a toggle used to write the whole multi-MB config on the UI thread),
@@ -63,7 +69,7 @@ object Store {
      * use history (PC parity): a file brings in emergency kinds, but can't reset the uses or bring in an unlock.
      */
     fun decodeImport(text: String, current: Config): Config? =
-        runCatching { json.decodeFromString<Config>(text) }.getOrNull()?.let { c ->
+        runCatching { ImportedSites.migrate(json.decodeFromString<Config>(text)) }.getOrNull()?.let { c ->
             c.copy(antibypass = c.antibypass.copy(unlockedFrom = current.antibypass.unlockedFrom, unlockedUntil = current.antibypass.unlockedUntil),
                 pause = current.pause, emergencyUses = current.emergencyUses, unlocks = current.unlocks,
                 unlockUntil = current.unlockUntil, unlockItems = current.unlockItems, alertsPausedUntil = current.alertsPausedUntil)

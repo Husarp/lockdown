@@ -34,10 +34,12 @@ import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
 import com.husarp.lockdown.engine.BreakAllow
+import com.husarp.lockdown.engine.CallCover
 import com.husarp.lockdown.engine.Browsers
 import com.husarp.lockdown.engine.Cadence
 import com.husarp.lockdown.engine.ChallengeRun
 import com.husarp.lockdown.engine.Emergency
+import com.husarp.lockdown.engine.ItemIndex
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Rules
@@ -132,6 +134,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 addDataScheme("package")
             }, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         }
+        if (Build.VERSION.SDK_INT >= 31) runCatching {
+            (getSystemService(AUDIO_SERVICE) as AudioManager).addOnModeChangedListener(mainExecutor, modeListener as AudioManager.OnModeChangedListener)
+        }
         handler.post(tick)
         handler.post(bedtimeTick)
         ReminderRunner.screen = this
@@ -201,7 +206,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             // and warns about the Island app in front
             val island = IslandLink.islandFront?.takeIf { !IslandLink.isHelper && IslandLink.islandInFront() }
             if (island != null) History.record(now, island, islandSite(island), dt)
-            inUseIds = setOfNotNull(island?.let { p -> cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(p, true) }?.id })
+            inUseIds = setOfNotNull(island?.let { p -> ItemIndex.of(cfg.items).app(p)?.id })
             // the helper can't grey the screen: main greys it while an Island app that greys is in front (not
             // Lockdown itself over it), or while one of main's that greys is still on screen (picture-in-picture)
             Grayscale.app(this, (island != null && Enforce.app(cfg, island, now, mode)?.grey == true && !ReminderRunner.appVisible) ||
@@ -213,8 +218,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         // The address bar is hidden in a full-screen video: keep the last address read, don't lose the site.
         if (isBrowser(pkg)) readBar(pkg)
         val host = if (isBrowser(pkg)) Browsers.hostOf(pkg, lastUrl[pkg]) else null
-        val appItem = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
-        val siteItem = host?.let { h -> cfg.items.firstOrNull { it.type == ItemType.SITE && !it.disabled && Enforce.hostMatches(it.target, h) } }
+        // (the index finds them straight away: no going through every item on each step)
+        val appItem = ItemIndex.of(cfg.items).app(pkg)
+        val siteItem = host?.let { h -> ItemIndex.of(cfg.items).sites(h).firstOrNull { it.type == ItemType.SITE && !it.disabled } }
         inUseIds = setOfNotNull(appItem?.takeIf { !it.disabled }?.id, siteItem?.id)
 
         // Count what's in use - but not an item that is blocked: its time behind the notice and its retries
@@ -768,22 +774,28 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         runCatching { startActivity(Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
-    /** The bedtime screen and a strict break never cover a call: they step aside while the phone rings or a call
-     *  is on, while the dialer is in front after "Phone", and on the lock screen (its emergency call stays
-     *  reachable; nothing can be used there anyway). They come back after; the engine keeps them running. */
+    /** The bedtime screen and a strict break step aside while the phone rings, during a phone call while the call's
+     *  own screen is in front (engine/CallCover.kt: an app's voice call - WhatsApp, Discord - doesn't count, and any
+     *  other app over a phone call brings them back), while the dialer is in front after "Phone", and on the lock
+     *  screen (its emergency call stays reachable; nothing can be used there anyway). They come back after (the
+     *  audio mode changing, a window change, the reminder tick); the engine keeps them running. */
     private fun syncRemindHidden() {
         val am = getSystemService(AUDIO_SERVICE) as AudioManager
-        val call = am.mode == AudioManager.MODE_RINGTONE || am.mode == AudioManager.MODE_IN_CALL ||
-            am.mode == AudioManager.MODE_IN_COMMUNICATION
+        val call = CallCover.stepsAside(CallCover.of(am.mode), isDialer(currentPkg))
         val ms = SystemClock.elapsedRealtime()
         if (dialing && ms >= dialUntil && !isDialer(currentPkg)) dialing = false
         val locked = (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked
         remindHidden = call || dialing || locked
-        // a dismissed break covers again only for an app that isn't allowed (a call is always allowed)
+        // a dismissed break covers again only for an app that isn't allowed (the phone ringing allows anything)
         if (breakDismissed && STRICT_BREAK in remindViews)
             breakCovered = BreakAllow.covered(true, breakFront, BreakApps.builtIn(this), Store.config.breaks.allowed, call)
         applyRemind()
     }
+
+    /** The audio mode changed (a call rang, began or ended): the reminder screens follow at once, not on the next tick.
+     *  Android 12+ (older phones: the window change and the 5-second tick). */
+    private val modeListener: Any? = if (Build.VERSION.SDK_INT >= 31)
+        AudioManager.OnModeChangedListener { handler.post { runCatching { syncRemindHidden() } } } else null
 
     /** Adds or removes each reminder view to match what it should do now ([remindHidden], the break's cover). */
     private fun applyRemind() {
@@ -947,6 +959,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         connected = false; removeOverlay()
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { unregisterReceiver(packageReceiver) }
+        if (Build.VERSION.SDK_INT >= 31) runCatching {
+            (getSystemService(AUDIO_SERVICE) as AudioManager).removeOnModeChangedListener(modeListener as AudioManager.OnModeChangedListener)
+        }
         runCatching { syncDnd(release = true) }        // the service going away puts Do Not Disturb back if we set it
         runCatching { Grayscale.app(this, false) }     // nothing watches what's in front any more: colour back
         // The bedtime screen goes with the service: count it as dismissed, so it comes back on its escalation.

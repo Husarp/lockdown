@@ -52,7 +52,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.husarp.lockdown.usage.Usage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.time.LocalDate
 
 private data class Bar(val label: String, val ms: Long)
 private data class InsightData(val total: Long, val days: Int, val perApp: List<TopRow>, val bars: List<Bar>, val hourly: Boolean, val islandNotInBars: Long = 0L)
@@ -74,12 +73,12 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
         // permanent "Loading…" and was the "7/30 days doesn't work" bug). Always returns a non-null result.
         value = withContext(Dispatchers.IO) {
             val (back, len) = ranges[range].second
-            val du = runCatching { Usage.range(ctx, Usage.dayBounds(back + len - 1).first, Usage.dayBounds(back).second) }.getOrNull()
+            val du = runCatching { Usage.range(ctx, Usage.dayBounds(ctx, back + len - 1).first, Usage.dayBounds(ctx, back).second) }.getOrNull()
             // Island apps count too: the helper's per-app time (over the link) is merged into main's by package
-            val today = LocalDate.now()
+            val today = com.husarp.lockdown.guard.TrustedTime.local(ctx).toLocalDate()    // trusted time's day (as the limits)
             val island = runCatching { com.husarp.lockdown.link.IslandLink.islandUse(ctx, today.minusDays(back + len - 1L), today.minusDays(back.toLong())) }
                 .getOrDefault(emptyMap())
-            val islandDays = (0 until len).map { today.minusDays((back + len - 1 - it).toLong()) }
+            val islandDays = com.husarp.lockdown.engine.DayBounds.days(today, back, len)
             val islandPerDay = runCatching { com.husarp.lockdown.engine.IslandUse.perDay(com.husarp.lockdown.link.IslandLink.islandRows(ctx), islandDays) }
                 .getOrDefault(List(len) { 0L })
             val allApps = com.husarp.lockdown.engine.IslandUse.topApps(
@@ -107,7 +106,7 @@ fun InsightsScreen(onOpenActivity: () -> Unit = {}) {
                     .mapIndexed { i, ms -> ms + islandPerDay[i] }
                 val wd = listOf("M", "T", "W", "T", "F", "S", "S")
                 totals.mapIndexed { i, ms ->
-                    val date = LocalDate.now().minusDays((len - 1 - i).toLong())
+                    val date = today.minusDays((len - 1 - i).toLong())
                     val label = when { len <= 7 -> wd[date.dayOfWeek.value - 1]; date.dayOfMonth % 5 == 0 -> "${date.dayOfMonth}"; else -> "" }
                     Bar(label, ms)
                 }

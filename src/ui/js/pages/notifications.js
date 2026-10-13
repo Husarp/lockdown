@@ -13,7 +13,7 @@
 // (the `draft` push says "discarded") reloads the page so the boxes show the saved values again.
 import { ld } from "../bridge.js";
 import { applyState, draftSetSetting, flushSettings } from "../draft.js";
-import { el, esc, field, ic, kic, seg, stepper, sw, toast } from "../ui.js";
+import { csec, csecNote, el, esc, field, helpBtn, helpText, ic, kic, seg, stepper, sw, toast, toggleHelp } from "../ui.js";
 
 export const freshMs = 10_000;
 export const events = ["draft"];
@@ -45,15 +45,13 @@ const STYLE = `<style>
 .nt .nt-cell { display: flex; border: 1px solid var(--line-strong); border-radius: var(--r-md); padding: var(--sp-3); background: var(--surface); }
 .nt .nt-cell:has(input:checked) { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
 .nt .nt-cell:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
-.nt .nt-pad { padding: var(--sp-3) var(--sp-4) 0; }
-.nt .nt-msgs { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) var(--sp-2); }
+.nt .nt-msgs { display: grid; gap: var(--sp-2); padding: var(--sp-2) var(--sp-5) var(--sp-2); }
 .nt .nt-msg { display: grid; grid-template-columns: calc(210px * var(--s)) minmax(0, 1fr) auto; gap: var(--sp-2); align-items: center; }
 .nt .nt-msg label { color: var(--text-2); font-size: var(--fs-sm); }
-.nt .nt-more { display: flex; align-items: center; gap: var(--sp-2); width: 100%; border: 0; background: none; padding: var(--sp-3) var(--sp-4) 0; text-align: left; color: var(--text); }
+.nt .nt-more { display: flex; align-items: center; gap: var(--sp-2); width: 100%; border: 0; background: none; padding: var(--sp-2) var(--sp-5); text-align: left; color: var(--text); font-weight: var(--fw-semibold); }
 .nt .nt-more .ic { transition: transform var(--dur) var(--ease); color: var(--text-2); }
 .nt .nt-more[aria-expanded="true"] .ic { transform: rotate(90deg); }
 .nt .nt-note { padding: var(--sp-2) var(--sp-4) var(--sp-4); color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
-.nt .nt-help { padding: 0 var(--sp-4) var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
 .nt .nt-digest { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); }
 .nt .nt-repeat { width: calc(84px * var(--s)); text-align: center; }
 .nt .nt-steps { width: calc(110px * var(--s)); text-align: center; }
@@ -64,27 +62,30 @@ const STYLE = `<style>
 @media (max-width: 860px) { .nt .nt-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nt .nt-msg { grid-template-columns: minmax(0, 1fr) auto; } .nt .nt-msg label { grid-column: 1 / -1; } }
 </style>`;
 
-const help = (key, label) => `<button class="icon-btn icon-btn-sm" type="button" data-act="help" data-help="${key}" aria-expanded="false" aria-label="More about ${esc(label)}">${ic("info")}</button>`;
+const help = helpBtn;
 const HELP = {
   fmt: "Windows draws its notifications, so they never cover a game the way a pop-up window can. While a full-screen app is in front, Lockdown always uses them (whatever you pick here). Windows' \"Do not disturb when playing a game\" keeps them out of games entirely - they wait in the notification centre (the bell) and clear themselves later.",
   front: "A small card in the corner of your screen, on top of a window or a borderless game - without taking focus, and not held back by Windows' Do not disturb or game mode - and a short sound. A game in true full screen can't be drawn over: there only the sound gets through. Write one time, or up to three (1 to 30 minutes), like 5, 1 for a warning at 5 minutes and another at 1.",
   digest: "Screen time compared with the week before, blocked visits, your top app and site, the days within your goal and your streaks.",
 };
-const helpRow = (key) => `<p class="nt-help" data-helptext="${key}" hidden>${esc(HELP[key])}</p>`;
+const helpRow = (key) => helpText(key, HELP[key]);
 
 function alertsCard() {
-  return `<section class="card" data-card="alerts">
+  const k = "k-block";
+  return `<section class="card card-x" data-card="alerts">
     <header class="card-h">${kic("k-block", "ban")}<h3>Blocked Visit Alerts</h3></header>
-    <p class="muted small nt-pad">Notify me when I try to open a site (or start an app) that is:</p>
-    <div class="card-b"><div class="nt-cells" data-k="cells"></div></div>
-    <button class="nt-more" type="button" data-act="messages" aria-expanded="false">${ic("chev-r")}<b>Messages</b><span class="muted small">change what each alert says</span></button>
-    <div class="nt-msgs" data-k="msgs" hidden></div>
-    <div class="card-b" style="padding:0">
-      ${field("Don't repeat for the same site within", "", `<select class="select select-sm" data-k="cooldown" aria-label="Cooldown"></select>`)}
-      ${field("Show as", "", `${seg("nfmt", [], "")}${help("fmt", "Show as")}`)}
-      ${helpRow("fmt")}
+    <div class="card-b">
+      ${csec(k, "bell", "Alert me when I open a site or app that is", `
+        <div class="field col"><div class="nt-cells" data-k="cells"></div></div>
+        ${csecNote("Per-site override: the Alerts column in Blocking &gt; Overview.")}`)}
+      ${csec(k, "settings", "How", `
+        ${field("Show as", "", `${seg("nfmt", [], "")}${help("fmt", "Show as")}`)}
+        ${helpRow("fmt")}
+        ${field("Don't repeat for the same site within", "", `<select class="select select-sm" data-k="cooldown" aria-label="Cooldown"></select>`)}`)}
+      ${csec(k, "message", "Messages", `
+        <button class="nt-more" type="button" data-act="messages" aria-expanded="false">${ic("chev-r")}<span>Change what each alert says</span></button>
+        <div class="nt-msgs" data-k="msgs" hidden></div>`)}
     </div>
-    <p class="nt-note">Per-site override: the Alerts column in Blocking &gt; Overview.</p>
   </section>`;
 }
 
@@ -312,12 +313,7 @@ async function onClick(e) {
       draftSetSetting(`notify.msg.${r.key}`, r.default, 0);
       break;
     }
-    case "help": {
-      const open = b.getAttribute("aria-expanded") !== "true";
-      b.setAttribute("aria-expanded", String(open));
-      root.querySelector(`[data-helptext="${b.dataset.help}"]`).hidden = !open;
-      break;
-    }
+    case "help": toggleHelp(root, b); break;
     case "test": {
       b.disabled = true;
       try {

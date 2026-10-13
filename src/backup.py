@@ -1,6 +1,8 @@
 """Export / import everything you set up (Settings > Backup): blocked sites / apps with their rules, groups,
 categories and settings - one JSON file. Runtime state (the service's clock, heartbeats, network adapter backups,
-download progress, the mode that's on, an Anti-Bypass unlock) isn't included. Plus a screen-time CSV export.
+download progress, the mode that's on, an Anti-Bypass unlock) isn't included, nor are the Anti-Bypass password,
+authenticator and recovery code (a restore keeps the ones this PC has; a restored step whose secret isn't set up here
+is skipped until it is). Plus a screen-time CSV export.
 Importing replaces your blocks and settings (the GUI asks for the Anti-Bypass challenge first)."""
 import csv
 import json
@@ -19,9 +21,11 @@ RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "cloc
                 "retention.last_day",   # (retention.LAST_KEY: when it last ran - machine state, not a choice)
                 "usage.counted_until", "firewall_quic", "firewall_video", "apps.members",
                 "pause.blocks",   # (a running "Pause my blocks" - an import neither carries one in nor ends one)
-                "app.off"}        # (Lockdown switched off: switching off has its own challenge, even with none set)
+                "app.off",        # (Lockdown switched off: switching off has its own challenge, even with none set)
+                "antibypass.secrets"}   # (your password's hash, the authenticator's secret, the recovery code's hash:
+#                                         never in a file you may share; a restore keeps the ones this PC has)
 # (monitor.usage.COUNTED_KEY, service.QUIC_KEY, service.VIDEO_KEY, monitor.usage.MEMBERS_KEY, pause.KEY,
-#  antibypass.OFF_KEY)
+#  antibypass.OFF_KEY, challenge_secrets.SECRETS_KEY)
 
 
 def export(db) -> dict:

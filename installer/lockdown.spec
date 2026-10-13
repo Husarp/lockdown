@@ -30,10 +30,13 @@ WEB_UI = (collect_submodules("resident") + collect_submodules("webapi")
           + ["agent", "webview", "webview.platforms.edgechromium", "webview.platforms.winforms", "clr_loader",
              "pythonnet", "clr"])
 
+# The authenticator setup's QR code (challenge_secrets.qr_svg imports segno lazily): stop here, not ship without it
+import segno  # noqa: F401  (pip install -r requirements.txt)
+
 gui = Analysis([os.path.join(SRC, "main.py")], pathex=[SRC],
                datas=[(os.path.join(ROOT, "assets"), "assets"), (os.path.join(SRC, "ui"), "ui")] + UIA_DLLS
                + collect_data_files("webview"),
-               hiddenimports=["comtypes.stream"] + TOASTS + WEB_UI,
+               hiddenimports=["comtypes.stream", "segno"] + TOASTS + WEB_UI,
                excludes=["pytest", "customtkinter"])
 svc = Analysis([os.path.join(SRC, "service_win.py")], pathex=[SRC],
                hiddenimports=["win32timezone"], excludes=["pytest", "customtkinter", "PIL", "pystray", "uiautomation"])

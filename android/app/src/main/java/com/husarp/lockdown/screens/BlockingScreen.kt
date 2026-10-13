@@ -172,6 +172,13 @@ private fun BlockList(
                 val list = matches.take(shown)
                 items(list, key = { it.id }) { item -> ItemRow(item, cfg, memberOf, now, mode) { onEdit(item) } }
                 if (shown < matches.size) item { MoreNote(list.size, matches.size) }
+                // the imported sites aren't items (data/ImportedSites.kt): say when the text is one of them
+                val q = query.trim().lowercase()
+                val importedHits = cfg.imported.count { it.contains(q) }
+                if (importedHits > 0) item {
+                    Text("$importedHits imported site${if (importedHits == 1) "" else "s"} match, blocked for good (Settings > Backup & import).",
+                        Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
             } else {
                 if (cfg.groups.isNotEmpty()) {
                     item { SectionLabel("Groups · ${cfg.groups.size}") }
@@ -200,8 +207,12 @@ private fun BlockList(
                             style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
                 }
+                if (cfg.imported.isNotEmpty()) item {
+                    Text("Also ${cfg.imported.size} imported sites, blocked for good (Settings > Backup & import).",
+                        Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
             }
-            if (cfg.items.isEmpty()) item {
+            if (cfg.items.isEmpty() && cfg.imported.isEmpty()) item {
                 Box(Modifier.fillMaxWidth().padding(top = 48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
                     Text("Nothing blocked yet. Tap Block to add an app or site.", color = cs.onSurfaceVariant)
                 }

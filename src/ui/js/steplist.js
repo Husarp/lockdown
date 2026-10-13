@@ -14,7 +14,7 @@
 //             is on; own_length = non-space length of the own phrase while it is in use (0 = none). Used for the
 //             estimate only; change it later with setPhrase().
 //   label     aria-label of the list (default "Challenge steps")
-//   -> { el, get(), set(steps), setSaved(steps), setPhrase(p), hasPhrase(), setDisabled(bool) }
+//   -> { el, get(), set(steps), setSaved(steps), setPhrase(p), hasPhrase(), setDisabled(bool), setReady(kinds) }
 //      el            the element to put on the page (.sl); rows [data-step], "+ Add a step" [data-act="sl-add"], the
 //                    "How long: about ..." line [data-k="sl-time"] and the soft note [data-k="sl-note"]
 //      get()         a fresh copy of the list as shown
@@ -22,6 +22,9 @@
 //      setSaved(s)   the list that is stored: rows that differ from it (by id) get a mark on the left (.chg)
 //      setPhrase(p)  new phrase info, repaints the estimate
 //      hasPhrase()   does the list hold a Typed phrase step (the caller then shows the phrase extras)
+//      setReady(k)   the secret kinds that are set up (["password", "totp"]); a row of another one says "Not set up yet"
+// A secret kind (options.kinds[].secret: Own password, Authenticator code - Anti-Bypass only) has no level and is always
+// asked once: its row shows that instead of the level and times boxes.
 // A new row gets a fresh random id; a row keeps its id while it is edited, moved or changes kind. At least one row
 // stays (the last x is disabled), at most options.max_steps.
 // Also exported (pure): stepSeconds, estimate, stepsLooser, newId, hasPhrase.
@@ -84,6 +87,7 @@ const copy = (steps) => steps.map((s) => ({ id: s.id, kind: s.kind, level: s.lev
 export function stepListEditor({ steps, options, onChange = () => {}, phrase = {}, label = "Challenge steps" }) {
   let rows = copy(steps);
   let saved = null;
+  let ready = null;                            // the secret kinds that are set up (null = not told: no note)
   let info = { length: 60, grid: false, own_length: 0, ...phrase };
   const custom = new Set();                    // ids of phrase rows that show the length box (a length that is no preset)
   const el = document.createElement("div");
@@ -107,10 +111,14 @@ export function stepListEditor({ steps, options, onChange = () => {}, phrase = {
       + (r.kind === "phrase" ? `<option value="custom"${isCustom(r) ? " selected" : ""}>Custom length</option>` : "");
     const box = isCustom(r)
       ? `<span class="sl-len"><input class="input" data-f="len" value="${r.level}" inputmode="numeric" maxlength="4" aria-label="Phrase length in characters, ${PHRASE_MIN} to ${PHRASE_MAX}"></span>` : "";
+    const unset = k.secret && ready && !ready.includes(r.kind);
+    const middle = k.secret
+      ? `<span class="sl-level sl-fixed small${unset ? " sl-unset" : " muted"}" data-k="sl-fixed">${unset ? "Not set up yet - set it up below" : "Asked once"}</span>`
+      : `<select class="select select-sm sl-level" data-f="level" aria-label="Level">${lvOpts}</select>${box}
+      ${stepper(r.times, "", { sm: true, min: options.min_times, max: options.max_times, label: `Times, step ${i + 1}` })}`;
     return `<div class="sl-row" data-step="${esc(r.id)}" role="group" aria-label="Step ${i + 1}"><span class="sl-n">${i + 1}</span>
       <select class="select select-sm sl-kind" data-f="kind" aria-label="Kind">${kinds}</select>
-      <select class="select select-sm sl-level" data-f="level" aria-label="Level">${lvOpts}</select>${box}
-      ${stepper(r.times, "", { sm: true, min: options.min_times, max: options.max_times, label: `Times, step ${i + 1}` })}
+      ${middle}
       <span class="sl-btns"><button class="icon-btn icon-btn-sm" type="button" data-act="sl-up" aria-label="Move up"${i === 0 ? " disabled" : ""}>${ic("chev-u")}</button>
         <button class="icon-btn icon-btn-sm" type="button" data-act="sl-down" aria-label="Move down"${i === rows.length - 1 ? " disabled" : ""}>${ic("chev-d")}</button>
         <button class="icon-btn icon-btn-sm" type="button" data-act="sl-x" aria-label="Remove this step"${rows.length <= 1 ? " disabled" : ""}>${ic("x")}</button></span></div>`;
@@ -185,7 +193,8 @@ export function stepListEditor({ steps, options, onChange = () => {}, phrase = {
       const was = r.kind;
       r.kind = t.value;
       custom.delete(r.id);
-      if (r.kind === "phrase") r.level = clamp(Math.round(Number(info.length)) || 60, PHRASE_MIN, PHRASE_MAX);
+      if (kindOf(options, r.kind).secret) { r.level = 0; r.times = 1; }      // (no level, asked once)
+      else if (r.kind === "phrase") r.level = clamp(Math.round(Number(info.length)) || 60, PHRASE_MIN, PHRASE_MAX);
       else r.level = was === "phrase" ? 0 : Math.min(r.level, kindOf(options, r.kind).levels.length - 1);
     } else if (f === "level") {
       if (t.value === "custom") custom.add(r.id);
@@ -238,6 +247,12 @@ export function stepListEditor({ steps, options, onChange = () => {}, phrase = {
       paintFoot();
     },
     hasPhrase: () => hasPhrase(rows),
+    setReady(kinds) {
+      const next = Array.isArray(kinds) ? kinds.slice().sort() : null;
+      if (JSON.stringify(next) === JSON.stringify(ready)) return;
+      ready = next;
+      render();
+    },
     setDisabled(off) {
       el.classList.toggle("sl-off", !!off);
     },
@@ -245,21 +260,30 @@ export function stepListEditor({ steps, options, onChange = () => {}, phrase = {
 }
 
 const STYLE = `<style>
-.sl .sl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); }
+.sl .sl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-1); padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); }
 .sl .sl-row:first-child { border-top: 0; }
 .sl .sl-row.chg { background: linear-gradient(90deg, var(--brand-soft) 0 3px, transparent 3px); }
 .sl .sl-n { width: calc(16px * var(--s)); color: var(--text-3); font-weight: var(--fw-semibold); }
-.sl .sl-kind { width: calc(128px * var(--s)); }
-.sl .sl-level { width: calc(116px * var(--s)); }
+/* the two choices share what is left of the row (up to their full width), so the move / remove buttons stay on it */
+.sl .sl-kind { flex: 1 1 0; min-width: calc(72px * var(--s)); max-width: calc(128px * var(--s)); }
+.sl .sl-level { flex: 1 1 0; min-width: calc(72px * var(--s)); max-width: calc(116px * var(--s)); }
 .sl .sl-len { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .sl .sl-len .input { width: calc(58px * var(--s)); height: var(--control-h-sm); font-size: var(--fs-sm); text-align: center; }
-.sl .sl-btns { display: inline-flex; gap: var(--sp-1); margin-left: auto; }
+.sl .sl-btns { display: inline-flex; gap: 0; margin-left: auto; }
 .sl .sl-btns .icon-btn:disabled { opacity: .35; cursor: not-allowed; }
 .sl .sl-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); }
 .sl .sl-time { padding: var(--sp-2) var(--sp-4) var(--sp-3); }
 .sl .sl-soft { margin: 0; padding: 0 var(--sp-4) var(--sp-3); color: var(--k-limit, var(--text-2)); font-weight: var(--fw-semibold); }
 .sl .sl-soft[hidden] { display: none; }
+/* a narrow list: kind and level fill the first line, the times and the move / remove buttons share the second */
+.sl { container-type: inline-size; }
+@container (max-width: 440px) {
+  .sl .sl-kind, .sl .sl-level { flex: 1 1 40%; max-width: none; }
+  .sl .sl-row .stepper { margin-left: calc(16px * var(--s) + var(--sp-1)); }
+}
 .sl.sl-own .sl-level, .sl.sl-own .sl-len { opacity: .55; }
+.sl .sl-fixed { align-self: center; flex: 2 1 auto; max-width: none; }
+.sl.sl-own .sl-fixed { opacity: 1; }
+.sl .sl-unset { color: var(--k-limit, var(--text-2)); font-weight: var(--fw-semibold); }
 .sl.sl-off .sl-list { opacity: .55; }
-@media (max-width: 520px) { .sl .sl-kind, .sl .sl-level { width: calc(50% - 24px); } }
 </style>`;

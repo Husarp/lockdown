@@ -142,7 +142,9 @@ html:not([data-kbd]) :focus-visible { outline: none; }   /* (keyboard only - bri
 /* ---------- cards ---------- */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-card); min-width: 0; }
 .card-h { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4) var(--sp-4) 0; min-height: calc(44px * var(--s)); }
-.card-h h3 { flex: 1; min-width: 0; }
+.card-h h3 { flex: 1; min-width: 0; font: var(--fw-semibold) var(--fs-title)/1.25 var(--font-display); }
+.card-h > .kic { width: calc(32px * var(--s)); height: calc(32px * var(--s)); }
+.card-h > .kic .ic { width: calc(18px * var(--s)); height: calc(18px * var(--s)); }
 .card-b { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 .card-f { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); }
 .card.flush .card-b { padding: 0; }
@@ -163,6 +165,29 @@ html:not([data-kbd]) :focus-visible { outline: none; }   /* (keyboard only - bri
 .field-l span { color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
 .field-c { display: flex; align-items: center; gap: var(--sp-2); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 .field.sub { padding-left: calc(var(--sp-4) + var(--sp-8)); background: var(--surface-2); }
+
+/* a busy card in titled sections (.card-x; ui.js csec()): rows at 20 px sides with no lines between them, one thin line
+   above each section, a small grey UPPERCASE title with its icon in the section's meaning colour (.k-*). The main switch
+   (.field.lead) comes first, untitled; a switch's own options (.field.sub) sit under it, indented with a thin line. */
+.card-x > .card-h { padding: var(--sp-5) var(--sp-5) var(--sp-3); gap: var(--sp-3); }
+.card-x > .card-b { padding: 0; }
+.card-x .field { padding: calc(10px * var(--s)) var(--sp-5); min-height: calc(48px * var(--s)); }
+.card-x .field + .field { border-top: 0; }
+.card-x .field.lead { padding-bottom: var(--sp-4); }
+.card-x .field.lead > .field-l > b { font-size: var(--fs-lg); }
+.card-x .field.col { display: grid; gap: var(--sp-2); align-items: start; }
+.card-x .field.col > .field-c { justify-content: flex-start; margin-left: 0; }
+.card-x .field.sub { background: transparent; padding-left: var(--sp-5); margin-left: var(--sp-5); border-left: 2px solid var(--k-soft, var(--line)); }
+.csec { padding: 0 0 var(--sp-2); border-top: 1px solid var(--line); }
+.csec[hidden] { display: none; }
+.csec-h { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4) var(--sp-5) var(--sp-1);
+  font-size: var(--fs-cap); font-weight: var(--fw-semibold); letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.csec-h .ic { width: calc(14px * var(--s)); height: calc(14px * var(--s)); color: var(--k, var(--text-2)); stroke-width: 2; }
+.csec-note { margin: 0; padding: var(--sp-1) var(--sp-5) var(--sp-2); color: var(--text-3); font-size: var(--fs-sm); text-wrap: pretty; }
+/* the longer explanation behind an (i) button (ui.js helpBtn / helpText) */
+.help-t { margin: 0; padding: 0 var(--sp-4) var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); text-wrap: pretty; }
+.help-t[hidden] { display: none; }
+.card-x .help-t { padding: 0 var(--sp-5) var(--sp-2); }
 .lock-note { display: inline-flex; gap: var(--sp-1); align-items: center; font-size: var(--fs-sm); color: var(--text-3); }
 
 /* ---------- list rows (fixed height → virtual scroll friendly) ---------- */

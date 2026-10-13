@@ -11,7 +11,7 @@ import { iconImg, wireIconReady } from "../../appicon.js";
 import { ld } from "../../bridge.js";
 import { colorOf } from "../../categories.js";
 import { CANCELLED, guarded } from "../../challenge.js";
-import { confirmButton, days as dayChips, el, esc, field, ic, kic, setText, stepper, sw, tpRange } from "../../ui.js";
+import { confirmButton, csec, days as dayChips, el, esc, field, ic, kic, setText, stepper, sw, tpRange } from "../../ui.js";
 import { createWays, defaultWays, groupOf, GROUPS } from "../../ways.js";
 
 export const POMODORO_FIELDS = [["work", "Focus", "min"], ["break", "Break", "min"], ["rounds", "Rounds", ""], ["long", "Long break", "min"]];
@@ -48,32 +48,37 @@ export function iconOfTarget(kind, target) {
 const win = (w) => `<div class="win-row" data-win role="group">${dayChips(Array.from({ length: 7 }, (_, i) => w.days.includes(i)))}${tpRange(w.start, w.end)}<span class="grow"></span>` +
   `<button class="icon-btn icon-btn-sm" type="button" data-act="win-x" aria-label="Remove this time window">${ic("trash")}</button></div>`;
 
+const K = "k-mode";
 const SKELETON = `<header class="card-h">${kic("k-mode", "pencil")}<h3 data-k="title">New mode</h3><span data-k="del"></span>
     <button class="btn" type="button" data-act="cancel">Cancel</button><button class="btn btn-primary" type="button" data-act="done">Done</button></header>
-  <div class="card-b md-form stack">
+  <div class="card-b md-form">
     <p class="md-held" data-k="held" hidden>${ic("lock")} This mode is on and held (locked, or its automatic times are running): making it block less asks for the challenge.</p>
-    <label class="stack-sm"><b>Name</b><input class="input" data-k="name" maxlength="40" autocomplete="off" spellcheck="false" placeholder="e.g. Gaming-free evening"></label>
-    <div class="stack-sm"><div class="hstack"><b>Block these categories</b><button class="icon-btn icon-btn-sm" type="button" data-act="cat-help" aria-expanded="false" aria-label="About categories">${ic("info")}</button></div>
-      <p class="small muted" data-k="cat-help" hidden>${esc(CAT_HELP)}</p><div class="hstack wrap" data-k="cats" style="gap:var(--sp-2) var(--sp-4)"></div></div>
-    <div class="stack-sm"><b>Also block</b><div class="pills" data-k="chips"></div><p class="small muted" data-k="nothing">Nothing else.</p>
-      <div class="hstack wrap"><select class="select select-sm" data-k="from-list" aria-label="From your blocklist"></select>
-        <button class="btn btn-sm" type="button" data-act="other">+ Other site or app</button></div>
-      <div class="md-pick" data-k="pick" hidden>
-        <div data-k="picker"></div>
-        <div class="pills" data-k="p-pills"></div>
-        <label class="stack-sm" data-k="p-namewrap" hidden><b class="small">Display name (optional)</b>
-          <input class="input" data-k="p-name" placeholder="Display name (optional)" maxlength="60" aria-label="Display name" autocomplete="off"></label>
-        <div data-k="ways"></div>
-        <p class="md-err" data-k="p-err" role="alert"></p>
-        <div class="hstack"><button class="btn btn-sm btn-primary" type="button" data-act="pick-add">Add</button><button class="btn btn-sm" type="button" data-act="pick-cancel">Cancel</button></div></div></div>
-    <div class="card flush"><div class="card-b">
+    <label class="field col lead"><span class="field-l"><b>Name</b></span><input class="input" data-k="name" maxlength="40" autocomplete="off" spellcheck="false" placeholder="e.g. Gaming-free evening"></label>
+    ${csec(K, "ban", "What it blocks", `
+      <div class="field col"><div class="field-l"><b>Block these categories</b><span>Set on Screen Time &gt; Apps / Websites.</span></div>
+        <div class="hstack wrap" style="gap:var(--sp-2) var(--sp-4)"><div class="hstack wrap" data-k="cats" style="gap:var(--sp-2) var(--sp-4)"></div>
+          <button class="icon-btn icon-btn-sm" type="button" data-act="cat-help" aria-expanded="false" aria-label="About categories">${ic("info")}</button></div>
+        <p class="small muted" data-k="cat-help" hidden>${esc(CAT_HELP)}</p></div>
+      <div class="field col"><div class="field-l"><b>Also block</b><span>Sites, apps and groups from your blocklist, or new ones.</span></div>
+        <div class="pills" data-k="chips"></div><p class="small muted" data-k="nothing">Nothing else.</p>
+        <div class="hstack wrap"><select class="select select-sm" data-k="from-list" aria-label="From your blocklist"></select>
+          <button class="btn btn-sm" type="button" data-act="other">+ Other site or app</button></div>
+        <div class="md-pick" data-k="pick" hidden>
+          <div data-k="picker"></div>
+          <div class="pills" data-k="p-pills"></div>
+          <label class="stack-sm" data-k="p-namewrap" hidden><b class="small">Display name (optional)</b>
+            <input class="input" data-k="p-name" placeholder="Display name (optional)" maxlength="60" aria-label="Display name" autocomplete="off"></label>
+          <div data-k="ways"></div>
+          <p class="md-err" data-k="p-err" role="alert"></p>
+          <div class="hstack"><button class="btn btn-sm btn-primary" type="button" data-act="pick-add">Add</button><button class="btn btn-sm" type="button" data-act="pick-cancel">Cancel</button></div></div></div>`)}
+    ${csec(K, "timer", "Pomodoro", `
       ${field("Pomodoro", "Blocked in focus rounds, free in breaks.", sw(false, 'data-k="pomo-on" aria-label="Pomodoro"'))}
       <div class="field sub md-sub" data-k="pomo" hidden><div class="grid-4" style="width:100%">${POMODORO_FIELDS.map(([k, label, unit]) =>
-        `<label class="stack-sm small muted"><b style="color:var(--text)">${label}</b>${stepper(25, unit, { sm: 1, min: 1, max: 240, label: `${label}${unit ? " (" + unit + ")" : ""}` }).replace("<input ", `<input data-pomo="${k}" `)}</label>`).join("")}</div></div>
-      ${field("Mute notifications", "Lockdown's own notifications wait while this mode is on - the same as Do Not Disturb.", sw(false, 'data-k="mute" aria-label="Mute notifications"'))}
+        `<label class="stack-sm small muted"><b style="color:var(--text)">${label}</b>${stepper(25, unit, { sm: 1, min: 1, max: 240, label: `${label}${unit ? " (" + unit + ")" : ""}` }).replace("<input ", `<input data-pomo="${k}" `)}</label>`).join("")}</div></div>`)}
+    ${csec(K, "calendar", "Automatic", `
       ${field("Turn on automatically", "At these times, every week.", sw(false, 'data-k="auto-on" aria-label="Turn on automatically"'))}
-      <div class="field sub md-sub" data-k="auto" hidden><div data-k="wins"></div><div><button class="btn btn-sm" type="button" data-act="win-add">${ic("plus")}Add time window</button></div></div>
-    </div></div>
+      <div class="field sub md-sub" data-k="auto" hidden><div data-k="wins"></div><div><button class="btn btn-sm" type="button" data-act="win-add">${ic("plus")}Add time window</button></div></div>`)}
+    ${csec(K, "mute", "While it's on", field("Mute notifications", "Lockdown's own notifications wait while this mode is on - the same as Do Not Disturb.", sw(false, 'data-k="mute" aria-label="Mute notifications"')))}
     <p class="md-err" data-k="err" role="alert"></p>
   </div>`;
 

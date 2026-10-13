@@ -12,7 +12,7 @@
 import { ld } from "./bridge.js";
 import { openDialog } from "./dialog.js";
 import { esc } from "./ui.js";
-import { runHeaderHtml, mountMath, mountMemory, mountSort } from "./challenge_kinds.js";
+import { runHeaderHtml, mountMath, mountMemory, mountSort, mountSecret } from "./challenge_kinds.js";
 
 export const CANCELLED = Symbol("challenge-cancelled");
 const TITLE = "This loosens your blocks";
@@ -219,7 +219,7 @@ function run(info) {
     }
     if (closed) return;
     begun = { now: data.now, at: performance.now(), info: data };
-    if (["phrase", "grid", "math", "memory", "sort"].includes(data.mode)) showPuzzle(data, "");
+    if (["phrase", "grid", "math", "memory", "sort", "password", "totp"].includes(data.mode)) showPuzzle(data, "");
     else if (data.mode === "waiting") await showWaiting(data.waiting_until, false);
     else showClosed(data);
   }
@@ -273,6 +273,7 @@ function run(info) {
     };
     if (data.mode === "math") mountMath(host, data);
     else if (data.mode === "memory") mountMemory(host, data);
+    else if (data.mode === "password" || data.mode === "totp") mountSecret(host, data);
     else mountSort(host, data);
   }
 

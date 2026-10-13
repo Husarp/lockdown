@@ -5,6 +5,8 @@ A challenge is an ordered LIST OF STEPS, done top to bottom; a step is {"id", "k
 - memory: a grid whose lit squares you tap back after pressing Ready (3 levels)
 - sort: tap the items from smallest to largest (3 levels)
 - phrase: type a random phrase (its level is its length in characters; 3x3 grid, numbers & CAPITALS, own phrase)
+- password, totp (SECRET_KINDS, Anti-Bypass only - never the bedtime screen): your own password / an authenticator code,
+  asked once (no level, times always 1), checked by challenge_secrets.Checker; a recovery code may stand in for them
 This module makes and judges every puzzle (the page only gets what it has to draw and never the answer), checks
 step lists (strictly for a save, leniently for stored data), compares two lists (stricter or looser) and runs one
 challenge (`Run`). It is UI-free and does not depend on GuardService, so the tray's bedtime cover uses `Run` as it is.
@@ -20,8 +22,11 @@ import time
 from fractions import Fraction
 from math import gcd
 
-KINDS = ("math", "memory", "sort", "phrase")
-LABELS = {"math": "Math", "memory": "Memory grid", "sort": "Sorting", "phrase": "Typed phrase"}
+KINDS = ("math", "memory", "sort", "phrase")           # the kinds that cost effort: Anti-Bypass and the bedtime screen
+SECRET_KINDS = ("password", "totp")                    # need something you know / hold: Anti-Bypass only
+AB_KINDS = KINDS + SECRET_KINDS                         # what the Anti-Bypass list may hold
+LABELS = {"math": "Math", "memory": "Memory grid", "sort": "Sorting", "phrase": "Typed phrase",
+          "password": "Own password", "totp": "Authenticator code"}
 LEVEL_NAMES = {"math": ("Easy", "Medium", "Hard", "Very hard"), "memory": ("Easy", "Medium", "Hard"),
                "sort": ("Easy", "Medium", "Hard")}
 PHRASE_LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}   # quick picks; any length in between works
@@ -32,12 +37,13 @@ MAX_ID = 24
 PHRASE_MS_PER_CHAR = 35        # typing the phrase faster than this per character isn't a human ("Too fast")
 MIN_SEC = {"math": 1.2, "memory": 0.15, "sort": 0.15}   # fastest plausible: a puzzle / per lit square / per item
 # "Takes about", seconds for ONE of a step (a phrase: 3 + 0.4 per character, x1.3 as a 3x3 grid)
-SECONDS_ONE = {"math": (6, 10, 20, 35), "memory": (8, 10, 15), "sort": (6, 10, 20)}
+SECONDS_ONE = {"math": (6, 10, 20, 35), "memory": (8, 10, 15), "sort": (6, 10, 20), "password": (8,), "totp": (20,)}
 PHRASE_SEC_BASE, PHRASE_SEC_PER_CHAR, GRID_FACTOR = 3, 0.4, 1.3
 LONG_SEC = 10 * 60             # above this the list gets a soft "this will take about ..." note
 MINUS, TIMES, DIVIDE = "−", "×", "÷"
 
 RIGHT, WRONG, MISMATCH, TOO_FAST, PASSED = "right", "wrong", "mismatch", "too_fast", "passed"
+REFUSED, BUSY = "refused", "busy"      # a password / code / recovery code that is not right; one that came during a wait
 
 _ID = re.compile(r"[A-Za-z0-9_-]{1,%d}" % MAX_ID)
 _DIGITS = re.compile(r"[0-9]{1,15}")
@@ -46,41 +52,51 @@ _DIGITS = re.compile(r"[0-9]{1,15}")
 # ---------------------------------------------------------------- kinds, levels, labels
 
 def level_range(kind: str) -> tuple[int, int]:
-    """(lowest, highest) level of a kind: the phrase's level is its length in characters."""
+    """(lowest, highest) level of a kind: the phrase's level is its length in characters; a secret kind has only 0."""
+    if kind in SECRET_KINDS:
+        return 0, 0
     return (PHRASE_MIN, PHRASE_MAX) if kind == "phrase" else (0, len(LEVEL_NAMES[kind]) - 1)
 
 
 def level_label(kind: str, level: int) -> str:
-    """"Hard"; for a phrase the quick pick its length is ("Medium"), else "45 letters"."""
+    """"Hard"; for a phrase the quick pick its length is ("Medium"), else "45 letters"; a secret kind has none ("")."""
+    if kind in SECRET_KINDS:
+        return ""
     if kind == "phrase":
         return next((name for name, n in PHRASE_LENGTHS.items() if n == level), f"{level} letters")
     return LEVEL_NAMES[kind][level]
 
 
 def step_label(step: dict) -> str:
-    """"Math, Hard" (the line "Step 1 of 3 - Math, Hard - 3 of 5")."""
-    return f"{LABELS[step['kind']]}, {level_label(step['kind'], step['level'])}"
+    """"Math, Hard" (the line "Step 1 of 3 - Math, Hard - 3 of 5"); "Own password" (no level)."""
+    level = level_label(step["kind"], step["level"])
+    return f"{LABELS[step['kind']]}, {level}" if level else LABELS[step["kind"]]
 
 
 def steps_text(steps: list[dict]) -> str:
-    """The list in a sentence: "Math (Hard) x5, then Typed phrase (Medium)"."""
-    return ", then ".join(f"{LABELS[s['kind']]} ({level_label(s['kind'], s['level'])})"
-                          + (f" ×{s['times']}" if s["times"] > 1 else "") for s in steps)
+    """The list in a sentence: "Math (Hard) x5, then Typed phrase (Medium), then Own password"."""
+    def one(s):
+        level = level_label(s["kind"], s["level"])
+        return LABELS[s["kind"]] + (f" ({level})" if level else "") + (f" ×{s['times']}" if s["times"] > 1 else "")
+    return ", then ".join(one(s) for s in steps)
 
 
-def options() -> dict:
-    """What an editor needs to offer: kinds with their levels and seconds, the limits and the phrase numbers."""
-    kinds = []
-    for kind in KINDS:
+def options(kinds=KINDS) -> dict:
+    """What an editor needs to offer: kinds with their levels and seconds, the limits and the phrase numbers. A secret
+    kind (Anti-Bypass only: pass kinds=AB_KINDS) has no levels and is always done once (`secret`, `times` 1)."""
+    out = []
+    for kind in kinds:
         entry = {"id": kind, "label": LABELS[kind]}
-        if kind == "phrase":
+        if kind in SECRET_KINDS:
+            entry.update(levels=[], seconds=list(SECONDS_ONE[kind]), secret=True, times=1)
+        elif kind == "phrase":
             entry.update(levels=[{"level": n, "label": name} for name, n in PHRASE_LENGTHS.items()],
                          min_level=PHRASE_MIN, max_level=PHRASE_MAX)
         else:
             entry.update(levels=[{"level": i, "label": name} for i, name in enumerate(LEVEL_NAMES[kind])],
                          seconds=list(SECONDS_ONE[kind]))
-        kinds.append(entry)
-    return {"kinds": kinds, "max_steps": MAX_STEPS, "min_times": MIN_TIMES, "max_times": MAX_TIMES,
+        out.append(entry)
+    return {"kinds": out, "max_steps": MAX_STEPS, "min_times": MIN_TIMES, "max_times": MAX_TIMES,
             "phrase_seconds": {"base": PHRASE_SEC_BASE, "per_char": PHRASE_SEC_PER_CHAR, "grid": GRID_FACTOR},
             "long_seconds": LONG_SEC}
 
@@ -119,10 +135,16 @@ def _clamp(value, low: int, high: int) -> int | None:
     return None if n is None else max(low, min(high, n))
 
 
-def validate_steps(raw) -> list[dict]:
-    """A step list the page sent, checked strictly (a save): 1..MAX_STEPS rows, each with a unique id, a known kind, a
-    level in that kind's range and times MIN_TIMES..MAX_TIMES. Nothing is clamped - a wrong value is refused with a
-    plain message (ValueError). Returns clean rows with just the four keys."""
+def _kinds_text(kinds) -> str:
+    names = [LABELS[k] for k in kinds]
+    return ", ".join(names[:-1]) + " or " + names[-1]
+
+
+def validate_steps(raw, kinds=KINDS) -> list[dict]:
+    """A step list the page sent, checked strictly (a save): 1..MAX_STEPS rows, each with a unique id, a kind of `kinds`
+    (the bedtime screen: KINDS; Anti-Bypass: AB_KINDS), a level in that kind's range and times MIN_TIMES..MAX_TIMES (a
+    secret kind: level 0, once). Nothing is clamped - a wrong value is refused with a plain message (ValueError).
+    Returns clean rows with just the four keys."""
     if not isinstance(raw, list) or not raw:
         raise ValueError("Add at least one step.")
     if len(raw) > MAX_STEPS:
@@ -132,10 +154,12 @@ def validate_steps(raw) -> list[dict]:
         if not isinstance(row, dict):
             raise ValueError(f"Step {i}: kind, level and times expected.")
         kind = row.get("kind")
-        if kind not in KINDS:
-            raise ValueError(f"Step {i}: pick Math, Memory grid, Sorting or Typed phrase.")
+        if kind not in kinds:
+            raise ValueError(f"Step {i}: pick {_kinds_text(kinds)}.")
         low, high = level_range(kind)
         level, times = _whole(row.get("level")), _whole(row.get("times"))
+        if kind in SECRET_KINDS and (level != 0 or times != 1):
+            raise ValueError(f"Step {i}: {LABELS[kind]} is asked once and has no level.")
         if level is None or not low <= level <= high:
             what = "a phrase length" if kind == "phrase" else "a level"
             raise ValueError(f"Step {i}: {what} from {low} to {high} expected.")
@@ -151,18 +175,21 @@ def validate_steps(raw) -> list[dict]:
     return out
 
 
-def read_steps(raw) -> list[dict]:
-    """A stored step list (a config, a backup, a copy from another device), read leniently: unreadable rows are left
-    out, levels and times are clamped into range, a bad or repeated id gets a plain one, more than MAX_STEPS are cut.
+def read_steps(raw, kinds=KINDS) -> list[dict]:
+    """A stored step list (a config, a backup, a copy from another device), read leniently: unreadable rows and kinds
+    not in `kinds` are left out (the bedtime screen never reads a password step), levels and times are clamped into
+    range (a secret kind: level 0, once), a bad or repeated id gets a plain one, more than MAX_STEPS are cut.
     May come back empty - the caller then uses its default (default_steps / default_bedtime_steps)."""
     out, ids = [], set()
     for row in raw if isinstance(raw, list) else []:
         if len(out) >= MAX_STEPS:
             break
-        if not isinstance(row, dict) or row.get("kind") not in KINDS:
+        if not isinstance(row, dict) or row.get("kind") not in kinds:
             continue
         kind = row["kind"]
         level, times = _clamp(row.get("level"), *level_range(kind)), _clamp(row.get("times"), MIN_TIMES, MAX_TIMES)
+        if kind in SECRET_KINDS and times is not None:
+            times = 1
         if level is None or times is None:
             continue
         ident = row.get("id")
@@ -198,10 +225,17 @@ def has_phrase(steps: list[dict]) -> bool:
     return any(s["kind"] == "phrase" for s in steps)
 
 
+def secret_kinds_in(steps: list[dict]) -> set:
+    """The secret kinds the list asks ({"password", "totp"} or part of it)."""
+    return {s["kind"] for s in steps} & set(SECRET_KINDS)
+
+
 # ---------------------------------------------------------------- how long it takes
 
 def step_seconds(step: dict, grid: bool = False, own_length: int = 0) -> float:
     """Seconds ONE of this step takes. `own_length`: your own phrase's length while it is in use (0 = none)."""
+    if step["kind"] in SECRET_KINDS:
+        return SECONDS_ONE[step["kind"]][0]
     if step["kind"] != "phrase":
         return SECONDS_ONE[step["kind"]][step["level"]]
     return (PHRASE_SEC_BASE + PHRASE_SEC_PER_CHAR * (own_length or step["level"])) * (GRID_FACTOR if grid else 1)
@@ -387,9 +421,20 @@ def sort_puzzle(level: int, rng=random) -> Puzzle:
     return Puzzle("sort", {"items": [text for _, text in items]}, answer, check, MIN_SEC["sort"] * n)
 
 
-def make_puzzle(step: dict, rng=random, grid: bool = False, complex: bool = False, own: str = "") -> Puzzle:
-    """The next puzzle of a step (grid, complex and own only matter to a phrase)."""
+def secret_puzzle(kind: str, secrets) -> Puzzle:
+    """A password / authenticator step: nothing to draw but whether a recovery code may be typed instead (`recovery`).
+    The checking is the Checker's (challenge_secrets): the right answer is never known here."""
+    check = secrets.check_password if kind == "password" else secrets.check_totp
+    return Puzzle(kind, {"recovery": secrets.has_recovery()}, None, check, 0)
+
+
+def make_puzzle(step: dict, rng=random, grid: bool = False, complex: bool = False, own: str = "",
+                secrets=None) -> Puzzle:
+    """The next puzzle of a step (grid, complex and own only matter to a phrase; `secrets` - a challenge_secrets.Checker
+    - to a password or authenticator step)."""
     kind, level = step["kind"], step["level"]
+    if kind in SECRET_KINDS:
+        return secret_puzzle(kind, secrets)
     if kind == "phrase":
         return phrase_puzzle(level, rng, grid, complex, own)
     return {"math": math_puzzle, "memory": memory_puzzle, "sort": sort_puzzle}[kind](level, rng)
@@ -402,22 +447,30 @@ class Run:
     and sends every answer to `answer()`; the right answer and the memory / sorting solution never leave this object.
     A wrong answer is a NEW puzzle of the same step (what is done stays done). A typed phrase that does not match
     stays (fix it and send again); one that came too fast starts its clock again. Cancel = drop the Run.
+    A password / authenticator step (`kinds` with SECRET_KINDS - Anti-Bypass only - and a `secrets` Checker) stays until
+    it is right; instead of it a recovery code may be sent ({"recovery": code}): it then stands in for every password /
+    authenticator step of this run - never for the other steps - and `recovered` holds the hash it matched (the caller
+    uses the code up once the run passed).
     Independent of GuardService and of the clock: `rng` and `clock` (monotonic seconds) are swapped by tests."""
 
     def __init__(self, steps: list[dict], grid: bool = False, complex: bool = False, own: str = "",
-                 rng=random, clock=time.monotonic):
-        self.steps = read_steps(steps)
+                 rng=random, clock=time.monotonic, kinds=KINDS, secrets=None):
+        self.steps = read_steps(steps, kinds)
         if not self.steps:
             raise ValueError("A challenge needs at least one step.")
+        if secrets is None and secret_kinds_in(self.steps):
+            raise ValueError("A password or authenticator step needs its checker.")
         self.grid, self.complex, self.own = grid, complex, own or ""
-        self._rng, self._clock = rng, clock
+        self._rng, self._clock, self._secrets = rng, clock, secrets
         self.index = self.done = 0
         self.finished = False
         self.last_too_fast = False     # the last answer to a puzzle that is not a phrase was refused for being too quick
+        self.last_refused = ""         # what the last REFUSED answer was: "password", "totp" or "recovery"
+        self.recovered = None          # the recovery code's hash once it stood in for the password / code steps
         self._new_puzzle()
 
     def _new_puzzle(self):
-        self.puzzle = make_puzzle(self.steps[self.index], self._rng, self.grid, self.complex, self.own)
+        self.puzzle = make_puzzle(self.steps[self.index], self._rng, self.grid, self.complex, self.own, self._secrets)
         self._shown = self._clock()
 
     @property
@@ -432,20 +485,33 @@ class Run:
         out = {"steps": [{"kind": s["kind"], "level": s["level"], "times": s["times"], "label": step_label(s)}
                          for s in self.steps],
                "step": self.index, "done": self.done, "kind": step["kind"], "level": step["level"],
-               "finished": self.finished}
+               "finished": self.finished, "recovered": bool(self.recovered)}
         out.update({k: list(v) if isinstance(v, list) else v for k, v in self.puzzle.view.items()})
         return out
 
     def answer(self, value) -> str:
         """RIGHT (the next puzzle is up), WRONG (a new puzzle of this step), MISMATCH / TOO_FAST (a typed phrase, same
-        phrase again), or PASSED (that was the last one). A puzzle other than a phrase answered under its fastest
-        plausible time counts as WRONG (and `last_too_fast` says so)."""
+        phrase again), REFUSED / BUSY (a password, code or recovery code that is not right / came while the Checker
+        makes wrong tries wait - the same step again), or PASSED (that was the last one). A puzzle other than a phrase
+        answered under its fastest plausible time counts as WRONG (and `last_too_fast` says so)."""
         if self.finished:
             return PASSED
         puzzle = self.puzzle
         fast = self._clock() - self._shown < puzzle.min_sec
         self.last_too_fast = False
-        if puzzle.kind == "phrase":
+        if puzzle.kind in SECRET_KINDS:
+            if self._secrets.wait_left() > 0:
+                return BUSY
+            if isinstance(value, dict):
+                matched = self._secrets.check_recovery(value.get("recovery")) if list(value) == ["recovery"] else None
+                if not matched:
+                    self.last_refused = "recovery"
+                    return REFUSED
+                self.recovered = matched
+            elif not puzzle.check(value):
+                self.last_refused = puzzle.kind
+                return REFUSED
+        elif puzzle.kind == "phrase":
             if not puzzle.check(value):
                 return MISMATCH
             if fast:
@@ -458,6 +524,8 @@ class Run:
         self.done += 1
         if self.done >= self.steps[self.index]["times"]:
             self.index, self.done = self.index + 1, 0
+        while self.recovered and self.index < len(self.steps) and self.steps[self.index]["kind"] in SECRET_KINDS:
+            self.index += 1                         # (the recovery code stands in for every password / code step)
         if self.index >= len(self.steps):
             self.finished = True
             self.index = len(self.steps) - 1

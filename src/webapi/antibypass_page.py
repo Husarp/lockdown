@@ -14,11 +14,21 @@ same functions the old window used (antibypass.settings_looser, pause.end_for ..
 - everything else (and a setting not in use: your own phrase while it's off, the random one's length or numbers while
   it's on) is saved at once.
 
+Your own password, an authenticator and the recovery code (challenge_secrets.py) are set up here too. Setting the
+first password / authenticator is free (it makes the first recovery code, shown once); changing or removing one and
+making a new recovery code are loosening (the challenge). A list with a password / authenticator step can only be saved
+once that is set up, and a secret a step asks can't be removed (take the step out first).
+
 Starting "Pause my blocks" and switching Lockdown off are loosening too (the second one even asks while no challenge is
 turned on, `force`); ending a pause and switching Lockdown on are free (`pause_resume` and `antibypass_switch_on`
 live in webapi/shell.py, as the top bar uses them).
 """
+import secrets
+import time
+
 import antibypass
+import applog
+import challenge_secrets
 import challenges
 import modes
 import pause
@@ -32,6 +42,8 @@ MAX_PHRASE_CHARS = 2000              # the longest own phrase (as long as the lo
 MAX_WINDOWS = 14
 SAVE_KEYS = ("phrase", "steps", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait")
 OFF_CHANGE = "Turn Lockdown off entirely (no blocking, no limits, no reminders, until you turn it back on)"
+TOTP_SETUP_SEC = 600                 # an authenticator setup that isn't confirmed within this is forgotten
+SECRET_WHAT = {"password": "password", "totp": "authenticator"}
 
 
 def _iso(value):
@@ -113,6 +125,16 @@ def _off_data(db) -> dict:
     return {"off": bool(since), "since": since or None}
 
 
+def _secrets_data(db, cfg: dict) -> dict:
+    """The password / authenticator / recovery code card - never a secret or a hash: challenge_secrets.status plus
+    `used` (the secret kinds the list asks) and `missing` (asked but not set up: such a step is skipped until it is)."""
+    out = challenge_secrets.status(db)
+    used = challenges.secret_kinds_in(cfg["steps"])
+    out["used"] = sorted(used)
+    out["missing"] = sorted(k for k in used if not out[k]["set"])
+    return out
+
+
 def _page(ctx) -> dict:
     db, now = ctx.db, ctx.now()
     cfg = antibypass.settings(db)
@@ -130,8 +152,9 @@ def _page(ctx) -> dict:
         "banner": _banner(cfg, now),
         "unlock_min": antibypass.UNLOCK_MIN,
         "lengths": antibypass.LENGTHS, "min_length": antibypass.MIN_LENGTH, "max_length": antibypass.MAX_LENGTH,
-        "challenge": {**challenges.options(), "estimate": challenges.estimate(
+        "challenge": {**challenges.options(challenges.AB_KINDS), "estimate": challenges.estimate(
             cfg["steps"], bool(cfg["grid"]), len(antibypass.own_phrase(cfg).replace(" ", "")))},
+        "secrets": _secrets_data(db, cfg),
         "pause": _pause_data(db, now),
         "lockdown": _off_data(db),
     }
@@ -168,7 +191,7 @@ def _length(value) -> int:
 
 def _steps(value) -> list:
     try:
-        return challenges.validate_steps(value)
+        return challenges.validate_steps(value, challenges.AB_KINDS)
     except ValueError as e:
         raise ApiError(str(e)) from None
 
@@ -292,6 +315,10 @@ def antibypass_save(ctx, cfg, confirmed=False):
         return _page(ctx)
     if "length" in fields and "steps" not in fields and old["steps"] == challenges.default_steps(old["length"]):
         fields["steps"] = challenges.default_steps(fields["length"])   # (a page that knows only a length)
+    missing = challenges.secret_kinds_in(fields.get("steps", [])) - challenge_secrets.ready(ctx.db)
+    if missing:
+        what = " and ".join(f"your {SECRET_WHAT[k]}" for k in sorted(missing))
+        raise ApiError(f"Set up {what} first (Password & authenticator) - then the step can be saved.")
     new = {**old, **fields}
     if new["use_own"] and not new["custom_phrase"]:
         if fields.get("use_own"):
@@ -367,3 +394,112 @@ def lockdown_switch_off(ctx):
         _poke(ctx)
         return _off_data(ctx.db)
     return ctx.guard.request([OFF_CHANGE], off, force=True)
+
+
+# ---------------------------------------------------------------- own password, authenticator, recovery code
+
+def _with_code(ctx, code) -> dict:
+    """The page data, plus `recovery_code` when one was just made: the only time it is ever shown."""
+    out = _page(ctx)
+    if code:
+        applog.record("antibypass_change", "Anti-Bypass: recovery code made (shown once)", ctx.db)
+        out["recovery_code"] = code
+    return out
+
+
+@core.loosen
+def antibypass_password_set(ctx, password, again):
+    """Set your own password (free while none is set) or change it (the challenge: whoever knows the new one could then
+    loosen). Kept only as a salted hash. -> the page data (+ `recovery_code`, shown once, when this made the first
+    one) or {needs_challenge, ticket} for a change."""
+    try:
+        text = challenge_secrets.check_password_text(password)
+    except ValueError as e:
+        raise ApiError(f"Password: {e}") from None
+    if again != password:
+        raise ApiError("The two passwords are not the same.")
+    had = challenge_secrets.status(ctx.db)["password"]["set"]
+
+    def apply():
+        code = challenge_secrets.set_password(ctx.db, text, ctx.now())
+        applog.record("antibypass_change", f"Anti-Bypass: own password {'changed' if had else 'set'}", ctx.db)
+        return _with_code(ctx, code)
+    return ctx.guard.request(["Change your Anti-Bypass password"], apply) if had else apply()
+
+
+@core.loosen
+def antibypass_secret_remove(ctx, kind):
+    """Forget your password (`kind` "password") or the authenticator ("totp"). Always the challenge; refused while a
+    step of the list asks it (take the step out first - that is the challenge too)."""
+    if kind not in challenges.SECRET_KINDS:
+        raise ApiError("Bad request: password or authenticator expected.")
+    if not challenge_secrets.status(ctx.db)[kind]["set"]:
+        return _page(ctx)
+    what = SECRET_WHAT[kind]
+
+    def check():
+        if kind in challenges.secret_kinds_in(antibypass.steps_of(antibypass.settings(ctx.db))):
+            raise ApiError(f"Take the {challenges.LABELS[kind]} step out of the challenge list first.")
+
+    def apply():
+        check()                                 # (again: the challenge can take minutes)
+        challenge_secrets.remove(ctx.db, kind)
+        applog.record("antibypass_change", f"Anti-Bypass: {'own password' if kind == 'password' else what} removed",
+                      ctx.db)
+        return _page(ctx)
+    check()
+    return ctx.guard.request([f"Remove your Anti-Bypass {what}"], apply)
+
+
+@core.ui
+def antibypass_totp_begin(ctx):
+    """Start setting up an authenticator: a new secret, kept here in memory under a one-time token (nothing is stored
+    yet), with its QR code (inline SVG, "" without segno) and the key as text - shown this once. Saving it needs one
+    current code of it (antibypass_totp_confirm). -> {token, qr, key, replaces, digits}."""
+    secret = challenge_secrets.new_totp_secret()
+    token = secrets.token_urlsafe(18)
+    ctx.totp_pending = {"token": token, "secret": secret, "at": time.monotonic()}
+    return {"token": token, "qr": challenge_secrets.qr_svg(challenge_secrets.otpauth_uri(secret)),
+            "key": challenge_secrets.group_key(secret), "digits": challenge_secrets.TOTP_DIGITS,
+            "replaces": challenge_secrets.status(ctx.db)["totp"]["set"]}
+
+
+@core.loosen
+def antibypass_totp_confirm(ctx, token, code):
+    """Save the authenticator begun with antibypass_totp_begin once `code` is a current code of it (that code is then
+    used). Free while none is set up; replacing one is the challenge (the old one stops working). -> the page data
+    (+ `recovery_code` when this made the first one) or {needs_challenge, ticket}."""
+    pending = getattr(ctx, "totp_pending", None)
+    if (not isinstance(token, str) or not pending or not secrets.compare_digest(token, pending["token"])
+            or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
+        raise ApiError("Start the authenticator setup again.")
+    step = challenge_secrets.match_code(pending["secret"], code, challenge_secrets.trusted_epoch(ctx.db))
+    if step is None:
+        raise ApiError("That code doesn't match - type the 6-digit code your app shows for Lockdown now.")
+    had = challenge_secrets.status(ctx.db)["totp"]["set"]
+
+    def apply():
+        if getattr(ctx, "totp_pending", None) is not pending:
+            raise ApiError("Start the authenticator setup again.")
+        ctx.totp_pending = None                 # (one use)
+        rec = challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now())
+        applog.record("antibypass_change", "Anti-Bypass: authenticator " + (
+            "set up again (the old one no longer works)" if had else "set up"), ctx.db)
+        return _with_code(ctx, rec)
+    return ctx.guard.request(["Replace your authenticator (the old one stops working)"], apply) if had else apply()
+
+
+@core.loosen
+def antibypass_recovery_new(ctx):
+    """Make a new recovery code (the old one stops working). Always the challenge: a fresh code is a fresh way past the
+    password / authenticator steps. Needs a password or an authenticator. -> the page data + `recovery_code` (shown
+    once) or {needs_challenge, ticket}."""
+    st = challenge_secrets.status(ctx.db)
+    if not (st["password"]["set"] or st["totp"]["set"]):
+        raise ApiError("Set up a password or an authenticator first.")
+
+    def apply():
+        code = challenge_secrets.make_recovery(ctx.db, ctx.now())
+        applog.record("antibypass_change", "Anti-Bypass: new recovery code made (the old one no longer works)", ctx.db)
+        return {**_page(ctx), "recovery_code": code}
+    return ctx.guard.request(["Make a new recovery code (the old one stops working)"], apply)

@@ -193,8 +193,8 @@ AB_LABELS = {"phrase": "challenge", "length": "phrase length", "grid": "word gri
 def _steps_line(steps, empty: str = "none") -> str:
     """A challenge's steps in a line: "Math Hard x5, Typed phrase Medium x1"."""
     import challenges
-    return ", ".join(f"{challenges.LABELS[s['kind']]} {challenges.level_label(s['kind'], s['level'])} x{s['times']}"
-                     for s in steps) or empty
+    return ", ".join(" ".join(filter(None, (challenges.LABELS[s["kind"]], challenges.level_label(s["kind"], s["level"]))))
+                     + f" x{s['times']}" for s in steps) or empty
 
 
 def _steps_part(label: str, old, new, empty: str = "none") -> list[str]:

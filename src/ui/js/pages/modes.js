@@ -94,7 +94,8 @@ const STYLE = `<style>
 .md .md-btns { margin-top: var(--sp-2); }
 .md .md-row .chip { flex: none; }
 .md .md-hint { margin: 0; padding: var(--sp-4); border: 1px dashed var(--line-strong); border-radius: var(--r-lg); color: var(--text-2); }
-.md .md-form { gap: var(--sp-4); }
+.md .md-form > .md-held { margin: 0 var(--sp-5) var(--sp-2); }
+.md .md-form > .md-err { padding: 0 var(--sp-5) var(--sp-3); }
 .md .md-cat { --cat: var(--brand); }
 .md .md-cat input { border-color: var(--cat); }
 .md .md-cat input:checked { background: var(--cat); }
@@ -142,7 +143,7 @@ export function mount(host, p) {
       <button class="btn btn-primary" type="button" data-act="new">${ic("plus")}New mode</button></div>
     ${nowCard()}
     <div class="split md-split"><div class="mode-list" data-k="list" aria-label="Your modes"></div>
-      <div class="stack md-work">${startCard()}<section class="card md-editor" data-k="editor" hidden></section>
+      <div class="stack md-work">${startCard()}<section class="card card-x md-editor" data-k="editor" hidden></section>
         <p class="md-hint" data-k="hint">Press <b>Start</b> on a mode to run it now, or <b>Edit</b> to change what it blocks, its Pomodoro, its automatic times and whether it mutes notifications.</p></div></div></div>`;
   host.addEventListener("click", onClick);
   host.addEventListener("seg", (e) => { if (e.detail.name === "dur") syncStart(); });

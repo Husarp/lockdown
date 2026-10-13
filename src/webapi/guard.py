@@ -7,6 +7,9 @@ ticket and the page only gets the ticket. The page then opens the challenge, whi
 (challenges.py: math, memory grid, sorting, typed phrase); a `challenges.Run` per open ticket holds the puzzle, the
 answer and the progress, and Python judges every answer. When the last step is passed it unlocks (antibypass.unlock)
 and only then runs the stored action. The page never says "confirmed" - there is no such argument anywhere.
+The Anti-Bypass list may also hold an "Own password" / "Authenticator code" step: `secrets` (challenge_secrets.Checker:
+wrong tries in a row are counted in the database, so across runs and processes) checks those, and a recovery code may
+stand in for them ({"recovery": code} as the answer) - used up when the run passes (not in a practice run).
 
 One challenge is open at a time (a new request cancels the old one), a ticket works once and expires after 10
 minutes. Grace (an exact revert of a tightening within 10 s needs no challenge) lives here too.
@@ -24,6 +27,7 @@ import time
 
 import antibypass
 import applog
+import challenge_secrets
 import challenges
 from rules import days_text
 
@@ -34,6 +38,11 @@ MIN_MS_PER_CHAR = challenges.PHRASE_MS_PER_CHAR   # typing the phrase faster tha
 TICKET_TTL_SEC = 600        # an open challenge is forgotten after 10 minutes
 GRACE_SEC = 10              # after a tightening change, this long to undo it (revert only) without the challenge
 SHOWN_CHANGES = 5           # lines listed in the challenge; the rest is "and N more"
+MODES = ("phrase", "grid", "math", "memory", "sort", "password", "totp")      # the ones with something to answer
+REFUSED_TEXT = {"password": "That isn't the password - try again.",
+                "totp": "That code isn't right (or it was used already) - type the one your app shows now.",
+                "recovery": "That isn't the recovery code - try again."}
+REFUSED_LOG = {"password": "wrong password", "totp": "wrong authenticator code", "recovery": "wrong recovery code"}
 
 
 class _Pending:
@@ -44,7 +53,7 @@ class _Pending:
         self.dry = dry              # a dry run ("Try the challenge"): a pass opens no unlock and starts no wait
         self.plain = plain          # the bedtime variant: {steps, complex, grid, title, note}, else None (Anti-Bypass)
         self.created = now
-        self.mode = None            # set by begin(): phrase | grid | math | memory | sort | waiting | closed
+        self.mode = None            # set by begin(): phrase | grid | math | memory | sort | password | totp | waiting | closed
         self.run = None             # the challenges.Run (steps, puzzle, progress) while a puzzle is up
 
     @property
@@ -71,6 +80,7 @@ class GuardService:
         self._ticket: str | None = None
         self._open: _Pending | None = None
         self._grace: dict[str, tuple] = {}      # domain -> (state to revert to, expiry)
+        self.secrets = challenge_secrets.Checker(db_provider)
 
     def _now(self, db):
         if self._clock:
@@ -176,8 +186,9 @@ class GuardService:
             data["next_open"] = nxt.isoformat(timespec="seconds") if nxt else None
             data["hours_text"] = ", ".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in cfg["windows"])
         else:
-            run = challenges.Run(cfg["steps"], grid=bool(cfg["grid"]), complex=bool(cfg.get("complex")),
-                                 own=antibypass.own_phrase(cfg), rng=self._rng, clock=lambda: self._mono())
+            run = challenges.Run(antibypass.asked_steps(cfg, self.secrets.ready()), grid=bool(cfg["grid"]),
+                                 complex=bool(cfg.get("complex")), own=antibypass.own_phrase(cfg), rng=self._rng,
+                                 clock=lambda: self._mono(), kinds=challenges.AB_KINDS, secrets=self.secrets)
             mode = self._mode(run)
             data.update(self._shown(run))
         data["mode"] = mode
@@ -189,7 +200,7 @@ class GuardService:
         return ok(data)
 
     def _mode(self, run) -> str:
-        """How the page shows the puzzle that is up: grid | phrase | math | memory | sort."""
+        """How the page shows the puzzle that is up: grid | phrase | math | memory | sort | password | totp."""
         kind = run.puzzle.kind
         return ("grid" if run.grid else "phrase") if kind == "phrase" else kind
 
@@ -205,8 +216,10 @@ class GuardService:
 
     def submit(self, ticket, typed) -> Envelope:
         """The answer to the puzzle that is up: the phrase as typed (a string; in grid mode the words in order, a list),
-        a number typed for a sum, the cells tapped in order (memory), the items tapped in order (sorting). Python judges
-        it. A phrase that doesn't match / came too fast is refused (fix it and send again). Any other puzzle that is
+        a number typed for a sum, the cells tapped in order (memory), the items tapped in order (sorting), the password
+        or the 6-digit code typed, or {"recovery": code} instead of either. Python judges it. A password / code that is
+        not right is refused (the same step stays; after a few wrong tries in a row each next one has to wait). A
+        phrase that doesn't match / came too fast is refused (fix it and send again). Any other puzzle that is
         wrong or too quick gives {wrong: true, next: <view>, message} (a new puzzle of that step); a right one with more
         to do gives {passed: false, next: <view>}. The last one right unlocks and runs the stored action - or, if a wait
         is set, cancels it and says when."""
@@ -215,7 +228,7 @@ class GuardService:
             return fail("This challenge has expired. Start the change again.")
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
-        if pending.mode not in ("phrase", "grid", "math", "memory", "sort") or pending.run is None:
+        if pending.mode not in MODES or pending.run is None:
             return fail("There is nothing to type right now.")
         if not pending.plain and (antibypass.waiting_until(cfg, now) or antibypass.status(cfg, now) == "closed"):
             return fail("Changes like this aren't possible right now.")
@@ -242,8 +255,21 @@ class GuardService:
             return ok({"wrong": True, "next": shown,
                        "message": "Too fast - take a proper look. Here is a new one." if run.last_too_fast
                        else "Not right - here is a new one."})
+        if result == challenges.BUSY:
+            wait = max(1, int(-(-self.secrets.wait_left() // 1)))
+            return fail(f"Too many wrong tries - wait {wait} s, then try again.")
+        if result == challenges.REFUSED:
+            what = run.last_refused
+            applog.record("challenge_failed", self._failed(pending, REFUSED_LOG.get(what, "wrong answer")), db)
+            return fail(REFUSED_TEXT.get(what, "Not right - try again."))
         if result == challenges.RIGHT:
             return ok({"passed": False, "next": shown})
+        if run.recovered:
+            if pending.dry:
+                applog.record("antibypass_change", "Recovery code typed in a practice run - it was not used up", db)
+            elif self.secrets.use_recovery(run.recovered):
+                applog.record("antibypass_change", "Recovery code used (instead of the password / authenticator "
+                                                   "code) - it is used up now", db)
         if pending.plain:           # the bedtime Dismiss: no unlock, no wait - just the action, once
             applog.record("challenge_passed", "Bedtime challenge passed (before Dismiss)", db)
             return ok({"passed": True, "result": pending.action()})

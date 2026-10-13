@@ -302,7 +302,7 @@ def test_the_stored_steps_are_shown_with_their_kind_level_and_times(shell, page,
     open_page(shell, page)
     assert step_rows(page) == [{"kind": "phrase", "level": "30", "times": "1"}, {"kind": "math", "level": "1", "times": "3"}]
     assert page.locator('[data-step] [data-f="kind"]').first.locator("option").all_inner_texts() == [
-        "Math", "Memory grid", "Sorting", "Typed phrase"]
+        "Math", "Memory grid", "Sorting", "Typed phrase", "Own password", "Authenticator code"]
     assert page.locator('[data-step] [data-f="level"]').nth(1).locator("option").all_inner_texts() == [
         "Easy", "Medium", "Hard", "Very hard"]
     assert page.locator('[data-step] [data-f="level"]').first.locator("option").all_inner_texts() == [

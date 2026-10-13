@@ -24,6 +24,7 @@ import pytest
 
 import antibypass as ab
 import backup
+import challenge_secrets as cs
 import emergency
 import keywords
 import modes
@@ -54,7 +55,8 @@ protection_check protection_get reminders_get reset_change_preview rules_validat
 screentime_month settings_get suggest update_notes update_state wordlist_get words_get"""
 TIGHTEN = """antibypass_lock antibypass_switch_on break_allow_remove draft_add_to_group manual_create pause_resume
 protection_connect protection_unallow service_start"""
-LOOSEN = """antibypass_save antibypass_try antibypass_unlock_to_edit backup_import_apply break_allow_add break_allow_restore
+LOOSEN = """antibypass_save antibypass_try antibypass_unlock_to_edit antibypass_password_set antibypass_secret_remove
+antibypass_totp_confirm antibypass_recovery_new backup_import_apply break_allow_add break_allow_restore
 category_add category_add_and_assign
 category_assign category_remove draft_remove_group draft_remove_item draft_save draft_set_autosave draft_set_disabled
 draft_set_group draft_set_group_disabled draft_submit_item emergency_settings_save emergency_unlock lockdown_switch_off
@@ -62,7 +64,7 @@ manual_remove manual_save_entries manual_set_enabled mode_delete mode_save mode_
 overlay_disable overlay_emergency pause_start protection_allow protection_allow_words protection_remove_custom protection_set_list_enabled
 reminder_delete reminder_save_break reminder_save_custom reminder_save_sleep reminder_set_on reset_change_apply
 words_update"""
-UI = """applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
+UI = """antibypass_totp_begin applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
 corner_answer corner_ready corner_size digest_set display_set draft_discard draft_set_notify draft_set_setting
 log_client_error network_export_csv network_live_stop notify_front_steps_set notify_repeat_set notify_test open_path
 open_url overlay_ready
@@ -70,7 +72,7 @@ page_ready protection_preview protection_set_updates protection_update_now revea
 set_accent set_appearance set_goal set_icons_download set_scale suggest_clear_history ui_ready ui_setting update_check
 update_download update_install update_opened update_set_prefs window_seen"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
-COUNTS = {"read": 47, "tighten": 9, "loosen": 43, "ui": 45}            # 144 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log)
+COUNTS = {"read": 47, "tighten": 9, "loosen": 47, "ui": 46}            # 149 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log, +5 password / authenticator / recovery code)
 # Loosen methods that are NOT a challenge: the emergency unlock's quota is their limit (BLUEPRINT 4: "not a challenge").
 QUOTA = ("emergency_unlock", "overlay_emergency")
 
@@ -79,7 +81,7 @@ def test_every_api_method_is_classified_here_and_the_count_is_known():
     table = {name: kind for kind, names in CLASSES.items() for name in names}
     assert sum(len(n) for n in CLASSES.values()) == len(table)              # (no name twice)
     assert dict(webapi.api_methods()) == table
-    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 144
+    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 149
 
 
 def test_every_public_function_of_a_webapi_module_is_an_api_method_or_marked_internal():
@@ -334,8 +336,31 @@ def _allow_example(env):
     protection.save_settings(env.db, cfg)
 
 
+def _password_set(env):
+    cs.set_password(env.db, "old password", NOW)
+
+
+def _totp_pending(env):
+    """An authenticator is set up, and a new one is begun: replacing it is the loosening."""
+    cs.set_totp(env.db, cs.new_totp_secret(), 0, NOW)
+    begin = data(env.call("antibypass_totp_begin"))
+    env.totp = {"token": begin["token"], "secret": begin["key"].replace(" ", "")}
+
+
+def _totp_code(env):
+    return cs.totp(cs.secret_key(env.totp["secret"]), cs.trusted_epoch(env.db))
+
+
 CASES = {
     "antibypass_save": Case(lambda e: [{"length": 30}], lambda e, r: ab.settings(_fresh(e))["length"] == 30),
+    "antibypass_password_set": Case(lambda e: ["new password", "new password"],
+                                    lambda e, r: cs.verify_secret("new password", cs.load(_fresh(e))["password"]),
+                                    _password_set),
+    "antibypass_secret_remove": Case(lambda e: ["password"], lambda e, r: not cs.ready(_fresh(e)), _password_set),
+    "antibypass_totp_confirm": Case(lambda e: [e.totp["token"], _totp_code(e)],
+                                    lambda e, r: cs.load(_fresh(e))["totp"]["secret"] == e.totp["secret"],
+                                    _totp_pending),
+    "antibypass_recovery_new": Case(lambda e: [], lambda e, r: bool(r.get("recovery_code")), _password_set),
     "antibypass_try": Case(lambda e: [], lambda e, r: "banner" in r),                 # (a dry run: see its own test)
     "antibypass_unlock_to_edit": Case(lambda e: [], lambda e, r: "banner" in r),      # (passing it IS the unlock)
     "backup_import_apply": Case(lambda e: [e.token], lambda e, r: _fresh(e).list_items() == [], _import_token),
@@ -608,6 +633,7 @@ def _blocking_state(env) -> list:
 
 
 UI_ARGS = {
+    "antibypass_totp_begin": [],                        # (keeps a new secret in memory only: nothing is stored)
     # tighten
     "break_allow_remove": ["systemsettings.exe"],
     "antibypass_lock": [], "antibypass_switch_on": [], "pause_resume": [], "service_start": [],

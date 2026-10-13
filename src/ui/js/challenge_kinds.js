@@ -1,5 +1,6 @@
 // The per-kind parts of the challenge dialog (js/challenge.js): the progress line + step strip, and the Math (drawn on a
-// canvas), Memory grid (Ready, then tap) and Sorting (tap into a row) puzzles. Python makes and judges every puzzle
+// canvas), Memory grid (Ready, then tap), Sorting (tap into a row), own password and authenticator code steps (with
+// "Lost it? Use your recovery code"). Python makes and judges every puzzle
 // (challenges.py): this file only draws what challenge_begin / challenge_submit return and collects the answer. It never
 // decides that anything is right - the early "Missed" for a square that wasn't lit is cosmetic, Python judges the taps.
 //
@@ -13,7 +14,8 @@
 //   host.cancelBtn, host.onlyOk(foot), host.closed()
 import { esc } from "./ui.js";
 
-export const SHORT = { math: "Math", memory: "Memory", sort: "Sorting", phrase: "Phrase" };
+export const SHORT = { math: "Math", memory: "Memory", sort: "Sorting", phrase: "Phrase", password: "Password", totp: "Code" };
+const ONCE = new Set(["password", "totp"]);      // asked once, no level: no "×1" / "0/1" on their chip
 
 // ---------------------------------------------------------------- plain helpers (node tests)
 
@@ -44,9 +46,9 @@ export function progressText(run) {
 export function stripModel(run) {
   if (!showsProgress(run)) return [];
   return run.steps.map((s, i) => ({
-    text: `${SHORT[s.kind] || s.kind} ×${s.times}`,
+    text: ONCE.has(s.kind) ? SHORT[s.kind] : `${SHORT[s.kind] || s.kind} ×${s.times}`,
     state: i < run.step ? "done" : i === run.step ? "cur" : "todo",
-    small: i === run.step ? `${Math.min(run.done, s.times)}/${s.times}` : "",
+    small: i === run.step && !ONCE.has(s.kind) ? `${Math.min(run.done, s.times)}/${s.times}` : "",
   }));
 }
 
@@ -84,6 +86,16 @@ export function missedAt(lit, ordered, taps) {
 
 /** The sorting level that re-shuffles the tiles still to tap after each tap (Hard). */
 export const reshufflesPool = (level) => level === 2;
+
+/** A recovery code as it is typed into its box: upper case, only letters, digits and dashes, at most 19 signs
+ *  ("ABCD-EFGH-JKLM-NPQR"). Display only - Python reads it again (case, spaces and dashes don't matter there). */
+export const recoveryTyped = (s) => String(s == null ? "" : s).toUpperCase().replace(/[^0-9A-Z-]/g, "").slice(0, 19);
+
+/** What a password / authenticator step says, typed (`secret`) or with the recovery code instead (`recovery`). */
+export function secretText(kind, recovery) {
+  if (recovery) return "Type your recovery code. It stands in for the password and authenticator steps of this challenge and is used up when you finish it.";
+  return kind === "totp" ? "Type the 6-digit code your authenticator app shows for Lockdown." : "Type your Anti-Bypass password.";
+}
 
 // ---------------------------------------------------------------- math
 
@@ -267,5 +279,74 @@ export function mountSort(host, data) {
       });
     }
   });
+  paint();
+}
+
+// ---------------------------------------------------------------- own password / authenticator code
+
+const SECRET_STYLE = `<style>
+.ch-secbox { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin: var(--sp-3) 0 var(--sp-2); }
+.ch-secbox .ch-sec { flex: 1 1 calc(220px * var(--s)); min-width: 0; max-width: calc(360px * var(--s)); }
+.ch-secbox .ch-sec.code { max-width: calc(170px * var(--s)); font-size: var(--fs-lg, 1.2em); letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
+.ch-secbox .ch-sec.rec { font-family: ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.ch-recline { margin: var(--sp-2) 0 0; text-align: left; }
+.ch-rec { padding: 0; border: 0; background: none; color: var(--brand, inherit); font: inherit; font-size: var(--fs-sm); text-decoration: underline; cursor: pointer; }
+</style>`;
+
+/** A password / authenticator step. The page never knows whether it is right: Python checks it (challenge_secrets),
+ *  refuses a wrong one (the same step stays) and after a few wrong tries in a row makes the next one wait. With a
+ *  recovery code set up, "Lost it? Use your recovery code" switches the box to the code ({recovery} is sent). */
+export function mountSecret(host, data) {
+  const kind = data.mode === "totp" ? "totp" : "password";
+  let recovery = false, busy = false;
+
+  function paint() {
+    const box = recovery
+      ? '<input class="input ch-sec rec" type="text" maxlength="19" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="ABCD-EFGH-JKLM-NPQR" aria-label="Recovery code">'
+      : kind === "totp"
+        ? '<input class="input ch-sec code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" spellcheck="false" placeholder="000000" aria-label="Authenticator code">'
+        : '<input class="input ch-sec" type="password" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Password">';
+    const link = data.recovery
+      ? `<p class="ch-recline"><button class="ch-rec" type="button" data-act="ch-rec">${recovery ? (kind === "totp" ? "Back to the code" : "Back to the password") : "Lost it? Use your recovery code"}</button></p>`
+      : "";
+    const foot = host.html(`${SECRET_STYLE}
+      ${host.frame(secretText(kind, recovery))}
+      <div class="ch-secbox">${box}</div>
+      <div class="small ch-msg-line"><span class="muted ch-msg">${recovery ? "Letters and digits; the dashes don't matter." : kind === "totp" ? "A new code comes every 30 seconds; a used one doesn't work again." : "Forgotten? Only your recovery code gets you past it."}</span></div>
+      ${link}`,
+    [host.cancelBtn, { label: recovery ? "Use the recovery code" : "Next", primary: true, disabled: true, onClick: go }]);
+    const go_ = foot.lastChild, input = host.q(".ch-sec"), msg = host.q(".ch-msg");
+    if (host.message && !recovery) { msg.textContent = host.message; msg.classList.add("err"); }
+    const value = () => (recovery ? recoveryTyped(input.value) : kind === "totp" ? digitsOnly(input.value).slice(0, 6) : input.value);
+    const ready = () => (recovery ? value().replace(/-/g, "").length === 16 : kind === "totp" ? value().length === 6 : value().length > 0);
+    function go() {
+      if (busy || !ready()) return;
+      busy = true;
+      go_.disabled = true;
+      input.disabled = true;
+      const sent = recovery ? { recovery: value() } : value();
+      host.send(sent, (err, gone) => {
+        busy = false;
+        input.disabled = false;
+        input.value = "";
+        go_.disabled = true;
+        msg.textContent = err;
+        msg.classList.add("err");
+        if (gone) host.onlyOk(host.foot()); else input.focus();
+      });
+    }
+    input.addEventListener("input", () => {
+      if (recovery || kind === "totp") {
+        const clean = value();
+        if (clean !== input.value) input.value = clean;
+      }
+      go_.disabled = busy || !ready();
+      if (kind === "totp" && !recovery && ready()) go();          // (six digits: no need to press Enter)
+    });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+    const toggle = host.q('[data-act="ch-rec"]');
+    if (toggle) toggle.addEventListener("click", () => { if (!busy) { recovery = !recovery; paint(); } });
+    input.focus();
+  }
   paint();
 }

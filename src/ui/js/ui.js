@@ -61,6 +61,19 @@ export const days = (sel) => `<span class="days">${DAYN.map((d, i) =>
 export const meter = (pct, k) => `<div class="meter ${k || ""}"><i style="width:${Math.min(100, Math.max(0, pct))}%"></i></div>`;
 export const field = (label, desc, control, cls) =>
   `<div class="field ${cls || ""}"><div class="field-l"><b>${label}</b>${desc ? `<span>${desc}</span>` : ""}</div><div class="field-c">${control}</div></div>`;
+/** A titled section of a sectioned card (.card-x): `k` = a KIND key or a .k-* class (the icon's colour), then the rows. */
+export const csec = (k, icon, title, body, attrs) =>
+  `<div class="csec ${KIND[k] ? KIND[k].c : k}" ${attrs || ""}><div class="csec-h">${ic(icon)}<span>${title}</span></div>${body}</div>`;
+/** A small grey note for a whole section, once at its end. */
+export const csecNote = (text) => `<p class="csec-note">${text}</p>`;
+/** The (i) button and the longer text it shows (hidden until pressed): toggleHelp(root, button) on its data-act="help". */
+export const helpBtn = (key, label) => `<button class="icon-btn icon-btn-sm" type="button" data-act="help" data-help="${key}" aria-expanded="false" aria-label="More about ${esc(label)}">${ic("info")}</button>`;
+export const helpText = (key, text) => `<p class="help-t" data-helptext="${key}" hidden>${esc(text)}</p>`;
+export function toggleHelp(root, b) {
+  const open = b.getAttribute("aria-expanded") !== "true";
+  b.setAttribute("aria-expanded", String(open));
+  root.querySelector(`[data-helptext="${b.dataset.help}"]`).hidden = !open;
+}
 export const check = (label, on, attrs, type) =>
   `<label class="check"><input type="${type || "checkbox"}" ${on ? "checked" : ""} ${attrs || ""}><span class="ellip">${label}</span></label>`;
 

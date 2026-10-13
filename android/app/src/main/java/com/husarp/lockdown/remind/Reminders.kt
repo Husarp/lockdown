@@ -220,6 +220,7 @@ class ProtectionWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, par
             if (isStopped) return Result.success()
             runCatching { com.husarp.lockdown.block.Protection.download(applicationContext, key) }
         }
+        runCatching { com.husarp.lockdown.block.Protection.dropStale(applicationContext, p.enabled) }
         com.husarp.lockdown.block.Protection.load(applicationContext)
         return Result.success()
     }
@@ -231,12 +232,13 @@ class DigestWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params)
         if (!Store.config.settings.weeklyDigest) return Result.success()
         val main = runCatching {
             com.husarp.lockdown.usage.Usage.range(
-                applicationContext, com.husarp.lockdown.usage.Usage.lastDaysStart(7), System.currentTimeMillis(),
+                applicationContext, com.husarp.lockdown.usage.Usage.lastDaysStart(applicationContext, 7), System.currentTimeMillis(),
             ) { isStopped }.totalMs
         }.getOrDefault(0)
         if (isStopped) return Result.success()   // stopped by Android: no half-counted week
         // Island apps count too, day by day (as Home's total)
-        val week = (0L..6L).map { java.time.LocalDate.now().minusDays(it) }
+        val today = com.husarp.lockdown.guard.TrustedTime.local(applicationContext).toLocalDate()
+        val week = (0L..6L).map { today.minusDays(it) }
         val total = runCatching { com.husarp.lockdown.link.IslandLink.withIsland(applicationContext, main, week) }.getOrDefault(main)
         val nm = applicationContext.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null)
@@ -287,13 +289,15 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
         val budget = cfg.settings.dailyGoalMin
         if (budget > 0 && !silent) {
             val main = runCatching {
-                com.husarp.lockdown.usage.Usage.range(applicationContext, com.husarp.lockdown.usage.Usage.dayBounds(0).first, System.currentTimeMillis()) { isStopped }.totalMs
+                com.husarp.lockdown.usage.Usage.dayBounds(applicationContext, 0).let { (s, e) ->
+                    com.husarp.lockdown.usage.Usage.range(applicationContext, s, e) { isStopped }.totalMs }
             }.getOrDefault(0)
             // Island apps count toward the goal too (as Home's goal bar)
-            val total = runCatching { com.husarp.lockdown.link.IslandLink.withIsland(applicationContext, main, listOf(java.time.LocalDate.now())) }.getOrDefault(main)
+            val day = com.husarp.lockdown.guard.TrustedTime.local(applicationContext).toLocalDate()   // trusted time's day
+            val total = runCatching { com.husarp.lockdown.link.IslandLink.withIsland(applicationContext, main, listOf(day)) }.getOrDefault(main)
             if (total >= budget * 60_000L) {
                 val prefs = applicationContext.getSharedPreferences("goal", Context.MODE_PRIVATE)
-                val today = java.time.LocalDate.now().toString()
+                val today = day.toString()
                 if (prefs.getString("day", "") != today) {
                     prefs.edit().putString("day", today).apply()
                     notify(5, "Daily screen-time goal reached", "You've used your ${budget}-minute goal for today.")

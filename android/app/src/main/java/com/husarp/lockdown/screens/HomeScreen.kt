@@ -157,8 +157,8 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
 private data class TodayUse(val totalMs: Long, val apps: List<AppTime>)
 
 private fun todayUse(ctx: Context): TodayUse {
-    val du = runCatching { val (s, e) = Usage.dayBounds(0); Usage.range(ctx, s, e) }.getOrNull()
-    val day = java.time.LocalDate.now()
+    val du = runCatching { val (s, e) = Usage.dayBounds(ctx, 0); Usage.range(ctx, s, e) }.getOrNull()
+    val day = com.husarp.lockdown.guard.TrustedTime.local(ctx).toLocalDate()      // trusted time's day (as the limits)
     val island = runCatching { IslandLink.islandUse(ctx, day, day) }.getOrDefault(emptyMap())
     val apps = IslandUse.topApps(du?.apps?.map { AppTime(it.pkg, it.label.ifEmpty { it.pkg }, it.totalMs) } ?: emptyList(), island)
     val main = du?.totalMs ?: 0L

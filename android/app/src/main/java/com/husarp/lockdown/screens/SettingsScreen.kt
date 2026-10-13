@@ -68,13 +68,9 @@ import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.engine.LimitClock
 import com.husarp.lockdown.engine.ResetCarry
 import java.time.LocalTime
-import com.husarp.lockdown.engine.Item
-import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.Perm
 import com.husarp.lockdown.engine.PermCheck
 import com.husarp.lockdown.guard.Perms
-import com.husarp.lockdown.engine.Rule
-import com.husarp.lockdown.engine.RuleType
 import com.husarp.lockdown.data.HomeLayout
 import com.husarp.lockdown.ui.EditorHeader
 import com.husarp.lockdown.ui.Kinds
@@ -87,7 +83,6 @@ import com.husarp.lockdown.ui.UnsavedChanges
 import com.husarp.lockdown.ui.rememberDraft
 import com.husarp.lockdown.usage.Usage
 import com.husarp.lockdown.vpn.LockdownVpn
-import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -112,8 +107,8 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
                 .map { it.trim().lowercase() }.filter { it.isNotEmpty() && !it.startsWith("#") }
         }.getOrDefault(emptyList())
 
-    // Import parses the file, dedups against thousands of existing items, and re-serialises a multi-MB config -
-    // all off the main thread so a big list never stalls the UI.
+    // Import parses the file and dedups it off the main thread. The sites go into the compact imported list
+    // (data/ImportedSites.kt: one name each, blocked for good), not one blocklist item each.
     val importSites = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         importMsg = "Importing sites…"
@@ -121,13 +116,7 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
             val added = withContext(Dispatchers.IO) {
                 val doms = linesOf(uri).flatMap { com.husarp.lockdown.engine.Sites.importLine(it) }
                 var n = 0
-                Store.update { c ->
-                    val have = c.items.filter { it.type == ItemType.SITE }.flatMapTo(HashSet()) { it.target.split(" ") }
-                    val new = doms.asSequence().filter { it !in have }.distinct()
-                        .map { Item(UUID.randomUUID().toString().take(8), it, it, ItemType.SITE, rules = listOf(Rule(RuleType.PERMANENT))) }.toList()
-                    n = new.size
-                    c.copy(items = c.items + new)
-                }
+                Store.update { c -> com.husarp.lockdown.data.ImportedSites.add(c, doms).let { (next, added) -> n = added; next } }
                 n
             }
             importMsg = "Added $added sites."
@@ -322,7 +311,7 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
 
             Text("Protection lists", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Bundled blocklists, built into the app - just turn one on (no download). You can fetch the full list later.",
+                "Bundled blocklists, built into the app - just turn one on (no download). Once a week, on Wi-Fi, a bigger version downloads.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -395,6 +384,7 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
                 TextButton(onClick = { importSites.launch("text/*") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import sites") }
                 TextButton(onClick = { importWords.launch("text/*") }) { ButtonIcon(Icons.Filled.FileDownload); Text("Import keywords") }
             }
+            if (cfg.imported.isNotEmpty()) ImportedSitesRow(cfg.imported, guard) { importMsg = it }
             Text(
                 "Sync everything to your work profile: Export here, then Import in the other profile's app.",
                 style = MaterialTheme.typography.bodySmall,
@@ -542,4 +532,28 @@ private fun whenText(t: java.time.LocalDateTime, now: java.time.LocalDateTime): 
         now.toLocalDate().plusDays(1) -> "tomorrow at $hm"
         else -> "on " + t.format(java.time.format.DateTimeFormatter.ofPattern("EEE d")) + " at $hm"
     }
+}
+
+/** The imported sites: how many, and taking one or all of them off (that frees them: the challenge, as deleting
+ *  their items always asked). */
+@Composable
+private fun ImportedSitesRow(list: List<String>, guard: (Boolean, () -> Unit) -> Unit, say: (String) -> Unit) {
+    var site by remember { mutableStateOf("") }
+    Text("${list.size} imported sites, blocked for good.", style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(site, { site = it.filterNot(Char::isWhitespace) }, Modifier.weight(1f), singleLine = true,
+            placeholder = { Text("example.com") })
+        TextButton(onClick = {
+            val name = com.husarp.lockdown.engine.DomainSet.norm(com.husarp.lockdown.engine.Sites.clean(site))
+            if (name !in list) { say("$name isn't an imported site."); return@TextButton }
+            guard(true) {
+                Store.update { c -> c.copy(imported = c.imported - name) }
+                say("$name taken off the imported sites."); site = ""
+            }
+        }, enabled = site.isNotBlank()) { Text("Take off") }
+    }
+    TextButton(onClick = {
+        guard(true) { Store.update { c -> c.copy(imported = emptyList()) }; say("Imported sites removed.") }
+    }) { Text("Remove all imported sites") }
 }

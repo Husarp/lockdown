@@ -15,12 +15,14 @@ package com.husarp.lockdown.block
  */
 
 import com.husarp.lockdown.data.Config
+import com.husarp.lockdown.data.ImportedSites
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.Block
 import com.husarp.lockdown.engine.BlockMethod
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.GreyUsedCache
 import com.husarp.lockdown.engine.Item
+import com.husarp.lockdown.engine.ItemIndex
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.ModeBlocksCache
 import com.husarp.lockdown.engine.ModeState
@@ -101,7 +103,7 @@ object Enforce {
     /** Verdict for a foreground app package, or null if allowed. A [Verdict.grey] one only greys the screen. */
     fun app(cfg: Config, pkg: String, now: LocalDateTime, mode: ModeState?, label: String = pkg): Verdict? {
         if (!cfg.enabled || paused(cfg, now)) return null
-        val item = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
+        val item = ItemIndex.of(cfg.items).app(pkg)
         var grey: Verdict? = null
         if (item != null && !item.disabled) {
             val eff = Rules.effectiveRules(item, cfg.groups)
@@ -142,7 +144,7 @@ object Enforce {
         // An emergency unlock frees a site as it does an app (PC): here, in the browser and in the site filter (the VPN
         // asks this too), for the unlock's length. Never a permanent block (Rules.itemBlock keeps those). Every item
         // matching the host counts: an unlocked "reddit.com" doesn't free a blocked "old.reddit.com".
-        val matches = cfg.items.filter { it.type == ItemType.SITE && !it.disabled && hostMatches(it.target, host) }
+        val matches = ItemIndex.of(cfg.items).sites(host).filter { it.type == ItemType.SITE && !it.disabled }
         val clock = cfg.clock()
         for (item in matches) {
             val unlock = emergencyUntil(cfg, item.id, now)
@@ -154,6 +156,10 @@ object Enforce {
                 return verdict(item.name, block, way.ifEmpty { "dns" }, item.id, now).copy(site = true)
             }
         }
+        // an imported site is blocked for good, as its item was (an emergency for another item doesn't free it)
+        if (ImportedSites.blocks(cfg, host))
+            return Verdict(host, "$host is blocked", "You blocked this one for good.", null, "dns", null, site = true,
+                reason = com.husarp.lockdown.engine.Alerts.reasonKey(Reason.PERMANENT))
         if (matches.isNotEmpty() && matches.all { emergencyUntil(cfg, it.id, now) != null }) return null
         val item = matches.firstOrNull()
         if (Modes.blocking(mode)) {

@@ -7,6 +7,8 @@ Challenges (any combination, both off = Anti-Bypass off):
   A typed phrase step has the options "3×3 grid" (off by default: one word at a time into a box picked at random -
   you have to click it) and "Numbers & CAPITALS", or "Use my own phrase" (use_own): a phrase you saved instead;
   switched off, it stays saved and isn't asked. They apply to every phrase step.
+  The list may also hold "Own password" and "Authenticator code" steps (challenges.SECRET_KINDS; the secrets themselves
+  and the recovery code live in challenge_secrets.py): a list can only be saved with them once they are set up.
 - hours: loosening changes only during the chosen time windows (e.g. Sunday 18:00-20:00).
 - wait: passing the challenge doesn't open at once - the unlock starts this many minutes later (a cooling-off
   period; the wait runs in the database, so closing Lockdown or rebooting doesn't skip it).
@@ -80,7 +82,16 @@ def with_defaults(cfg: dict) -> dict:
 def steps_of(cfg: dict) -> list[dict]:
     """The challenge's step list: the stored one (read leniently), else - no steps, or none readable - a single phrase
     step of `length`. Works on a config that has not been through with_defaults too."""
-    return challenges.read_steps(cfg.get("steps")) or challenges.default_steps(cfg.get("length", DEFAULTS["length"]))
+    return (challenges.read_steps(cfg.get("steps"), challenges.AB_KINDS)
+            or challenges.default_steps(cfg.get("length", DEFAULTS["length"])))
+
+
+def asked_steps(cfg: dict, ready: set) -> list[dict]:
+    """The steps a challenge run asks: the list, less a password / authenticator step whose secret isn't set up
+    (`ready`: challenge_secrets.ready). The page never saves such a step, and removing a secret that a step uses is
+    refused, so only a restored backup or an edited database gets here; nothing left -> one phrase of `length`."""
+    rows = [s for s in steps_of(cfg) if s["kind"] not in challenges.SECRET_KINDS or s["kind"] in ready]
+    return rows or challenges.default_steps(cfg.get("length", DEFAULTS["length"]))
 
 
 def save(db, cfg: dict):
