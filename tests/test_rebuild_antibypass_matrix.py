@@ -53,7 +53,7 @@ group_member_search groups_list host_normalize item_get manual_get mode_extra_ch
 network_block_target network_get network_graph notifications_get overlay_emergency_kinds pause_get pick_program_file
 protection_check protection_get reminders_get reset_change_preview rules_validate screentime_day screentime_get
 screentime_month settings_get suggest update_notes update_state wordlist_get words_get"""
-TIGHTEN = """antibypass_lock antibypass_switch_on break_allow_remove draft_add_to_group manual_create pause_resume
+TIGHTEN = """antibypass_lock antibypass_recovery_remove antibypass_switch_on break_allow_remove draft_add_to_group manual_create pause_resume
 protection_connect protection_unallow service_start"""
 LOOSEN = """antibypass_save antibypass_try antibypass_unlock_to_edit antibypass_password_set antibypass_secret_remove
 antibypass_totp_confirm antibypass_recovery_new backup_import_apply break_allow_add break_allow_restore
@@ -72,7 +72,7 @@ page_ready protection_preview protection_set_updates protection_update_now revea
 set_accent set_appearance set_goal set_icons_download set_scale suggest_clear_history ui_ready ui_setting update_check
 update_download update_install update_opened update_set_prefs window_seen"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
-COUNTS = {"read": 47, "tighten": 9, "loosen": 47, "ui": 46}            # 149 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log, +5 password / authenticator / recovery code)
+COUNTS = {"read": 47, "tighten": 10, "loosen": 47, "ui": 46}           # 150 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log, +5 password / authenticator / recovery code, +1 recovery code removed)
 # Loosen methods that are NOT a challenge: the emergency unlock's quota is their limit (BLUEPRINT 4: "not a challenge").
 QUOTA = ("emergency_unlock", "overlay_emergency")
 
@@ -81,7 +81,7 @@ def test_every_api_method_is_classified_here_and_the_count_is_known():
     table = {name: kind for kind, names in CLASSES.items() for name in names}
     assert sum(len(n) for n in CLASSES.values()) == len(table)              # (no name twice)
     assert dict(webapi.api_methods()) == table
-    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 149
+    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 150
 
 
 def test_every_public_function_of_a_webapi_module_is_an_api_method_or_marked_internal():
@@ -637,6 +637,7 @@ UI_ARGS = {
     # tighten
     "break_allow_remove": ["systemsettings.exe"],
     "antibypass_lock": [], "antibypass_switch_on": [], "pause_resume": [], "service_start": [],
+    "antibypass_recovery_remove": [],                   # (deleting the recovery code: one way past the challenge less)
     "draft_add_to_group": lambda e: [{"kind": "site", "name": "news.com"}, e.ids["gid"]],
     "manual_create": ["Another"], "protection_unallow": ["example.com"],
     "protection_connect": ["X", "https://example.com/l.txt", "not-a-token"],

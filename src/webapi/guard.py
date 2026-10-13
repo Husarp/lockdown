@@ -8,8 +8,11 @@ ticket and the page only gets the ticket. The page then opens the challenge, whi
 answer and the progress, and Python judges every answer. When the last step is passed it unlocks (antibypass.unlock)
 and only then runs the stored action. The page never says "confirmed" - there is no such argument anywhere.
 The Anti-Bypass list may also hold an "Own password" / "Authenticator code" step: `secrets` (challenge_secrets.Checker:
-wrong tries in a row are counted in the database, so across runs and processes) checks those, and a recovery code may
-stand in for them ({"recovery": code} as the answer) - used up when the run passes (not in a practice run).
+wrong tries in a row are counted in the database, so across runs and processes) checks those. When a recovery code
+exists, a real Anti-Bypass run (not a practice, not the bedtime screen) may be passed whole by it ({"recovery": code}
+as the answer): it is used up, a new one is made at once and the reply carries it (`recovery_code`, shown once).
+The uninstaller's challenge (`uninstall`, from `--challenge`) asks the list without the password / authenticator steps
+and lets only the uninstall through: it never opens the unlock for other changes (antibypass.uninstall_pass).
 
 One challenge is open at a time (a new request cancels the old one), a ticket works once and expires after 10
 minutes. Grace (an exact revert of a tightening within 10 s needs no challenge) lives here too.
@@ -48,8 +51,9 @@ REFUSED_LOG = {"password": "wrong password", "totp": "wrong authenticator code",
 class _Pending:
     """One request waiting for its challenge."""
 
-    def __init__(self, changes, action, cancel, force, now, dry=False, plain=None):
+    def __init__(self, changes, action, cancel, force, now, dry=False, plain=None, uninstall=False):
         self.changes, self.action, self.cancel, self.force = changes, action, cancel, force
+        self.uninstall = uninstall  # the uninstaller's challenge: no password / authenticator steps, opens no unlock
         self.dry = dry              # a dry run ("Try the challenge"): a pass opens no unlock and starts no wait
         self.plain = plain          # the bedtime variant: {steps, complex, grid, title, note}, else None (Anti-Bypass)
         self.created = now
@@ -91,7 +95,8 @@ class GuardService:
     # ---------------- asking
 
     def request(self, changes: list[str], action, cancel=None, force: bool = False, dry: bool = False, steps=None,
-                phrase_opts=None, plain: bool = False, title: str | None = None, note: str | None = None) -> Envelope:
+                phrase_opts=None, plain: bool = False, title: str | None = None, note: str | None = None,
+                uninstall: bool = False) -> Envelope:
         """Run `action` now if Anti-Bypass allows it (status "free"; with force - a locked mode - only while a passed
         challenge is still unlocked), else keep it under a ticket for the challenge. `cancel` undoes whatever the
         page shows if the challenge is cancelled or never passed. `dry`: always the challenge, and passing it only runs
@@ -100,7 +105,11 @@ class GuardService:
         The bedtime variant (`plain=True`, with `steps`, and `phrase_opts` = {"complex", "grid"}; there is no own phrase):
         it ALWAYS asks, with exactly these steps - Anti-Bypass being free, closed (hours) or waiting changes nothing; a
         pass opens no unlock and starts no wait, it only runs `action`; `title` / `note` are what the dialog says
-        (begin's data) and the App log says "Bedtime challenge ..." instead of the Anti-Bypass lines."""
+        (begin's data) and the App log says "Bedtime challenge ..." instead of the Anti-Bypass lines.
+
+        `uninstall` (the uninstaller's `--challenge`): the list without the password / authenticator steps; passing it
+        runs `action` and opens no unlock for other changes - with a wait set, the uninstaller's own wait starts, and
+        after it uninstalling is free for a while (antibypass.uninstall_open)."""
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
         variant = None
@@ -113,8 +122,11 @@ class GuardService:
                        "title": title, "note": note}
         elif not dry and antibypass.status(cfg, now) == "free" and not (force and not antibypass.unlocked_until(cfg, now)):
             return ok(action())
+        elif uninstall and antibypass.status(cfg, now) == "phrase" and antibypass.uninstall_open(db, now):
+            antibypass.uninstall_used(db)               # (its own wait ran out: one uninstall)
+            return ok(action())
         changes = [str(c) for c in changes]
-        pending = _Pending(changes, action, cancel, force, self._mono(), dry, variant)
+        pending = _Pending(changes, action, cancel, force, self._mono(), dry, variant, uninstall=uninstall and not plain)
         ticket = secrets.token_urlsafe(18)
         with self._lock:
             previous, self._ticket, self._open = self._open, ticket, pending
@@ -170,6 +182,8 @@ class GuardService:
         data = {"changes": pending.changes[:SHOWN_CHANGES], "more": max(0, len(pending.changes) - SHOWN_CHANGES),
                 "unlock_min": antibypass.UNLOCK_MIN, "now": now.isoformat(timespec="seconds")}
         waiting, run = antibypass.waiting_until(cfg, now), None
+        if not waiting and pending.uninstall:
+            waiting = antibypass.uninstall_waiting(db, now)
         if pending.plain:           # the bedtime screen's own list: no Anti-Bypass wait / hours, and nothing is unlocked
             plain = pending.plain
             run = challenges.Run(plain["steps"], grid=plain["grid"], complex=plain["complex"], rng=self._rng,
@@ -186,9 +200,11 @@ class GuardService:
             data["next_open"] = nxt.isoformat(timespec="seconds") if nxt else None
             data["hours_text"] = ", ".join(f"{days_text(w['days'])} {w['start']}-{w['end']}" for w in cfg["windows"])
         else:
-            run = challenges.Run(antibypass.asked_steps(cfg, self.secrets.ready()), grid=bool(cfg["grid"]),
-                                 complex=bool(cfg.get("complex")), own=antibypass.own_phrase(cfg), rng=self._rng,
-                                 clock=lambda: self._mono(), kinds=challenges.AB_KINDS, secrets=self.secrets)
+            steps = (antibypass.uninstall_steps(cfg) if pending.uninstall
+                     else antibypass.asked_steps(cfg, self.secrets.ready()))
+            run = challenges.Run(steps, grid=bool(cfg["grid"]), complex=bool(cfg.get("complex")),
+                                 own=antibypass.own_phrase(cfg), rng=self._rng, clock=lambda: self._mono(),
+                                 kinds=challenges.AB_KINDS, secrets=self.secrets, recovery=not pending.dry)
             mode = self._mode(run)
             data.update(self._shown(run))
         data["mode"] = mode
@@ -217,7 +233,9 @@ class GuardService:
     def submit(self, ticket, typed) -> Envelope:
         """The answer to the puzzle that is up: the phrase as typed (a string; in grid mode the words in order, a list),
         a number typed for a sum, the cells tapped in order (memory), the items tapped in order (sorting), the password
-        or the 6-digit code typed, or {"recovery": code} instead of either. Python judges it. A password / code that is
+        or the 6-digit code typed, or {"recovery": code} instead of any answer (passes the whole run while a code
+        exists - not in a practice run; the reply then carries the NEW code, `recovery_code`, shown once). Python
+        judges it. A password / code that is
         not right is refused (the same step stays; after a few wrong tries in a row each next one has to wait). A
         phrase that doesn't match / came too fast is refused (fix it and send again). Any other puzzle that is
         wrong or too quick gives {wrong: true, next: <view>, message} (a new puzzle of that step); a right one with more
@@ -230,7 +248,8 @@ class GuardService:
         cfg, now = antibypass.settings(db), self._now(db)
         if pending.mode not in MODES or pending.run is None:
             return fail("There is nothing to type right now.")
-        if not pending.plain and (antibypass.waiting_until(cfg, now) or antibypass.status(cfg, now) == "closed"):
+        if not pending.plain and (antibypass.waiting_until(cfg, now) or antibypass.status(cfg, now) == "closed"
+                                  or (pending.uninstall and antibypass.uninstall_waiting(db, now))):
             return fail("Changes like this aren't possible right now.")
         run = pending.run
         with self._lock:
@@ -264,26 +283,28 @@ class GuardService:
             return fail(REFUSED_TEXT.get(what, "Not right - try again."))
         if result == challenges.RIGHT:
             return ok({"passed": False, "next": shown})
-        if run.recovered:
-            if pending.dry:
-                applog.record("antibypass_change", "Recovery code typed in a practice run - it was not used up", db)
-            elif self.secrets.use_recovery(run.recovered):
-                applog.record("antibypass_change", "Recovery code used (instead of the password / authenticator "
-                                                   "code) - it is used up now", db)
+        new_code = {}
+        if run.new_code:
+            applog.record("antibypass_change", f"Anti-Bypass: recovery code used to pass the challenge "
+                                               f"({self._for(pending)}) - it is used up", db)
+            applog.record("antibypass_change", "Anti-Bypass: a new recovery code was made and shown once (the old one "
+                                               "no longer works)", db)
+            new_code = {"recovery_code": run.new_code}
         if pending.plain:           # the bedtime Dismiss: no unlock, no wait - just the action, once
             applog.record("challenge_passed", "Bedtime challenge passed (before Dismiss)", db)
             return ok({"passed": True, "result": pending.action()})
         if pending.dry:
             applog.record("challenge_passed", "Anti-Bypass challenge passed (a practice run, nothing was changed)", db)
             return ok({"passed": True, "dry": True, "result": pending.action()})
-        waiting = antibypass.unlock(db, now)
+        waiting = antibypass.uninstall_pass(db, now) if pending.uninstall else antibypass.unlock(db, now)
         if waiting:
             applog.record("challenge_passed", f"Anti-Bypass challenge passed ({self._for(pending)}); the wait runs "
                                               f"until {waiting:%H:%M}, nothing was changed yet", db)
             self._run_cancel(pending)               # a cooling-off period: nothing is done now, come back later
-            return ok({"passed": True, "waiting_until": waiting.isoformat(timespec="seconds")})
-        applog.record("challenge_passed", f"Anti-Bypass challenge passed ({self._for(pending)})", db)
-        return ok({"passed": True, "result": pending.action()})
+            return ok({"passed": True, "waiting_until": waiting.isoformat(timespec="seconds"), **new_code})
+        applog.record("challenge_passed", f"Anti-Bypass challenge passed ({self._for(pending)})"
+                                          + (" - only this, nothing else unlocked" if pending.uninstall else ""), db)
+        return ok({"passed": True, "result": pending.action(), **new_code})
 
     def _failed(self, pending, how: str) -> str:
         """The App log line for a failed try: "Anti-Bypass challenge failed: <how> (for: ...)"; the bedtime Dismiss's

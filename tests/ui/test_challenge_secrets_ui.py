@@ -1,9 +1,11 @@
 """Own password, authenticator code and recovery code in Chrome, against the real Python Api (see harness.py).
 
-The setup flows on the Anti-Bypass page (the "Forgotten = ..." warning, the QR code and key shown once, a current code
-needed to save, the recovery code shown once and only closed on purpose), the step editor's secret rows (no level, no
-times, "Not set up yet", a list that can't be saved without its secret) and the challenge dialog's password / code
-steps with "Lost it? Use your recovery code". Python judges everything; these tests drive the page like a person."""
+The setup flows on the Anti-Bypass page (the "Forgotten / lost = only uninstalling ..." warning, no recovery code with
+a password or an authenticator, the QR code and key shown once, a current code needed to save), the optional recovery
+code (made on purpose, shown once and only closed on purpose, removed for free), the step editor's secret rows (no
+level, no times, "Not set up yet", a list that can't be saved without its secret) and the challenge dialog's password /
+code steps and its "Use recovery code" (passes the whole run, then the NEW code is shown once). Python judges
+everything; these tests drive the page like a person."""
 import re
 
 import antibypass as ab
@@ -14,6 +16,7 @@ from test_challenge import Req, eventually, open_in_page, result  # noqa: F401
 from test_page_antibypass import dialog_closed, open_page
 
 PW = "correct horse"
+FORGOTTEN = "Forgotten / lost = only uninstalling Lockdown gets you out (your settings are kept for the next install)."
 CODE_RE = re.compile(r"^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){3}$")
 
 
@@ -54,15 +57,15 @@ def close_recovery(page):
     return code
 
 
-def test_setting_a_password_warns_and_shows_the_recovery_code_once(shell, page, harness):
+def test_setting_a_password_warns_and_gives_no_recovery_code(shell, page, harness):
     lock(harness)
     open_page(shell, page)
     assert page.inner_text('[data-k="sx-pw"]') == "Not set."
-    assert page.is_disabled('[data-act="sx-rec-new"]')
+    assert page.inner_text('[data-k="sx-rec"]') == "Off (none made)."
+    assert FORGOTTEN in page.inner_text('[data-k="sx"]')
     page.click('[data-act="sx-pw-set"]')
     page.wait_for_selector('#dlg[open] [data-k="sx-p1"]')
-    assert "Forgotten = only the recovery code gets you out - uninstalling Lockdown asks this challenge too." \
-        in page.inner_text("#dlg")
+    assert FORGOTTEN in page.inner_text("#dlg")
     assert page.get_attribute('#dlg [data-k="sx-p1"]', "type") == "password"
     page.fill('#dlg [data-k="sx-p1"]', PW)
     page.fill('#dlg [data-k="sx-p2"]', PW + "!")
@@ -70,14 +73,12 @@ def test_setting_a_password_warns_and_shows_the_recovery_code_once(shell, page, 
     assert "not the same" in page.inner_text('#dlg [data-k="sx-err"]')
     page.fill('#dlg [data-k="sx-p2"]', PW)
     page.press('#dlg [data-k="sx-p2"]', "Enter")
-    code = close_recovery(page)
-    assert CODE_RE.match(code), code
-    assert cs.verify_secret(PW, cs.load(harness.db)["password"])
-    assert cs.verify_secret(cs.clean_recovery(code), cs.load(harness.db)["recovery"])
+    dialog_closed(page)                                            # (no recovery code comes with it)
+    assert cs.verify_secret(PW, cs.load(harness.db)["password"]) and "recovery" not in cs.load(harness.db)
     page.wait_for_function("document.querySelector('[data-k=\"sx-pw\"]').textContent.startsWith('Set')")
     assert page.inner_text('[data-act="sx-pw-set"]') == "Change" and page.is_visible('[data-act="sx-pw-x"]')
-    assert page.inner_text('[data-k="sx-rec"]').startswith("Made ")
-    assert code not in page.content() and PW not in page.content()          # shown once, kept nowhere on the page
+    assert page.inner_text('[data-k="sx-rec"]') == "Off (none made)." and not page.is_visible('[data-act="sx-rec-x"]')
+    assert PW not in page.content()
 
 
 def test_the_authenticator_setup_shows_a_qr_and_saves_only_with_a_current_code(shell, page, harness):
@@ -85,6 +86,7 @@ def test_the_authenticator_setup_shows_a_qr_and_saves_only_with_a_current_code(s
     open_page(shell, page)
     page.click('[data-act="sx-totp-set"]')
     page.wait_for_selector("#dlg[open] .sx-qr svg")
+    assert FORGOTTEN in page.inner_text("#dlg")
     key = page.inner_text('#dlg [data-k="sx-key"]').replace(" ", "")
     assert len(key) == 32 and not cs.status(harness.db)["totp"]["set"]
     page.fill('#dlg [data-k="sx-code"]', other_code(code_now(harness, key)))
@@ -92,8 +94,8 @@ def test_the_authenticator_setup_shows_a_qr_and_saves_only_with_a_current_code(s
     page.wait_for_function("document.querySelector('#dlg [data-k=\"sx-err\"]').textContent.includes(\"doesn't match\")")
     page.fill('#dlg [data-k="sx-code"]', code_now(harness, key))
     page.click("#dlg .dlg-f .btn-primary")
-    code = close_recovery(page)                                    # (the first secret: its recovery code)
-    assert CODE_RE.match(code)
+    dialog_closed(page)                                            # (no recovery code comes with it)
+    assert "recovery" not in cs.load(harness.db)
     assert eventually(lambda: cs.status(harness.db)["totp"]["set"]) and cs.load(harness.db)["totp"]["secret"] == key
     page.wait_for_function("document.querySelector('[data-k=\"sx-totp\"]').textContent.startsWith('Set up')")
     assert page.inner_text('[data-act="sx-totp-set"]') == "Set up again"
@@ -132,8 +134,8 @@ def test_the_dialog_asks_the_password_then_the_authenticator_code(shell, page, h
     req, data = ask(harness)
     open_in_page(page, data)
     page.wait_for_selector('#dlg input.ch-sec[type="password"]')
-    assert "Type your Anti-Bypass password." in page.inner_text("#dlg")
-    assert page.query_selector("#dlg .ch-rec")                     # (a recovery code exists: the link is there)
+    assert "Type your Anti-Bypass password." in page.inner_text("#dlg") and FORGOTTEN in page.inner_text("#dlg")
+    assert not page.query_selector("#dlg .ch-rec")                 # (no recovery code: nothing offered)
     page.fill("#dlg .ch-sec", "not it")
     page.press("#dlg .ch-sec", "Enter")
     page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.includes(\"isn't the password\")")
@@ -145,20 +147,51 @@ def test_the_dialog_asks_the_password_then_the_authenticator_code(shell, page, h
     assert result(page) == {"saved": 1} and req.ran == 1
 
 
-def test_the_recovery_code_stands_in_for_the_password_and_is_used_up(shell, page, harness):
-    code = cs.set_password(harness.db, PW, harness.now)
-    lock(harness, [step("password")])
+def test_a_recovery_code_is_made_on_purpose_shown_once_and_removed_for_free(shell, page, harness):
+    open_page(shell, page)                                         # (Anti-Bypass off: making one asks nothing)
+    assert page.inner_text('[data-act="sx-rec-new"]') == "Make a recovery code"
+    page.click('[data-act="sx-rec-new"]')
+    page.wait_for_selector("#dlg[open]")
+    assert "passes one whole Anti-Bypass challenge" in page.inner_text("#dlg")
+    page.click("#dlg .dlg-f .btn-primary")
+    code = close_recovery(page)
+    assert CODE_RE.match(code), code
+    assert cs.verify_secret(cs.clean_recovery(code), cs.load(harness.db)["recovery"])
+    page.wait_for_function("document.querySelector('[data-k=\"sx-rec\"]').textContent.startsWith('Made ')")
+    assert page.inner_text('[data-act="sx-rec-new"]') == "Make a new one" and code not in page.content()
+    lock(harness)                                                  # removing it is free even while locked
+    page.click('[data-act="sx-rec-x"]')
+    page.wait_for_selector("#dlg[open]")
+    page.click("#dlg .dlg-f .btn-primary")
+    dialog_closed(page)
+    assert eventually(lambda: "recovery" not in cs.load(harness.db))
+    page.wait_for_function("document.querySelector('[data-k=\"sx-rec\"]').textContent === 'Off (none made).'")
+
+
+def test_the_recovery_code_passes_the_whole_challenge_and_the_new_one_is_shown_once(shell, page, harness):
+    cs.set_password(harness.db, PW, harness.now)
+    code = cs.make_recovery(harness.db, harness.now)
+    lock(harness, [{"id": "m", "kind": "math", "level": 3, "times": 5}, step("password")])
     shell()
     req, data = ask(harness)
     open_in_page(page, data)
-    page.wait_for_selector("#dlg .ch-rec")
-    page.click("#dlg .ch-rec")
+    page.wait_for_selector('#dlg [data-act="ch-userec"]')          # offered at the start of the run
+    page.click('#dlg [data-act="ch-userec"]')
     page.wait_for_selector("#dlg input.ch-sec.rec")
-    assert "used up when you finish" in page.inner_text("#dlg")
+    assert "passes one whole Anti-Bypass challenge" in page.inner_text("#dlg")
     page.type("#dlg .ch-sec.rec", "AAAABBBBCCCCDDDD")
     page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.includes(\"isn't the recovery code\")")
     page.type("#dlg .ch-sec.rec", code.lower())
     page.click("#dlg .dlg-f .btn-primary")
-    assert result(page) == {"saved": 1}
-    assert not cs.status(harness.db)["recovery"]["exists"]
+    page.wait_for_selector('#dlg [data-k="ch-newcode"]')
+    new = page.inner_text('#dlg [data-k="ch-newcode"]').strip()
+    assert CODE_RE.match(new) and new != code
+    assert "the old one no longer works" in page.inner_text("#dlg")
+    page.keyboard.press("Escape")                                  # (Esc can't lose it)
+    assert page.evaluate("document.getElementById('dlg').open") and page.query_selector('#dlg [data-k="ch-newcode"]')
+    assert page.evaluate("window.__res === undefined")
+    page.click("#dlg .dlg-f .btn-primary")                         # I've saved it
+    assert result(page) == {"saved": 1} and req.ran == 1
+    stored = cs.load(harness.db)["recovery"]
+    assert cs.verify_secret(cs.clean_recovery(new), stored) and not cs.verify_secret(cs.clean_recovery(code), stored)

@@ -1,20 +1,20 @@
 // The "Password & authenticator" section of the Anti-Bypass page's Challenges card: your own password, an authenticator
-// app (TOTP, a QR code to scan once) and the recovery code. Python keeps and checks every secret (challenge_secrets.py,
-// webapi/antibypass_page.py): this file shows what is set up - never a secret, except a NEW recovery code once and the
-// authenticator's key once while it is being set up - and sends what is typed. Setting the first password or
-// authenticator is free; changing or removing one and making a new recovery code ask the challenge (guarded()).
+// app (TOTP, a QR code to scan once) and the optional recovery code. Python keeps and checks every secret
+// (challenge_secrets.py, webapi/antibypass_page.py): this file shows what is set up - never a secret, except a NEW
+// recovery code once and the authenticator's key once while it is being set up - and sends what is typed. Setting the
+// first password or authenticator is free and gives no recovery code (forgotten / lost = uninstalling is the way out);
+// changing or removing one and making a recovery code ask the challenge (guarded()); removing the code is free.
 //
 //   secretsSection(k)          the section's html (k = the card's colour class), put into the Challenges card
 //   paintSecrets(root, d)      fills it from antibypass_get() (d.secrets)
 //   wireSecrets(root, apply)   its buttons; `apply(pageData)` repaints the page with what Python answered
 import { ld } from "../bridge.js";
 import { CANCELLED, guarded } from "../challenge.js";
-import { digitsOnly } from "../challenge_kinds.js";
+import { digitsOnly, FORGOTTEN, printCode, RECOVERY_DOES } from "../challenge_kinds.js";
 import { confirmDialog, openDialog } from "../dialog.js";
 import { csec, csecNote, esc, field, setText, toast } from "../ui.js";
 
-// (Not "or uninstalling": uninstalling Lockdown asks this same challenge, password step and all.)
-export const FORGOTTEN = "Forgotten = only the recovery code gets you out - uninstalling Lockdown asks this challenge too.";
+export { FORGOTTEN };      // (uninstalling asks the challenge without the password / authenticator steps)
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WHAT = { password: "password", totp: "authenticator" };
 let last = null;                 // the secrets state last painted (antibypass_get().secrets)
@@ -30,12 +30,10 @@ export function dayText(ts, time = false) {
 /** The state line of each row ({password, totp, recovery}) from antibypass_get().secrets. */
 export function secretLines(s) {
   const since = (t) => (dayText(t) ? ` ${dayText(t)}` : "");
-  const any = s.password.set || s.totp.set;
   return {
     password: s.password.set ? `Set${since(s.password.since)}.` : "Not set.",
     totp: s.totp.set ? `Set up${since(s.totp.since)}.` : "Not set up.",
-    recovery: s.recovery.exists ? `Made ${dayText(s.recovery.made, true) || "earlier"} - shown only then.`
-      : any ? "None (used up or never made) - make a new one." : "Made with your first password or authenticator.",
+    recovery: s.recovery.exists ? `Made ${dayText(s.recovery.made, true) || "earlier"} - shown only then.` : "Off (none made).",
   };
 }
 
@@ -77,9 +75,9 @@ export function secretsSection(k) {
   return csec(k, "lock", "Password & authenticator", `${STYLE}
     ${field("Own password", '<span class="sx-state" data-k="sx-pw"></span>', btn("sx-pw-set", "Set a password") + btn("sx-pw-x", "Remove", "hidden"))}
     ${field("Authenticator app", '<span class="sx-state" data-k="sx-totp"></span>', btn("sx-totp-set", "Set up") + btn("sx-totp-x", "Remove", "hidden"))}
-    ${field("Recovery code", '<span class="sx-state" data-k="sx-rec"></span>', btn("sx-rec-new", "Make a new one", "disabled"))}
+    ${field("Recovery code", '<span class="sx-state" data-k="sx-rec"></span>', btn("sx-rec-new", "Make a recovery code") + btn("sx-rec-x", "Remove", "hidden"))}
     <p class="sx-warn" data-k="sx-missing" role="status" hidden></p>
-    ${csecNote(`Add "Own password" or "Authenticator code" as a step above to ask for it. Strongest when someone else sets the password or keeps the authenticator on their phone. ${FORGOTTEN}`)}`,
+    ${csecNote(`Add "Own password" or "Authenticator code" as a step above to ask for it. Strongest when someone else sets the password or keeps the authenticator on their phone. ${FORGOTTEN} A recovery code is optional (none by default): a one-time key - ${RECOVERY_DOES.charAt(0).toLowerCase() + RECOVERY_DOES.slice(1)} Making one asks the challenge; removing it is free.`)}`,
   'data-k="sx"');
 }
 
@@ -99,7 +97,8 @@ export function paintSecrets(root, d) {
   act("sx-pw-x").hidden = !s.password.set;
   setText(act("sx-totp-set"), s.totp.set ? "Set up again" : "Set up");
   act("sx-totp-x").hidden = !s.totp.set;
-  act("sx-rec-new").disabled = !(s.password.set || s.totp.set);
+  setText(act("sx-rec-new"), s.recovery.exists ? "Make a new one" : "Make a recovery code");
+  act("sx-rec-x").hidden = !s.recovery.exists;
   const warn = q("sx-missing");
   setText(warn, missingText(s));
   warn.hidden = !warn.textContent;
@@ -117,7 +116,8 @@ export function wireSecrets(root, apply) {
       else if (act === "sx-totp-set") await totpDialog(apply);
       else if (act === "sx-pw-x") await removeSecret("password", apply);
       else if (act === "sx-totp-x") await removeSecret("totp", apply);
-      else if (act === "sx-rec-new") await newRecovery(apply);
+      else if (act === "sx-rec-new") await newRecovery(!!(last && last.recovery.exists), apply);
+      else if (act === "sx-rec-x") await removeRecovery(apply);
     } finally {
       busy = false;
     }
@@ -143,7 +143,7 @@ function passwordDialog(had, apply) {
   let sending = false;
   const h = openDialog({
     key: "sx-pw", title: had ? "Change your Anti-Bypass password" : "Set an Anti-Bypass password",
-    body: `<p>${had ? "The new password replaces the old one. Changing it asks the challenge." : 'An "Own password" step of the challenge asks it. Setting it is free; changing or removing it later asks the challenge.'}</p>
+    body: `<p>${had ? "The new password replaces the old one. Changing it asks the challenge." : 'An "Own password" step of the challenge asks it. Setting it is free; changing or removing it later asks the challenge. No recovery code comes with it.'}</p>
       <p class="sx-forgot">${esc(FORGOTTEN)}</p>
       <p class="small muted">Strongest when someone else types it here and keeps it to themselves.</p>
       <label class="sx-l">${had ? "New password" : "Password"}<input class="input" type="password" data-k="sx-p1" maxlength="200" autocomplete="off" spellcheck="false"></label>
@@ -192,6 +192,7 @@ async function totpDialog(apply) {
       ${qr}
       <p class="small">Or type this key into the app: <span class="sx-key" data-k="sx-key">${esc(setup.key)}</span></p>
       <p class="small muted">The QR code and the key are shown only now.${setup.replaces ? " Saving replaces the old authenticator: that asks the challenge, and the old one stops working." : ""}</p>
+      <p class="sx-forgot">${esc(FORGOTTEN)}</p>
       <label class="sx-l"><span><b>2.</b> Type the 6-digit code the app shows for Lockdown</span>
         <input class="input sx-codein" data-k="sx-code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" spellcheck="false" placeholder="000000"></label>
       <p class="sx-err" data-k="sx-err" role="alert"></p>`,
@@ -240,10 +241,10 @@ async function removeSecret(kind, apply) {
   }
 }
 
-async function newRecovery(apply) {
+async function newRecovery(had, apply) {
   const yes = await confirmDialog({
-    key: "sx-rx", title: "Make a new recovery code?", ok: "Make a new one",
-    text: "The old code stops working. Making one asks the challenge: it is a way past your password and authenticator steps.",
+    key: "sx-rx", title: had ? "Make a new recovery code?" : "Make a recovery code?", ok: had ? "Make a new one" : "Make one",
+    text: `${had ? "The old code stops working. " : ""}It is a one-time key: ${RECOVERY_DOES.charAt(0).toLowerCase() + RECOVERY_DOES.slice(1)} Making one asks the challenge.`,
   });
   if (!yes) return;
   try {
@@ -253,28 +254,27 @@ async function newRecovery(apply) {
   }
 }
 
-function printCode(code) {
-  const frame = document.createElement("iframe");
-  frame.style.cssText = "position:fixed;width:0;height:0;border:0;right:0;bottom:0";
-  document.body.append(frame);
-  const doc = frame.contentDocument;
-  doc.open();
-  doc.write(`<!doctype html><meta charset="utf-8"><title>Lockdown recovery code</title><body style="font-family:sans-serif;padding:40px">
-    <h2>Lockdown - Anti-Bypass recovery code</h2><p style="font:600 28px monospace;letter-spacing:.08em">${esc(code)}</p>
-    <p>It stands in for the password and authenticator steps of one challenge, then it is used up. Keep it somewhere safe.</p></body>`);
-  doc.close();
-  try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (_) { /* no printer: write it down */ }
-  setTimeout(() => frame.remove(), 60000);
+async function removeRecovery(apply) {
+  const yes = await confirmDialog({
+    key: "sx-rxx", title: "Remove your recovery code?", ok: "Remove", danger: true,
+    text: "It stops working at once. Removing it is free; making a new one later asks the challenge.",
+  });
+  if (!yes) return;
+  try {
+    await done(await ld.call("antibypass_recovery_remove"), apply);
+  } catch (err) {
+    toast(err.message || "That didn't work.");
+  }
 }
 
-/** The new recovery code, shown once. Only "I have written it down" closes it (no Esc by accident). */
+/** The new recovery code, shown once. Only "I've saved it" closes it (no Esc by accident). */
 export function showRecoveryCode(code) {
   const h = openDialog({
     key: "sx-rec", title: "Your recovery code", dismissable: false,
     body: `<p>Print it or write it down now and keep it somewhere safe - <b>it is shown only this once</b>.</p>
       <p class="sx-code" data-k="sx-code-shown">${esc(code)}</p>
-      <p class="small muted">If the password or the authenticator is lost, typing it instead gets you through their steps of one challenge (the other steps are still asked). Then it is used up - make a new one afterwards.</p>`,
-    buttons: [{ label: "Print", onClick: () => { printCode(code); return false; } }, { label: "I have written it down", kind: "primary", value: true }],
+      <p class="small muted">${esc(RECOVERY_DOES)}</p>`,
+    buttons: [{ label: "Print", onClick: () => { printCode(code); return false; } }, { label: "I've saved it", kind: "primary", value: true }],
   });
   return h ? h.done : Promise.resolve();
 }

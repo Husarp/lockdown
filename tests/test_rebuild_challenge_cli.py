@@ -80,12 +80,14 @@ def test_anti_bypass_off_passes_at_once_without_a_window(ctx):
     assert show.tickets == []
 
 
-def test_typing_the_phrase_exits_0_and_unlocks(ctx):
+def test_typing_the_phrase_exits_0_and_unlocks_nothing_else(ctx):
     turn_on(ctx)
     show = Show(ctx, lambda c, t: typist(c, t))
     assert challenge_cli.exit_code(ctx, "Uninstall Lockdown", show) == 0
     assert len(show.tickets) == 1
-    assert ab.unlocked_until(ab.settings(ctx.db), ctx.now())          # the pass is remembered like any other
+    # only the uninstall goes through: its list may lack the password steps, so it never opens the unlock for the rest
+    assert not ab.unlocked_until(ab.settings(ctx.db), ctx.now())
+    assert ab.status(ab.settings(ctx.db), ctx.now()) == "phrase"
 
 
 def test_the_grid_works_too(ctx):
@@ -127,10 +129,15 @@ def test_a_wrong_phrase_or_a_macro_does_not_pass(ctx):
 def test_a_wait_after_passing_exits_1(ctx):
     turn_on(ctx, wait_min=10)
     assert challenge_cli.exit_code(ctx, "x", Show(ctx, typist)) == 1       # passed, but the change must wait
-    assert ab.waiting_until(ab.settings(ctx.db), ctx.now())
+    assert ab.uninstall_waiting(ctx.db, ctx.now())                         # (the uninstaller's own wait ...)
+    assert not ab.waiting_until(ab.settings(ctx.db), ctx.now())            # (... not the unlock's for other changes)
     seen = []                                                              # coming back during the wait: no phrase
     challenge_cli.exit_code(ctx, "x", Show(ctx, lambda c, t: seen.append(c.guard.begin(t)["data"]["mode"])))
     assert seen == ["waiting"]
+    ctx.clock.now = NOW.replace(minute=11)                                 # the wait is over: uninstalling goes, once
+    assert challenge_cli.exit_code(ctx, "x", Show(ctx)) == 0
+    assert not ab.unlocked_until(ab.settings(ctx.db), ctx.now())
+    assert challenge_cli.exit_code(ctx, "x", Show(ctx)) == 1               # (used: the next one asks again)
 
 
 def test_outside_the_allowed_hours_exits_1(ctx):
@@ -248,3 +255,54 @@ def test_agent_tray_exit_goes_through_the_guard(ctx, monkeypatch):
     agent._tray_exit(win, Keeper(), ctx)
     assert hidden == [1, "window"] and quits == [] and not win.quitting
     assert ctx.db.get_setting(ab.EXITED_KEY, "0") == "1"
+
+
+# ---------------------------------------------------------------- forgotten password / lost authenticator: uninstalling
+
+def _secrets(ctx, monkeypatch):
+    import challenge_secrets as cs
+    monkeypatch.setattr(cs, "SCRYPT", {"n": 2 ** 8, "r": 8, "p": 1})
+    cs.set_password(ctx.db, "correct horse", NOW)
+    cs.set_totp(ctx.db, cs.new_totp_secret(), 0, NOW)
+    return cs
+
+
+def _step(kind, ident=None, level=0):
+    return {"id": ident or kind, "kind": kind, "level": level, "times": 1}
+
+
+def test_the_uninstaller_asks_the_list_without_the_password_and_authenticator(ctx, monkeypatch):
+    _secrets(ctx, monkeypatch)
+    turn_on(ctx, steps=[_step("password"), _step("math", "m"), _step("totp")])
+    seen = []
+
+    def person(c, t):
+        data = c.guard.begin(t)["data"]
+        seen.append([s["kind"] for s in data["run"]["steps"]])
+        c.clock.mono += 60
+        return c.guard.submit(t, c.guard._open.run.puzzle.answer)
+    assert challenge_cli.exit_code(ctx, "Uninstall Lockdown", Show(ctx, person)) == 0
+    assert seen == [["math"]]
+    assert not ab.unlocked_until(ab.settings(ctx.db), ctx.now())
+    # the same list in the app still asks all three
+    ticket = ctx.guard.request(["Remove YouTube"], lambda: None)["data"]["ticket"]
+    assert [s["kind"] for s in ctx.guard.begin(ticket)["data"]["run"]["steps"]] == ["password", "math", "totp"]
+
+
+def test_a_list_of_only_secret_steps_asks_what_it_asked_before_they_existed(ctx, monkeypatch):
+    _secrets(ctx, monkeypatch)
+    turn_on(ctx, length=45, steps=[_step("password"), _step("totp")])
+    seen = []
+    challenge_cli.exit_code(ctx, "Uninstall Lockdown",
+                            Show(ctx, lambda c, t: seen.append(c.guard.begin(t)["data"]["run"]["steps"])))
+    assert [(s["kind"], s["level"]) for s in seen[0]] == [("phrase", 45)]      # one phrase of its length, as before
+    assert ab.uninstall_steps(ab.settings(ctx.db)) == [{"id": "s0", "kind": "phrase", "level": 45, "times": 1}]
+
+
+def test_the_uninstall_challenge_cant_be_used_to_unlock_the_app(ctx, monkeypatch):
+    """`Lockdown.exe --challenge` run by hand: passing it (no password asked) must not open the unlock."""
+    _secrets(ctx, monkeypatch)
+    turn_on(ctx, steps=[_step("phrase", "s0", 30), _step("password")])
+    assert challenge_cli.exit_code(ctx, "anything", Show(ctx, typist)) == 0
+    reply = ctx.guard.request(["Remove YouTube"], lambda: pytest.fail("loosened without the password"))
+    assert reply["data"]["needs_challenge"]

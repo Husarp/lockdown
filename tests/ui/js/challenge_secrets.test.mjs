@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 // Own password, authenticator code and recovery code: the pure helpers of the dialog (challenge_kinds.js), the step
 // editor (steplist.js) and the Anti-Bypass page's section (pages/antibypass_secrets.js). The flows run in Chrome.
-const { recoveryTyped, secretText, stripModel, SHORT } = await import("../../../src/ui/js/challenge_kinds.js");
+const { recoveryTyped, secretText, stripModel, SHORT, RECOVERY_DOES } = await import("../../../src/ui/js/challenge_kinds.js");
+const { offersRecovery } = await import("../../../src/ui/js/challenge.js");
 const { estimate, stepSeconds, stepsLooser } = await import("../../../src/ui/js/steplist.js");
 const { dayText, secretLines, missingText, passwordProblem, FORGOTTEN } = await import("../../../src/ui/js/pages/antibypass_secrets.js");
 
@@ -29,10 +30,10 @@ test("recoveryTyped: upper case, only signs and dashes, at most 19", () => {
   assert.equal(recoveryTyped(null), "");
 });
 
-test("secretText: what the password, the code and the recovery code ask", () => {
-  assert.match(secretText("password", false), /password/);
-  assert.match(secretText("totp", false), /6-digit code/);
-  assert.match(secretText("totp", true), /recovery code.*used up/);
+test("secretText: what the password and the code ask; what the recovery code does", () => {
+  assert.match(secretText("password"), /password/);
+  assert.match(secretText("totp"), /6-digit code/);
+  assert.match(RECOVERY_DOES, /passes one whole Anti-Bypass challenge \(every step\).*used up and a new code is shown/);
   assert.equal(SHORT.password, "Password");
   assert.equal(SHORT.totp, "Code");
 });
@@ -61,17 +62,17 @@ test("the section's lines: set, set up, made, and the warnings", () => {
   assert.equal(dayText("2026-10-13 10:12:00", true), "13 Oct 2026 10:12");
   assert.equal(dayText(""), "");
   assert.deepEqual(secretLines(status(false, false, false)), {
-    password: "Not set.", totp: "Not set up.", recovery: "Made with your first password or authenticator.",
+    password: "Not set.", totp: "Not set up.", recovery: "Off (none made).",
   });
   const on = secretLines(status(true, true, true));
   assert.equal(on.password, "Set 13 Oct 2026.");
   assert.equal(on.totp, "Set up 12 Oct 2026.");
   assert.equal(on.recovery, "Made 13 Oct 2026 10:12 - shown only then.");
-  assert.match(secretLines(status(true, false, false)).recovery, /make a new one/);
+  assert.equal(secretLines(status(true, false, false)).recovery, "Off (none made).");     // (no code with a password)
   assert.equal(missingText(status(false, false, false)), "");
   assert.match(missingText(status(false, false, false, ["password"])), /asks your password, but it isn't set up/);
   assert.match(missingText(status(false, false, false, ["password", "totp"])), /password and authenticator, but they aren't/);
-  assert.match(FORGOTTEN, /only the recovery code gets you out - uninstalling Lockdown asks this challenge too/);
+  assert.equal(FORGOTTEN, "Forgotten / lost = only uninstalling Lockdown gets you out (your settings are kept for the next install).");
 });
 
 test("passwordProblem: the boxes are checked before sending (Python checks again)", () => {
@@ -79,4 +80,16 @@ test("passwordProblem: the boxes are checked before sending (Python checks again
   assert.equal(passwordProblem("abc", "abc"), "At least 4 characters, please.");
   assert.equal(passwordProblem("abcd", "abce"), "The two passwords are not the same.");
   assert.equal(passwordProblem("abcd", "abcd"), "");
+});
+
+test("offersRecovery: at the start of a run that offers it, and on a password / code step", () => {
+  const steps = [row("a", "math", 0, 2), row("b", "password"), row("c", "phrase", 60)];
+  const at = (step, done, recovery = true, finished = false) => ({ steps, step, done, recovery, finished });
+  assert.equal(offersRecovery(at(0, 0)), true);                 // the start: nothing answered yet
+  assert.equal(offersRecovery(at(0, 1)), false);                // (half way through the math: not here)
+  assert.equal(offersRecovery(at(1, 0)), true);                 // the password step
+  assert.equal(offersRecovery(at(2, 0)), false);
+  assert.equal(offersRecovery(at(0, 0, false)), false);         // no code, a practice run, the bedtime screen
+  assert.equal(offersRecovery(at(0, 0, true, true)), false);
+  assert.equal(offersRecovery(null), false);
 });

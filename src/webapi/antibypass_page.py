@@ -14,10 +14,12 @@ same functions the old window used (antibypass.settings_looser, pause.end_for ..
 - everything else (and a setting not in use: your own phrase while it's off, the random one's length or numbers while
   it's on) is saved at once.
 
-Your own password, an authenticator and the recovery code (challenge_secrets.py) are set up here too. Setting the
-first password / authenticator is free (it makes the first recovery code, shown once); changing or removing one and
-making a new recovery code are loosening (the challenge). A list with a password / authenticator step can only be saved
-once that is set up, and a secret a step asks can't be removed (take the step out first).
+Your own password, an authenticator and the optional recovery code (challenge_secrets.py) are set up here too. Setting
+the first password / authenticator is free and gives NO recovery code (forgotten / lost = only uninstalling gets you
+out; uninstalling keeps the settings); changing or removing one is loosening (the challenge). Making a recovery code
+(or a new one) is loosening too - it passes one whole challenge - and removing it is free. A list with a password /
+authenticator step can only be saved once that is set up, and a secret a step asks can't be removed (take the step out
+first).
 
 Starting "Pause my blocks" and switching Lockdown off are loosening too (the second one even asks while no challenge is
 turned on, `force`); ending a pause and switching Lockdown on are free (`pause_resume` and `antibypass_switch_on`
@@ -398,20 +400,11 @@ def lockdown_switch_off(ctx):
 
 # ---------------------------------------------------------------- own password, authenticator, recovery code
 
-def _with_code(ctx, code) -> dict:
-    """The page data, plus `recovery_code` when one was just made: the only time it is ever shown."""
-    out = _page(ctx)
-    if code:
-        applog.record("antibypass_change", "Anti-Bypass: recovery code made (shown once)", ctx.db)
-        out["recovery_code"] = code
-    return out
-
-
 @core.loosen
 def antibypass_password_set(ctx, password, again):
     """Set your own password (free while none is set) or change it (the challenge: whoever knows the new one could then
-    loosen). Kept only as a salted hash. -> the page data (+ `recovery_code`, shown once, when this made the first
-    one) or {needs_challenge, ticket} for a change."""
+    loosen). Kept only as a salted hash; no recovery code comes with it. -> the page data or {needs_challenge, ticket}
+    for a change."""
     try:
         text = challenge_secrets.check_password_text(password)
     except ValueError as e:
@@ -421,9 +414,9 @@ def antibypass_password_set(ctx, password, again):
     had = challenge_secrets.status(ctx.db)["password"]["set"]
 
     def apply():
-        code = challenge_secrets.set_password(ctx.db, text, ctx.now())
+        challenge_secrets.set_password(ctx.db, text, ctx.now())
         applog.record("antibypass_change", f"Anti-Bypass: own password {'changed' if had else 'set'}", ctx.db)
-        return _with_code(ctx, code)
+        return _page(ctx)
     return ctx.guard.request(["Change your Anti-Bypass password"], apply) if had else apply()
 
 
@@ -467,8 +460,8 @@ def antibypass_totp_begin(ctx):
 @core.loosen
 def antibypass_totp_confirm(ctx, token, code):
     """Save the authenticator begun with antibypass_totp_begin once `code` is a current code of it (that code is then
-    used). Free while none is set up; replacing one is the challenge (the old one stops working). -> the page data
-    (+ `recovery_code` when this made the first one) or {needs_challenge, ticket}."""
+    used). Free while none is set up; replacing one is the challenge (the old one stops working). No recovery code comes
+    with it. -> the page data or {needs_challenge, ticket}."""
     pending = getattr(ctx, "totp_pending", None)
     if (not isinstance(token, str) or not pending or not secrets.compare_digest(token, pending["token"])
             or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
@@ -482,24 +475,32 @@ def antibypass_totp_confirm(ctx, token, code):
         if getattr(ctx, "totp_pending", None) is not pending:
             raise ApiError("Start the authenticator setup again.")
         ctx.totp_pending = None                 # (one use)
-        rec = challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now())
+        challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now())
         applog.record("antibypass_change", "Anti-Bypass: authenticator " + (
             "set up again (the old one no longer works)" if had else "set up"), ctx.db)
-        return _with_code(ctx, rec)
+        return _page(ctx)
     return ctx.guard.request(["Replace your authenticator (the old one stops working)"], apply) if had else apply()
 
 
 @core.loosen
 def antibypass_recovery_new(ctx):
-    """Make a new recovery code (the old one stops working). Always the challenge: a fresh code is a fresh way past the
-    password / authenticator steps. Needs a password or an authenticator. -> the page data + `recovery_code` (shown
-    once) or {needs_challenge, ticket}."""
-    st = challenge_secrets.status(ctx.db)
-    if not (st["password"]["set"] or st["totp"]["set"]):
-        raise ApiError("Set up a password or an authenticator first.")
+    """Make a recovery code, or a new one (the old one stops working). Always the challenge: the code passes one whole
+    challenge. -> the page data + `recovery_code` (shown once) or {needs_challenge, ticket}."""
+    had = challenge_secrets.status(ctx.db)["recovery"]["exists"]
 
     def apply():
         code = challenge_secrets.make_recovery(ctx.db, ctx.now())
-        applog.record("antibypass_change", "Anti-Bypass: new recovery code made (the old one no longer works)", ctx.db)
+        applog.record("antibypass_change", "Anti-Bypass: " + ("new recovery code made (the old one no longer works)"
+                                                              if had else "recovery code made") + ", shown once", ctx.db)
         return {**_page(ctx), "recovery_code": code}
-    return ctx.guard.request(["Make a new recovery code (the old one stops working)"], apply)
+    return ctx.guard.request(["Make a new recovery code (the old one stops working)" if had
+                              else "Make a recovery code (it passes one whole challenge)"], apply)
+
+
+@core.tighten
+def antibypass_recovery_remove(ctx):
+    """Delete the recovery code: free (stricter - one way past the challenge less). -> the page data."""
+    if challenge_secrets.status(ctx.db)["recovery"]["exists"]:
+        challenge_secrets.remove(ctx.db, "recovery")
+        applog.record("antibypass_change", "Anti-Bypass: recovery code removed", ctx.db)
+    return _page(ctx)

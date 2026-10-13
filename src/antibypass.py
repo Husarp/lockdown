@@ -9,6 +9,9 @@ Challenges (any combination, both off = Anti-Bypass off):
   switched off, it stays saved and isn't asked. They apply to every phrase step.
   The list may also hold "Own password" and "Authenticator code" steps (challenges.SECRET_KINDS; the secrets themselves
   and the recovery code live in challenge_secrets.py): a list can only be saved with them once they are set up.
+  Uninstalling Lockdown asks the list WITHOUT those two (uninstall_steps: forgotten / lost = uninstalling is the way
+  out, and uninstalling keeps the settings), so its pass only ever lets the uninstall through - never the unlock for
+  other changes (uninstall_pass; its wait is its own, UNINSTALL_KEY).
 - hours: loosening changes only during the chosen time windows (e.g. Sunday 18:00-20:00).
 - wait: passing the challenge doesn't open at once - the unlock starts this many minutes later (a cooling-off
   period; the wait runs in the database, so closing Lockdown or rebooting doesn't skip it).
@@ -94,6 +97,13 @@ def asked_steps(cfg: dict, ready: set) -> list[dict]:
     return rows or challenges.default_steps(cfg.get("length", DEFAULTS["length"]))
 
 
+def uninstall_steps(cfg: dict) -> list[dict]:
+    """The steps the uninstaller's challenge asks: the list without the password / authenticator steps (forgotten or
+    lost = uninstalling is the way out); nothing else left -> one phrase of `length`, as a list without them read
+    before those kinds existed."""
+    return asked_steps(cfg, set())
+
+
 def save(db, cfg: dict):
     """Store the config. A step list that is still the one a config from before lists reads as (one phrase step of its
     length) is not written: such a config stays as it is, and its length keeps being the phrase's length, until the
@@ -163,6 +173,47 @@ def unlock(db, now: datetime) -> datetime | None:
     cfg["unlocked_until"] = (start + timedelta(minutes=UNLOCK_MIN)).strftime(TIME_FMT)
     save(db, cfg)
     return start if start > now else None
+
+
+UNINSTALL_KEY = "antibypass.uninstall"   # {"from", "until"}: the uninstaller's own pass after a wait (machine state,
+#                                          never in a backup): uninstalling is possible from "from" until "until"
+
+
+def _uninstall_times(db) -> tuple:
+    try:
+        data = json.loads(db.get_setting(UNINSTALL_KEY, "") or "{}")
+        return datetime.strptime(data["from"], TIME_FMT), datetime.strptime(data["until"], TIME_FMT)
+    except (ValueError, KeyError, TypeError):
+        return None, None
+
+
+def uninstall_pass(db, now: datetime) -> datetime | None:
+    """The uninstaller's challenge was passed. No wait set: None (it may uninstall now). Else its own wait starts and
+    this returns when it ends; after it, uninstalling is possible for UNLOCK_MIN minutes (uninstall_open). The unlock
+    for other changes is never opened: that run did not ask the password / authenticator."""
+    wait = settings(db).get("wait_min") or 0
+    if not wait:
+        return None
+    start = now + timedelta(minutes=wait)
+    db.set_setting(UNINSTALL_KEY, json.dumps({"from": start.strftime(TIME_FMT),
+                                              "until": (start + timedelta(minutes=UNLOCK_MIN)).strftime(TIME_FMT)}))
+    return start
+
+
+def uninstall_waiting(db, now: datetime) -> datetime | None:
+    """The uninstaller's own wait is running: when it ends."""
+    start, until = _uninstall_times(db)
+    return start if start and now < start and until else None
+
+
+def uninstall_open(db, now: datetime) -> bool:
+    """The uninstaller's own wait has run out and uninstalling is possible now."""
+    start, until = _uninstall_times(db)
+    return bool(start and start <= now < until)
+
+
+def uninstall_used(db):
+    db.set_setting(UNINSTALL_KEY, "")
 
 
 def lock(db):

@@ -6,7 +6,8 @@ A challenge is an ordered LIST OF STEPS, done top to bottom; a step is {"id", "k
 - sort: tap the items from smallest to largest (3 levels)
 - phrase: type a random phrase (its level is its length in characters; 3x3 grid, numbers & CAPITALS, own phrase)
 - password, totp (SECRET_KINDS, Anti-Bypass only - never the bedtime screen): your own password / an authenticator code,
-  asked once (no level, times always 1), checked by challenge_secrets.Checker; a recovery code may stand in for them
+  asked once (no level, times always 1), checked by challenge_secrets.Checker
+An Anti-Bypass run may also be passed whole by the recovery code (`Run(recovery=True)`, see challenge_secrets.py).
 This module makes and judges every puzzle (the page only gets what it has to draw and never the answer), checks
 step lists (strictly for a save, leniently for stored data), compares two lists (stricter or looser) and runs one
 challenge (`Run`). It is UI-free and does not depend on GuardService, so the tray's bedtime cover uses `Run` as it is.
@@ -422,10 +423,10 @@ def sort_puzzle(level: int, rng=random) -> Puzzle:
 
 
 def secret_puzzle(kind: str, secrets) -> Puzzle:
-    """A password / authenticator step: nothing to draw but whether a recovery code may be typed instead (`recovery`).
-    The checking is the Checker's (challenge_secrets): the right answer is never known here."""
+    """A password / authenticator step: nothing to draw. The checking is the Checker's (challenge_secrets): the right
+    answer is never known here."""
     check = secrets.check_password if kind == "password" else secrets.check_totp
-    return Puzzle(kind, {"recovery": secrets.has_recovery()}, None, check, 0)
+    return Puzzle(kind, {}, None, check, 0)
 
 
 def make_puzzle(step: dict, rng=random, grid: bool = False, complex: bool = False, own: str = "",
@@ -448,17 +449,17 @@ class Run:
     A wrong answer is a NEW puzzle of the same step (what is done stays done). A typed phrase that does not match
     stays (fix it and send again); one that came too fast starts its clock again. Cancel = drop the Run.
     A password / authenticator step (`kinds` with SECRET_KINDS - Anti-Bypass only - and a `secrets` Checker) stays until
-    it is right; instead of it a recovery code may be sent ({"recovery": code}): it then stands in for every password /
-    authenticator step of this run - never for the other steps - and `recovered` holds the hash it matched (the caller
-    uses the code up once the run passed).
+    it is right. With `recovery` (an Anti-Bypass run that is not a practice, and a recovery code exists) the code may be
+    sent instead of any answer ({"recovery": code}): it passes the WHOLE run at once and is used up - `new_code` then
+    holds the new code the Checker made in its place (show it once).
     Independent of GuardService and of the clock: `rng` and `clock` (monotonic seconds) are swapped by tests."""
 
     def __init__(self, steps: list[dict], grid: bool = False, complex: bool = False, own: str = "",
-                 rng=random, clock=time.monotonic, kinds=KINDS, secrets=None):
+                 rng=random, clock=time.monotonic, kinds=KINDS, secrets=None, recovery: bool = False):
         self.steps = read_steps(steps, kinds)
         if not self.steps:
             raise ValueError("A challenge needs at least one step.")
-        if secrets is None and secret_kinds_in(self.steps):
+        if secrets is None and (recovery or secret_kinds_in(self.steps)):
             raise ValueError("A password or authenticator step needs its checker.")
         self.grid, self.complex, self.own = grid, complex, own or ""
         self._rng, self._clock, self._secrets = rng, clock, secrets
@@ -466,7 +467,8 @@ class Run:
         self.finished = False
         self.last_too_fast = False     # the last answer to a puzzle that is not a phrase was refused for being too quick
         self.last_refused = ""         # what the last REFUSED answer was: "password", "totp" or "recovery"
-        self.recovered = None          # the recovery code's hash once it stood in for the password / code steps
+        self.recovery = bool(recovery and secrets.has_recovery())     # the recovery code may pass this run
+        self.new_code = None           # the new recovery code once the old one passed the run (shown once)
         self._new_puzzle()
 
     def _new_puzzle(self):
@@ -485,7 +487,7 @@ class Run:
         out = {"steps": [{"kind": s["kind"], "level": s["level"], "times": s["times"], "label": step_label(s)}
                          for s in self.steps],
                "step": self.index, "done": self.done, "kind": step["kind"], "level": step["level"],
-               "finished": self.finished, "recovered": bool(self.recovered)}
+               "finished": self.finished, "recovery": self.recovery}
         out.update({k: list(v) if isinstance(v, list) else v for k, v in self.puzzle.view.items()})
         return out
 
@@ -493,22 +495,19 @@ class Run:
         """RIGHT (the next puzzle is up), WRONG (a new puzzle of this step), MISMATCH / TOO_FAST (a typed phrase, same
         phrase again), REFUSED / BUSY (a password, code or recovery code that is not right / came while the Checker
         makes wrong tries wait - the same step again), or PASSED (that was the last one). A puzzle other than a phrase
-        answered under its fastest plausible time counts as WRONG (and `last_too_fast` says so)."""
+        answered under its fastest plausible time counts as WRONG (and `last_too_fast` says so). The recovery code
+        ({"recovery": code}, while `recovery`) passes the whole run (PASSED) or is REFUSED / BUSY like a password."""
         if self.finished:
             return PASSED
         puzzle = self.puzzle
         fast = self._clock() - self._shown < puzzle.min_sec
         self.last_too_fast = False
+        if isinstance(value, dict) and list(value) == ["recovery"]:
+            return self._recovery(value["recovery"])
         if puzzle.kind in SECRET_KINDS:
             if self._secrets.wait_left() > 0:
                 return BUSY
-            if isinstance(value, dict):
-                matched = self._secrets.check_recovery(value.get("recovery")) if list(value) == ["recovery"] else None
-                if not matched:
-                    self.last_refused = "recovery"
-                    return REFUSED
-                self.recovered = matched
-            elif not puzzle.check(value):
+            if not puzzle.check(value):
                 self.last_refused = puzzle.kind
                 return REFUSED
         elif puzzle.kind == "phrase":
@@ -524,12 +523,26 @@ class Run:
         self.done += 1
         if self.done >= self.steps[self.index]["times"]:
             self.index, self.done = self.index + 1, 0
-        while self.recovered and self.index < len(self.steps) and self.steps[self.index]["kind"] in SECRET_KINDS:
-            self.index += 1                         # (the recovery code stands in for every password / code step)
         if self.index >= len(self.steps):
-            self.finished = True
-            self.index = len(self.steps) - 1
-            self.done = self.steps[self.index]["times"]
-            return PASSED
+            return self._finish()
         self._new_puzzle()
         return RIGHT
+
+    def _finish(self) -> str:
+        self.finished = True
+        self.index = len(self.steps) - 1
+        self.done = self.steps[self.index]["times"]
+        return PASSED
+
+    def _recovery(self, typed) -> str:
+        """The recovery code instead of an answer: the whole run passes when it is right (it is used up and a new one
+        made: `new_code`); not offered in this run, wrong, or during a wait for wrong tries -> REFUSED / BUSY."""
+        self.last_refused = "recovery"
+        if not self.recovery:
+            return REFUSED
+        if self._secrets.wait_left() > 0:
+            return BUSY
+        self.new_code = self._secrets.use_recovery(typed)
+        if not self.new_code:
+            return REFUSED
+        return self._finish()

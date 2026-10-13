@@ -33,7 +33,7 @@ const KEEPING = [
   "Tray Exit only closes the icon and the window - blocking, word filters and reminders keep running. If Lockdown is killed (e.g. in Task Manager) it comes back within a minute.",
   "The service comes back within a minute if it's stopped.",
   "Changing the Windows clock does nothing; a new time zone counts only after 24 hours.",
-  "Uninstalling Lockdown asks for the challenge too.",
+  "Uninstalling Lockdown asks for the challenge too - without your own password and authenticator steps - and keeps your settings for the next install.",
 ];
 const HELP = {
   own: "Set a phrase only you know (e.g. a long sentence). You still type it exactly each time - no pasting. With the 3×3 grid it's split into words by the spaces. While it's switched on, the length and the numbers & capitals option don't apply; switched off, it stays saved and a random phrase is asked. Switching it on needs the challenge (a phrase you know is easier than a fresh random one).",
@@ -224,7 +224,7 @@ function keepingCard() {
 function alwaysCard() {
   return `<section class="card"><header class="card-h">${kic("k-grey", "lock")}<h3>Always on</h3></header>
     <div class="card-b" style="padding:0">
-      ${field("Uninstall protection", "Uninstalling Lockdown always asks for the challenge. This can't be switched off.", '<span class="chip chip-ok">Always on</span>')}
+      ${field("Uninstall protection", "Uninstalling Lockdown always asks for the challenge, without your own password and authenticator steps: forgotten / lost = only uninstalling gets you out. Your settings are kept for the next install. This can't be switched off.", '<span class="chip chip-ok">Always on</span>')}
       ${field("Trusted time", "Lockdown keeps its own clock, so changing the Windows clock can't end a block early.", '<span class="chip chip-ok">Always on</span>')}
     </div></section>`;
 }

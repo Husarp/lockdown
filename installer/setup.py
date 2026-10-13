@@ -8,8 +8,11 @@ Install / update:
   Your settings, blocks and history live in C:\\ProgramData\\Lockdown, not in the program folder - an update never
   touches them (and the database adds any new columns itself).
 Uninstall (LockdownSetup.exe --uninstall, from "Apps & features"):
-  the Anti-Bypass challenge first, then network settings, browser policies, firewall rules and hosts entries are
-  undone, the service, tasks, shortcuts and program folder removed; your data only if you tick it.
+  the Anti-Bypass challenge first (the list without the password / authenticator steps: forgotten or lost = uninstalling
+  is the way out), then network settings, browser policies, firewall rules and hosts entries are undone, the service,
+  tasks, shortcuts and program folder removed. Your data (C:\\ProgramData\\Lockdown: config.db with your settings,
+  rules, history and Anti-Bypass secrets, and the logs) is ALWAYS kept - there is no "delete my data" option - so
+  installing Lockdown again picks up the same setup; the next install's service puts the blocking back.
 In-app update (LockdownSetup.exe --update, started by Lockdown's "Download and install"):
   no questions - only the progress page; Lockdown is started again and the window closes by itself.
 
@@ -291,7 +294,9 @@ def challenge_passed() -> bool:
 UNINSTALL_WEIGHTS = (35, 25, 25, 10, 5)
 
 
-def uninstall(log, delete_data: bool, at=None):
+def uninstall(log, at=None):
+    """Undo what the install did to Windows. DATA_DIR (config.db, logs) is never touched: a new install reads it as it
+    is (keep_data)."""
     at = at or (lambda step, fraction=0.0, name=None: None)
     service_exe = str(INSTALL_DIR / "LockdownService.exe")
     at(0)
@@ -321,11 +326,12 @@ def uninstall(log, delete_data: bool, at=None):
     except OSError:
         pass
     at(4)
-    if delete_data:
-        log("Deleting your settings and history...")
-        shutil.rmtree(DATA_DIR, ignore_errors=True)
+    log(KEPT)
     at(5)
     log("Lockdown is uninstalled. The program folder is removed when you close this window.")
+
+
+KEPT = f"Your settings, blocks and history stay in {DATA_DIR} - installing Lockdown again picks them up."
 
 
 def remove_program_folder():
@@ -360,7 +366,7 @@ def recover(log):
             pass
 
 
-def work(mode: str, post, delete_data: bool = False):
+def work(mode: str, post):
     """The worker thread: installs / uninstalls and reports through post(kind, value) - never touches Tk.
     Kinds: "log" (a step), "file" (a file copied), "progress" ((value, end of this step), 0-1), then one of
     "done" ("installed" / "uninstalled" / "refused") or "failed" (the error)."""
@@ -386,8 +392,8 @@ def work(mode: str, post, delete_data: bool = False):
                 return
             app_log("uninstall", "Uninstall: the Anti-Bypass challenge was passed")
             touched = True
-            uninstall(log, delete_data, at)
-            app_log("uninstall", "Lockdown was uninstalled" + (" and its data deleted" if delete_data else " (its data is kept)"))
+            uninstall(log, at)
+            app_log("uninstall", "Lockdown was uninstalled (its settings, blocks and history are kept for a new install)")
             post("done", "uninstalled")
         else:
             was = installed_version()
@@ -659,7 +665,6 @@ class SetupWindow(tk.Tk):
         self.busy = False            # installing: the window can't be closed
         self.done = False
         self.outcome = None
-        self.delete_data = tk.BooleanVar(value=False)
         self.run_app = tk.BooleanVar(value=True)
         self.shown, self.target, self.end = 0.0, 0.0, 0.0   # the bar: drawn / reported / end of this step
         self.bar_colour = self.accent
@@ -825,7 +830,10 @@ class SetupWindow(tk.Tk):
             head = "Remove Lockdown from this PC"
             points = ["Blocking stops. Network settings and browser policies go back to how they were.",
                       "The service, its tasks, the shortcuts and the program folder are removed.",
-                      "If Anti-Bypass is on, you'll be asked for the challenge first."]
+                      "Your settings, blocks and history are kept: installing Lockdown again brings them back as they "
+                      "were.",
+                      "If Anti-Bypass is on, you'll be asked for the challenge first (not your own password or "
+                      "authenticator code)."]
         elif self.same:
             head = f"Lockdown {VERSION} is already installed"
             points = ["Installing it again is safe, and repairs a broken install.",
@@ -856,9 +864,6 @@ class SetupWindow(tk.Tk):
             row.pack(anchor="w", fill="x", pady=self.px(3))
             tk.Label(row, image=dot, bg=BG, bd=0).pack(side="left", anchor="n", pady=(self.px(7), 0))
             self.label(row, point, fg=MUTED, wraplength=self.px(520)).pack(side="left", padx=(self.px(11), 0))
-        if self.uninstalling:
-            Check(self, b, "Also delete my settings, blocks and history", self.delete_data).pack(
-                anchor="w", pady=(self.px(16), 0))
         go = "Uninstall" if self.uninstalling else "Reinstall" if self.same else "Update" if self.current else "Install"
         self.buttons((go, self._next, True), ("Cancel", self._close, False))
 
@@ -926,7 +931,7 @@ class SetupWindow(tk.Tk):
         self.busy = True
         # not a daemon: if the window goes away mid-install (a Tk error, Windows closing it), the process still
         # waits for the install to finish - and so for Lockdown to be started again - instead of dying half-way
-        threading.Thread(target=work, args=(self.mode, self._post, self.delete_data.get())).start()
+        threading.Thread(target=work, args=(self.mode, self._post)).start()
 
     def _post(self, kind, value):   # (worker thread: only the queue)
         self.events.put((kind, value))
@@ -947,8 +952,9 @@ class SetupWindow(tk.Tk):
             text = "The Anti-Bypass challenge wasn't passed. Lockdown is still installed and blocking."
         elif self.outcome == "uninstalled":
             colour, title = SUCCESS, "Lockdown is uninstalled"
-            text = ("Blocking has stopped and your network settings are back to how they were. The program folder "
-                    "is removed when you close this window.")
+            text = ("Blocking has stopped and your network settings are back to how they were. Your settings, blocks "
+                    "and history are kept for the next install. The program folder is removed when you close this "
+                    "window.")
         else:
             colour, title = SUCCESS, f"Lockdown {VERSION} is installed"
             text = "Blocking is active, and Lockdown starts with Windows. Your settings, blocks and history are kept."

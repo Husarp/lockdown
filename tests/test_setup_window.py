@@ -172,9 +172,73 @@ def test_a_failed_uninstall_starts_the_service_again(setup, windows, monkeypatch
 def test_uninstall_still_needs_the_challenge(setup, windows, monkeypatch):
     monkeypatch.setattr(setup, "challenge_passed", lambda: False)
     monkeypatch.setattr(setup, "uninstall", lambda *a: pytest.fail("uninstalled without the challenge"))
-    seen = events_of(setup, "uninstall", delete_data=True)
+    seen = events_of(setup, "uninstall")
     assert seen[-1] == ("done", "refused")
     assert windows == []   # nothing stopped, nothing to start again
+
+
+# ---------- uninstalling keeps your data; a new install picks it up ----------
+
+@pytest.fixture
+def data_dir(setup, monkeypatch, tmp_path):
+    """A data folder with a real config.db holding settings, a block and Anti-Bypass secrets."""
+    import challenge_secrets as cs
+    from db import Database
+    folder = tmp_path / "ProgramData" / "Lockdown"
+    folder.mkdir(parents=True)
+    monkeypatch.setattr(setup, "DATA_DIR", folder)
+    monkeypatch.setattr(setup, "START_MENU", tmp_path / "start")
+    monkeypatch.setattr(setup, "DESKTOP", tmp_path / "desktop")
+    monkeypatch.setattr(cs, "SCRYPT", {"n": 2 ** 8, "r": 8, "p": 1})
+    db = Database(folder / "config.db")
+    db.set_setting("antibypass", '{"phrase": true, "length": 45}')
+    db.add_item("YouTube", ["youtube.com"])
+    cs.set_password(db, "correct horse", __import__("datetime").datetime(2026, 10, 13, 10, 0))
+    db.conn.close()
+    (folder / "lockdown.log").write_text("a log line\n")
+    return folder
+
+
+def test_uninstalling_never_deletes_the_data_folder(setup, windows, data_dir, monkeypatch):
+    before = {p.name: p.read_bytes() for p in data_dir.iterdir()}
+    monkeypatch.setattr(setup, "challenge_passed", lambda: True)
+    monkeypatch.setattr(setup, "stop_everything", lambda log: None)
+    removed = []
+    monkeypatch.setattr(setup.shutil, "rmtree", lambda *a, **k: removed.append(a))
+    seen = events_of(setup, "uninstall")
+    assert seen[-1] == ("done", "uninstalled")
+    assert removed == []                                                     # nothing deleted, whatever it was
+    assert {p.name: p.read_bytes() for p in data_dir.iterdir()} == before   # config.db and the log as they were
+    assert ("log", setup.KEPT) in seen and "installing Lockdown again picks them up" in setup.KEPT
+    # what depends on Windows is still undone: policies, firewall, hosts, DNS, the service and its tasks
+    exe = str(setup.INSTALL_DIR / "LockdownService.exe")
+    for call in ((exe, "restore-dns"), (exe, "remove-policies"), (exe, "remove"), ("sc", "delete", setup.SERVICE),
+                 ("schtasks", "/Delete", "/F", "/TN", setup.WATCHDOG),
+                 ("schtasks", "/Delete", "/F", "/TN", setup.AGENT_WATCHDOG)):
+        assert call in windows, call
+    assert "delete_data" not in setup.work.__code__.co_varnames                 # (no "also delete my data" option)
+
+
+def test_a_new_install_reads_the_kept_database_as_it_was(setup, windows, data_dir):
+    import antibypass as ab
+    import challenge_secrets as cs
+    from db import Database
+    before = (data_dir / "config.db").read_bytes()
+    setup.data_folder(lambda text: None)                                     # the install's own step for it
+    assert (data_dir / "config.db").read_bytes() == before
+    db = Database(data_dir / "config.db")                                    # what the new install's app opens
+    try:
+        assert ab.settings(db)["length"] == 45 and ab.settings(db)["phrase"] is True
+        assert [i["display_name"] for i in db.list_items()] == ["YouTube"]
+        assert cs.verify_secret("correct horse", cs.load(db)["password"])
+    finally:
+        db.conn.close()
+
+
+def test_the_uninstall_window_says_the_settings_are_kept(setup):
+    text = open(SETUP_PY, encoding="utf-8").read()
+    assert "Also delete my settings" not in text
+    assert "Your settings, blocks and history are kept: installing Lockdown again brings them back" in text
 
 
 # ---------- the window (needs a display) ----------
@@ -235,7 +299,7 @@ def test_running_lockdown_is_asked_about_in_the_window(setup, window_of, monkeyp
 
 
 def test_a_failure_stays_on_screen_with_the_details_open(setup, window_of, monkeypatch):
-    def fails(mode, post, delete_data=False):
+    def fails(mode, post):
         post("log", "Copying the program...")
         post("log", setup.RECOVERING)
         post("failed", "disk full")

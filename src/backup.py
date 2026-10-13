@@ -22,10 +22,11 @@ RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "cloc
                 "usage.counted_until", "firewall_quic", "firewall_video", "apps.members",
                 "pause.blocks",   # (a running "Pause my blocks" - an import neither carries one in nor ends one)
                 "app.off",        # (Lockdown switched off: switching off has its own challenge, even with none set)
-                "antibypass.secrets"}   # (your password's hash, the authenticator's secret, the recovery code's hash:
+                "antibypass.secrets",   # (your password's hash, the authenticator's secret, the recovery code's hash:
 #                                         never in a file you may share; a restore keeps the ones this PC has)
+                "antibypass.uninstall"}   # (the uninstaller's own wait after its challenge: machine state)
 # (monitor.usage.COUNTED_KEY, service.QUIC_KEY, service.VIDEO_KEY, monitor.usage.MEMBERS_KEY, pause.KEY,
-#  antibypass.OFF_KEY, challenge_secrets.SECRETS_KEY)
+#  antibypass.OFF_KEY, challenge_secrets.SECRETS_KEY, antibypass.UNINSTALL_KEY)
 
 
 def export(db) -> dict:

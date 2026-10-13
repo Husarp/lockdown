@@ -3,6 +3,8 @@
 Python decides everything (webapi/guard.py): the page only shows what GuardService issued and types. Here:
 - `exit_code(ctx, text, show)`: ask GuardService for a ticket whose stored action is "exit 0", let `show(ticket)` put the
   challenge on screen until it is closed, then answer 0 (passed) or 1. No Anti-Bypass challenge set = 0 at once.
+  It is the uninstaller's challenge (`uninstall`): the list without the password / authenticator steps (forgotten or
+  lost = uninstalling is the way out), and passing it never unlocks anything else.
 - `run(argv)`: the Windows glue - a small window with js/challenge.js (challenge.html), its own temporary WebView2
   profile (the resident agent may be running with the normal one), and an Api that has only the challenge methods.
   If its page does not say it works within READY_SEC (or WebView2 is missing), the window goes, the reason is logged and
@@ -34,7 +36,7 @@ def exit_code(ctx, text: str, show) -> int:
     """0 = nothing to pass or passed, 1 = cancelled, closed, in the wait, or outside the allowed hours.
     `show(ticket)` returns when the challenge is over (window closed)."""
     passed = []
-    reply = ctx.guard.request([text], lambda: passed.append(True))
+    reply = ctx.guard.request([text], lambda: passed.append(True), uninstall=True)
     data = reply.get("data") if reply.get("ok") else None
     if not (isinstance(data, dict) and data.get("needs_challenge")):
         return 0 if reply.get("ok") else 1

@@ -9,10 +9,13 @@
 //                          opens the challenge and returns the final result, otherwise the answer itself.
 //   CANCELLED              what both resolve with when nothing was changed.
 // A `challenge_open` push (tray Exit, tray Pause ...) and the shell's "ld:needs-challenge" event open it too.
+// While a recovery code exists, a real Anti-Bypass run (run.recovery) offers "Use recovery code" at its start (and on a
+// password / authenticator step): the code passes the whole run, and the NEW code Python made in its place is shown
+// once (Print / "I've saved it") before the dialog closes - also in the uninstaller's window.
 import { ld } from "./bridge.js";
 import { openDialog } from "./dialog.js";
 import { esc } from "./ui.js";
-import { runHeaderHtml, mountMath, mountMemory, mountSort, mountSecret } from "./challenge_kinds.js";
+import { runHeaderHtml, mountMath, mountMemory, mountSort, mountSecret, recoveryTyped, printCode, RECOVERY_DOES, SECRET_STYLE } from "./challenge_kinds.js";
 
 export const CANCELLED = Symbol("challenge-cancelled");
 const TITLE = "This loosens your blocks";
@@ -77,6 +80,14 @@ export function whenText(iso, nowMs) {
   return `${DAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]} ${hm}`;
 }
 
+/** Is "Use recovery code" offered on this view? While the run offers it (a code exists, a real Anti-Bypass run), at its
+ *  start - nothing answered yet - and on a password / authenticator step (going back starts the run again). */
+export function offersRecovery(run) {
+  if (!run || !run.recovery || run.finished) return false;
+  const kind = run.steps && run.steps[run.step] && run.steps[run.step].kind;
+  return (run.step === 0 && run.done === 0) || kind === "password" || kind === "totp";
+}
+
 /** The line about what passing does: `info.note` when Python gave one ("" = none), else "Passing unlocks changes like
  *  these for N minutes." - never the unlock sentence for a `plain` challenge (the bedtime Dismiss unlocks nothing). */
 export function noteText(info, steps = 1) {
@@ -126,9 +137,10 @@ function run(info) {
   let begun = { now: "", at: 0 };    // Python's "now" at challenge_begin and our clock then (the fallback to count down from)
   let closed = false;           // the dialog is gone: answers that arrive later are dropped
   let inflight = false;         // challenge_submit is out: Python may pass it any moment, so Esc / Cancel / X wait for the reply
+  let holding = false;          // the new recovery code is on screen: only "I've saved it" closes it
 
   const handle = openDialog({     // stack: its own layer, so an editor dialog underneath is left exactly as it was
-    key: "challenge:" + ticket, title: TITLE, wide: true, dismissable: () => !inflight, stack: true,
+    key: "challenge:" + ticket, title: TITLE, wide: true, dismissable: () => !inflight && !holding, stack: true,
     body: changesHtml(info) + '<p class="small muted">One moment\u2026</p>', onClose,
   });
   if (!handle) {                // (no dialog could be opened: the change does not happen)
@@ -136,13 +148,13 @@ function run(info) {
     return Promise.resolve(CANCELLED);
   }
   active = me;
-  me.close = () => { if (!inflight) handle.close(); };
+  me.close = () => { if (!inflight && !holding) handle.close(); };
   const dlg = handle.el, body = handle.body;
   const q = (sel) => body.querySelector(sel);
 
   // Esc does nothing while a submit is out (the dialog's cancel event is also refused; this keeps the browser's own
   // "second Esc closes it anyway" rule from firing)
-  const holdEsc = (e) => { if (e.key === "Escape" && inflight) e.preventDefault(); };
+  const holdEsc = (e) => { if (e.key === "Escape" && (inflight || holding)) e.preventDefault(); };
   dlg.addEventListener("keydown", holdEsc, true);
 
   // paste, drop and the context menu are off for anything typed here
@@ -186,10 +198,10 @@ function run(info) {
       foot.append(btn);
     }
   }
-  function view(title, html, buttons) {
+  function view(title, html, buttons, bare = false) {
     if (closed) return null;
     dlg.querySelector(".dlg-h h2").textContent = title;
-    body.innerHTML = changesHtml(begun.info || info) + html;
+    body.innerHTML = (bare ? "" : changesHtml(begun.info || info)) + html;
     let foot = dlg.querySelector(".dlg-f");
     if (!foot) { foot = document.createElement("div"); foot.className = "dlg-f"; dlg.append(foot); }
     fillFoot(foot, buttons);
@@ -206,7 +218,7 @@ function run(info) {
     foot.append(btn);
   };
   const closeBtn = (label = "OK") => ({ label, primary: true, onClick: () => handle.close() });
-  const cancelBtn = { label: "Cancel", onClick: () => { if (!inflight) handle.close(); } };
+  const cancelBtn = { label: "Cancel", onClick: () => { if (!inflight && !holding) handle.close(); } };
 
   // ---- what comes back from Python ------------------------------------------------------
   async function begin() {
@@ -246,6 +258,7 @@ function run(info) {
       return showPuzzle(res.next, res.wrong ? (wrongText || res.message || "") : "");
     }
     settled = true;                                     // the ticket is used up, whatever follows
+    if (res && res.recovery_code && !closed) await showNewCode(res.recovery_code);
     if (res && res.waiting_until) return closed ? conclude() : showWaiting(res.waiting_until, true);
     outcome = res ? res.result : undefined;
     if (closed) conclude(); else handle.close();
@@ -255,8 +268,13 @@ function run(info) {
   let current = null;           // the puzzle on screen (begin's data, or `next` of a reply): its `run` draws the progress
   const stepsIn = () => ((begun.info && begun.info.run && begun.info.run.steps) || []).length;
   const lead = (text) => [text, noteText(begun.info, stepsIn())].filter(Boolean).join(" ");
-  /** The instruction line (with the note about what passing does), then the progress line and the step strip. */
-  const frame = (text) => `<p class="small muted ch-lead">${esc(lead(text))}</p>${runHeaderHtml(current && current.run)}`;
+  /** The instruction line (with the note about what passing does), then the progress line and the step strip - and
+   *  "Use recovery code" where the run offers it. */
+  const frame = (text) => `<p class="small muted ch-lead">${esc(lead(text))}</p>${runHeaderHtml(current && current.run)}`
+    + (offersRecovery(current && current.run) ? '<p class="ch-recline"><button class="ch-rec" type="button" data-act="ch-userec">Use recovery code</button></p>' : "");
+  body.addEventListener("click", (e) => {
+    if (e.target.closest('[data-act="ch-userec"]') && !inflight) showRecovery();
+  });
 
   function showPuzzle(data, message) {
     if (closed) return;
@@ -398,6 +416,60 @@ function run(info) {
       });
     }
     step();
+  }
+
+  // ---- the recovery code ---------------------------------------------------------------
+  /** Type the recovery code instead of the challenge. "Back" asks Python for the run again (fresh puzzles, from step 1:
+   *  nothing seen before comes back). */
+  function showRecovery() {
+    if (closed) return;
+    let busy = false;
+    const foot = view(titleOf(), `${SECRET_STYLE}
+      <p class="small muted ch-lead">${esc(`Type your recovery code. ${RECOVERY_DOES}`)}</p>
+      <div class="ch-secbox"><input class="input ch-sec rec" type="text" maxlength="19" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="ABCD-EFGH-JKLM-NPQR" aria-label="Recovery code"></div>
+      <div class="small ch-msg-line"><span class="muted ch-msg">Letters and digits; the dashes don't matter.</span></div>
+      <p class="ch-recline"><button class="ch-rec" type="button" data-act="ch-back">Back to the challenge (it starts again)</button></p>`,
+    [cancelBtn, { label: "Use the recovery code", primary: true, disabled: true, onClick: go }]);
+    if (!foot) return;
+    const go_ = foot.lastChild, input = q(".ch-sec"), msg = q(".ch-msg");
+    const ready = () => recoveryTyped(input.value).replace(/-/g, "").length === 16;
+    function go() {
+      if (busy || !ready()) return;
+      busy = true;
+      go_.disabled = true;
+      input.disabled = true;
+      submit({ recovery: recoveryTyped(input.value) }, (err, gone) => {
+        busy = false;
+        input.disabled = false;
+        input.value = "";
+        go_.disabled = true;
+        msg.textContent = err;
+        msg.classList.add("err");
+        if (gone) onlyOk(foot); else input.focus();
+      });
+    }
+    input.addEventListener("input", () => {
+      const clean = recoveryTyped(input.value);
+      if (clean !== input.value) input.value = clean;
+      go_.disabled = busy || !ready();
+    });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+    q('[data-act="ch-back"]').addEventListener("click", () => { if (!busy && !inflight) begin(); });
+    input.focus();
+  }
+
+  /** The recovery code passed the run and is used up: the new one Python made, shown once. Resolves on "I've saved it". */
+  function showNewCode(code) {
+    holding = true;
+    return new Promise((resolve) => {
+      const foot = view("Your new recovery code", `${SECRET_STYLE}
+        <p><b>Save this new code - the old one no longer works.</b> Print it or write it down now: it is shown only this once.</p>
+        <p class="ch-newcode" data-k="ch-newcode">${esc(code)}</p>
+        <p class="small muted">${esc(RECOVERY_DOES)}</p>`,
+      [{ label: "Print", onClick: () => printCode(code) },
+        { label: "I've saved it", primary: true, onClick: () => { holding = false; resolve(); } }], true);
+      if (!foot) { holding = false; resolve(); }
+    });
   }
 
   // ---- waiting / closed -----------------------------------------------------------------

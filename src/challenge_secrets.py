@@ -4,15 +4,18 @@ Unlike math or a typed phrase these don't cost effort, they need something you m
 SOMEONE ELSE sets the password or keeps the authenticator, so you can't loosen a block without them. They are step kinds
 of the Anti-Bypass list only (challenges.SECRET_KINDS), never of the bedtime screen.
 
-- Own password: kept only as a salted scrypt hash (never the password itself), compared in constant time. Forgotten =
-  only the recovery code gets you out: uninstalling Lockdown asks the same challenge (antibypass.py's rule).
+- Own password: kept only as a salted scrypt hash (never the password itself), compared in constant time. Forgotten /
+  lost (the authenticator too) = only uninstalling Lockdown gets you out: the uninstaller's challenge asks the list
+  WITHOUT the password and authenticator steps (antibypass.uninstall_steps), and uninstalling keeps your settings, so a
+  new install has the same setup again.
 - Authenticator code (RFC 6238): 6 digits, 30 s, HMAC-SHA1, the step before and after are accepted (a phone clock a
   little off), and a code that was accepted once is never accepted again (nor any older one). Set up by scanning a QR
   code (otpauth://totp/Lockdown:<pc>?secret=...&issuer=Lockdown) and typing one current code to confirm.
-- Recovery code: 16 characters in 4 groups from an alphabet without look-alikes, made when the first password or
-  authenticator is set up and shown ONCE (print it or write it down); kept only as a hash. Typing it stands in for the
-  password / authenticator steps of ONE challenge run, and that run passing uses it up. It never stands in for the other
-  steps (math, memory, ...): a code you can get for free (setting up a password is free) must never skip the work.
+- Recovery code (optional, none by default): a one-time master key - 16 characters in 4 groups from an alphabet without
+  look-alikes, kept only as a hash. Making one (or a new one) asks the challenge, so it is never free; it is shown ONCE
+  (print it or write it down). Typing it passes ONE whole Anti-Bypass challenge run (every step, any kind); it is then
+  used up and a NEW code is made at once and shown once ("the old one no longer works"). Removing it is free (stricter).
+  Wrong codes count as wrong tries (the slowdown below).
 
 Where they are kept: the setting SECRETS_KEY (JSON) in Lockdown's database, like every other setting. Backups leave it
 out and a restore leaves it alone (backup.RUNTIME_KEYS). Honest limit: the authenticator's secret has to be stored in a
@@ -30,6 +33,7 @@ import re
 import secrets as _random
 import struct
 import time
+from datetime import datetime
 from urllib.parse import quote
 
 SECRETS_KEY = "antibypass.secrets"
@@ -204,49 +208,39 @@ def status(db) -> dict:
             "recovery": {"exists": "recovery" in data, "made": _since(data.get("recovery", {}).get("made"))}}
 
 
-def _first_recovery(data: dict, now) -> str | None:
-    """The recovery code made with the FIRST password or authenticator: only while neither of them was set before and
-    there is no code. Any later one is "Make a new recovery code", which asks the challenge - a code made for free while
-    an authenticator someone else keeps is set up would be a way around that person."""
-    if "password" in data or "totp" in data or "recovery" in data:
-        return None
-    code = new_recovery_code()
-    data["recovery"] = {**hash_secret(clean_recovery(code)), "made": now.strftime(TIME_FMT)}
-    return code
-
-
-def set_password(db, text: str, now) -> str | None:
-    """Store a new password (its hash). Returns the recovery code when this made the first one (show it once)."""
+def set_password(db, text: str, now):
+    """Store a new password (its hash). No recovery code comes with it (forgotten = uninstalling is the way out)."""
     data = load(db)
-    code = _first_recovery(data, now)
     data["password"] = {**hash_secret(check_password_text(text)), "set": now.strftime(TIME_FMT)}
     _save(db, data)
-    return code
 
 
-def set_totp(db, secret: str, step: int, now) -> str | None:
-    """Store the authenticator confirmed with the code of time step `step` (that code is then used). Returns the
-    recovery code when this made the first one."""
+def set_totp(db, secret: str, step: int, now):
+    """Store the authenticator confirmed with the code of time step `step` (that code is then used). No recovery code
+    comes with it."""
     secret_key(secret)                       # (a bad secret fails here, before anything is stored)
     data = load(db)
-    code = _first_recovery(data, now)
     data["totp"] = {"secret": secret, "set": now.strftime(TIME_FMT), "last": int(step)}
     _save(db, data)
-    return code
 
 
 def remove(db, kind: str):
-    """Forget the password or the authenticator (`kind` "password" / "totp"). The recovery code stays."""
+    """Forget the password, the authenticator or the recovery code (`kind` "password" / "totp" / "recovery")."""
     data = load(db)
     if data.pop(kind, None) is not None:
         _save(db, data)
 
 
+def _new_recovery(data: dict, now) -> str:
+    code = new_recovery_code()
+    data["recovery"] = {**hash_secret(clean_recovery(code)), "made": now.strftime(TIME_FMT)}
+    return code
+
+
 def make_recovery(db, now) -> str:
     """A new recovery code (the old one stops working). Returns it - the only time it is ever shown."""
     data = load(db)
-    code = new_recovery_code()
-    data["recovery"] = {**hash_secret(clean_recovery(code)), "made": now.strftime(TIME_FMT)}
+    code = _new_recovery(data, now)
     _save(db, data)
     return code
 
@@ -262,7 +256,7 @@ def trusted_epoch(db) -> float:
 
 
 class Checker:
-    """Checks what is typed for a password / authenticator step or a recovery code, for the challenge runs
+    """Checks what is typed for a password / authenticator step or the recovery code, for the challenge runs
     (challenges.Run). Wrong tries in a row are counted in the database ("tries"), so across runs, restarts and the
     uninstaller's own window: after FREE_TRIES of them each next try has to wait (1 s, 2 s, 4 s ... up to MAX_WAIT_SEC,
     by the trusted clock) - guessing a 6-digit code by a script would take years. A right answer clears the count.
@@ -332,20 +326,17 @@ class Checker:
             _save(db, data)
         return self._result(step is not None)
 
-    def check_recovery(self, value) -> str | None:
-        """The stored hash the recovery code matched (to use it up later with `use_recovery`), or None."""
-        record = load(self._db()).get("recovery")
-        code = clean_recovery(value)
-        right = bool(record and code and verify_secret(code, record))
-        self._result(right)
-        return record["hash"] if right else None
-
-    def use_recovery(self, matched: str) -> bool:
-        """Use up the recovery code that was matched (still the stored one - a new code made since stays)."""
+    def use_recovery(self, value) -> str | None:
+        """The recovery code typed: when it is the stored one it is used up and a NEW code takes its place at once
+        (made "now" by the trusted clock) - returned to be shown once; else None (a wrong try, counted like any other)."""
         db = self._db()
         data = load(db)
-        if data.get("recovery", {}).get("hash") != matched:
-            return False
-        del data["recovery"]
+        record = data.get("recovery")
+        code = clean_recovery(value)
+        if not (record and code and verify_secret(code, record)):
+            self._result(False)
+            return None
+        new = _new_recovery(data, datetime.fromtimestamp(self._now(db)))
+        data.pop("tries", None)              # (a right answer clears the wrong tries)
         _save(db, data)
-        return True
+        return new
