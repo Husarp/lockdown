@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Tune
@@ -159,7 +160,13 @@ fun App(askOff: MutableState<Boolean>) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(when (route) { "blockcal" -> "Block calendar"; "activity" -> "Activity log"; "apps" -> "All apps"; else -> here.label }) },
+                title = { Text(when (route) { "blockcal" -> "Block calendar"; "activity" -> "Activity log"; "apps" -> "All apps"; "netlog" -> "Network log"; else -> here.label }) },
+                // a page opened from another (not a tab of its own) has Back
+                navigationIcon = {
+                    if (route in SUB_PAGES) IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
                 actions = {
                     for (d in listOf(Dest.GUARDRAILS, Dest.SETTINGS)) {
                         IconButton(onClick = { nav.go(d) }) { Icon(d.icon, d.label) }
@@ -172,7 +179,8 @@ fun App(askOff: MutableState<Boolean>) {
                 for (d in Dest.entries.filter { it.inBottomBar }) {
                     val t = tone(d.hue)
                     NavigationBarItem(
-                        selected = (when (route) { "blockcal" -> Dest.BLOCKING; "activity", "apps" -> Dest.INSIGHTS; else -> here }) == d,
+                        // "All apps" opens from Home and Insights alike: no tab is lit for it
+                        selected = (when (route) { "blockcal" -> Dest.BLOCKING; "activity" -> Dest.INSIGHTS; "apps", "netlog" -> null; else -> here }) == d,
                         onClick = { nav.go(d) },
                         icon = { Icon(d.icon, d.label) },
                         label = { Text(d.label) },
@@ -216,6 +224,9 @@ fun App(askOff: MutableState<Boolean>) {
         }
     }
 }
+
+/** Pages opened from another page: Back in the top bar. */
+private val SUB_PAGES = setOf("apps", "activity", "blockcal", "netlog")
 
 /** Navigate to a top-level section without stacking duplicates; from a page with unsaved edits, Save / Discard first. */
 private fun androidx.navigation.NavController.go(dest: Dest) {

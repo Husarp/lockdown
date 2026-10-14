@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -46,24 +45,27 @@ object ReminderRunner {
         fun close(key: String)
         fun startBreak(until: LocalDateTime)
         fun endBreak()
+        /** The bedtime screen is stepped aside for "Disable alerts" (engine/CoverAside.kt): the app is working on it. */
+        fun disabling(): Boolean = false
+        /** "Disable alerts" answered in the app ([askAnswered]'s [action]): what becomes of the bedtime screen stepped
+         *  aside for it. Returns what the engine hears, or null when the screen is simply back (the engine still has it up). */
+        fun disableAnswered(action: String): String? = action
+        /** The app came to the front or left it: a screen stepped aside for it looks again at once. */
+        fun appMoved() {}
     }
 
     var screen: Screen? = null
     private var engine: RemindersEngine? = null
     private const val CHANNEL = "nudges"
     private const val NOTE_ID = 40
-    private const val ASK_LIMIT_MS = 2 * 60_000L    // "Disable alerts": away from the app this long = Dismiss
-    private const val ASK_MAX_MS = 16 * 60_000L     // ... and never open longer than this
 
     private val _asking = MutableStateFlow(false)
     /** The bedtime screen's "Disable alerts" is waiting for the challenge in the app. */
     val asking: StateFlow<Boolean> = _asking
-    private var askStart = 0L
-    private var askSeen = 0L
-    private var askEarly = false                      // "Disable alerts" pressed while Dismiss was still waiting
     private val posted = HashSet<String>()            // prompts up as notifications, waiting for an answer
-    /** The app is in front (set by MainActivity), so the challenge is still being worked on. */
+    /** The app is in front (set by MainActivity, on the main thread), so the challenge is still being worked on. */
     @Volatile var appVisible = false
+        set(v) { field = v; runCatching { screen?.appMoved() } }
 
     fun now(ctx: Context): LocalDateTime = Enforce.ldt(TrustedTime.now(ctx))
 
@@ -72,11 +74,8 @@ object ReminderRunner {
         val e = engine ?: load(ctx).also { engine = it }
         val cfg = Store.config
         val now = now(ctx)
-        if (_asking.value) {
-            val ms = SystemClock.elapsedRealtime()
-            if (appVisible) askSeen = ms
-            if (ms - askSeen > ASK_LIMIT_MS || ms - askStart > ASK_MAX_MS) askAnswered(ctx, "dismiss")
-        }
+        // the bedtime screen is back (or gone) without an answer: the app's question for it goes too
+        if (_asking.value && screen?.disabling() != true) _asking.value = false
         gone(ctx)
         val r = e.tick(now, idleSec, cfg.sleep, cfg.breaks, cfg.customs, dt,
             paused = Enforce.alertsPaused(cfg, now), emergencyLeft = emergencyLeft(cfg, now), silent = Enforce.silenced(cfg, now),
@@ -105,12 +104,10 @@ object ReminderRunner {
         for (key in posted.filter { it !in up }) answer(ctx, key, "swipe")
     }
 
-    /** "Disable alerts" on the bedtime screen: the challenge in the app first, then off tonight or a snooze.
-     *  The bedtime screen stays away while that's open, but not for ever (see [tick]). [early]: pressed while
-     *  Dismiss was still waiting. */
-    fun askDisable(ctx: Context, early: Boolean = false) {
-        askEarly = early
-        askStart = SystemClock.elapsedRealtime(); askSeen = askStart
+    /** "Disable alerts" on the bedtime screen: the challenge in the app first, then off tonight or a snooze. The
+     *  bedtime screen only steps aside while that's open (BlockService, engine/CoverAside.kt): leaving the app brings
+     *  it back, with the Dismiss wait it had left. */
+    fun askDisable(ctx: Context) {
         _asking.value = true
         runCatching {
             ctx.startActivity(Intent(ctx, MainActivity::class.java)
@@ -118,16 +115,21 @@ object ReminderRunner {
         }
     }
 
-    /** The app's answer to "Disable alerts": "off_tonight", "snooze:15", or "dismiss" (cancelled / timed out).
-     *  Asked while Dismiss was still waiting, cancelling isn't a way round the wait: the bedtime screen comes
-     *  straight back. After the wait it counts as a Dismiss, as on the PC - unless "Challenge before Dismiss" is on:
-     *  then cancelling isn't a way round the challenge either, and the bedtime screen comes straight back too. */
+    /** The app's answer to "Disable alerts": "off_tonight", "snooze:15", or "dismiss" (cancelled). The bedtime screen
+     *  stepped aside for it decides ([Screen.disableAnswered]): cancelled while Dismiss was still waiting, it comes
+     *  straight back with the wait it had left; after the wait it counts as a Dismiss, as on the PC - unless the screen
+     *  asks a challenge before Dismiss: then it comes straight back too. With no screen holding it (the service was
+     *  restarted), cancelling is never a Dismiss: the bedtime screen comes up again, its wait from the start. */
     fun askAnswered(ctx: Context, action: String) {
         if (!_asking.value) return
         _asking.value = false
-        val back = action == "dismiss" && (askEarly || Store.config.sleep.challenge)
-        answer(ctx, "sleep", if (back) "back" else action)
+        val s = screen
+        val heard = if (s != null && s.disabling()) s.disableAnswered(action) else if (action == "dismiss") "back" else action
+        heard?.let { answer(ctx, "sleep", it) }
     }
+
+    /** The bedtime screen stepped aside for "Disable alerts" is back (the app was left) or gone: the app's question goes. */
+    fun askGone() { _asking.value = false }
 
     /** "Emergency (N left)": the uses left of every kind together (0 while off). */
     fun emergencyLeft(cfg: Config, now: LocalDateTime): Int =

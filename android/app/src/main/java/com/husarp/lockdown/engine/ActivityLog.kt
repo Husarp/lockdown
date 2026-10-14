@@ -32,6 +32,18 @@ enum class LogFilter(val label: String) {
     }
 }
 
+/** The activity log's time range presets (a custom from..to inside the kept days is [ActivityLog.clampDays]). */
+enum class LogRange(val label: String) {
+    TODAY("Today"), YESTERDAY("Yesterday"), WEEK("7 days");
+
+    /** The days it covers (first, last), up to [today]. */
+    fun days(today: LocalDate): Pair<LocalDate, LocalDate> = when (this) {
+        TODAY -> today to today
+        YESTERDAY -> today.minusDays(1) to today.minusDays(1)
+        WEEK -> today.minusDays(ActivityLog.DAYS - 1L) to today
+    }
+}
+
 /** One line of the log. [name] is the app, site or blocked thing; [pkg] is set when it is an app (for its icon);
  *  [via] is the browser a site was seen in; [seconds] how long (0: no length to show). */
 data class LogRow(val at: LocalDateTime, val kind: LogKind, val name: String, val pkg: String = "", val via: String = "", val seconds: Int = 0) {
@@ -162,8 +174,17 @@ object ActivityLog {
         return sources.flatMap { it }.filter { !it.at.toLocalDate().isBefore(from) && !it.at.toLocalDate().isAfter(today) }.sortedByDescending { it.at }
     }
 
-    /** What a filter chip shows: the newest [MAX_ROWS] of its kinds. */
-    fun view(rows: List<LogRow>, filter: LogFilter): List<LogRow> = rows.filter { filter.matches(it.kind) }.take(MAX_ROWS)
+    /** What a filter chip shows: the newest [MAX_ROWS] of its kinds, on the days [from]..[to] (all kept days by default). */
+    fun view(rows: List<LogRow>, filter: LogFilter, from: LocalDate = LocalDate.MIN, to: LocalDate = LocalDate.MAX): List<LogRow> =
+        rows.filter { filter.matches(it.kind) && it.at.toLocalDate() in from..to }.take(MAX_ROWS)
+
+    /** Days picked by hand: in order, and inside the [DAYS] the log keeps up to [today] (nothing older is there). */
+    fun clampDays(a: LocalDate, b: LocalDate, today: LocalDate): Pair<LocalDate, LocalDate> {
+        val first = today.minusDays(DAYS - 1L)
+        fun clamp(d: LocalDate) = if (d.isBefore(first)) first else if (d.isAfter(today)) today else d
+        val (x, y) = if (a.isAfter(b)) b to a else a to b
+        return clamp(x) to clamp(y)
+    }
 
     /** [rows] (newest first) as a list with a heading before each day. */
     fun flat(rows: List<LogRow>): List<LogItem> {

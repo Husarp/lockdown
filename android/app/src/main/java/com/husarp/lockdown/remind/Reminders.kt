@@ -46,6 +46,17 @@ object Reminders {
     /** Failed Island checks in a row ([com.husarp.lockdown.engine.IslandSight.noticeStep]); kept across processes. */
     internal fun islandPrefs(ctx: Context) = ctx.getSharedPreferences("island_notice", Context.MODE_PRIVATE)
 
+    /** Island isn't covered now (blocking on, linked, Lockdown in Island not checking in or unable to block): what
+     *  the 15-minute check counts toward the "not covered" notice, and Home's banner with it. */
+    fun islandBad(ctx: Context, cfg: com.husarp.lockdown.data.Config): Boolean {
+        val link = com.husarp.lockdown.link.IslandLink
+        return cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(ctx)
+    }
+
+    /** The "Island apps not covered" notice's judgement now ([com.husarp.lockdown.engine.IslandSight.alertUp]), for Home's banner. */
+    fun islandAlert(ctx: Context, cfg: com.husarp.lockdown.data.Config): Boolean =
+        com.husarp.lockdown.engine.IslandSight.alertUp(islandPrefs(ctx).getInt("fails", 0), islandBad(ctx, cfg))
+
     /** A failed Island check is counted (the "not covered" notice may be up). */
     fun islandFailing(ctx: Context) = islandPrefs(ctx).getInt("fails", 0) > 0
 
@@ -266,12 +277,11 @@ class ReminderWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, param
             notify(3, "App blocking is off", "Lockdown's accessibility service was turned off - open the app to turn it back on.")
         if (cfg.settings.siteFilterOn && !com.husarp.lockdown.vpn.LockdownVpn.active)
             notify(4, "Site filter stopped", "The site filter isn't running - open Lockdown to restart it.")
-        val link = com.husarp.lockdown.link.IslandLink
         // An open "Island helper stopped" alert (the service counts it) is put up again here, in case that service is
         // gone; the plain notice is for everything else that leaves Island uncovered.
         val stoppedAlert = com.husarp.lockdown.link.HelperWatcher.repost(applicationContext, cfg.enabled && cfg.guardrails.helperAlert)
         // Only after 2 failed checks in a row, and taken down once one passes (IslandSight.noticeStep).
-        val bad = !stoppedAlert && cfg.enabled && link.mainState.value.state == "linked" && !link.healthy(applicationContext)
+        val bad = !stoppedAlert && Reminders.islandBad(applicationContext, cfg)
         val screenOn = runCatching { applicationContext.getSystemService(android.os.PowerManager::class.java).isInteractive }.getOrDefault(true)
         val fails = Reminders.islandPrefs(applicationContext).getInt("fails", 0)
         val (nextFails, act) = com.husarp.lockdown.engine.IslandSight.noticeStep(fails, bad, screenOn)

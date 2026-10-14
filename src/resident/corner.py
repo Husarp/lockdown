@@ -212,7 +212,7 @@ def _spawn(fn):
 # ====================================================================== the window (Windows only, thin glue)
 
 TITLE = "Lockdown notices"
-WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, GWL_EXSTYLE = 0x08000000, 0x80, -20
+WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, GWL_EXSTYLE = 0x08000000, 0x80, 0x40000, -20
 HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE = -1, 0x10, 0x40, 0, 4
 
 
@@ -289,7 +289,8 @@ class CornerHost:
         user32.IsWindowVisible.argtypes = [wintypes.HWND]
         user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
         style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF
-        wanted = style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+        # (WS_EX_APPWINDOW off: WinForms sets it on every form, and it forces a taskbar button even on a tool window)
+        wanted = (style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
         if wanted != style:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ctypes.c_long(wanted).value)
         if not user32.IsWindowVisible(hwnd):

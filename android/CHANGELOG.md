@@ -1,5 +1,16 @@
 # Changelog — Lockdown Mobile
 
+## Unreleased
+- **Disable alerts, Emergency and the strict break's Phone can't skip the bedtime wait.** Disable alerts only steps the bedtime screen aside: leaving the app, switching the screen off or cancelling brings it back with the wait it had left, and it goes only after the challenge and Off tonight / Snooze. (The old "2 minutes away counts as Dismiss" is gone.) Emergency closes the screen only if a use was really spent. On a strict break, Phone lets only the dialer / call screens through - any other app brings the cover back at once - and a strict break that is up stays in front during Disable alerts. Tests: new `CoverAsideTest`.
+- **Insights chart labels.** Days with no data draw no mark, and the day labels sit on their own row under the chart, never wrapped, only every Nth day (checked for Today / Yesterday / 7 / 30 days). Tests: `InsightsFixesTest`.
+- **The launcher is left out of usage.** Home-screen time no longer counts as using an app in Home, Insights, Top apps or the All apps page. It is display only: limits and blocking are unchanged. Tests: `InsightsFixesTest`.
+- **Kind filter on the cards.** Home's Time per app today and Insights' Top apps have the kind menu (All apps / Only apps I installed / Personal / Island) right on the card.
+- **All apps page has a Back arrow** and lights no tab in the bottom bar.
+- **Network log page has its own title and Back arrow.** It said "Home" and lit the Home tab; it now reads "Network log", has the Back arrow and lights no tab.
+- **Island not answering shows in the app.** A banner on Home when the Island copy isn't checking in, using the same rule as the notice. Tests: `InsightsFixesTest`.
+- **Activity log time ranges.** Today / Yesterday / 7 days, or "Pick days…" for one day or a span inside the 7 days the log keeps. Tests: `InsightsFixesTest`.
+- **Locked banner and Category button.** The Guardrails "Locked" banner has a gap before the Unlock button (the text wraps), and the Category button in Top apps rows lines up with the name.
+
 ## 0.5.21 - 2026-10-13 18:30
 - **Each app's bar shows its own time.** Apps sharing a limit (a group) all showed the limit's bar; now every bar is that app's time today on the card's scale, while "N min left" still shows the shared limit (amber, red once blocked).
 - **All apps page.** "Show all (N)" on Home's Time per app today and on Insights' Top apps opens a full list: Today / Yesterday / 7 / 30 days, sort by most time, most opens or recently opened, and a kind filter (All apps / Only apps I installed - hides Settings, the launcher and other system apps - and Personal / Island while Island is linked). Each row shows the opens and when it was last opened. The kind you pick also filters the two cards; the choices are remembered. Tests: new `AppListTest`.

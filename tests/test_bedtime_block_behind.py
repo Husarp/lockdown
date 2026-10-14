@@ -141,13 +141,16 @@ HWNDS = {"Lockdown overlay": 100, "Lockdown overlay cover 1": 101}
 
 
 def fake_win32(monkeypatch):
-    """The Win32 calls the host makes, recorded: windows found by title, never moved by anyone."""
-    put, keys = [], []
+    """The Win32 calls the host makes, recorded: windows found by title, shown, never moved by anyone."""
+    put, keys, raised = [], [], []
     monkeypatch.setattr(overlay_mod, "_hwnd", lambda title: HWNDS.get(title, 0))
     monkeypatch.setattr(overlay_mod, "_rect_of", lambda hwnd: MAIN if hwnd == 100 else OTHER)
     monkeypatch.setattr(overlay_mod, "_put", lambda hwnd, rect, front=False, show=True: put.append(hwnd))
-    monkeypatch.setattr(overlay_mod, "_take_keys", lambda hwnd, ours: keys.append((hwnd, set(ours))))
-    return put, keys
+    monkeypatch.setattr(overlay_mod, "_take_keys", lambda hwnd, ours: keys.append((hwnd, set(ours))) and 0)
+    monkeypatch.setattr(overlay_mod, "_raise", raised.append)
+    monkeypatch.setattr(overlay_mod, "_visible", lambda hwnd: True)
+    monkeypatch.setattr(overlay_mod, "_tool_window", lambda hwnd: False)
+    return put, keys, raised
 
 
 def make_host(block):
@@ -161,7 +164,7 @@ def make_host(block):
 
 @pytest.mark.parametrize("on", [False, True])
 def test_refresh_puts_everything_back_on_top_and_takes_the_keys_only_when_blocking(monkeypatch, on):
-    put, keys = fake_win32(monkeypatch)
+    put, keys, raised = fake_win32(monkeypatch)
     host, made = make_host({"on": on})
     host.show("#000000")
     deadline = time.time() + 3
@@ -169,10 +172,11 @@ def test_refresh_puts_everything_back_on_top_and_takes_the_keys_only_when_blocki
         time.sleep(0.02)
     put.clear()
     host.refresh()
+    assert put == []                                                            # nothing moved: nothing moved / resized
     if on:
-        assert put == [100, 101] and keys == [(100, {100, 101})]
+        assert raised == [100, 101] and keys == [(100, {100, 101})]             # (back on top: Z-order only)
     else:
-        assert put == [] and keys == []                                         # today's behaviour: only when moved
+        assert raised == [] and keys == []                                      # today's behaviour: only when moved
     host.hide()
 
 
@@ -185,6 +189,9 @@ class FakeUser32:
 
     def GetWindowThreadProcessId(self, hwnd, pid):
         return 77
+
+    def GetAncestor(self, hwnd, flag):                                          # (no owner: its own root)
+        return hwnd
 
     def AttachThreadInput(self, a, b, on):
         self.calls.append(("attach", a, b, on))
@@ -201,9 +208,9 @@ def test_take_keys_leaves_the_cover_alone_and_takes_the_keyboard_from_anything_e
     monkeypatch.setattr(ctypes, "WinDLL", lambda name: SimpleNamespace(GetCurrentThreadId=lambda: 5), raising=False)
     user32 = FakeUser32(front=101)
     monkeypatch.setattr(overlay_mod, "_user32", lambda: user32)
-    assert overlay_mod._take_keys(100, {100, 101}) is False and user32.calls == []     # a cover has it: nothing
+    assert overlay_mod._take_keys(100, {100, 101}) == 0 and user32.calls == []         # a cover has it: nothing
     user32.front = 555                                                                  # an app behind has it
-    assert overlay_mod._take_keys(100, {100, 101}) is True
+    assert overlay_mod._take_keys(100, {100, 101}) == 555
     assert user32.calls == [("attach", 5, 77, True), ("top", 100), ("front", 100), ("attach", 5, 77, False)]
 
 

@@ -34,7 +34,21 @@ makes itself topmost later (the taskbar, another app's always-on-top window) can
 keyboard stays with the app in front when Windows refuses to hand it over (a tray process may not take the foreground;
 the covers on the other monitors never take it). With it, every BLOCK_GUARD_SEC the cover and its covers go back on top
 of every other always-on-top window and the keyboard is taken back from whatever has it. No keyboard hook: Ctrl+Alt+Del,
-Win+L and the cover's own buttons (Dismiss, Disable alerts, Emergency) all keep working."""
+Win+L and the cover's own buttons (Dismiss, Disable alerts, Emergency) all keep working.
+
+The pointer is never touched (no SetCursorPos / ClipCursor / mouse_event / SendInput here, nor in 0.92.0). Putting a
+window "back on top" only changes its place in the Z-order (SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); it is only moved
+and resized when it really is somewhere else - not where it was put (`misplaced`), and not where Windows put it the last
+time it was asked for that place (a pixel off through DPI rounding is not fought every tick) - and the keyboard is only
+taken back when a window that is not the cover's (nor one it owns) has it, or nothing has it. What 0.92.0 did instead,
+and the suspected cause of the pointer jumping (not proven; only a real PC can show it): with the switch on, every 0.5 s
+it passed the screen window and every cover their full position and size again (SetWindowPos with SWP_SHOWWINDOW)
+whether anything had moved or not; and, switch on or off, it put a window back at every check (every 2 s, 0.5 s with the
+switch on) when Windows had left it a pixel off the wanted rectangle, which display scaling does.
+
+Every cover window is a tool window (WS_EX_TOOLWINDOW, never WS_EX_APPWINDOW - which WinForms puts on every form and which
+wins over the tool-window bit): no taskbar button, not in Alt+Tab. It is set while the window is still hidden (the
+taskbar only looks when a window comes up), and the guard puts it back if anything resets it."""
 import sys
 import threading
 import time
@@ -472,6 +486,10 @@ class Overlay:
 # ====================================================================== the windows (Windows only, thin glue)
 
 HWND_TOPMOST, SWP_SHOWWINDOW, SWP_NOACTIVATE, SW_RESTORE = -1, 0x40, 0x10, 9
+SWP_NOSIZE, SWP_NOMOVE, SW_HIDE, SW_SHOWNOACTIVATE = 0x1, 0x2, 0, 4
+GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x80, 0x40000
+GA_ROOTOWNER = 3
+NOTE_LIMIT = 3            # the guard writes to the log this many times per screen (what it moved, whose keyboard it took)
 COVER_HTML = ("<!doctype html><meta charset=utf-8><title>{title}</title>"
               "<body style=\"margin:0;background:{bg};overflow:hidden\">")
 
@@ -493,7 +511,32 @@ def _user32():
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
     user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
     user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     return user32
+
+
+def tool_style(exstyle: int) -> int:
+    """The extended style that keeps a window off the taskbar and out of Alt+Tab: WS_EX_TOOLWINDOW on, WS_EX_APPWINDOW
+    off (WinForms sets it on every form - ShowInTaskbar - and it forces a taskbar button even on a tool window)."""
+    return ((exstyle & 0xFFFFFFFF) | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+
+
+def misplaced(actual, wanted, settled=None) -> bool:
+    """Is a window at `actual` out of place when it should be at `wanted`? All three are (left, top, right, bottom) in
+    physical pixels - the monitors (gui/screens) and GetWindowRect alike, the process being per-monitor DPI aware, so
+    there is no scaling between them. `settled`: where Windows put it the last time it was asked for `wanted` (a pixel
+    off through DPI rounding, or clamped): that counts as in place, so the guard never moves it again and again. A rect
+    that can't be read (None) is left alone."""
+    if actual is None:
+        return False
+    actual = tuple(actual)
+    return actual != tuple(wanted) and (settled is None or actual != tuple(settled))
 
 
 def _hwnd(title: str) -> int:
@@ -522,6 +565,10 @@ def _put(hwnd: int, rect, front: bool = False, show: bool = True):
     user32 = _user32()
     if show and user32.IsIconic(hwnd):     # (Win+D or a stray click minimised it: it must come back)
         user32.ShowWindow(hwnd, SW_RESTORE)
+    elif show and not user32.IsWindowVisible(hwnd):
+        # (a cover made hidden: ShowWindow first - it sends WM_SHOWWINDOW, which is how WinForms and its WebView2 learn
+        # the window is up; SetWindowPos's SWP_SHOWWINDOW alone leaves the page undrawn, as resident/corner.py found)
+        user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
     left, top, right, bottom = rect
     user32.SetWindowPos(hwnd, HWND_TOPMOST, left, top, right - left, bottom - top,
                         (SWP_SHOWWINDOW if show else 0) | (0 if front else SWP_NOACTIVATE))
@@ -529,15 +576,65 @@ def _put(hwnd: int, rect, front: bool = False, show: bool = True):
         user32.SetForegroundWindow(hwnd)
 
 
-def _take_keys(hwnd: int, ours) -> bool:
-    """The keyboard back to the cover `hwnd` unless one of `ours` (the cover, its covers) has it. Windows refuses
-    SetForegroundWindow to a process that is not in front (the tray agent never is): for that one call this thread shares
-    the input state of the window in front, the usual way round it. No hook, nothing is pressed. True when it moved."""
+def _raise(hwnd: int):
+    """Back on top of every other always-on-top window - nothing else: not moved, not resized, not activated, not shown
+    (a window already on top is not touched at all: Windows sees there is nothing to change)."""
+    _user32().SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+
+
+def _visible(hwnd: int) -> bool:
+    try:
+        return bool(_user32().IsWindowVisible(hwnd))
+    except Exception:
+        return True                        # (can't tell: leave it as it is)
+
+
+def _tool_window(hwnd: int) -> bool:
+    """Make `hwnd` a tool window (tool_style). True when its style had to be changed."""
+    try:
+        import ctypes
+        user32 = _user32()
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF
+        wanted = tool_style(style)
+        if wanted == style:
+            return False
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ctypes.c_long(wanted).value)
+        return True
+    except Exception:
+        return False
+
+
+def _reshow(hwnd: int):
+    """Hidden and shown again, without taking the keyboard: the taskbar only looks at a window's style when it comes up."""
+    user32 = _user32()
+    user32.ShowWindow(hwnd, SW_HIDE)
+    user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+
+
+def _window_name(hwnd: int) -> str:
+    """'title' [class] of a window, for the log."""
+    try:
+        import ctypes
+        user32 = _user32()
+        title, cls = ctypes.create_unicode_buffer(80), ctypes.create_unicode_buffer(80)
+        user32.GetWindowTextW(hwnd, title, 80)
+        user32.GetClassNameW(hwnd, cls, 80)
+        return f"'{title.value}' [{cls.value}]"
+    except Exception:
+        return str(hwnd)
+
+
+def _take_keys(hwnd: int, ours) -> int:
+    """The keyboard back to the cover `hwnd` unless one of `ours` (the cover, its covers) - or a window they own, such as
+    a drop-down of the page - has it. Windows refuses SetForegroundWindow to a process that is not in front (the tray
+    agent never is): for that one call this thread shares the input state of the window in front, the usual way round
+    it (when nothing is in front there is nobody to share with, and it is simply asked for). No hook, nothing is pressed,
+    the pointer is not touched. Returns the window that had the keyboard when it was taken from it, else 0."""
     import ctypes
     user32 = _user32()
     front = user32.GetForegroundWindow() or 0
-    if front in ours:
-        return False
+    if front and (front in ours or (user32.GetAncestor(front, GA_ROOTOWNER) or 0) in ours):
+        return 0
     mine = ctypes.WinDLL("kernel32").GetCurrentThreadId()
     theirs = user32.GetWindowThreadProcessId(front, None) if front else 0
     attached = bool(theirs and theirs != mine and user32.AttachThreadInput(mine, theirs, True))
@@ -547,7 +644,7 @@ def _take_keys(hwnd: int, ours) -> bool:
     finally:
         if attached:
             user32.AttachThreadInput(mine, theirs, False)
-    return True
+    return front
 
 
 class OverlayHost:
@@ -570,50 +667,104 @@ class OverlayHost:
         self._wanted = None                                 # (main rect, [cover rects]) as last placed; None = hidden
         self._bg = BACKGROUNDS["dark"]
         self._allow_close = False
+        self._lock = threading.RLock()       # show / refresh / hide one at a time: a refresh can't re-show what hide hid
+        self._settled: dict = {}             # (hwnd, wanted rect) -> where Windows put it when asked (if not exactly there)
+        self._notes = 0                      # guard lines written to the log for the screen that is up
 
     def show(self, background: str):
-        self._bg = background
-        main, others = plan_rects(self._monitors())
-        self._wanted = (main, others)
-        hwnd = _hwnd(TITLE)
-        if hwnd:
-            _put(hwnd, main, show=False)     # (placed while still hidden: no flash in the wrong place)
-        self.window.show()
-        if hwnd:
-            _put(hwnd, main, front=True)
-        else:
-            left, top, right, bottom = main
-            self.window.move(left, top)
-            self.window.resize(right - left, bottom - top)
-        self._covers_soon()
+        with self._lock:
+            self._bg = background
+            main, others = plan_rects(self._monitors())
+            self._wanted = (main, others)
+            self._settled, self._notes = {}, 0
+            hwnd = _hwnd(TITLE)
+            if hwnd:
+                _tool_window(hwnd)               # (while still hidden: the taskbar only looks when a window comes up)
+                _put(hwnd, main, show=False)     # (placed while still hidden: no flash in the wrong place)
+            self.window.show()
+            if hwnd:
+                if _tool_window(hwnd):           # (reset while it came up: hidden and shown once more for the taskbar)
+                    self.log("overlay: the window came up with a taskbar button - made a tool window again")
+                    _reshow(hwnd)
+                _put(hwnd, main, front=True)
+                self._settle(hwnd, main, "the screen")
+            else:
+                left, top, right, bottom = main
+                self.window.move(left, top)
+                self.window.resize(right - left, bottom - top)
+            self._covers_soon()
 
     def refresh(self):
-        """Put the window and the covers back where they belong (the monitors may have changed, a window been moved).
-        Blocking the clicks behind: also back on top of every other always-on-top window, and the keyboard taken back."""
-        if self._wanted is None:
-            return
-        block = self.blocking()
-        main, others = plan_rects(self._monitors())
-        hwnd = _hwnd(TITLE)
-        if hwnd and (block or main != self._wanted[0] or _rect_of(hwnd) != main):
-            _put(hwnd, main)
-        changed = (main, others) != self._wanted
-        self._wanted = (main, others)
-        if changed or self._covers_moved():
-            self._covers_soon()
-        elif block:
-            for i, (_window, rect) in enumerate(list(self._covers)):
-                cover = _hwnd(f"{TITLE} cover {i + 1}")
+        """Put the window and the covers back where they belong (the monitors may have changed, a window been moved) -
+        only what really is out of place is moved. Blocking the clicks behind: also back on top of every other
+        always-on-top window (Z-order only), shown again if something hid it, and the keyboard taken back when another
+        window has it."""
+        with self._lock:                     # (placing only: hide() never waits for another app's input below)
+            if self._wanted is None:
+                return
+            block = self.blocking()
+            main, others = plan_rects(self._monitors())
+            hwnd = _hwnd(TITLE)
+            if hwnd:
+                self._restyle(hwnd)
+                if self._out_of_place(hwnd, main, block):
+                    _put(hwnd, main)
+                    self._settle(hwnd, main, "the screen")
+                elif block:
+                    _raise(hwnd)
+            changed = (main, others) != self._wanted
+            self._wanted = (main, others)
+            covers = [_hwnd(f"{TITLE} cover {i + 1}") for i in range(len(self._covers))]
+            for cover in covers:
                 if cover:
-                    _put(cover, rect)
-        if hwnd and block:
-            ours = {hwnd} | {_hwnd(f"{TITLE} cover {i + 1}") for i in range(len(self._covers))}
-            _take_keys(hwnd, ours)
+                    self._restyle(cover)
+            if changed or self._covers_moved(block):
+                self._covers_soon()
+            elif block:
+                for cover in covers:
+                    if cover:
+                        _raise(cover)
+        if hwnd and block and self._wanted is not None:
+            taken = _take_keys(hwnd, {hwnd} | {c for c in covers if c})
+            if taken:
+                self._note(f"the keyboard was taken back from {_window_name(taken)}")
 
     def hide(self):
-        self._wanted = None
-        self.window.hide()
+        with self._lock:
+            self._wanted = None
+            self.window.hide()
         self._covers_soon()
+
+    # ------------------------------------------------------------------ keeping them in place without fighting Windows
+    def _out_of_place(self, hwnd: int, rect, block: bool) -> bool:
+        """Moved, resized or minimised (`misplaced`) - or, blocking the clicks behind, hidden by something."""
+        actual = _rect_of(hwnd)
+        if misplaced(actual, rect, self._settled.get((hwnd, tuple(rect)))):
+            self._note(f"window {hwnd} was at {actual}, put back at {tuple(rect)}")
+            return True
+        return block and not _visible(hwnd)
+
+    def _settle(self, hwnd: int, rect, name: str):
+        """Just placed at `rect`: where Windows really put it, if not exactly there, counts as in place from now on (it
+        would put it there again; moving a window at every check is the suspected cause of the jumping pointer)."""
+        key = (hwnd, tuple(rect))
+        got = _rect_of(hwnd)
+        if got is not None and tuple(got) != tuple(rect):
+            if self._settled.get(key) != tuple(got):
+                self.log(f"overlay: {name} was put at {tuple(rect)}, Windows placed it at {tuple(got)} - left there")
+            self._settled[key] = tuple(got)
+        else:
+            self._settled.pop(key, None)
+
+    def _restyle(self, hwnd: int):
+        """The tool-window style back if anything reset it (the taskbar picks it up the next time the screen comes up)."""
+        if _tool_window(hwnd):
+            self._note(f"window {hwnd} had lost its tool-window style (taskbar button) - put back")
+
+    def _note(self, text: str):
+        if self._notes < NOTE_LIMIT:
+            self._notes += 1
+            self.log(f"overlay guard: {text}")
 
     def closing(self) -> bool:
         """The covers' close event: False (ignored) while they are up - Alt+F4 does nothing."""
@@ -629,33 +780,54 @@ class OverlayHost:
     def _covers_soon(self):
         threading.Thread(target=self._sync_covers, name="lockdown-overlay-covers", daemon=True).start()
 
-    def _covers_moved(self) -> bool:
+    def _covers_moved(self, block: bool = False) -> bool:
         for i, (_window, rect) in enumerate(self._covers):
             hwnd = _hwnd(f"{TITLE} cover {i + 1}")
-            if hwnd and _rect_of(hwnd) != rect:
+            if hwnd and self._out_of_place(hwnd, rect, block):
                 return True
         return False
 
     def _sync_covers(self):
         """Make the covers match what is wanted NOW (called on a thread of its own, one at a time; a call that runs
-        after the wishes changed again simply finds nothing more to do)."""
+        after the wishes changed again simply finds nothing more to do). A new cover is made hidden, made a tool window,
+        and only then placed and shown (without taking the keyboard)."""
         with self._covers_lock:
             wanted = self._wanted
             rects = [tuple(r) for r in wanted[1]] if wanted else []
+            made = []
             if [rect for _w, rect in self._covers] != rects:
                 self._destroy_covers()
                 for i, rect in enumerate(rects):
                     title = f"{TITLE} cover {i + 1}"
                     try:
                         self._covers.append((self._make_cover(title, self._bg), rect))
+                        made.append(len(self._covers) - 1)
                     except Exception as error:
                         self.log(f"overlay cover: {error}")
-            for i, (_window, rect) in enumerate(self._covers):
+            for i, (window, rect) in enumerate(self._covers):
                 hwnd = _hwnd(f"{TITLE} cover {i + 1}")
-                if hwnd and _rect_of(hwnd) != rect:
+                if not hwnd:
+                    if i in made:
+                        self._show_plain(window, rect)
+                    continue
+                _tool_window(hwnd)
+                if i in made:
+                    _put(hwnd, rect, show=False)        # (placed while still hidden: no flash at the default spot)
+                if i in made or not _visible(hwnd) or self._out_of_place(hwnd, rect, False):
                     _put(hwnd, rect)
+                    self._settle(hwnd, rect, f"cover {i + 1}")
             if self._wanted is None:                    # (hidden while the covers were being made)
                 self._destroy_covers()
+
+    def _show_plain(self, window, rect):
+        """No native handle (not Windows, or it wasn't found): pywebview's own move / resize / show."""
+        try:
+            left, top, right, bottom = rect
+            window.move(left, top)
+            window.resize(right - left, bottom - top)
+            window.show()
+        except Exception as error:
+            self.log(f"overlay cover: {error}")
 
     def _destroy_covers(self):
         covers, self._covers = self._covers, []
@@ -671,9 +843,9 @@ class OverlayHost:
 
     def _pywebview_cover(self, title: str, background: str):
         import webview
-        window = webview.create_window(
+        window = webview.create_window(      # (hidden: shown once it is a tool window - no taskbar button)
             title, html=COVER_HTML.format(title=title, bg=background), frameless=True, on_top=True, easy_drag=False,
-            shadow=False, focus=False, resizable=False, background_color=background)
+            shadow=False, focus=False, resizable=False, hidden=True, background_color=background)
         window.events.closing += self.closing
         return window
 

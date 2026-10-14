@@ -142,6 +142,10 @@ object IslandSight {
         else -> fails + 1 to Notice.NONE
     }
 
+    /** Home's "Island apps not covered" banner: up exactly while the notice is - [fails] (as [noticeStep] left it)
+     *  reached [NOTICE_AFTER] and Island is still [bad] now (it goes the moment a check-in brings Island back). */
+    fun alertUp(fails: Int, bad: Boolean): Boolean = bad && fails >= NOTICE_AFTER
+
     /** Main's record of which apps its accessibility service heard from and when: one entry per app per second at
      *  most, the last [KEEP_MS], at most [MAX_LOG]. Thread-safe (the service writes, the link server reads). */
     class Log(private val keepMs: Long = KEEP_MS, private val max: Int = MAX_LOG) {

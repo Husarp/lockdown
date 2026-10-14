@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -137,6 +138,7 @@ fun HomeScreen(onOpenBlocking: () -> Unit, onOpenModes: () -> Unit, onOpenGuardr
     ) {
         com.husarp.lockdown.update.UpdateBanner()
         GrayscaleStuck()
+        IslandDownBanner(cfg, tick)
         StatusHero(cfg, today?.totalMs ?: 0L)
         for (card in layout) if (card.on) when (card.id) {
             "problems" -> ProblemsCard(cfg, onOpenSettings)
@@ -385,9 +387,12 @@ private fun AppsCard(cfg: Config, now: LocalDateTime, today: TodayUse?, modeStat
     val ctx = LocalContext.current
     val info = HOME_CARDS.getValue("apps")
     val listed = remember(cfg.items) { cfg.items.filter { it.type == ItemType.APP }.associateBy { it.target.lowercase() } }
-    val kind = remember { AppList.effective(AppListPrefs.kind(ctx), AppList.kinds(islandLinked(ctx))) }
+    val kinds = remember { AppList.kinds(islandLinked(ctx)) }
+    var kind by remember { mutableStateOf(AppList.effective(AppListPrefs.kind(ctx), kinds)) }
     val all = remember(today, kind) { AppList.filter(today?.apps.orEmpty(), kind) }
     HomePanel(info.name, info.icon, info.hue, action = if (today?.apps.orEmpty().isNotEmpty()) "Show all (${all.size})" else null, onAction = onOpenApps, onClick = onOpenInsights) {
+        // which apps the card shows (e.g. only the ones you installed), picked right here
+        if (today?.apps.orEmpty().isNotEmpty()) AppKindMenu(kind, kinds, Modifier.offset(x = (-12).dp)) { kind = it }
         val apps = all.take(5)
         if (today == null) Text("Loading…", color = cs.onSurfaceVariant)
         else if (apps.isEmpty()) Text(if (today.apps.isNotEmpty()) "No apps of this kind used today." else if (Usage.hasAccess(ctx)) "No screen time yet today." else "Allow usage access in Settings to see it.",
@@ -494,6 +499,25 @@ private fun EmergencyCard(cfg: Config, now: LocalDateTime) {
         }
     }
     if (use) EmergencyDialog(onDismiss = { use = false })
+}
+
+/** Always on top of Home (whatever cards are on) while the "Island apps not covered" notice is up: the same judgement
+ *  (Reminders.islandAlert - 2 failed checks in a row, gone once Lockdown in Island checks in), with Open Island. */
+@Composable
+private fun IslandDownBanner(cfg: Config, tick: Int) {
+    val ctx = LocalContext.current
+    if (IslandLink.role(ctx) != com.husarp.lockdown.link.Role.MAIN) return
+    val link by IslandLink.mainState.collectAsStateWithLifecycle()
+    val fresh = com.husarp.lockdown.guard.rememberFresh()
+    val up = remember(fresh, tick, link, cfg.enabled) { runCatching { com.husarp.lockdown.remind.Reminders.islandAlert(ctx, cfg) }.getOrDefault(false) }
+    if (!up) return
+    val cs = MaterialTheme.colorScheme
+    com.husarp.lockdown.ui.Card(color = cs.errorContainer, contentColor = cs.onErrorContainer) {
+        Text("Island apps aren't covered", style = MaterialTheme.typography.titleSmall)
+        Text("Lockdown in Island isn't checking in or can't block, so apps in Island aren't limited or blocked right now.",
+            style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { IslandLink.openOtherProfile(ctx) }, Modifier.padding(top = 8.dp)) { Text("Open Lockdown in Island") }
+    }
 }
 
 /** Lockdown in Island: checking in (green), not (red, with Fix), or Set up. Not shown in Lockdown's Island copy. */

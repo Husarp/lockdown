@@ -8,6 +8,7 @@ import com.husarp.lockdown.engine.DayDetail
 import com.husarp.lockdown.engine.DayTotals
 import com.husarp.lockdown.engine.FrontSplit
 import com.husarp.lockdown.engine.HistoryLog
+import com.husarp.lockdown.engine.HomeApp
 import com.husarp.lockdown.engine.MinuteAcc
 import com.husarp.lockdown.engine.SwitchTracker
 import java.io.File
@@ -26,8 +27,14 @@ object History {
     private val split = FrontSplit()
     private var switches: SwitchTracker? = null
 
+    private var app: Context? = null
+
+    /** The launcher, left out of what the history gives Insights and the CSV (engine/HomeApp.kt). */
+    private fun home(): String? = app?.let { runCatching { com.husarp.lockdown.usage.Usage.homePkg(it) }.getOrNull() }
+
     @Synchronized fun init(ctx: Context) {
         if (dir != null) return
+        app = ctx.applicationContext
         dir = File(ctx.filesDir, "history").apply { mkdirs() }
         val home = runCatching {
             ctx.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
@@ -93,21 +100,27 @@ object History {
         }
     }
 
-    /** Detail for each day in [from]..[to] that has it. */
+    /** Detail for each day in [from]..[to] that has it (the launcher's minutes left out). */
     fun detail(from: LocalDate, to: LocalDate): Map<LocalDate, DayDetail> {
         flush()
+        val home = home()
         val out = LinkedHashMap<LocalDate, DayDetail>()
         var d = from
         while (!d.isAfter(to)) {
             val f = dir?.let { dayFile(d) }
-            if (f != null && f.exists()) out[d] = HistoryLog.parseDay(d, runCatching { f.readText() }.getOrDefault(""))
+            if (f != null && f.exists()) out[d] = HomeApp.detail(HistoryLog.parseDay(d, runCatching { f.readText() }.getOrDefault("")), home)
             d = d.plusDays(1)
         }
         return out
     }
 
-    /** Daily totals for every day there is: the rolled-up days and the days still in detail. */
-    fun allTotals(): Map<LocalDate, DayTotals> {
+    /** Daily totals for every day there is: the rolled-up days and the days still in detail (the launcher's left out). */
+    fun allTotals(): Map<LocalDate, DayTotals> = allTotalsWithHome().let { all ->
+        val home = home()
+        all.mapValues { HomeApp.totals(it.value, home) }
+    }
+
+    private fun allTotalsWithHome(): Map<LocalDate, DayTotals> {
         flush()
         val out = HashMap(runCatching { HistoryLog.parseDaily(dailyFile().readText()) }.getOrDefault(emptyMap()))
         for (day in detailDays()) {

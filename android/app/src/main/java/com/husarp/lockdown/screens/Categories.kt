@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -92,7 +92,7 @@ fun siteCategory(cfg: com.husarp.lockdown.data.Config, host: String): String? {
 /** A small "Distracting ▾" menu for an app in Insights (an app on your list, or any other app) - or, with [site], for
  *  a site (the item on your list it belongs to, or the site itself). */
 @Composable
-fun CategoryMenu(pkg: String, site: String? = null) {
+fun CategoryMenu(pkg: String, site: String? = null, modifier: Modifier = Modifier) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val set = rememberCategorySetter()
     var open by remember { mutableStateOf(false) }
@@ -101,14 +101,15 @@ fun CategoryMenu(pkg: String, site: String? = null) {
         cfg.items.firstOrNull { it.type == ItemType.SITE && com.husarp.lockdown.block.Enforce.hostMatches(it.target, site) }
             ?.let(::categoryKeys) ?: listOf("site:${site.lowercase()}")
     } else listOf("app:${pkg.lowercase()}")
-    Box(contentAlignment = Alignment.CenterEnd) {
-        // As wide as its widest label whatever it says now, so the Top apps bars beside it all get the same track
-        // (a "Distracting" row's bar was shorter than a "Neutral" one's for the same time).
+    Box(modifier, contentAlignment = Alignment.CenterEnd) {
+        // As wide as its widest label whatever it says now, so the Top apps rows all keep the same room for the name
+        // (a "Distracting" row's was shorter than a "Neutral" one's).
         (CATEGORY_NAMES.map { it.second } + "Category").forEach {
-            Text("$it ▾", Modifier.padding(ButtonDefaults.TextButtonContentPadding).alpha(0f).clearAndSetSemantics {},
+            Text("$it ▾", Modifier.padding(horizontal = 12.dp).alpha(0f).clearAndSetSemantics {},
                 style = MaterialTheme.typography.labelMedium)
         }
-        TextButton(onClick = { open = true }) {
+        // a low button, so it sits on the name's line (the rows put it there, aligned by the text's baseline)
+        SmallTextButton(onClick = { open = true }) {
             Text((CATEGORY_NAMES.firstOrNull { it.first == current }?.second ?: "Category") + " ▾", style = MaterialTheme.typography.labelMedium,
                 color = tone(Kinds.category(current).hue).accent)
         }
@@ -122,5 +123,15 @@ fun CategoryMenu(pkg: String, site: String? = null) {
                 })
             }
         }
+    }
+}
+
+/** A text button only 32 dp tall (no 48 dp touch frame), for a menu that sits on a line of text. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun SmallTextButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement provides false) {
+        TextButton(onClick = onClick, modifier = modifier.height(32.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp), content = content)
     }
 }

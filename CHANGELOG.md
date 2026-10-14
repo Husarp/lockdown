@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Bedtime and break screens no longer show on the taskbar or in Alt+Tab.** The bedtime / strict-break cover windows (and the corner notices window) are now tool windows: no taskbar button, no Alt+Tab entry. The style is set while the window is hidden, checked again after it is shown and put back by the guard if something resets it. A taskbar button that appears while the screen is already up goes at the next show. Not yet tried on a real Windows PC. Tests: new `test_overlay_taskbar_pointer.py`.
+- **The mouse pointer should stop jumping while the bedtime screen is up.** The cover used to be moved and shown again on every tick; it is now put back on top without moving or resizing it, and moved only when it really is out of place. The cause is suspected, not proven - this needs a check on a real PC, with "Block clicks behind" both on and off. "Block clicks behind the bedtime screen" still works as before (it still takes the keyboard back when nothing has it), and off is unchanged; the cover still counts as hiding the apps under it for usage. Tests: `test_overlay_taskbar_pointer.py`, `test_bedtime_block_behind.py`.
+
 ## 0.92.0 - 2026-10-13 18:30
 - **Missing app icons (Firefox, Brave, Javaw, LockApp).** Every way of getting an icon is now tried in turn - the big icon, the small one, a Store/system app's own logo (read from its package, e.g. LockApp), then the icon Explorer shows - and a blank picture counts as a failure. Icons are drawn more reliably (transparency worked out properly, read only once Windows has finished drawing), app icons have their own queue (they were dropped while many site icons were loading), and programs are also found in C:\Windows\SystemApps, the App Paths registry and PATH (an installed Java). Icons that came out blank in 0.91.0 are made again once. When an icon still can't be made, lockdown.log says why. Tests: new `test_app_icon_fallbacks.py`.
 

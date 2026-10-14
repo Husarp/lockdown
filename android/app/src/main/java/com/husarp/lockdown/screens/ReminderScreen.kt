@@ -482,8 +482,9 @@ internal fun TimeField(label: String, value: String, modifier: Modifier, onValid
         isError = validTime(value) == null, interactionSource = src, modifier = modifier)
 }
 
-/** The bedtime screen's "Disable alerts": the challenge, then off for tonight or a 15-min snooze. Cancelled, or
- *  left too long (ReminderRunner), it counts as Dismiss: the bedtime screen comes back on its escalation. */
+/** The bedtime screen's "Disable alerts": the challenge, then off for tonight or a 15-min snooze. The bedtime screen
+ *  only steps aside meanwhile (engine/CoverAside.kt): leaving the app or cancelling brings it back with the Dismiss
+ *  wait it had left (cancelled after the wait, with no challenge before Dismiss, it counts as Dismiss). */
 @Composable
 fun BedtimeAsk() {
     val asking by ReminderRunner.asking.collectAsStateWithLifecycle()

@@ -35,6 +35,7 @@ import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.LogFilter
 import com.husarp.lockdown.engine.LogItem
 import com.husarp.lockdown.engine.LogKind
+import com.husarp.lockdown.engine.LogRange
 import com.husarp.lockdown.engine.LogRow
 import com.husarp.lockdown.guard.TrustedTime
 import com.husarp.lockdown.link.IslandLink
@@ -99,17 +100,30 @@ fun ActivityLogScreen() {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     var filter by remember { mutableStateOf(LogFilter.ALL) }
+    var range by remember { mutableStateOf<LogRange?>(LogRange.WEEK) }                  // null: the days picked
+    var picked by remember { mutableStateOf<Pair<LocalDate, LocalDate>?>(null) }
+    var picking by remember { mutableStateOf(false) }
     val data by produceState<LogData?>(null) {
         value = withContext(Dispatchers.IO) {
             runCatching { load(ctx, Store.config) }.getOrDefault(LogData(emptyList(), LocalDate.now(), true))
         }
     }
     val d = data
-    val shown = remember(d, filter) { d?.let { ActivityLog.flat(ActivityLog.view(it.rows, filter)) } }
+    val days = d?.let { range?.days(it.today) ?: picked }
+    val shown = remember(d, filter, days) { d?.let { ActivityLog.flat(ActivityLog.view(it.rows, filter, days?.first ?: LocalDate.MIN, days?.second ?: LocalDate.MAX)) } }
 
     Column(Modifier.fillMaxSize()) {
+        // when: Today / Yesterday / 7 days (all the log keeps), or days picked inside those 7
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LogRange.entries.forEach { r -> Chip(r.label, r == range, hue = Hue.TEAL) { range = r } }
+            val p = picked
+            Chip(if (range == null && p != null && d != null) pickedText(p, d.today) else "Pick days…", range == null, hue = Hue.TEAL) { picking = true }
+        }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LogFilter.entries.forEach { f -> Chip(f.label, f == filter, hue = Hue.TEAL) { filter = f } }
+        }
+        if (picking && d != null) PickDays(d.today, onDismiss = { picking = false }) { from, to ->
+            picking = false; picked = ActivityLog.clampDays(from, to, d.today); range = null
         }
         LazyColumn(Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
             if (d == null || shown == null) item { Text("Loading…", color = cs.onSurfaceVariant) }
@@ -117,7 +131,8 @@ fun ActivityLogScreen() {
                 if (shown.isEmpty()) item {
                     Text(
                         if (filter == LogFilter.APPS && !d.usageOk) "Grant usage access in Settings to list the apps you opened."
-                        else if (filter == LogFilter.BYPASS) "No bypass used in the last 7 days: no emergency unlock, pause, challenge passed or switching off."
+                        else if (filter == LogFilter.BYPASS) "No bypass used in this time: no emergency unlock, pause, challenge passed or switching off."
+                        else if (range != LogRange.WEEK) "Nothing in this time."
                         else "Nothing here yet. Apps, sites and blocks from the last 7 days show up as you use the phone.",
                         Modifier.padding(vertical = 12.dp), color = cs.onSurfaceVariant,
                     )
@@ -138,6 +153,40 @@ fun ActivityLogScreen() {
                 }
             }
         }
+    }
+}
+
+/** "Mon 5 Oct" or "Mon 5 Oct – Wed 7 Oct" (Today / Yesterday by name). */
+private fun pickedText(p: Pair<LocalDate, LocalDate>, today: LocalDate): String =
+    if (p.first == p.second) ActivityLog.dayLabel(p.first, today) else ActivityLog.dayLabel(p.first, today) + " – " + ActivityLog.dayLabel(p.second, today)
+
+/** Picks a day or a span of days, only among the [ActivityLog.DAYS] the log keeps (older ones can't be picked). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PickDays(today: LocalDate, onDismiss: () -> Unit, onPick: (LocalDate, LocalDate) -> Unit) {
+    fun ms(day: LocalDate) = day.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()      // the picker's days are UTC
+    fun day(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    val first = today.minusDays(ActivityLog.DAYS - 1L)
+    val state = androidx.compose.material3.rememberDateRangePickerState(
+        initialDisplayedMonthMillis = ms(today),
+        yearRange = first.year..today.year,
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long) = day(utcTimeMillis).let { !it.isBefore(first) && !it.isAfter(today) }
+            override fun isSelectableYear(year: Int) = year in first.year..today.year
+        },
+    )
+    androidx.compose.material3.DatePickerDialog(onDismissRequest = onDismiss,
+        confirmButton = {
+            androidx.compose.material3.TextButton(enabled = state.selectedStartDateMillis != null, onClick = {
+                val a = state.selectedStartDateMillis ?: return@TextButton
+                onPick(day(a), day(state.selectedEndDateMillis ?: a))
+            }) { Text("Show") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) {
+        androidx.compose.material3.DateRangePicker(state, Modifier.weight(1f),
+            title = { Text("Days to show (the log keeps the last ${ActivityLog.DAYS})", Modifier.padding(start = 24.dp, end = 12.dp, top = 16.dp)) },
+            showModeToggle = false)
     }
 }
 

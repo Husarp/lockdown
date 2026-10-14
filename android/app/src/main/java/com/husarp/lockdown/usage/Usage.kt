@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import com.husarp.lockdown.engine.AppSpan
+import com.husarp.lockdown.engine.HomeApp
 import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
@@ -36,6 +37,24 @@ object Usage {
 
     fun accessIntent() = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
+    @Volatile private var homeCache: Pair<Long, String?>? = null
+
+    /** The default launcher ([HomeApp.pick]), whose time is left out of every screen-time total and app list here.
+     *  Read at most every 5 minutes, so a launcher changed in Settings is picked up soon. */
+    fun homePkg(ctx: Context): String? {
+        val c = homeCache
+        if (c != null && android.os.SystemClock.elapsedRealtime() - c.first < 5 * 60_000L) return c.second
+        val pm = ctx.packageManager
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val pkg = runCatching {
+            val def = pm.resolveActivity(home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+            HomeApp.pick(def, if (def != null && def != HomeApp.RESOLVER) emptyList()
+                else pm.queryIntentActivities(home, 0).map { it.activityInfo.packageName })
+        }.getOrNull()
+        homeCache = android.os.SystemClock.elapsedRealtime() to pkg
+        return pkg
+    }
+
     /** Foreground time and opens per app between [start] and [end], computed from raw events. A worker passes
      *  [stopped] (its isStopped), so a job Android stops quits reading at once. */
     fun range(ctx: Context, start: Long, end: Long, stopped: () -> Boolean = { false }): DayUse {
@@ -45,10 +64,11 @@ object Usage {
         val opens = HashMap<String, Int>()
         val resumedAt = HashMap<String, Long>()
         val hourly = LongArray(24)
+        val home = homePkg(ctx)                        // the home screen isn't app use (HomeApp)
         val e = UsageEvents.Event()
         while (events.hasNextEvent() && !stopped()) {
             events.getNextEvent(e)
-            val pkg = e.packageName ?: continue
+            val pkg = e.packageName?.takeIf { HomeApp.counts(it, home) } ?: continue
             when (e.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> {
                     resumedAt[pkg] = e.timeStamp
@@ -78,10 +98,11 @@ object Usage {
         val events = usm.queryEvents(start, end)
         val out = ArrayList<AppSpan>()
         val resumedAt = HashMap<String, Long>()
+        val home = homePkg(ctx)                        // the home screen isn't app use (HomeApp)
         val e = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
-            val pkg = e.packageName ?: continue
+            val pkg = e.packageName?.takeIf { HomeApp.counts(it, home) } ?: continue
             when (e.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = e.timeStamp
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->
@@ -120,9 +141,10 @@ object Usage {
             val idx = (((from - start) / 86_400_000L).toInt()).coerceIn(0, days - 1)
             totals[idx] += (to - from)
         }
+        val home = homePkg(ctx)                        // the home screen isn't app use (HomeApp)
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
-            val pkg = e.packageName ?: continue
+            val pkg = e.packageName?.takeIf { HomeApp.counts(it, home) } ?: continue
             when (e.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = e.timeStamp
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED -> {
@@ -154,10 +176,11 @@ object Usage {
             IslandUse.addHourSpan(hours, from, to, hourFrom, zone)
             if (spans != null && from >= spansFrom && to > from) spans.add(AppSpan(pkg, from, to))
         }
+        val home = homePkg(ctx)                        // the home screen isn't app use (HomeApp)
         val e = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
-            val pkg = e.packageName ?: continue
+            val pkg = e.packageName?.takeIf { HomeApp.counts(it, home) } ?: continue
             when (e.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = e.timeStamp
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->

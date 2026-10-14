@@ -178,7 +178,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 val secs = Duration.between(now, until).seconds.coerceAtLeast(0)
                 Card(color = ex.successContainer, contentColor = ex.onSuccessContainer) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f).padding(end = 12.dp)) {
                             Text("Unlocked for editing", style = MaterialTheme.typography.titleSmall)
                             Text("%d:%02d left — changes save without the challenge".format(secs / 60, secs % 60), style = MaterialTheme.typography.bodySmall)
                         }
@@ -189,7 +189,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 val status = AntiBypass.status(ab, now)
                 Card(color = cs.primaryContainer, contentColor = cs.onPrimaryContainer) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f).padding(end = 12.dp)) {     // a gap before Unlock: the text wraps there
                             Text("Locked", style = MaterialTheme.typography.titleSmall)
                             Text(if (status == "closed") "Only inside your allowed hours" else "Unlock to make changes without re-asking each time",
                                 style = MaterialTheme.typography.bodySmall)

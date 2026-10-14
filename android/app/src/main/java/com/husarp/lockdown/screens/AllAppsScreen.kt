@@ -3,6 +3,7 @@ package com.husarp.lockdown.screens
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +68,28 @@ internal object AppListPrefs {
     fun sort(ctx: Context): AppSort = AppSort.entries.firstOrNull { it.name == p(ctx).getString("sort", null) } ?: AppSort.TIME
     fun kind(ctx: Context): AppKind = AppKind.entries.firstOrNull { it.name == p(ctx).getString("kind", null) } ?: AppKind.ALL
     fun save(ctx: Context, sort: AppSort, kind: AppKind) { p(ctx).edit().putString("sort", sort.name).putString("kind", kind.name).apply() }
+}
+
+/** The lists' kind picked right on a card (Home's "Time per app", Insights' Top apps): "Only apps I installed ▾" and
+ *  the like. Remembered as on "All apps", so every list follows it. */
+@Composable
+internal fun AppKindMenu(kind: AppKind, kinds: List<AppKind>, modifier: Modifier = Modifier, onPick: (AppKind) -> Unit) {
+    val ctx = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        SmallTextButton(onClick = { open = true }) {
+            Text(kind.label + " ▾", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            kinds.forEach { k ->
+                androidx.compose.material3.DropdownMenuItem(text = { Text(k.label) }, onClick = {
+                    open = false
+                    AppListPrefs.save(ctx, AppListPrefs.sort(ctx), k)
+                    onPick(k)
+                }, trailingIcon = if (k == kind) { { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Check, "Chosen") } } else null)
+            }
+        }
+    }
 }
 
 /** Island is linked (this is main), so the Personal / Island kinds mean something. */
@@ -163,7 +186,8 @@ fun AllAppsScreen(startRange: Int = 0) {
                 }
                 item {
                     Text("Opens count each visit of 5 seconds or more, as the Activity log lists them (Island's from Lockdown in Island, " +
-                        "for the last 7 days). System apps are the ones that came with the phone, its home screen and Settings.",
+                        "for the last 7 days). System apps are the ones that came with the phone and Settings. Time on the home screen " +
+                        "isn't counted as using an app (as in Android's Digital Wellbeing).",
                         Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
             }
@@ -189,8 +213,9 @@ private fun AppStatRow(a: AppStat, frac: Float, left: TimeLeft.Left?, cfg: com.h
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         if (site != null) ItemIcon(ItemType.SITE, site, site) else AppIcon(a.pkg, a.label)
         Column(Modifier.weight(1f)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            // the category menu on the name's line, all three on one baseline
+            Row(Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f).padding(end = 8.dp).alignByBaseline()) {
                     Text(a.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val opened = AppList.lastText(a.lastMs, today, TrustedTime.zone())
                     val sub = listOfNotNull(a.via?.let { "in $it" },
@@ -198,15 +223,15 @@ private fun AppStatRow(a: AppStat, frac: Float, left: TimeLeft.Left?, cfg: com.h
                         opened.takeIf { it.isNotEmpty() }?.let { "last $it" }).joinToString(" · ")
                     if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                if (left != null) Text(TimeLeft.line(left, now) + " · ", style = MaterialTheme.typography.labelMedium, color = bar,
+                if (left != null) Text(TimeLeft.line(left, now) + " · ", Modifier.alignByBaseline(), style = MaterialTheme.typography.labelMedium, color = bar,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(fmtDuration(a.ms), style = MaterialTheme.typography.titleSmall)
+                Text(fmtDuration(a.ms), Modifier.alignByBaseline(), style = MaterialTheme.typography.titleSmall)
+                CategoryMenu(a.pkg, site, Modifier.alignByBaseline())
             }
             Spacer(Modifier.height(5.dp))
             Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(cs.surfaceContainerHighest)) {
                 Box(Modifier.fillMaxWidth(frac).height(4.dp).clip(CircleShape).background(bar))
             }
         }
-        CategoryMenu(a.pkg, site)
     }
 }

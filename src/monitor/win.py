@@ -184,6 +184,7 @@ class WindowFacts(NamedTuple):
     alpha: int = 255               # see-through windows: their opacity, or UNKNOWN_ALPHA
     region: int = 0                # a window region (SetWindowRgn) cutting its shape: GetWindowRgnBox's kind
     region_box: Rect = (0, 0, 0, 0)   # a SIMPLEREGION's rectangle on screen
+    own_cover: bool = False        # Lockdown's own full-screen cover (bedtime / strict break): hides everything under it
 
 
 _MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HANDLE, wintypes.HDC, ctypes.POINTER(wintypes.RECT),
@@ -271,9 +272,12 @@ def window_facts(hwnd: int) -> WindowFacts:
         rect = outer
     box = wintypes.RECT()    # a region is relative to the window's outer corner
     region = _u32.GetWindowRgnBox(hwnd, ctypes.byref(box))
+    own_cover = bool(exstyle & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) and window_pid(hwnd) == os.getpid() \
+        and window_title(hwnd).startswith(COVER_TITLE)      # (a tool window "hides nothing" - except our cover)
     return WindowFacts(hwnd, True, False, False, exstyle, cls.value, (rect.left, rect.top, rect.right, rect.bottom),
                        _alpha(hwnd) if exstyle & WS_EX_LAYERED else 255, region,
-                       (outer.left + box.left, outer.top + box.top, outer.left + box.right, outer.top + box.bottom))
+                       (outer.left + box.left, outer.top + box.top, outer.left + box.right, outer.top + box.bottom),
+                       own_cover)
 
 
 def can_be_in_front(f: WindowFacts) -> bool:
@@ -291,6 +295,8 @@ def cover(f: WindowFacts) -> Rect | None:
     a shape that isn't a rectangle. Erring that way only ever counts more."""
     if not can_be_in_front(f):
         return None
+    if f.own_cover:          # (a tool window - no taskbar button - yet it hides everything under it)
+        return f.rect
     if f.exstyle & WS_EX_TOOLWINDOW and not f.exstyle & WS_EX_APPWINDOW:
         return None
     if f.exstyle & (WS_EX_NOACTIVATE | WS_EX_TRANSPARENT):

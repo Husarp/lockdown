@@ -35,6 +35,7 @@ import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
 import com.husarp.lockdown.engine.BreakAllow
 import com.husarp.lockdown.engine.CallCover
+import com.husarp.lockdown.engine.CoverAside
 import com.husarp.lockdown.engine.Browsers
 import com.husarp.lockdown.engine.Cadence
 import com.husarp.lockdown.engine.ChallengeRun
@@ -82,8 +83,9 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private var breakCovered = false                  // the strict break's cover is wanted on screen now (call / lock screen aside)
     private var breakFront = ""                       // what is in front since the dismiss ("" = not known yet: counts as allowed)
     private var challenge: CoverChallenge? = null     // the bedtime screen is asking its challenge before Dismiss (inside the cover)
-    private var dialing = false                       // "Phone" was tapped on a strict break
-    private var dialUntil = 0L                        // ... and the dialer has until then to come up
+    private var aside: CoverAside? = null             // the covers stepped aside for Disable alerts (the app) / Phone (the dialer)
+    private var asideAsks = false                     // ... from a bedtime screen with a challenge before Dismiss
+    private val waitResume = HashMap<String, Long>()  // a cover back from stepping aside: the Dismiss wait it had left (ms)
     private var lastInUse = 0L                        // the screen was last on and unlocked (elapsed ms)
     private var lastRemindTick = 0L
     private var shownItemId: String? = null
@@ -108,7 +110,11 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     /** The screen went off / came on / was unlocked: the loops stretched for the screen being off run now, at the
      *  pace the screen calls for. A broadcast that can't be missed, so the stretch never delays blocking. */
     private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, intent: Intent) { runCatching { wake(Cadence.closesUsageGap(intent.action)) } }
+        override fun onReceive(c: Context, intent: Intent) {
+            // the screen off while the covers are stepped aside: they come back (shown once it is unlocked)
+            runCatching { if (intent.action == Intent.ACTION_SCREEN_OFF && aside?.screenOff() == CoverAside.Do.BACK) asideBack() }
+            runCatching { wake(Cadence.closesUsageGap(intent.action)) }
+        }
     }
 
     /** An app was installed, removed or changed: the apps a break leaves usable are looked up again (BreakApps). */
@@ -416,7 +422,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 currentPkg = pkg
                 IslandLink.islandFront = null                   // a main-profile window came to the front
                 if (isBrowser(pkg)) readBar(pkg, fresh = true)
-                handler.post { runCatching { step() }; runCatching { syncRemindHidden() }; speedUpSteps() }   // react immediately
+                handler.post { runCatching { step() }; runCatching { checkAside() }; runCatching { syncRemindHidden() }; speedUpSteps() }   // react immediately
             }
             if (!isBrowser(pkg)) return@runCatching
 
@@ -585,7 +591,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             "%02d:%02d".format(t.hour, t.minute) to 60_000L - (t.second * 1000L + t.nano / 1_000_000) + 20
         }
         // "Wait before Dismiss": Dismiss counts down and can't be tapped until it ends, from the start each time the
-        // screen comes up (also back after a call or the lock screen). Disable alerts and Emergency don't wait.
+        // screen comes up (also back after a call or the lock screen). Disable alerts and Emergency don't wait. Back
+        // from Disable alerts (it only stepped aside, engine/CoverAside.kt) it goes on with what it had left.
         var readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L
         var dismiss: Button? = null
         var shownLeft = -1      // the number on the button now: it is only touched (and redrawn) when it changes
@@ -603,7 +610,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             }
         }
         col.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) { readyAt = SystemClock.elapsedRealtime() + p.wait * 1000L; shownLeft = -1; countdown.run() }
+            override fun onViewAttachedToWindow(v: View) {
+                readyAt = SystemClock.elapsedRealtime() + (waitResume.remove(p.key) ?: (p.wait * 1000L))
+                shownLeft = -1; countdown.run()
+            }
             override fun onViewDetachedFromWindow(v: View) { handler.removeCallbacks(countdown) }
         })
         fun fill() {
@@ -619,13 +629,16 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 buttons.addView(remindButton(if (b.action == "dismiss") "Dismiss" else b.label, role) {
                     when (b.action) {
                         "disable" -> {
-                            val early = RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime()) > 0
-                            closeRemind(p.key); ReminderRunner.askDisable(this, early)
+                            // no Dismiss: the screen only steps aside for the challenge in the app, keeping its wait
+                            stepAside(CoverAside.DISABLE, CoverAside.leftAt(readyAt, SystemClock.elapsedRealtime()),
+                                CoverAside.START_MS, asks = p.challenge.isNotEmpty())
+                            ReminderRunner.askDisable(this)
                         }
                         "emergency" -> askEmergency(buttons, "Your bedtime settings stay as they are.", back = { fill() }) { tier ->
-                            closeRemind(p.key)
-                            ReminderRunner.answer(this, p.key, "dismiss")   // back on the escalation if it fails
-                            ReminderRunner.spendEmergency(this, tier)
+                            // spent first: a use that can't be spent (none left meanwhile) is no Dismiss - the screen
+                            // stays, its wait running on
+                            if (ReminderRunner.spendEmergency(this, tier)) { closeRemind(p.key); ReminderRunner.answer(this, p.key, "dismiss") }
+                            else fill()
                         }
                         "dismiss" -> if (RemindersEngine.waitLeft(readyAt, SystemClock.elapsedRealtime()) == 0) {
                             // "Challenge before Dismiss": after the wait, the list is solved inside this screen first
@@ -767,12 +780,65 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun activeApp(): String? = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
         ?.takeUnless { it == packageName && onScreenKeys.isNotEmpty() }
 
-    /** "Phone": the dialer, with the reminder screens out of its way while it's in front. */
+    /** "Phone": the dialer, with the reminder screens stepped aside while it (or a call's screen) is in front - any
+     *  other app brings them back at once (engine/CoverAside.kt), also before the dialer is up. */
     private fun dial() {
-        dialing = true; dialUntil = SystemClock.elapsedRealtime() + DIAL_GRACE_MS
-        syncRemindHidden()
-        runCatching { startActivity(Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        stepAside(CoverAside.PHONE, 0, DIAL_GRACE_MS)
+        if (runCatching { startActivity(Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isFailure) asideBack()
     }
+
+    /** [action]'s button steps the reminder screens aside (engine/CoverAside.kt): off the screen, kept as they are, until
+     *  the app / the dialer is finished with or left. [leftMs]: the bedtime screen's Dismiss wait left now; [asks]: it
+     *  asks a challenge before Dismiss. */
+    private fun stepAside(action: String, leftMs: Long, startMs: Long, asks: Boolean = false) {
+        val under = activeApp()?.takeUnless { it == packageName || it == "com.android.systemui" || isKeyboard(it) }
+        aside = CoverAside(action, leftMs, SystemClock.elapsedRealtime(), under ?: currentPkg, startMs)
+        asideAsks = asks
+        applyRemind()
+        handler.removeCallbacks(asideTick); handler.postDelayed(asideTick, ASIDE_POLL_MS)
+    }
+
+    /** The screens stepped aside: is what they stepped aside for still in front? Disable alerts: the app, in front and
+     *  its window the active one (when that can be told); Phone: the dialer or a call's screen. The status bar and the
+     *  keyboard say nothing either way. Gone from the front: back they come ([asideBack]). */
+    private fun checkAside() {
+        val a = aside ?: return
+        val act = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        val neutral = act == null || act == "com.android.systemui" || isKeyboard(act)
+        val inTarget = if (a.action == CoverAside.PHONE) isDialer(if (neutral) currentPkg else act!!)
+            else ReminderRunner.appVisible && (neutral || act == packageName)
+        val other = if (neutral || inTarget || (a.action == CoverAside.DISABLE && act == packageName)) null else act
+        if (a.front(SystemClock.elapsedRealtime(), inTarget, other) == CoverAside.Do.BACK) asideBack()
+    }
+
+    /** While stepped aside: looked at again every [ASIDE_POLL_MS] (a missed window event can't keep them away). */
+    private val asideTick = object : Runnable {
+        override fun run() { runCatching { checkAside() }; if (aside != null) handler.postDelayed(this, ASIDE_POLL_MS) }
+    }
+
+    /** The screens stepped aside come back, as they were: the bedtime screen with the Dismiss wait it had left (shown
+     *  again once nothing else hides it - a call, the lock screen), and the app's question for it goes. */
+    private fun asideBack() {
+        val a = aside ?: return
+        aside = null
+        handler.removeCallbacks(asideTick)
+        if (a.action == CoverAside.DISABLE) { waitResume["sleep"] = a.leftMs; ReminderRunner.askGone() }
+        syncRemindHidden()
+    }
+
+    override fun disabling() = aside?.action == CoverAside.DISABLE
+
+    /** "Disable alerts" answered in the app: finished (off tonight, a snooze) - the bedtime screen goes and the engine
+     *  hears it; cancelled - back with the wait it had left, or (the wait over, no challenge before Dismiss) a Dismiss. */
+    override fun disableAnswered(action: String): String? {
+        val a = aside?.takeIf { it.action == CoverAside.DISABLE } ?: return if (action == "dismiss") "back" else action
+        val d = if (action == "dismiss") a.cancelled(asideAsks || Store.config.sleep.challenge) else a.finished()
+        if (d == CoverAside.Do.BACK) { asideBack(); return null }
+        closeRemind("sleep")
+        return action
+    }
+
+    override fun appMoved() = checkAside()
 
     /** The bedtime screen and a strict break step aside while the phone rings, during a phone call while the call's
      *  own screen is in front (engine/CallCover.kt: an app's voice call - WhatsApp, Discord - doesn't count, and any
@@ -782,10 +848,8 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun syncRemindHidden() {
         val am = getSystemService(AUDIO_SERVICE) as AudioManager
         val call = CallCover.stepsAside(CallCover.of(am.mode), isDialer(currentPkg))
-        val ms = SystemClock.elapsedRealtime()
-        if (dialing && ms >= dialUntil && !isDialer(currentPkg)) dialing = false
         val locked = (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).isKeyguardLocked
-        remindHidden = call || dialing || locked
+        remindHidden = call || locked
         // a dismissed break covers again only for an app that isn't allowed (the phone ringing allows anything)
         if (breakDismissed && STRICT_BREAK in remindViews)
             breakCovered = BreakAllow.covered(true, breakFront, BreakApps.builtIn(this), Store.config.breaks.allowed, call)
@@ -797,10 +861,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private val modeListener: Any? = if (Build.VERSION.SDK_INT >= 31)
         AudioManager.OnModeChangedListener { handler.post { runCatching { syncRemindHidden() } } } else null
 
-    /** Adds or removes each reminder view to match what it should do now ([remindHidden], the break's cover). */
+    /** Adds or removes each reminder view to match what it should do now ([remindHidden], stepped [aside], the break's cover). */
     private fun applyRemind() {
         for ((key, v) in remindViews.entries.toList()) {
-            val want = !remindHidden && (key != STRICT_BREAK || breakCovered)
+            val want = !remindHidden && !asideHides(key) && (key != STRICT_BREAK || breakCovered)
             if (want && key !in onScreenKeys) { if (runCatching { wm?.addView(v, remindParams(Store.config.sleep.blockBehind)) }.isSuccess) onScreenKeys.add(key) }
             else if (!want && onScreenKeys.remove(key)) {
                 // out of the way (a call, the lock screen): a bedtime challenge in progress is dropped, as the wait starts again
@@ -809,6 +873,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             }
         }
     }
+
+    /** Stepped [aside]: a strict break's "Phone" takes every screen out of the dialer's way; "Disable alerts" only the
+     *  bedtime screen it is for - a strict break up meanwhile stays in front of the app, as it always did. */
+    private fun asideHides(key: String): Boolean = aside?.let { it.action == CoverAside.PHONE || key == "sleep" } ?: false
 
     private fun isDialer(pkg: String): Boolean {
         val dialer = runCatching { (getSystemService(TELECOM_SERVICE) as android.telecom.TelecomManager).defaultDialerPackage }.getOrNull()
@@ -832,7 +900,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         remindViews[key] = root
         if (key == STRICT_BREAK) { breakDismissed = false; breakCovered = true }
         applyRemind()
-        if (key !in onScreenKeys && !remindHidden && (key != STRICT_BREAK || breakCovered)) remindViews.remove(key)   // couldn't be added
+        if (key !in onScreenKeys && !remindHidden && !asideHides(key) && (key != STRICT_BREAK || breakCovered)) remindViews.remove(key)   // couldn't be added
     }
 
     /** The bedtime / strict-break screen's window. Not [block]: as it always was - not focusable, so Back and the
@@ -862,7 +930,15 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if (challenge?.key == key) endChallenge(restore = false)   // (the window goes: nothing to give back)
         onScreenKeys.remove(key)
         remindViews.remove(key)?.let { runCatching { wm?.removeView(it) } }   // (not on screen while hidden: fails, harmlessly)
+        waitResume.remove(key)
         if (key == STRICT_BREAK) { breakDismissed = false; breakCovered = false; breakFront = "" }
+        // the screen stepped aside is gone (answered, the night over, the break ended): nothing to come back to
+        val a = aside
+        if (a != null && key == (if (a.action == CoverAside.DISABLE) "sleep" else STRICT_BREAK)) {
+            aside = null; handler.removeCallbacks(asideTick)
+            if (a.action == CoverAside.DISABLE) ReminderRunner.askGone()
+            applyRemind()
+        }
     }
 
     // ---------- bedtime grayscale ----------
@@ -978,6 +1054,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         private const val PIP_CATCH_MS = 15_000L    // a PiP window this soon after its app's block is the blocked video
         private const val STRICT_BREAK = "strict-break"
         private const val DIAL_GRACE_MS = 10_000L   // after "Phone", the dialer has this long to come to the front
+        private const val ASIDE_POLL_MS = 1000L     // the screens stepped aside look at what is in front this often
 
         /** The service really runs (bound by Android), not just ticked in Settings. Same process as its readers. */
         @Volatile var connected = false
