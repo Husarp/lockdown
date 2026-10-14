@@ -1,6 +1,6 @@
 # Changelog — Lockdown Mobile
 
-## Unreleased
+## 0.5.22 - 2026-10-14 06:58
 - **Disable alerts, Emergency and the strict break's Phone can't skip the bedtime wait.** Disable alerts only steps the bedtime screen aside: leaving the app, switching the screen off or cancelling brings it back with the wait it had left, and it goes only after the challenge and Off tonight / Snooze. (The old "2 minutes away counts as Dismiss" is gone.) Emergency closes the screen only if a use was really spent. On a strict break, Phone lets only the dialer / call screens through - any other app brings the cover back at once - and a strict break that is up stays in front during Disable alerts. Tests: new `CoverAsideTest`.
 - **Insights chart labels.** Days with no data draw no mark, and the day labels sit on their own row under the chart, never wrapped, only every Nth day (checked for Today / Yesterday / 7 / 30 days). Tests: `InsightsFixesTest`.
 - **The launcher is left out of usage.** Home-screen time no longer counts as using an app in Home, Insights, Top apps or the All apps page. It is display only: limits and blocking are unchanged. Tests: `InsightsFixesTest`.
