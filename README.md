@@ -248,6 +248,7 @@ are in `assets/fonts`.
 
 ## Licence
 
-MIT — © 2026 Husarp. Free to use, change and share, keeping the copyright notice; see
-[LICENSE](LICENSE). The bundled fonts (Barlow Condensed, Inter) keep their own licence, the SIL Open
-Font License — the licence files are next to them in `assets/fonts/`.
+**All rights reserved** — © 2026 Husarp. The code is public to read, and the releases are free to
+download and use, but the app may not be copied, changed, shared, sold or built upon without
+written permission. The bundled fonts (Barlow Condensed, Inter) keep their own licence, the SIL Open
+Font License — the licence files are next to them in `assets/fonts/`. Full terms in [LICENSE](LICENSE).
