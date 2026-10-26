@@ -330,3 +330,12 @@ def test_a_bad_event_does_not_stop_the_window_following_the_install(setup, windo
     win.events.put(("log", "Copying the program..."))   # (a later round: only seen if the drain kept going)
     pump(win, 1, until=lambda: win.p_status.cget("text") == "Copying the program...")
     assert win.p_status.cget("text") == "Copying the program..."
+
+
+def test_tool_output_that_does_not_decode_still_reads_as_text(setup):
+    """0.93.1: on Polish Windows `sc query` prints cp852 bytes that cp1250 can't decode; stdout came back None and
+    "Stopping Lockdown" failed with "argument of type 'NoneType' is not iterable"."""
+    import sys
+    setup.NO_WINDOW = 0   # (Windows-only flag; the test runs on Linux)
+    out = setup.run(sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'STAN \\x81\\x98\\xff STOPPED')")
+    assert isinstance(out.stdout, str) and "STOPPED" in out.stdout

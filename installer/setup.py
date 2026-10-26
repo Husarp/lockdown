@@ -88,8 +88,10 @@ def flush_app_log():
 
 
 def run(*args, check=False) -> subprocess.CompletedProcess:
-    return subprocess.run([tool(args[0]), *args[1:]], capture_output=True, text=True, creationflags=NO_WINDOW,
-                          check=check)
+    # errors="replace": Windows tools print in the console code page (cp852 on Polish Windows), not the cp1250 text
+    # mode reads; a byte that doesn't decode left stdout None and stopped the install
+    return subprocess.run([tool(args[0]), *args[1:]], capture_output=True, text=True, errors="replace",
+                          creationflags=NO_WINDOW, check=check)
 
 
 def payload() -> Path:
