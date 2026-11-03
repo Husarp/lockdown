@@ -315,7 +315,7 @@ def test_a_restart_rebuilds_the_rule_only_for_hosts_still_blocked(enforcer):
 
 def test_the_dns_filter_is_used_while_a_site_is_blocked():
     off = {"search": False, "youtube": False}
-    e = types.SimpleNamespace(protection=types.SimpleNamespace(count=lambda: 0), dns_blocks={})
+    e = types.SimpleNamespace(protection=types.SimpleNamespace(count=lambda: 0), dns_blocks={}, was_off=False)
     assert not service.filter_wanted(e, off)
     e.dns_blocks = {"googlevideo.com": {}}
     assert service.filter_wanted(e, off)

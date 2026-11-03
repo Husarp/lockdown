@@ -111,8 +111,8 @@ class LockdownVpn : VpnService() {
         }
 
         // SafeSearch: answer search engines with their safe address (fall through to normal on any error)
-        if (cfg.settings.forceSafeSearch) {
-            val safe = Dns.safeHost(host)
+        if (cfg.enabled) {
+            val safe = Dns.safeHost(host, cfg)
             if (safe != null) when (Dns.queryType(packet, len)) {
                 28 -> { write(Dns.noData(packet, len)); return }          // AAAA -> NODATA, pushes client to IPv4
                 1 -> {

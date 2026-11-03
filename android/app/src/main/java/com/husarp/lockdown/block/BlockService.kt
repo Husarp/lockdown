@@ -42,6 +42,7 @@ import com.husarp.lockdown.engine.ChallengeRun
 import com.husarp.lockdown.engine.Emergency
 import com.husarp.lockdown.engine.ItemIndex
 import com.husarp.lockdown.engine.ItemType
+import com.husarp.lockdown.engine.foregroundItems
 import com.husarp.lockdown.engine.ModeState
 import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.engine.RPrompt
@@ -229,17 +230,19 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         val host = if (isBrowser(pkg)) Browsers.hostOf(pkg, lastUrl[pkg]) else null
         // (the index finds them straight away: no going through every item on each step)
         val appItem = ItemIndex.of(cfg.items).app(pkg)
-        val siteItem = host?.let { h -> ItemIndex.of(cfg.items).sites(h).firstOrNull { it.type == ItemType.SITE && !it.disabled } }
-        inUseIds = setOfNotNull(appItem?.takeIf { !it.disabled }?.id, siteItem?.id)
+        val foreground = foregroundItems(cfg.items, pkg, host)
+        inUseIds = foreground.mapTo(HashSet()) { it.id }
 
         // Count what's in use - but not an item that is blocked: its time behind the notice and its retries
         // aren't use (they used to fill its limits and the group's). The opening that goes over a limit counts.
         // An app that is only greyed is in use: it counts.
         val actives = ArrayList<Active>()
-        if (appItem != null && !appItem.disabled && Enforce.counts(cfg, appItem, now))
-            actives.add(Active(appItem, Rules.countedRules(appItem, cfg.groups), launched = pkg != prevTickPkg))
-        if (siteItem != null && !Enforce.itemBlocked(cfg, siteItem, now))
-            actives.add(Active(siteItem, Rules.countedRules(siteItem, cfg.groups)))
+        for (item in foreground) {
+            val counts = if (item.type == ItemType.APP) Enforce.counts(cfg, item, now)
+                else !Enforce.itemBlocked(cfg, item, now)
+            if (counts) actives.add(Active(item, Rules.countedRules(item, cfg.groups),
+                launched = item.type == ItemType.APP && pkg != prevTickPkg))
+        }
         UsageStore.record(actives, now)
         prevTickPkg = pkg
 

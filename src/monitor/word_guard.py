@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 
+import antibypass
 import keywords
 from blocker import protection, site_block
 from blocker.hosts import normalize_host
@@ -149,6 +150,9 @@ class WordGuard(threading.Thread):
             blocked = BlockedSites()
             while not self.stop_event.wait(TICK_SEC):
                 try:
+                    if antibypass.is_off(db):
+                        self.last = None
+                        continue
                     now = time.monotonic()
                     self.tick(keywords.settings_shared(db), sense_tab, act, now, blocked.get(db, now),
                               protection.words_skip_sites(db))   # (read-only)

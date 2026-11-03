@@ -6,7 +6,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
+import com.husarp.lockdown.engine.Mode
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -19,14 +26,38 @@ object Store {
     private val _state = MutableStateFlow(Config())
     val state: StateFlow<Config> = _state
 
-    fun init(ctx: Context) {
-        file = File(ctx.filesDir, "config.json")
-        if (file.exists()) runCatching {
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
+    private var unreadableSource: File? = null
+    fun clearError() { _error.value = null }
+
+    fun init(ctx: Context) = init(File(ctx.filesDir, "config.json"))
+
+    /** File overload also keeps recovery and I/O tests independent of Android. */
+    internal fun init(configFile: File) {
+        file = configFile
+        unreadableSource = null
+        _state.value = Config()
+        _error.value = null
+        if (!file.exists()) {
+            file.parentFile?.listFiles()?.firstOrNull { it.name.startsWith("config-unreadable-") }?.let {
+                _error.value = "Settings couldn't be read. A copy is kept as ${it.name}. Import a backup or set up again."
+            }
+            return
+        }
+        runCatching {
             val read = json.decodeFromString<Config>(file.readText())
-            // imported sites kept as one item each (up to 0.5.19): moved into the compact list once, and saved so
             val c = ImportedSites.migrate(read)
             _state.value = c
             if (c !== read) persist()
+        }.onFailure {
+            unreadableSource = file
+            val kept = runCatching { keepUnreadable()!! }.getOrElse { error ->
+                _error.value = "Settings couldn't be read or kept aside: ${error.message}. Import a backup to recover."
+                return
+            }
+            _error.value = "Settings couldn't be read. A copy is kept as $kept. Import a backup or set up again."
+
         }
     }
 
@@ -34,32 +65,81 @@ object Store {
     // one after another, always the newest state, through a temp file so a crash mid-write can't corrupt it.
     private val writer = Executors.newSingleThreadExecutor()
     private val dirty = AtomicBoolean(false)
+    private val diskLock = FileWrites.lock
+    internal fun awaitWrites() { writer.submit {}.get(10, java.util.concurrent.TimeUnit.SECONDS) }
 
     /** Change the config and persist it. Atomic: the UI and the VPN thread can't overwrite each other's change. */
     fun update(block: (Config) -> Config) {
-        _state.updateAndGet(block)
-        persist()
+        synchronized(diskLock) { _state.updateAndGet(block); persist() }
     }
 
     private fun persist() {
         if (!dirty.compareAndSet(false, true)) return          // a save is already queued; it writes the newest state
         writer.execute {
             dirty.set(false)
-            runCatching {
-                val tmp = File(file.path + ".tmp")
-                tmp.writeText(json.encodeToString(_state.value))
-                if (!tmp.renameTo(file)) file.writeText(tmp.readText())
-            }
+            runCatching { synchronized(diskLock) { writeConfig(file, _state.value) } }
+                .onFailure { _error.value = "Couldn't save settings: ${it.message ?: "write failed"}" }
+
         }
     }
 
     /** The whole config as JSON (for exporting / syncing to the other profile). */
-    fun exportJson(): String = json.encodeToString(_state.value)
+    fun exportJson(): String = synchronized(diskLock) {
+        encodeBackup(_state.value, ModesStore.modes.value)
+    }
 
-    /** Replace the whole config from exported JSON. Returns false if it can't be parsed. */
-    fun importJson(text: String): Boolean {
-        _state.value = decodeImport(text, _state.value) ?: return false
-        persist(); return true
+    internal fun encodeBackup(config: Config, modes: List<Mode>): String = buildJsonObject {
+        (json.encodeToJsonElement(config) as JsonObject).forEach { (key, value) -> put(key, value) }
+        put("modes", json.encodeToJsonElement(modes))
+    }.toString()
+
+    internal fun decodeModes(text: String): List<Mode>? =
+        (json.parseToJsonElement(text) as JsonObject)["modes"]?.let { json.decodeFromJsonElement<List<Mode>>(it) }
+
+    /** Move the unreadable live file aside once. If storage is unavailable, retry before the next write. */
+    private fun keepUnreadable(): String? {
+        val source = unreadableSource ?: return null
+        val backup = File(source.parentFile, "config-unreadable-${System.currentTimeMillis()}-${java.util.UUID.randomUUID()}.json")
+        Files.move(source.toPath(), backup.toPath()) // no REPLACE_EXISTING: a kept copy is never overwritten
+        unreadableSource = null
+        return backup.name
+    }
+
+    internal fun writeConfig(target: File, config: Config) {
+        keepUnreadable()
+        FileWrites.replace(listOf(target to json.encodeToString(config)))
+    }
+
+    /** A helper acknowledges only after the replacement reaches disk; failures keep the previous live rules. */
+    internal fun updatePersisted(block: (Config) -> Config): Boolean = synchronized(diskLock) {
+        runCatching {
+            val updated = block(_state.value)
+            writeConfig(file, updated)
+            _state.value = updated
+            _error.value = null
+            true
+        }.getOrElse {
+            _error.value = "Couldn't save settings: ${it.message ?: "write failed"}"
+            false
+        }
+    }
+
+    /** Replace config and modes together. Publish neither until both have been persisted. */
+    fun importJson(text: String): Boolean = synchronized(diskLock) {
+        val imported = decodeImport(text, _state.value) ?: return false
+        val modes = runCatching { decodeModes(text) }.getOrElse { return false }
+        runCatching {
+            keepUnreadable()
+            val modeWrite = modes?.let { ModesStore.stageModes(it) }
+            FileWrites.replace(listOfNotNull(modeWrite, file to json.encodeToString(imported)))
+            if (modes != null) ModesStore.publishModes(modes)
+            _state.value = imported
+            _error.value = null
+            true
+        }.getOrElse {
+            _error.value = "Couldn't save imported settings: ${it.message ?: "write failed"}"
+            false
+        }
     }
 
     /**
@@ -69,7 +149,10 @@ object Store {
      * use history (PC parity): a file brings in emergency kinds, but can't reset the uses or bring in an unlock.
      */
     fun decodeImport(text: String, current: Config): Config? =
-        runCatching { ImportedSites.migrate(json.decodeFromString<Config>(text)) }.getOrNull()?.let { c ->
+        runCatching {
+            decodeModes(text) // reject malformed mode data before changing either store
+            ImportedSites.migrate(json.decodeFromString<Config>(text))
+        }.getOrNull()?.let { c ->
             c.copy(antibypass = c.antibypass.copy(unlockedFrom = current.antibypass.unlockedFrom, unlockedUntil = current.antibypass.unlockedUntil),
                 pause = current.pause, emergencyUses = current.emergencyUses, unlocks = current.unlocks,
                 unlockUntil = current.unlockUntil, unlockItems = current.unlockItems, alertsPausedUntil = current.alertsPausedUntil)

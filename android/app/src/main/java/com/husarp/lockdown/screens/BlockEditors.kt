@@ -231,7 +231,7 @@ fun ProtectionEditor(onClose: () -> Unit) {
         val old = Store.config.protection
         guard(AntiBypass.protectionLooser(old.enabled, old.allowed, old.allowedWords, new.enabled, new.allowed, new.allowedWords)) {
             Store.update { c -> c.copy(protection = new) }
-            if (new.enabled != old.enabled) Protection.load(ctx)
+            if (new != old) Protection.load(ctx)
             d.clear()
             then()
         }

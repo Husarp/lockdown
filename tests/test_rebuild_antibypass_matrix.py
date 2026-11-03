@@ -566,7 +566,7 @@ def test_the_cover_emergency_spends_only_a_kind_that_has_a_use_left(tmp_path, mo
 @pytest.fixture(scope="module")
 def synth_db(tmp_path_factory):
     path = tmp_path_factory.mktemp("synth") / "config.db"
-    Database(path)
+    Database(path).close()
     info = synthdata.build(path, NOW.date(), days=10, network_rows=300)
     db = Database(path)
     seed(db)
@@ -579,9 +579,14 @@ READS = sorted(n for n in CLASSES["read"] if n not in selftest.SKIP_READS)
 
 @pytest.mark.parametrize("name", READS)
 def test_a_read_method_writes_nothing(synth_db, tmp_path, name):
-    import shutil
     path = tmp_path / "config.db"
-    shutil.copy(synth_db[0], path)
+    # A WAL database must be snapshotted through SQLite: copying only config.db can omit committed schema/data.
+    source, snapshot = sqlite3.connect(synth_db[0]), sqlite3.connect(path)
+    try:
+        source.backup(snapshot)
+    finally:
+        source.close()
+        snapshot.close()
     ctx = webapi.make_context(path, clock=lambda db=None: NOW)
     ctx.update_flow = FakeFlow()
     ctx.overlay = FakeOverlay()

@@ -5,7 +5,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
@@ -90,9 +91,26 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val cfg by com.husarp.lockdown.data.Store.state.collectAsStateWithLifecycle()
+            val storeError by com.husarp.lockdown.data.Store.error.collectAsStateWithLifecycle()
             val helper by com.husarp.lockdown.link.IslandLink.helper.collectAsStateWithLifecycle()
             // The linked copy in Island has no editing screens: main holds the rules.
-            LockdownTheme(pref = cfg.settings.theme) { if (helper) com.husarp.lockdown.screens.HelperScreen() else App(askOff) }
+            LockdownTheme(pref = cfg.settings.theme) {
+                Column(Modifier.fillMaxSize()) {
+                    storeError?.let { message ->
+                        androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.errorContainer) {
+                            Row(Modifier.padding(16.dp)) {
+                                Text(message, Modifier.weight(1f))
+                                androidx.compose.material3.TextButton(onClick = {
+                                    com.husarp.lockdown.data.Store.clearError()
+                                }) { Text("Dismiss") }
+                            }
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        if (helper) com.husarp.lockdown.screens.HelperScreen() else App(askOff)
+                    }
+                }
+            }
         }
     }
 

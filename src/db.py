@@ -266,6 +266,7 @@ USAGE_DAYS_LOADED = 40   # monthly limits (+ a long day after a reset-time chang
 # One per hot WHERE / ORDER BY (see design/rebuild/inventory-perf.md #3-#5). activity and network_log need none: their
 # primary keys start with `minute`, which is what every query on them ranges over.
 INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_usage_window ON usage(substr(bucket, -16)) WHERE bucket LIKE 'win:%'",
     "CREATE INDEX IF NOT EXISTS idx_switch_events_ts ON switch_events(timestamp)",      # stats.switches, averages
     "CREATE INDEX IF NOT EXISTS idx_block_events_ts ON block_events(timestamp)",        # blocked_events(day), log
     "CREATE INDEX IF NOT EXISTS idx_usage_day ON usage(day)",                           # usage_lookup, every tick
@@ -281,12 +282,13 @@ INDEXES = [
 ]
 # PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
 # MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
-SCHEMA_VERSION = 10   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
+SCHEMA_VERSION = 11   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
 #                      6: a daily time limit per weekday (0.84.12); 7: emergency_unlocks.tier (emergency kinds)
 #                      8: a member app's own way replaces the group's (was: added on top) - same schema
 #                      9: a group's icon and colour (looks only)
 #                      10: app_events, the App log (applog.py)
+#                      11: carry legacy overlapping-window allowance usage into the continuous bucket
 UI_BUSY_SEC = 1.5        # the window's connection: wait at most this long for a lock (it was 10 s - a frozen window)
 BUSY_SEC = 10            # everyone else (service, worker threads)
 WRITE_RETRY_SEC = 10     # a structural write from the window is retried this long before it gives up (as before)
@@ -392,6 +394,8 @@ class Database:
                 self.conn.execute(statement)
             if was < 8:
                 self._own_app_ways()
+            if was < 11:
+                self._merge_window_usage()
             self.conn.commit()
         except BaseException:
             self.conn.rollback()
@@ -405,6 +409,34 @@ class Database:
         self.conn.execute("ANALYZE")
         self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.conn.commit()
+
+    def _merge_window_usage(self):
+        """One-off upgrade: old window-end counters belong to their continuous blocked stretch.
+        Move, rather than copy, so reopening cannot count them twice. Never discard a counter we cannot identify.
+        """
+        from rules import allowance_bucket, allowance_owner, schedule_until, counted_rules
+        groups = self.list_groups()
+        schedules = {}
+        for item in self.list_items():
+            for rule in counted_rules(item, groups):
+                if rule["rule_type"] == "scheduled" and rule.get("schedule"):
+                    schedules[(allowance_owner(rule), rule["rule_key"])] = rule
+        rows = self.conn.execute("SELECT owner, bucket, seconds, day FROM usage WHERE bucket LIKE 'win:%'").fetchall()
+        for owner, bucket, seconds, day in rows:
+            rule = schedules.get((owner, bucket[4:-17]))
+            if rule is None:
+                continue
+            try:
+                end = datetime.strptime(bucket[-16:], "%Y-%m-%dT%H:%M")
+                until = schedule_until(rule["schedule"], end - timedelta(minutes=1))
+            except (ValueError, KeyError, TypeError, OverflowError):
+                continue
+            target = allowance_bucket(rule, until) if until else bucket
+            if target != bucket:
+                self.conn.execute("INSERT INTO usage (owner, bucket, seconds, day) VALUES (?, ?, ?, ?) "
+                                  "ON CONFLICT(owner, bucket) DO UPDATE SET seconds = seconds + excluded.seconds",
+                                  (owner, target, seconds, day))
+                self.conn.execute("DELETE FROM usage WHERE owner = ? AND bucket = ?", (owner, bucket))
 
     def _own_app_ways(self):
         """One-off (schema 8): a member app's own way used to be added on top of the group's (or of its own); it is
@@ -741,6 +773,11 @@ class Database:
         since = (now.date() - timedelta(days=USAGE_DAYS_LOADED)).isoformat()
         data = {(r["owner"], r["bucket"]): r["seconds"] for r in self.conn.execute(
             "SELECT owner, bucket, seconds FROM usage WHERE day >= ?", (since,))}
+        # A full-week continuous block has a permanent window bucket: its allowance must not refill on day 41.
+        # The partial index keeps this independent of the size of the screen-time history.
+        data.update({(r["owner"], r["bucket"]): r["seconds"] for r in self.conn.execute(
+            "SELECT owner, bucket, seconds FROM usage WHERE bucket LIKE 'win:%' AND substr(bucket, -16) >= ?",
+            (now.strftime("%Y-%m-%dT%H:%M"),))})
         return Usage(data, self.limit_clock(), {f"item:{i}": u for i, u in self.active_unlocks(now).items()},
                      pause.until(self, now))
 

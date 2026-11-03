@@ -35,7 +35,7 @@ def export(db) -> dict:
         "lockdown": FORMAT,
         "items": [{k: item[k] for k in ("id", "display_name", "target", "item_type", "source", "notify", "block_type",
                                          "app_path")} | {"rules": [_rule(r) for r in item["rules"]]} for item in items],
-        "groups": [{"name": g["name"], "rules": [_rule(r) for r in g["rules"]],
+        "groups": [{"id": g["id"], "name": g["name"], "rules": [_rule(r) for r in g["rules"]],
                     "members": {str(i): o for i, o in g["members"].items()},
                     # how its members are blocked (0.84.11; absent / None: as each member is set)
                     "app_block": g.get("app_block"), "site_block": g.get("site_block"),
@@ -113,6 +113,13 @@ def diff(db, data: dict) -> list[str]:
     new_g = {g["name"] for g in data.get("groups", [])}
     if cur_g != new_g:
         lines.append(f"Groups: {len(cur_g)} -> {len(new_g)}")
+    current = export(db)
+    cur_details, cur_modes = _comparison(current)
+    new_details, new_modes = _comparison(data)
+    if cur_details[0] != new_details[0]:
+        lines.append("Site / app rules, blocking methods or details will change")
+    if cur_details[1] != new_details[1]:
+        lines.append("Group rules, blocking methods, members or details will change")
     cur_c = db.categories()
     new_c = {(c["kind"], c["name"]): c["category"] for c in data.get("categories", [])}
     if cur_c != new_c:
@@ -124,13 +131,71 @@ def diff(db, data: dict) -> list[str]:
               "stats.categories": "Categories", "ui.theme": "Theme", "ui.accent": "Accent colour",
               "emergency.tiers": "Emergency unlock kinds"}
     changed = {k for k in set(cur_s) | set(new_s) if _norm(k, cur_s.get(k)) != _norm(k, new_s.get(k))}
+    if cur_modes == new_modes:
+        changed.discard("modes.list")
+    else:
+        changed.add("modes.list")
     for key, label in labels.items():
         if key in changed:
             lines.append(f"{label} will change")
             changed.discard(key)
     if changed:
         lines.append(f"{len(changed)} other setting{'s' * (len(changed) != 1)} will change")
+    lines.extend(mode_target_warnings(data))
     return lines or ["No differences - it matches your current setup."]
+
+
+def _mapped_modes(value: str, item_ids: dict, group_ids: dict, drop_missing: bool = False,
+                  warnings: list | None = None) -> str:
+    """Resolve targets by source IDs. An old/stale reference cannot invalidate the usable backup."""
+    modes = json.loads(value)
+    for mode in modes:
+        for field, mapping in (("items", item_ids), ("groups", group_ids)):
+            resolved = []
+            for target in mode.get(field, []):
+                if str(target) in mapping:
+                    resolved.append(mapping[str(target)])
+                elif drop_missing:
+                    if warnings is not None:
+                        warnings.append(f"Warning: mode {mode.get('name') or mode.get('id', '')}: "
+                                        f"dropped unresolved {field} #{target}.")
+                else:
+                    resolved.append(f"missing:{target}")
+            if field in mode:
+                mode[field] = resolved
+    return json.dumps(modes, sort_keys=True)
+
+
+def mode_target_warnings(data: dict) -> list[str]:
+    warnings = []
+    value = data.get("settings", {}).get("modes.list")
+    if value:
+        _mapped_modes(value, {str(i["id"]): i["id"] for i in data.get("items", [])},
+                      {str(g["id"]): g["id"] for g in data.get("groups", []) if "id" in g},
+                      drop_missing=True, warnings=warnings)
+    return warnings
+
+
+def _comparison(data: dict) -> tuple[tuple[list, list], str | None]:
+    """Compare saved choices by target / group name, ignoring database IDs and rule row metadata."""
+    item_ids = {str(i["id"]): json.dumps([i["item_type"], i["target"]]) for i in data.get("items", [])}
+    group_ids = {str(g["id"]): g["name"] for g in data.get("groups", []) if "id" in g}
+    items = [{k: i.get(k) for k in ("display_name", "target", "item_type", "source", "notify", "block_type", "app_path")}
+             | {"rules": [_rule(r) for r in i.get("rules", [])]} for i in data.get("items", [])]
+    groups = []
+    for g in data.get("groups", []):
+        groups.append({k: g.get(k) for k in ("name", "app_block", "site_block", "icon", "color")}
+                      | {"rules": [_rule(r) for r in g.get("rules", [])]}
+                      | {field: {item_ids.get(str(i), f"missing:{i}"): value for i, value in
+                                 (g.get(field) or {}).items()} for field in ("members", "member_blocks")})
+    value = data.get("settings", {}).get("modes.list")
+    if value:
+        try:
+            value = _mapped_modes(value, item_ids, group_ids)
+        except (ValueError, TypeError, AttributeError):
+            pass   # the setting comparison still reports malformed text as changed
+    return (sorted(json.dumps(i, sort_keys=True) for i in items),
+            sorted(json.dumps(g, sort_keys=True) for g in groups)), value
 
 
 class _NoCommit:
@@ -155,6 +220,7 @@ def restore(db, data: dict):
     half-way (a damaged entry) leaves the blocks as they were instead of emptied (R28)."""
     import time
     from db import WRITE_RETRY_SEC, _locked
+    warnings = mode_target_warnings(data)
     conn = db.conn
     deadline = time.monotonic() + WRITE_RETRY_SEC
     while True:
@@ -176,7 +242,9 @@ def restore(db, data: dict):
     finally:
         db.conn = conn
     applog.record("backup_import", f"Backup imported: {len(data['items'])} sites and apps, {len(data.get('groups', []))} "
-                  f"groups, {len(data.get('categories', []))} category choices and the settings now replace the old ones", db)
+                  f"groups, {len(data.get('categories', []))} category choices and the settings now replace the old ones"
+                  + (". " + " ".join(warnings) if warnings else ""), db)
+    return warnings
 
 
 def _restore(db, data: dict):
@@ -191,6 +259,7 @@ def _restore(db, data: dict):
                                                item.get("source") or "backup", item.get("rules", []),
                                                item.get("notify"), item.get("block_type"), item.get("app_path"))
         blocks[new_ids[str(item["id"])]] = item.get("block_type")
+    new_groups = {}
     for g in data.get("groups", []):
         members = {new_ids[i]: o for i, o in g.get("members", {}).items() if i in new_ids}
         member_blocks = {new_ids[i]: w for i, w in (g.get("member_blocks") or {}).items() if i in new_ids}
@@ -200,13 +269,17 @@ def _restore(db, data: dict):
                              if kinds[i] != "site" else w for i, w in member_blocks.items()}
         ways = {"app_block": g.get("app_block"), "site_block": g.get("site_block"),
                 "member_blocks": member_blocks}
-        db.add_group(g["name"], g.get("rules", []), members, ways,
-                     {k: g[k] for k in ("icon", "color") if isinstance(g.get(k), str) and len(g[k]) <= 40})
+        group_id = db.add_group(g["name"], g.get("rules", []), members, ways,
+                                {k: g[k] for k in ("icon", "color") if isinstance(g.get(k), str) and len(g[k]) <= 40})
+        if "id" in g:
+            new_groups[str(g["id"])] = group_id
     for c in data.get("categories", []):
         db.set_category(c["kind"], c["name"], c["category"])
     settings = data.get("settings", {})
     for key, value in settings.items():
         if key not in RUNTIME_KEYS:
+            if key == "modes.list" and value:
+                value = _mapped_modes(value, new_ids, new_groups, drop_missing=True)
             db.set_setting(key, value)
     if "emergency.tiers" not in settings:   # a backup from before emergency kinds: its single setting applies
         db.set_setting("emergency.tiers", "")

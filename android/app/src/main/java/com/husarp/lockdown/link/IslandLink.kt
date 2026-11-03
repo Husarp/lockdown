@@ -768,9 +768,10 @@ object IslandLink {
             if (c == null) cfgFailed = sb.cfgHash        // keep the old rules; main isn't asked to resend the same one
             else {
                 val before = Store.config
-                Store.update { applyConfig(c, it) }
-                cfgHash = sb.cfgHash; cfgFailed = null
-                if (before.protection != c.protection) runCatching { Protection.load(ctx) }
+                if (persistHelperConfig(c)) {
+                    cfgHash = sb.cfgHash; cfgFailed = null
+                    if (before.protection != c.protection) runCatching { Protection.load(ctx) }
+                } // Keep cfgHash on write failure: main sends this snapshot again next time.
             }
         }
         sb.modes?.let { if (ModesStore.replace(it)) modesHash = sb.modesHash }
@@ -869,3 +870,6 @@ object IslandLink {
         }
     }
 }
+
+/** Persist before the helper acknowledges main's config hash. Kept free of Android runtime dependencies. */
+internal fun persistHelperConfig(config: Config): Boolean = Store.updatePersisted { applyConfig(config, it) }

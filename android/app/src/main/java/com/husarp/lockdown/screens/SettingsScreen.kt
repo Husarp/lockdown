@@ -142,8 +142,10 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
     }
     val exportCfg = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
-            runCatching { ctx.contentResolver.openOutputStream(uri)!!.bufferedWriter().use { it.write(Store.exportJson()) } }
-            importMsg = "All settings exported."
+            importMsg = runCatching {
+                checkNotNull(ctx.contentResolver.openOutputStream(uri)) { "No output stream" }
+                    .bufferedWriter().use { it.write(Store.exportJson()) }
+            }.fold({ "All settings exported." }, { "Couldn't export settings: ${it.message ?: "write failed"}" })
         }
     }
     val importCfg = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -153,7 +155,10 @@ fun SettingsScreen(onBack: () -> Unit = {}, start: String? = null) {
         // Replacing everything can drop any limit or block, so an import always asks for the challenge (free when no
         // challenge is set or the unlock window is open), like any other loosening.
         guard(true) {
-            importMsg = if (Store.importJson(text)) "All settings imported." else "Couldn't read that file."
+            importMsg = if (Store.importJson(text)) {
+                com.husarp.lockdown.block.Protection.load(ctx)
+                "All settings imported."
+            } else "Couldn't import settings. Check the file and available storage."
             com.husarp.lockdown.remind.Grayscale.sync(ctx)
         }
     }

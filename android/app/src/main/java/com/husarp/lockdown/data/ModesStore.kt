@@ -24,20 +24,30 @@ object ModesStore {
     private val _active = MutableStateFlow<ModeActive?>(null)
     val active: StateFlow<ModeActive?> = _active
 
-    fun init(ctx: Context) {
-        listFile = File(ctx.filesDir, "modes.json")
-        activeFile = File(ctx.filesDir, "mode_active.json")
+    fun init(ctx: Context) = init(ctx.filesDir)
+
+    internal fun init(dir: File) {
+        listFile = File(dir, "modes.json")
+        activeFile = File(dir, "mode_active.json")
         val saved = if (listFile.exists())
             runCatching { json.decodeFromString<List<Mode>>(listFile.readText()) }.getOrDefault(emptyList())
         else emptyList()
         _modes.value = Modes.merge(saved)
-        if (activeFile.exists())
-            _active.value = runCatching { json.decodeFromString<ModeActive?>(activeFile.readText()) }.getOrNull()
+        _active.value = if (activeFile.exists())
+            runCatching { json.decodeFromString<ModeActive?>(activeFile.readText()) }.getOrNull() else null
     }
 
-    fun saveModes(list: List<Mode>) {
-        _modes.value = Modes.merge(list)
-        runCatching { listFile.writeText(json.encodeToString(_modes.value)) }
+    internal fun stageModes(list: List<Mode>): Pair<File, String> =
+        listFile to json.encodeToString(Modes.merge(list))
+
+    internal fun publishModes(list: List<Mode>) { _modes.value = Modes.merge(list) }
+
+    fun saveModes(list: List<Mode>): Boolean = synchronized(FileWrites.lock) {
+        runCatching {
+            FileWrites.replace(listOf(stageModes(list)))
+            publishModes(list)
+            true
+        }.getOrDefault(false)
     }
 
     /** Start a mode by hand. [until] null = until stopped; [locked] only holds when there's an end. */
@@ -63,15 +73,17 @@ object ModesStore {
     fun exportJson(modes: List<Mode> = _modes.value, active: ModeActive? = _active.value): String = json.encodeToString(Snapshot(modes, active))
 
     /** The Island helper takes main's modes as they are. False if it can't be read. */
-    fun replace(text: String): Boolean {
+    fun replace(text: String): Boolean = synchronized(FileWrites.lock) {
         val s = runCatching { json.decodeFromString<Snapshot>(text) }.getOrNull() ?: return false
-        saveModes(s.modes)
-        _active.value = s.active
-        persistActive()
-        return true
+        runCatching {
+            FileWrites.replace(listOf(stageModes(s.modes), activeFile to json.encodeToString(s.active)))
+            publishModes(s.modes)
+            _active.value = s.active
+            true
+        }.getOrDefault(false)
     }
 
-    private fun persistActive() = runCatching {
-        activeFile.writeText(json.encodeToString(_active.value))
-    }
+    private fun persistActive() = synchronized(FileWrites.lock) { runCatching {
+        FileWrites.replace(listOf(activeFile to json.encodeToString(_active.value)))
+    } }
 }

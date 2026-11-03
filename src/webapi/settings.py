@@ -456,13 +456,14 @@ def backup_import_apply(ctx, token):
     def restore():
         again, _ = _load_checked(path, sha)           # (the challenge can take minutes: look again right before)
         again["settings"] = {k: v for k, v in again.get("settings", {}).items() if k != antibypass.OFF_KEY}
-        backup.restore(ctx.db, again)
+        warnings = backup.restore(ctx.db, again)
         d = drafts.draft_of(ctx)
         with drafts.lock:
             d.discard()                               # (the blocks are the backup's now: reload them everywhere)
         _poke(ctx)
         _icons_changed(ctx)                           # (the backup carries its own icon switch)
         _dirty(ctx, *PAGES)
-        return {"items": len(again["items"]), "groups": len(again.get("groups", []))}
+        return {"items": len(again["items"]), "groups": len(again.get("groups", [])),
+                **({"warnings": warnings} if warnings else {})}
 
     return ctx.guard.request([f"Import settings from {name} (replaces your blocks and settings)"], restore)

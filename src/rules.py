@@ -104,10 +104,40 @@ def _schedule_until(schedule_json: str, now: datetime) -> datetime | None:
     s = load_schedule(schedule_json)
     ends = [u for u in (window_until(w, now) for w in s["windows"]) if u]
     if s["mode"] == BLOCK:
-        return max(ends) if ends else None
+        if not ends:
+            return None
+        minute = now.weekday() * 1440 + now.hour * 60 + now.minute
+        for start, end in _blocked_intervals(schedule_json):
+            if start <= minute < end:
+                if end - start >= 7 * 1440:
+                    return datetime.max
+                return (now.replace(hour=0, minute=0, second=0, microsecond=0)
+                        - timedelta(days=now.weekday()) + timedelta(minutes=end))
+        return None
     if ends:          # allow mode, inside an allowed window
         return None
     return next_window_start(s["windows"], now) or datetime.max
+
+
+@functools.lru_cache(maxsize=512)
+def _blocked_intervals(schedule_json: str) -> tuple:
+    """Merge the repeating week once per schedule, including both sides of Sunday midnight."""
+    spans = []
+    for w in load_schedule(schedule_json)["windows"]:
+        start, end = parse_hhmm(w["start"]), parse_hhmm(w["end"])
+        start, end = start.hour * 60 + start.minute, end.hour * 60 + end.minute
+        if end <= start:
+            end += 1440
+        for day in w["days"]:
+            for week in (-10080, 0, 10080):
+                spans.append((week + day * 1440 + start, week + day * 1440 + end))
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return tuple(merged)
 
 
 # ---------- limit periods ----------

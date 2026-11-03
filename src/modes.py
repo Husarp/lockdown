@@ -169,6 +169,13 @@ def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[
     for item in category_members(cats, items, categories, blocklist=False):
         add(item)
     for extra in mode.get("extra", []):
+        if extra["kind"] == "category":
+            for member in category_members(set(extra["targets"]), items, categories,
+                                           block_type=extra.get("block_type")):
+                if member["item_type"] == "app" and extra.get("block_type"):
+                    member = {**member, "block_type": extra["block_type"]}
+                add(member)
+            continue
         add({"id": None, "display_name": extra["name"], "target": " ".join(extra["targets"]),
              "item_type": extra["kind"], "block_type": extra.get("block_type") or ("close" if extra["kind"] == "app"
                                                                                   else None),

@@ -222,7 +222,7 @@ class Enforcer:
         self.blocks, self.dns_blocks = blocks, dns_blocks
 
         kw = keywords.settings(self.db)
-        if browser_policy.apply(safe_search=kw["safesearch"], youtube=kw["youtube"]):
+        if browser_policy.apply(safe_search=not off and kw["safesearch"], youtube=not off and kw["youtube"]):
             log.info("Browser policies (re)applied")
 
         self.cut_live_connections(now)
@@ -800,7 +800,8 @@ def filter_wanted(enforcer: Enforcer, safe: dict) -> bool:
     any site you blocked is sent nowhere (0.84.9): the hosts file can't name a video host (each video has its
     own, rr1---sn-....googlevideo.com), so a video page open when its block began found the next one; the filter
     answers for everything under googlevideo.com."""
-    return bool(enforcer.protection.count() or safe["search"] or safe["youtube"] or enforcer.dns_blocks)
+    return not enforcer.was_off and bool(enforcer.protection.count() or safe["search"] or safe["youtube"]
+                                        or enforcer.dns_blocks)
 
 
 def dns_loop(enforcer: Enforcer):
@@ -824,7 +825,8 @@ def dns_loop(enforcer: Enforcer):
                 log.info("Protection lists loaded: %d domains", enforcer.protection.count())
                 hosts.flush_dns()   # a site you just allowed would otherwise stay blocked in the DNS cache
             kw = keywords.settings(db)
-            safe["search"], safe["youtube"] = kw["safesearch"], kw["youtube"]
+            off = antibypass.is_off(db)
+            safe["search"], safe["youtube"] = not off and kw["safesearch"], not off and kw["youtube"]
             if time.monotonic() - last_adapters >= DNS_ADAPTER_CHECK_SEC:
                 last_adapters = time.monotonic()
                 if filter_wanted(enforcer, safe):

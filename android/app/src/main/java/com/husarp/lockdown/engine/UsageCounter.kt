@@ -58,7 +58,11 @@ class UsageCounter(
         val elapsed = Duration.between(last, now).seconds
         if (elapsed < 1 || elapsed > MAX_TICK_SEC) return         // gap (asleep / service paused): don't count
         val sec = elapsed.toInt()
-        for (a in actives) addAll(Rules.usageTargets(a.item, a.counted, now, clock), sec)
+        // A browser and its site (or overlapping sites) can spend the same group's pot at the same time.
+        // Each owner/bucket gets the elapsed time once; each item's own buckets remain separate.
+        val targets = HashSet<Pair<String, String>>()
+        for (a in actives) targets += Rules.usageTargets(a.item, a.counted, now, clock)
+        addAll(targets, sec)
     }
 
     private fun addAll(targets: Set<Pair<String, String>>, amount: Int) {

@@ -453,7 +453,8 @@ def test_schema_changes_come_with_a_schema_version_bump():
               7: "ab86b080a859e00b",                          # 7: emergency_unlocks.tier (emergency kinds)
               8: "ab86b080a859e00b",
               9: "4cc8c906e5383f2d",                          # 9: a group's icon and colour (block_groups.icon / color)
-              10: "9f0d44666ca1d69e"}                         # 10: app_events, the App log (applog.py)
+              10: "9f0d44666ca1d69e",                          # 10: app_events, the App log (applog.py)
+              11: "537aa16fa3d8e55d"}                         # 11: active window usage index + overlap migration
     assert pinned.get(SCHEMA_VERSION) == hashlib.sha256(text.encode()).hexdigest()[:16], \
         (SCHEMA_VERSION, hashlib.sha256(text.encode()).hexdigest()[:16])
 

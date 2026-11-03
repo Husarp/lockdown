@@ -129,6 +129,15 @@ object Dns {
     private val GOOGLE = Regex("^(www\\.)?google\\.(com|[a-z]{2}|co\\.[a-z]{2}|com\\.[a-z]{2})$")
 
     /** The safe-search hostname to answer with instead of [host], or null if [host] isn't a search engine. */
+    /** The legacy filter switch gates both; each keyword-screen switch controls only its own restriction. */
+    fun safeHost(host: String, cfg: com.husarp.lockdown.data.Config): String? {
+        if (!cfg.enabled || !cfg.settings.forceSafeSearch) return null
+        val safe = safeHost(host) ?: return null
+        return safe.takeIf {
+            if (safe == "restrictmoderate.youtube.com") cfg.keywords.youtube else cfg.keywords.safeSearch
+        }
+    }
+
     fun safeHost(host: String): String? {
         val h = host.lowercase()
         return when {

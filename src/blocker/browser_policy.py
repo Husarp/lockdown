@@ -39,16 +39,98 @@ SAFE_SEARCH = {
 YOUTUBE = {path: _YT for path in (r"SOFTWARE\Policies\Google\Chrome", r"SOFTWARE\Policies\Microsoft\Edge",
                                   r"SOFTWARE\Policies\BraveSoftware\Brave")}
 
+# Machine-local originals, separate from portable setup backups. Native registry types retain even binary values.
+_BACKUP = r"SOFTWARE\Lockdown\BrowserPolicyBackup"
+
+
+def _legacy_install() -> bool:
+    """Migrate only the complete legacy footprint, once, before this version enforces anything.
+    A lone matching administrator policy is not evidence of a Lockdown installation. If an earlier upgrade
+    already captured originals, inspect those instead of the currently enforced policies.
+    """
+    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, _BACKUP, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as root:
+        try:
+            return bool(winreg.QueryValueEx(root, "legacy")[0])
+        except FileNotFoundError:
+            pass
+        matches = True
+        for path, entries in POLICIES.items():
+            with (winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ) as key,
+                  winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, _BACKUP + "\\" + path, 0, winreg.KEY_READ) as saved):
+                for name, (kind, data) in entries.items():
+                    try:
+                        present = winreg.QueryValueEx(saved, "present." + name)[0]
+                    except FileNotFoundError:
+                        try:
+                            original = winreg.QueryValueEx(key, name)
+                        except FileNotFoundError:
+                            original = None
+                    else:
+                        original = winreg.QueryValueEx(saved, "value." + name) if present else None
+                    matches = matches and original == (data, kind)
+        winreg.SetValueEx(root, "legacy", 0, REG_DWORD, int(matches))
+        return matches
+
+
+def _remember(saved, key, name, own, legacy=False):
+    try:
+        present = winreg.QueryValueEx(saved, "present." + name)[0]
+    except FileNotFoundError:
+        try:
+            original = winreg.QueryValueEx(key, name)
+        except FileNotFoundError:
+            original = None
+    else:
+        original = winreg.QueryValueEx(saved, "value." + name) if present else None
+        if not (legacy and original == own):
+            return
+    if legacy and original == own:
+        original = None
+    if original is not None:
+        data, kind = original
+        winreg.SetValueEx(saved, "value." + name, 0, kind, data)
+    # Marker last: backup failure must never overwrite an independent original policy.
+    winreg.SetValueEx(saved, "present." + name, 0, REG_DWORD, int(original is not None))
+
+
+def _restore_value(saved, key, name, own, forget=False) -> bool:
+    try:
+        present, _ = winreg.QueryValueEx(saved, "present." + name)
+    except FileNotFoundError:
+        return False   # never owned by us
+    try:
+        current = winreg.QueryValueEx(key, name)
+    except FileNotFoundError:
+        current = None
+    original = winreg.QueryValueEx(saved, "value." + name) if present else None
+    # A different current value was set independently after enforcement; leave it (including deletion) alone.
+    changed = current != original and current == own
+    if changed:
+        if original is None:
+            winreg.DeleteValue(key, name)
+        else:
+            data, kind = original
+            winreg.SetValueEx(key, name, 0, kind, data)
+    if forget:
+        winreg.DeleteValue(saved, "present." + name)
+        if present:
+            winreg.DeleteValue(saved, "value." + name)
+    return changed
+
 
 def apply(safe_search: bool = False, youtube: bool = False) -> bool:
-    """Set every policy that is missing or different (SafeSearch / YouTube ones only when on - removed when off).
+    """Set policies, saving originals once (optional policies return to their originals when off).
     Returns True if anything was written."""
     changed = False
+    legacy = _legacy_install()
     for path in POLICIES.keys() | SAFE_SEARCH.keys() | YOUTUBE.keys():
         wanted = {**POLICIES.get(path, {}), **(SAFE_SEARCH.get(path, {}) if safe_search else {}),
                   **(YOUTUBE.get(path, {}) if youtube else {})}
-        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+        with (winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key,
+              winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, _BACKUP + "\\" + path, 0,
+                                 winreg.KEY_READ | winreg.KEY_SET_VALUE) as saved):
             for name, (kind, data) in wanted.items():
+                _remember(saved, key, name, (data, kind), legacy)
                 try:
                     if winreg.QueryValueEx(key, name) == (data, kind):
                         continue
@@ -57,23 +139,29 @@ def apply(safe_search: bool = False, youtube: bool = False) -> bool:
                 winreg.SetValueEx(key, name, 0, kind, data)
                 changed = True
             for name in (SAFE_SEARCH.get(path, {}).keys() | YOUTUBE.get(path, {}).keys()) - wanted.keys():
-                try:
-                    winreg.DeleteValue(key, name)
-                    changed = True
-                except FileNotFoundError:
-                    pass
+                kind, data = {**SAFE_SEARCH.get(path, {}), **YOUTUBE.get(path, {})}[name]
+                if legacy:
+                    _remember(saved, key, name, (data, kind), legacy=True)
+                changed = _restore_value(saved, key, name, (data, kind)) or changed
     return changed
 
 
 def remove():
-    """Delete the values set by apply() (used on uninstall). Keys are left in place."""
+    """Restore originals saved by apply() (used on uninstall). Keys are left in place."""
     for path in POLICIES.keys() | SAFE_SEARCH.keys() | YOUTUBE.keys():
         try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as key:
-                for name in {**POLICIES.get(path, {}), **SAFE_SEARCH.get(path, {}), **YOUTUBE.get(path, {})}:
-                    try:
-                        winreg.DeleteValue(key, name)
-                    except FileNotFoundError:
-                        pass
+            with (winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _BACKUP + "\\" + path, 0,
+                                 winreg.KEY_READ | winreg.KEY_SET_VALUE) as saved,
+                  winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0,
+                                     winreg.KEY_READ | winreg.KEY_SET_VALUE) as key):
+                entries = {**POLICIES.get(path, {}), **SAFE_SEARCH.get(path, {}), **YOUTUBE.get(path, {})}
+                for name, (kind, data) in entries.items():
+                    _restore_value(saved, key, name, (data, kind), forget=True)
         except FileNotFoundError:
             pass
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _BACKUP, 0, winreg.KEY_SET_VALUE) as root:
+            winreg.DeleteValue(root, "legacy")
+    except FileNotFoundError:
+        pass

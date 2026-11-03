@@ -124,7 +124,8 @@ def test_a_category_extra_is_saved_blocks_its_apps_and_is_checked_again_on_save(
     mode = next(m for m in modes.load(ctx.db) if m["id"] == saved)
     assert mode["extra"] == [extra]
     made = modes.targets(mode, [], [], {("app", "game.exe"): "games"})
-    assert [(t["item_type"], t["target"], t["block_type"]) for t in made if t["item_type"] == "category"] == [("category", "games", "close,background")]
+    # Category extras now expand to actual members, which is what service app enforcement consumes.
+    assert [(t["item_type"], t["target"], t["block_type"]) for t in made] == [("app", "game.exe", "close,background")]
     # a forged extra: an unknown category, or a way that is no way, never gets in
     for forged in ({**extra, "targets": ["nonsense"]}, {**extra, "targets": ["games"], "block_type": "dns"}):
         reply = api.mode_save({**sent, "id": "", "name": "Forged", "extra": [forged]})
