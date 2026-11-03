@@ -19,6 +19,7 @@ import { createPicker, fileName, isHosted, keyOf, labelOf, normalizeHost } from 
 import { createWays, defaultWays, groupOf, GROUPS, waysProblem } from "../../ways.js";
 import { esc, ic, setText, skCard, toast } from "../../ui.js";
 import { createEditHead, groupsLine, title as editTitle } from "./edit.js";
+import { blockNow, mergeBlockNow } from "./block_now.js";
 import "../../suggest.js";           // (needed by targetpicker.js: named here too, so it is fetched in the same round as the files above)
 
 export const freshMs = 60_000;
@@ -359,6 +360,9 @@ export function mount(host, t) {
   earlyList = null;
   ways = createWays({ onChange: ({ group }) => { touched[group] = true; clearError(); } });
   head = createEditHead({
+    onBlockNow: () => blockNow(item.id, false, (r) => {
+      mergeBlockNow(rail, r.until, trustedNow());
+    }),
     onAlerts: async (v) => { const r = await draftCall("draft_set_notify", item.id, v); if (r !== FAILED && r !== CANCELLED) head.setNotify(v); },
     onDisable: () => { const off = !head.disabled; change(draftCall("draft_set_disabled", item.id, off), `${item.name} ${off ? "disabled" : "enabled"}`); },
     onRemove: () => change(draftCall("draft_remove_item", item.id), `${item.name} removed`),

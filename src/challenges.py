@@ -5,6 +5,7 @@ A challenge is an ordered LIST OF STEPS, done top to bottom; a step is {"id", "k
 - memory: a grid whose lit squares you tap back after pressing Ready (3 levels)
 - sort: tap the items from smallest to largest (3 levels)
 - phrase: type a random phrase (its level is its length in characters; 3x3 grid, numbers & CAPITALS, own phrase)
+- captcha: type 4/5/6 characters from a distorted picture (3 levels)
 - password, totp (SECRET_KINDS, Anti-Bypass only - never the bedtime screen): your own password / an authenticator code,
   asked once (no level, times always 1), checked by challenge_secrets.Checker
 An Anti-Bypass run may also be passed whole by the recovery code (`Run(recovery=True)`, see challenge_secrets.py).
@@ -23,22 +24,26 @@ import time
 from fractions import Fraction
 from math import gcd
 
-KINDS = ("math", "memory", "sort", "phrase")           # the kinds that cost effort: Anti-Bypass and the bedtime screen
+KINDS = ("math", "memory", "sort", "phrase", "captcha")  # effort: Anti-Bypass and the bedtime screen
 SECRET_KINDS = ("password", "totp")                    # need something you know / hold: Anti-Bypass only
 AB_KINDS = KINDS + SECRET_KINDS                         # what the Anti-Bypass list may hold
-LABELS = {"math": "Math", "memory": "Memory grid", "sort": "Sorting", "phrase": "Typed phrase",
+LABELS = {"math": "Math", "memory": "Memory grid", "sort": "Sorting", "phrase": "Typed phrase", "captcha": "Captcha",
           "password": "Own password", "totp": "Authenticator code"}
 LEVEL_NAMES = {"math": ("Easy", "Medium", "Hard", "Very hard"), "memory": ("Easy", "Medium", "Hard"),
-               "sort": ("Easy", "Medium", "Hard")}
+               "sort": ("Easy", "Medium", "Hard"), "captcha": ("Easy", "Medium", "Hard")}
 PHRASE_LENGTHS = {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}   # quick picks; any length in between works
 PHRASE_MIN, PHRASE_MAX = 30, 2000
 MAX_STEPS = 6
 MIN_TIMES, MAX_TIMES = 1, 20
 MAX_ID = 24
 PHRASE_MS_PER_CHAR = 35        # typing the phrase faster than this per character isn't a human ("Too fast")
+CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRTUVWXYZ2346789"   # identical to the phone (no ambiguous characters)
+CAPTCHA_LENGTHS = (4, 5, 6)
+CAPTCHA_MS_PER_CHAR = 150
 MIN_SEC = {"math": 1.2, "memory": 0.15, "sort": 0.15}   # fastest plausible: a puzzle / per lit square / per item
 # "Takes about", seconds for ONE of a step (a phrase: 3 + 0.4 per character, x1.3 as a 3x3 grid)
-SECONDS_ONE = {"math": (6, 10, 20, 35), "memory": (8, 10, 15), "sort": (6, 10, 20), "password": (8,), "totp": (20,)}
+SECONDS_ONE = {"math": (6, 10, 20, 35), "memory": (8, 10, 15), "sort": (6, 10, 20), "captcha": (10, 12, 14),
+               "password": (8,), "totp": (20,)}
 PHRASE_SEC_BASE, PHRASE_SEC_PER_CHAR, GRID_FACTOR = 3, 0.4, 1.3
 LONG_SEC = 10 * 60             # above this the list gets a soft "this will take about ..." note
 MINUS, TIMES, DIVIDE = "−", "×", "÷"
@@ -422,6 +427,17 @@ def sort_puzzle(level: int, rng=random) -> Puzzle:
     return Puzzle("sort", {"items": [text for _, text in items]}, answer, check, MIN_SEC["sort"] * n)
 
 
+def captcha_puzzle(level: int, rng=random) -> Puzzle:
+    """Only a PNG and its character count leave the engine; checking and the text stay here."""
+    from captcha_image import render
+
+    length = CAPTCHA_LENGTHS[level]
+    text = "".join(rng.choice(CAPTCHA_ALPHABET) for _ in range(length))
+    return Puzzle("captcha", {"captcha_image": render(text, level, rng), "captcha_length": length}, text,
+                  lambda v: isinstance(v, str) and v.strip().upper() == text,
+                  length * CAPTCHA_MS_PER_CHAR / 1000)
+
+
 def secret_puzzle(kind: str, secrets) -> Puzzle:
     """A password / authenticator step: nothing to draw. The checking is the Checker's (challenge_secrets): the right
     answer is never known here."""
@@ -438,7 +454,8 @@ def make_puzzle(step: dict, rng=random, grid: bool = False, complex: bool = Fals
         return secret_puzzle(kind, secrets)
     if kind == "phrase":
         return phrase_puzzle(level, rng, grid, complex, own)
-    return {"math": math_puzzle, "memory": memory_puzzle, "sort": sort_puzzle}[kind](level, rng)
+    return {"math": math_puzzle, "memory": memory_puzzle, "sort": sort_puzzle,
+            "captcha": captcha_puzzle}[kind](level, rng)
 
 
 # ---------------------------------------------------------------- one run of a challenge

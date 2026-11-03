@@ -14,6 +14,7 @@ from blocker import protection, site_block
 from blocker.hosts import normalize_host
 from db import Database
 from monitor import usage
+from monitor.address import LAST_VALID_SEC, valid_address
 from trusted_time import now_from_db
 
 TICK_SEC = 0.5
@@ -25,7 +26,7 @@ RESTART_SEC = 30   # wait before starting the check again after it fell over
 log = logging.getLogger("lockdown.words")
 
 
-_bar: dict[int, tuple[str, str]] = {}   # browser window -> (its title, its address) at the last read of its bar
+_bar: dict[int, tuple[str, str, float]] = {}   # browser window -> (title, address, monotonic time of its last valid read)
 
 
 def sense_tab():
@@ -35,23 +36,26 @@ def sense_tab():
     if not hwnd or exe not in browser_url.BROWSERS:
         return None
     title = win.window_title(hwnd)
-    url, hidden = tab_address(hwnd, browser_url.browser_url(hwnd), title)
+    url, hidden = tab_address(hwnd, browser_url.browser_url(hwnd), title, exe)
     return hwnd, url, title, hidden
 
 
-def tab_address(hwnd: int, url: str | None, title: str) -> tuple[str | None, bool]:
+def tab_address(hwnd: int, url: str | None, title: str, exe: str | None = None) -> tuple[str | None, bool]:
     """(the address to check, whether the address bar couldn't be read). A video played full screen hides the
     address bar, so the tab check read nothing and left a full-screen YouTube video alone, while the
     tracker counted it (it keeps the last address - usage._read_url). Now the same: the address last read in this
-    window while its title is unchanged, else the site the title names ("Cats - YouTube — Mozilla Firefox" -
-    site_block.title_site), 0.84.9. Kept apart from the tracker's memory: this runs on its own thread."""
-    if url is not None:
+    window for up to 10 seconds while its title is unchanged, else the site the title names
+    ("Cats - YouTube — Mozilla Firefox" - site_block.title_site), 0.84.9. Kept apart from the tracker's memory:
+    this runs on its own thread."""
+    now = time.monotonic()
+    if valid_address(url):
         if len(_bar) > 200:
             _bar.clear()
-        _bar[hwnd] = (title, url)
+        _bar[hwnd] = (title, url, now)
         return url, False
     last = _bar.get(hwnd)
-    return (last[1] if last and title and last[0] == title else site_block.title_site(title)), True
+    return (last[1] if last and title and last[0] == title
+                       and 0 <= now - last[2] <= LAST_VALID_SEC else site_block.title_site(title, exe)), True
 
 
 def act(hwnd: int, action: str) -> bool:

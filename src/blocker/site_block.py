@@ -13,11 +13,11 @@ FLAGS = ("dns", "close", "back")
 _DASH = r"\s[-\u2013\u2014]\s"
 # the browser's own end of a window title: " — Mozilla Firefox", " — Mozilla Firefox Private Browsing",
 # " - Google Chrome", " - Brave", " - Microsoft\u200b Edge" ...
-_BROWSER_END = re.compile(_DASH + r"(?:Mozilla Firefox|Firefox[\w ]*|Google Chrome|Microsoft\u200b?\s?Edge|Brave|Opera|"
-                          r"Vivaldi|Chromium|Private Browsing)(?: Private Browsing)?$")
-# Edge's "... and 2 more pages - Personal" (its profile) before " - Microsoft Edge"
-_EDGE_EXTRA = re.compile(r"(?:\sand \d+ more pages?)?(?:\s-\s[^-\u2013\u2014]+)?$")
-TITLE_SITES = {"YouTube": "youtube.com", "YouTube Music": "music.youtube.com"}
+_BROWSER_END = re.compile(_DASH + r"(?:Mozilla Firefox|Firefox|Google Chrome|Microsoft\u200b?\s?Edge|Brave|Opera|"
+                          r"Vivaldi|Chromium|Private Browsing)(?:[^-\u2013\u2014]*)$", re.IGNORECASE)
+# A tab-count decoration can use any script or word order; no translation table.
+_TAB_COUNT = re.compile(r"\d")
+TITLE_SITES = {"YouTube Music": "music.youtube.com", "YouTube Shorts": "youtube.com", "YouTube": "youtube.com"}
 
 
 def site_flags(block_type: str | None) -> set[str]:
@@ -47,17 +47,26 @@ def text(block_type: str | None) -> str:
                                      ("back", "goes back")) if f in flags)
 
 
-def title_site(title: str | None) -> str | None:
-    """The site a browser window's title says its tab is on, when its address bar can't be read - "youtube.com"
-    for "Cats - YouTube — Mozilla Firefox". A YouTube video played full screen hides the address bar, and the
-    next video (autoplay, a playlist) changes the title, so the last address read no longer counts: YouTube
-    went uncounted and its tab was never sent back (0.84.9). Only YouTube's own titles are known."""
+def title_site(title: str | None, exe: str | None = None) -> str | None:
+    """Recognise the site in a browser title, independent of UI language and tab groups.
+
+    A known browser process cannot disambiguate an earlier page-title segment.
+    A successful address read always takes precedence.
+    """
     if not title:
         return None
     page = _BROWSER_END.sub("", title.strip())
-    # Edge may add " and 2 more pages" and its profile name: "Cats - YouTube and 2 more pages - Personal - Edge"
-    pages = (page, _EDGE_EXTRA.sub("", page)) if "Edge" in title[len(page):] else (page,)
-    for name, site in TITLE_SITES.items():
-        if any(p == name or re.search(_DASH + re.escape(name) + "$", p) for p in pages):
-            return site
+    parts = re.split(_DASH, page)
+    for i, part in enumerate(parts):
+        for name, site in TITLE_SITES.items():
+            if not part.casefold().startswith(name.casefold()):
+                continue
+            extra = part[len(name):]
+            # The marker is the site's trailing segment, optionally followed by
+            # the browser's tab-count decoration and profile/group name. Knowing
+            # the executable doesn't turn an earlier page-title word into a site.
+            if not extra and i == len(parts) - 1:
+                return site
+            if extra and not (extra[0].isascii() and (extra[0].isalnum() or extra[0] == "_")) and _TAB_COUNT.search(extra):
+                return site
     return None

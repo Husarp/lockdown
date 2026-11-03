@@ -37,6 +37,7 @@ import com.husarp.lockdown.ui.theme.Hue
  */
 internal class CoverLook(private val ctx: Context) {
     enum class Kind(val hue: Hue, val icon: Int) {
+        BLOCK(Hue.RED, R.drawable.ic_cover_block),        // blocked now, the PC's k-block
         SLEEP(Hue.INDIGO, R.drawable.ic_cover_moon),       // the PC's k-sched
         BREAK(Hue.GREEN, R.drawable.ic_cover_coffee),      // the PC's k-ok
         REMIND(Hue.AMBER, R.drawable.ic_cover_bell),       // a reminder's hue in the app

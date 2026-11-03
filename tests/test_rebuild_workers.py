@@ -619,12 +619,13 @@ class UsageSink:
 
 def test_a_shown_window_hears_todays_active_seconds_every_five_seconds(env):
     env.heartbeat()
+    # Legacy rows have fewer input-active seconds; all foreground seconds now count.
     env.db.add_activity(f"{NOW.date()} 09:00", "code.exe", "", 600, 480)
     env.db.add_activity(f"{NOW.date()} 21:59", "code.exe", "", 60, 30)
     env.db.add_activity(f"{NOW.date() - timedelta(days=1)} 09:00", "code.exe", "", 600, 600)     # (not today's)
     sink = UsageSink()
     run_status(env, 12, listeners=[sink])
-    assert sink.ticks == [{"active_sec": 510}] * 3                    # at 0 s, 5 s and 10 s
+    assert sink.ticks == [{"active_sec": 660}] * 3                    # at 0 s, 5 s and 10 s
     assert env.errors == []
 
 
@@ -680,7 +681,8 @@ def test_the_publisher_listener_pushes_usage_ticks_only_while_the_window_is_show
     env.clock.advance(5)
     w.tick()
     pub.flush()
-    assert len(window.scripts) == 1 and '["usage_tick",{"active_sec":480}]' in window.scripts[0]
+    # The legacy payload key includes passive foreground time too.
+    assert len(window.scripts) == 1 and '["usage_tick",{"active_sec":600}]' in window.scripts[0]
     env.clock.advance(5)
     w.tick()                                                          # (the same number again: dropped by the publisher)
     assert pub.flush() is False
@@ -1024,7 +1026,7 @@ def test_pomodoro_phase_notices(watch):
     modes.start(watch.db, "focus", NOW, None)
     forced = []
     for minutes, expected in ((10, None), (26, "Break until 22:30 - blocks are off."),
-                              (27, None), (31, "Focus - round 2 of 4, until 22:55. Blocks are back on.")):
+                              (27, None), (31, "Focus - round 2 of 4, until 22:55.\nReddit is now blocked until 23:00.")):
         watch.clock.t = NOW + timedelta(minutes=minutes)
         watch.calls.clear()
         watch.snap()

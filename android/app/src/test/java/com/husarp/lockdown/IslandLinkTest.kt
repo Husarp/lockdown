@@ -328,6 +328,19 @@ class IslandLinkTest {
         assertEquals(fun2.rules, out.groups.single().rules)
     }
 
+    @Test fun captcha_steps_survive_island_config_in_all_challenge_lists() {
+        val steps = (0..2).map { com.husarp.lockdown.engine.ChallengeStep("c$it", "captcha", it, 20) }
+        val remote = Config(
+            antibypass = com.husarp.lockdown.engine.AntiBypassCfg(phrase = true, steps = steps),
+            sleep = com.husarp.lockdown.engine.SleepCfg(challenge = true, challengeSteps = steps,
+                tiers = listOf(com.husarp.lockdown.engine.ReminderTier("23:00", challengeSteps = steps))))
+        val sent = LinkProtocol.json.encodeToString(Config.serializer(), remote)
+        val out = applyConfig(LinkProtocol.json.decodeFromString(Config.serializer(), sent), Config())
+        assertEquals(steps, out.antibypass.stepList)
+        assertEquals(steps, out.sleep.generalChallenge)
+        assertEquals(steps, com.husarp.lockdown.engine.Challenges.clean(out.sleep.tiers.single().challengeSteps))
+    }
+
     // ---------- foreground ----------
 
     @Test fun the_app_in_front_follows_the_events() {

@@ -319,17 +319,17 @@ def test_a_finished_month_counts_every_day(fresh):
     assert cards["average"]["sub"] == "over 30 days" and cards["within"]["value"].endswith(" / 30")
 
 
-def test_the_busiest_day_of_a_month_with_only_idle_time_is_0_m(tmp_path):
-    """The old window listed every day that has rows (idle-only ones too): its busiest day is then "0 m", not "-"."""
+def test_the_busiest_day_counts_passive_foreground_time(tmp_path):
+    """Legacy rows without keyboard activity still count their foreground seconds."""
     ctx, api, db = blank(tmp_path)
     put(db, TODAY - timedelta(days=3), "09:00", seconds=60, active=0)
     put(db, TODAY - timedelta(days=2), "09:00", seconds=60, active=0)
     cards = {c["key"]: c for c in month(api, 2026, 10)["stats"]}
-    assert cards["busiest"]["value"] == "0 m" and cards["busiest"]["sub"] == "Thursday 8 Oct"      # (the first of equals)
-    put(db, TODAY - timedelta(days=1), "09:00", seconds=60, active=60)
+    assert cards["busiest"]["value"] == "1 m" and cards["busiest"]["sub"] == "Thursday 8 Oct"      # (the first of equals)
+    put(db, TODAY - timedelta(days=1), "09:00", seconds=120, active=60)
     st.forget(ctx)
     cards = {c["key"]: c for c in month(api, 2026, 10)["stats"]}
-    assert (cards["busiest"]["value"], cards["busiest"]["sub"]) == ("1 m", "Saturday 10 Oct")
+    assert (cards["busiest"]["value"], cards["busiest"]["sub"]) == ("2 m", "Saturday 10 Oct")
     # a month with nothing recorded at all stays "-"
     assert {c["key"]: c for c in month(api, 2026, 8)["stats"]}["busiest"]["value"] == "-"
 

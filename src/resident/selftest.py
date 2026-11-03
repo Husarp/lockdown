@@ -28,6 +28,7 @@ import traceback
 # Sample arguments for a `read` Api method that takes some: name -> [args] or fn(ctx) -> [args]. A page ticket that
 # adds such a method adds ONE line here (the self-test and scripts/perf_ui.py then time it with these arguments).
 READ_ARGS: dict = {
+    "blocking_block_now_options": lambda ctx: [(next(iter(ctx.db.list_items()), None) or {}).get("id")],
     "update_notes": ["0.0.0"],     # About: the changelog lines of a waiting release
     "rules_validate": [[{"rule_type": "permanent"}, {"rule_type": "time_limit", "same": True, "day": "1h"}]],   # rule editors: two forms
     "appmenu_info": ["app", "chrome.exe"],     # right-click menu of an app: category, protected, groups

@@ -63,7 +63,7 @@ def type_challenge(page):
     text = page.evaluate("document.querySelector('.ch-phrase').textContent")
     page.focus("dialog[open] textarea.typed")
     page.keyboard.type(text, delay=45)
-    page.keyboard.press("Enter")
+    # Completion submits automatically; an extra Enter can reach the restored parent dialog.
     wait_for(page, "document.querySelectorAll('.ch-phrase').length === 0", 8000)
 
 

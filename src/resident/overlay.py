@@ -54,6 +54,8 @@ import threading
 import time
 from datetime import datetime
 
+from notification_batch import BlockingMessage
+
 import challenges
 
 # The page background (css --bg in tokens.css) per theme: the window and the covers on other monitors are painted with
@@ -884,7 +886,7 @@ def attach(win, hub, ctx, ui, log=None):
         page); a strict break keeps your windows minimised all the same (MinimizeWorker), so it is only logged."""
         if kind == "break" or getattr(ui, "toaster", None) is None:
             return
-        ui.toaster.send(text, title=title)
+        hub.notify(BlockingMessage(f"{title}: {text}"), force=True)
 
     def block_for(key):         # (the reminder worker's thread, as wait_for; one cover: a strict break goes by it too)
         if ui.worker is None:

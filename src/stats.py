@@ -1,7 +1,7 @@
 """Screen-time numbers for the Dashboard and Screen Time pages, computed from the activity and switch logs.
 
 Definitions:
-- active time: seconds in front with keyboard/mouse input in the last 5 minutes (idle = in front, no input)
+- active time: all seconds in front, with or without keyboard/mouse input
 - session: time at the PC without a break of 5+ minutes
 - longest focus: the longest stretch in one app without switching away
 - visit: from switching to an app/site until switching away; short visit = under 30 s
@@ -28,7 +28,7 @@ def range_dates(name: str, today: date) -> tuple[date, date]:
 
 def activity(db, start: date, end: date) -> list[dict]:
     """Rows {minute, exe, site, seconds, active} for [start, end)."""
-    rows = db.conn.execute("SELECT minute, exe, site, seconds, active_seconds FROM activity "
+    rows = db.conn.execute("SELECT minute, exe, site, COALESCE(seconds, active_seconds), COALESCE(seconds, active_seconds) FROM activity "
                            "WHERE minute >= ? AND minute < ? ORDER BY minute", (f"{start} 00:00", f"{end} 00:00"))
     return [{"minute": r[0], "exe": r[1], "site": r[2], "seconds": r[3], "active": r[4]} for r in rows]
 
@@ -77,13 +77,13 @@ def first_activity(db) -> datetime | None:
 
 def daily_active(db, start: date, end: date) -> Counter:
     """Active seconds per day ("YYYY-MM-DD") for [start, end) - the same Counter per_day(activity(...)) gives (a day
-    with only idle time is there, with 0), but summed in SQL and including days already rolled up."""
+    with only passive time is included), but summed in SQL and including days already rolled up."""
     rows = db.conn.execute(
         "SELECT d, SUM(a) FROM ("
-        " SELECT substr(minute, 1, 10) AS d, SUM(active_seconds) AS a FROM activity"
+        " SELECT substr(minute, 1, 10) AS d, SUM(COALESCE(seconds, active_seconds)) AS a FROM activity"
         "  WHERE minute >= ? AND minute < ? GROUP BY d"
         " UNION ALL"
-        " SELECT day AS d, SUM(active_seconds) AS a FROM daily_activity WHERE day >= ? AND day < ? GROUP BY day"
+        " SELECT day AS d, SUM(COALESCE(seconds, active_seconds)) AS a FROM daily_activity WHERE day >= ? AND day < ? GROUP BY day"
         ") GROUP BY d ORDER BY d", (f"{start} 00:00", f"{end} 00:00", start.isoformat(), end.isoformat()))
     return Counter({d: a for d, a in rows})
 
@@ -91,7 +91,7 @@ def daily_active(db, start: date, end: date) -> Counter:
 def active_on(db, day: date) -> int:
     """Active seconds on one day from the minute detail (what totals(activity(day, day + 1))[0] gives, one SQL sum).
     Meant for today, which is never rolled up."""
-    return db.conn.execute("SELECT COALESCE(SUM(active_seconds), 0) FROM activity WHERE minute >= ? AND minute < ?",
+    return db.conn.execute("SELECT COALESCE(SUM(COALESCE(seconds, active_seconds)), 0) FROM activity WHERE minute >= ? AND minute < ?",
                            (f"{day} 00:00", f"{day + timedelta(days=1)} 00:00")).fetchone()[0]
 
 
@@ -100,10 +100,10 @@ def app_totals(db, start: date, end: date) -> Counter:
     them - by when each app was first seen - so most_common() breaks ties the same way."""
     rows = db.conn.execute(
         "SELECT exe, SUM(a), MIN(f) FROM ("
-        " SELECT exe, SUM(active_seconds) AS a, MIN(minute) AS f FROM activity"
+        " SELECT exe, SUM(COALESCE(seconds, active_seconds)) AS a, MIN(minute) AS f FROM activity"
         "  WHERE minute >= ? AND minute < ? GROUP BY exe"
         " UNION ALL"
-        " SELECT exe, SUM(active_seconds) AS a, MIN(COALESCE(first_minute, day || ' 00:00')) AS f"
+        " SELECT exe, SUM(COALESCE(seconds, active_seconds)) AS a, MIN(COALESCE(first_minute, day || ' 00:00')) AS f"
         "  FROM daily_activity WHERE day >= ? AND day < ? GROUP BY exe"
         ") GROUP BY exe ORDER BY MIN(f), exe", (f"{start} 00:00", f"{end} 00:00", start.isoformat(), end.isoformat()))
     return Counter({exe: a for exe, a, _first in rows})

@@ -103,9 +103,9 @@ class AlertsAndHistoryTest {
         val w2 = BlockWatcher()
         w2.check(items, groups, { _, _ -> 0 }, clock, at(20, 59), emptySet(), cfg)
         val msgs = w2.check(items, groups, { _, _ -> 0 }, clock, at(21, 0), setOf("3"), cfg)
-        assertEquals(listOf("Evenings started - 2 things blocked until 23:00.", "Solo is now blocked until 23:00."), msgs)
+        assertEquals(listOf("Evenings started - Reddit, X blocked until 23:00.", "Solo is now blocked until 23:00."), msgs)
         assertTrue("Solo is now blocked until 23:00." in w2.urgent)
-        assertFalse("Evenings started - 2 things blocked until 23:00." in w2.urgent)
+        assertFalse("Evenings started - Reddit, X blocked until 23:00." in w2.urgent)
         // the group's warning was one line too
         val w3 = BlockWatcher()
         assertEquals(listOf("Evenings starts in 1 min (21:00): Reddit, X will be blocked.", "Solo will be blocked in 1 min (21:00)."),
@@ -250,5 +250,16 @@ class AlertsAndHistoryTest {
         assertEquals(2, heat[0][9])        // 40 min on one Monday, 0 on the other: 20 min average
         assertEquals(0, heat[1][9])
         assertEquals(DayDetail(), HistoryLog.parseDay(mon1, ""))
+    }
+    @Test fun unrelated_items_keep_their_names_and_different_end_times_in_one_notification() {
+        fun schedule(end: String) = Rule(RuleType.SCHEDULED,
+            schedule = Schedule(SchedMode.BLOCK, listOf(Window((0..6).toList(), "21:00", end))))
+        val items = listOf(Item("1", "YouTube", "com.y", ItemType.APP, rules = listOf(schedule("22:00"))),
+            Item("2", "Instagram", "com.i", ItemType.APP, rules = listOf(schedule("23:00"))))
+        val w = BlockWatcher()
+        w.check(items, emptyList(), { _, _ -> 0 }, clock, at(20, 0), emptySet(), AlertsCfg(warn = false))
+        val messages = w.check(items, emptyList(), { _, _ -> 0 }, clock, at(21, 0), emptySet(), AlertsCfg(warn = false))
+        assertEquals("YouTube is now blocked until 22:00.\nInstagram is now blocked until 23:00.",
+            com.husarp.lockdown.engine.NotificationBatch().merge(messages, 0))
     }
 }

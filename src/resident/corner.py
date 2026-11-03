@@ -77,15 +77,16 @@ class Corner:
             self._cards.append(card)
         self._changed()
 
-    def notice(self, message: str, actions=(), sticky: bool = False) -> str:
+    def notice(self, message: str, actions=(), sticky: bool = False, *, key: str | None = None) -> str:
         """An in-app notice. `actions`: [(label, callback)]; sticky = only its buttons and the ✕ close it."""
         actions = list(actions)[:MAX_BUTTONS]
-        key = f"notice:{next(self._ids)}"
+        key = key or f"notice:{next(self._ids)}"
         card = {"key": key, "id": next(self._ids), "kind": "notice", "text": str(message), "sticky": bool(sticky),
                 "ms": NOTICE_MS, "buttons": [{"label": str(label), "action": f"act:{i}",
                                               "style": "primary" if i == 0 and len(actions) > 1 else "outline"}
                                              for i, (label, _fn) in enumerate(actions)]}
         with self._lock:
+            self._drop(key)
             self._cards.append(card)
             self._meta[key] = {"callbacks": [fn for _label, fn in actions]}
         self._changed()

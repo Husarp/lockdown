@@ -33,6 +33,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from notification_batch import BlockingMessage
 import alerts
 import digest
 import reminders
@@ -193,6 +194,8 @@ class Notifier:
                  front: bool = False, sound: bool = False) -> bool:
         if self.muted(force or front):
             return False
+        if isinstance(message, BlockingMessage):
+            message.force = force or front
         if front:
             self.show(message, action=action, actions=actions, sticky=sticky, front=True, sound=sound)
         else:
@@ -512,7 +515,7 @@ class Alerter:
                 names = {c["key"]: c["name"] for c in categories.load(db)}
             message = alerts.format_message(alerts.get(db, f"notify.msg.{reason}"), event, hub.clock.now(db),
                                             protection.list_names(db), names)
-        hub.notify(message)
+        hub.notify(BlockingMessage(message))
         return True
 
     def flush_due(self):
@@ -646,11 +649,12 @@ class WatcherWorker(Worker):
             self._settings = {key: alerts.get(self.db, key) for key in alerts.DEFAULTS}
         self._announce_phase(snap)
         sound = self._settings.get("notify.front.sound") == "1"
-        for message in self.watcher.check(snap.items, snap.groups, snap.usage, snap.now, hub.in_use(), self._settings):
+        for message in self.watcher.check(snap.items, snap.groups, snap.usage, snap.now, hub.in_use(), self._settings,
+                                          active_blocks=snap.block_list):
             if message in self.watcher.front:      # the app in front is about to be blocked: gets through games and mutes
-                hub.notify(message, force=True, front=True, sound=sound)
+                hub.notify(BlockingMessage(message), force=True, front=True, sound=sound)
             else:
-                hub.notify(message, force=message in self.watcher.urgent)
+                hub.notify(BlockingMessage(message), force=message in self.watcher.urgent)
         if slow and digest.due(self.db, snap.now):       # the weekly summary
             db = self.db
             names = lambda kind, name: name_of(kind, name, snap.items)   # noqa: E731
@@ -671,8 +675,11 @@ class WatcherWorker(Worker):
             ph = mode["phase"]
             end = datetime.fromisoformat(ph["ends_at"])
             if ph["name"] == "focus":
-                self.hub.notify(f"Focus - round {ph['round']} of {ph['rounds']}, until {end:%H:%M}. "
-                                "Blocks are back on.", force=True)
+                details = [alerts.BlockWatcher._started({"names": [b["item"]["display_name"]],
+                           "reason": b["reason"], "until": b["until"], "rule": b["rule"]}, snap.now)
+                           for b in snap.block_list]
+                self.hub.notify(BlockingMessage(f"Focus - round {ph['round']} of {ph['rounds']}, until {end:%H:%M}.\n"
+                                               + "\n".join(details)), force=True)
             else:
                 self.hub.notify(f"{ph['name'].capitalize()} until {end:%H:%M} - blocks are off.", force=True)
         elif last and not phase and self.last_end and snap.now >= datetime.fromisoformat(self.last_end):
@@ -755,7 +762,7 @@ class MinimizeWorker(Worker):
         if self.hub.win.minimize_foreground(allowed):     # you tried to open something - send it back and say why
             if now.timestamp() - self._break_notice_at > BREAK_NOTICE_SEC:
                 self._break_notice_at = now.timestamp()
-                self.hub.notify(f"Break in progress - {max(1, round((until - now).total_seconds() / 60))} min left.",
+                self.hub.notify(BlockingMessage(f"Break in progress - {max(1, round((until - now).total_seconds() / 60))} min left."),
                                 force=True)
             blocked = getattr(self.reminder_ui, "break_blocked", None)
             if blocked is not None:     # (the new window: the cover comes back, unless it is up; any thread is fine)
@@ -985,7 +992,7 @@ class WordNotices:
             self._batch = []
             self._timer_handle = self._schedule(WORDS_BATCH_SEC, self._summary)
         done = "closing the tab" if action == "close" else "going back"
-        self.hub.notify(f'"{word.rstrip("*")}" is a blocked word - {done}.')
+        self.hub.notify(BlockingMessage(f'"{word.rstrip("*")}" is a blocked word - {done}.'))
 
     def _summary(self):
         with self._lock:
@@ -997,7 +1004,7 @@ class WordNotices:
                 self._timer_handle = None
         if batch:
             n = len(batch)
-            self.hub.notify(f"Closed {n} more tab{'s' * (n > 1)} with blocked words.")
+            self.hub.notify(BlockingMessage(f"Closed {n} more tab{'s' * (n > 1)} with blocked words."))
 
     def stop(self):
         with self._lock:

@@ -189,6 +189,7 @@ object ReminderRunner {
         val b = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(p.title).setContentText(p.text)
+            .setOnlyAlertOnce(true)
             .setStyle(NotificationCompat.BigTextStyle().bigText(p.text))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
         for (btn in p.buttons.take(3))

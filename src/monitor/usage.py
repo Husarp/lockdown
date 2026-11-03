@@ -1,6 +1,6 @@
 """Desktop tracking in the tray agent (which sees the desktop), twice a second:
 
-- screen time: which app (and which site, in a browser) is in front, and whether you're active
+- screen time: all time the app (and its browser site) is in front, with or without input
 - switches: every change to another app / site
 - blocked items in use - the foreground one and the window in front on every other monitor: time goes to every
   usage bucket their rules need (own day total, shared group limit, allowance of the current blocked stretch of
@@ -27,6 +27,7 @@ from blocker.apps import (PROTECTED, app_folder, exe_name, in_folder, interprete
 from blocker.hosts import normalize_host
 from blocker.site_block import title_site
 from db import Database
+from monitor.address import LAST_VALID_SEC, valid_address
 from rules import (Usage, block_targets, closed_opening, counted_rules, effective_rules, limit_targets,
                    switch_targets, usage_targets, visit_targets)
 from trusted_time import now_from_db
@@ -36,7 +37,6 @@ FLUSH_SEC = 2          # counted time is written at most this often (sooner when
 URL_REFRESH_SEC = 2    # an unchanged browser window's address bar is read again this often (_read_url)
 PROCESS_REFRESH_SEC = 2   # the process list (to spot app launches) is read again this often (UsageTracker.running_now)
 RESTART_SEC = 30       # wait before starting the tracker again after it fell over
-ACTIVE_IDLE_SEC = 5 * 60   # screen time: input within this = active (plan: 5 min idle threshold)
 # Time is counted as it really passed between two ticks, not as TICK_SEC per tick: a tick that comes late (the
 # window busy, a database lock, the PC under load) used to lose everything but 2 seconds of it. A longer gap than
 # this is the PC asleep, not play - and while the tray isn't counting at all, the service counts instead.
@@ -81,10 +81,11 @@ def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict]
                  categories: dict[tuple[str, str], str] | None = None, path: str | None = None,
                  owners: frozenset | set = frozenset()) -> list[dict]:
     """Items being used: the foreground app (games count even without keyboard/mouse input), and the site
-    open in the foreground browser tab (only while you're not away). A blocker on a whole category counts as
-    in use whenever one of its members is, so its time limit is one pot for everything in the category."""
+    open in the foreground browser tab, with or without input. A blocker on a whole category counts as
+    in use whenever one of its members is, so its time limit is one pot for everything in the category.
+    The legacy idle argument is ignored; existing callers can keep their sensor tuple."""
     used = [i for i in items if i["item_type"] == "app" and exe and app_matches(i, exe, path, owners)]
-    if url and not idle:
+    if url:
         try:
             site = match_item(normalize_host(url), [i for i in items if i["item_type"] == "site"])
         except ValueError:   # e.g. search text typed in the address bar
@@ -105,7 +106,7 @@ def used_categories(exe: str | None, url: str | None, idle: bool, used: list[dic
     out = {modes.item_category(i, categories) for i in used}
     if exe:
         out.add(categories.get(("app", exe.lower()), ""))
-    if url and not idle:
+    if url:
         try:
             host = normalize_host(url)
         except ValueError:
@@ -118,7 +119,7 @@ def used_categories(exe: str | None, url: str | None, idle: bool, used: list[dic
 
 
 def sense_desktop():
-    """(foreground exe, its browser URL or None, seconds since last input, exe path or None, its pid or None,
+    """(foreground exe, its browser URL or None, reserved zero (legacy sensor slot), exe path or None, its pid or None,
     the other windows in front) - None exe when nothing is in front.
 
     The other windows in front (0.84.2): on a second monitor the window on top is in use too - a game left
@@ -129,30 +130,31 @@ def sense_desktop():
     from monitor import browser_url, win
     hwnd, exe, path = win.foreground_process()
     if win.session_locked():   # locked: nothing is being used, whatever window was in front
-        return None, None, win.idle_seconds(), None, None
+        return None, None, 0.0, None, None
     others = []
     try:
         for o_hwnd, o_pid, o_exe, o_path in win.front_windows():
             if o_hwnd == hwnd:
                 continue
-            others.append((o_exe, _read_url(browser_url, win, o_hwnd, True) if o_exe in browser_url.BROWSERS
+            others.append((o_exe, _read_url(browser_url, win, o_hwnd, True, o_exe) if o_exe in browser_url.BROWSERS
                            else None, o_path or None, o_pid))
     except Exception:
         log.exception("Couldn't list the windows in front on the other monitors")
     if not hwnd:
-        return None, None, win.idle_seconds(), None, None, others
-    url = _read_url(browser_url, win, hwnd, False) if exe in browser_url.BROWSERS else None
-    return exe or None, url, win.idle_seconds(), path or None, win.window_pid(hwnd) or None, others
+        return None, None, 0.0, None, None, others
+    url = _read_url(browser_url, win, hwnd, False, exe) if exe in browser_url.BROWSERS else None
+    return exe or None, url, 0.0, path or None, win.window_pid(hwnd) or None, others
 
 
 NO_BAR_RETRY_SEC = 30
 NO_BAR_AFTER = 3   # failed reads in a row before a browser window counts as having no address bar
 _no_bar: dict[int, tuple[int, float]] = {}   # browser window -> (failed reads in a row, when last looked)
-# browser window -> (its title, its URL - None if never read under that title -, when it was last asked)
-_seen: dict[int, tuple[str, str | None, float]] = {}
+# browser window -> (title, last valid URL or None, last attempt time, last successful read time)
+_seen: dict[int, tuple[str, str | None, float, float]] = {}
+_url_diagnostics: dict[int, float] = {}   # last warning per window; never log addresses or titles
 
 
-def _read_url(browser_url, win, hwnd: int, back_off: bool) -> str | None:
+def _read_url(browser_url, win, hwnd: int, back_off: bool, exe: str | None = None) -> str | None:
     """The active tab's URL of a browser window, by UI Automation.
 
     Reading the address bar (UI Automation, a call into the browser's process) is the expensive part of a tick, so
@@ -161,48 +163,64 @@ def _read_url(browser_url, win, hwnd: int, back_off: bool) -> str | None:
     single-page site; a link followed before the new page has named itself), so a move to a blocked site is
     still caught within URL_REFRESH_SEC - no later than when the tracker ticked every 2 seconds.
 
-    When the address bar can't be read - hidden while a video plays full screen, the browser busy - the URL last
-    read from the same window still counts as long as the window's title (the tab's title) hasn't changed: a
-    YouTube video in full screen is still YouTube. A window not in the foreground (`back_off`) that fails
-    NO_BAR_AFTER times in a row has no address bar (an installed web app): it is looked at again only every
-    NO_BAR_RETRY_SEC, as searching its UI tree each tick would be slow; one that won't answer is still its app,
-    just without a site. A failed read is not repeated every tick either, while the title stays the same (a
-    browser window in front with no address bar - an installed web app - used to be searched twice a second): it
-    is asked again after URL_REFRESH_SEC, or at once when the title changes - as often as at the 2-second tick.
+    Failed reads use the last valid address for the same window and title for at most LAST_VALID_SEC.
+    Title detection remains available after that (including fullscreen autoplay). Reads are retried every
+    URL_REFRESH_SEC; background windows without a bar back off to NO_BAR_RETRY_SEC after NO_BAR_AFTER failures.
 
     No address read under this title (the bar hidden, and autoplay or a playlist moved the full-screen video on to
     the next one, or a browser web app): the site the title names, if it names one ("Cats - YouTube — Mozilla
     Firefox" is youtube.com - site_block.title_site, 0.84.9). That video used to count as no site at all."""
     title = win.window_title(hwnd)
     url = _read_bar(browser_url, win, hwnd, back_off, title)
-    return url if url is not None else title_site(title)
+    if url is not None:
+        return url
+    if exe is None:
+        try:
+            exe = win.process_name(hwnd)
+        except Exception:  # the process may have exited since its title was read
+            pass
+    return title_site(title, exe)
 
 
 def _read_bar(browser_url, win, hwnd: int, back_off: bool, title: str) -> str | None:
     now = time.monotonic()
     last = _seen.get(hwnd)
+    previous = (last[1] if last and title and last[0] == title
+                and 0 <= now - last[3] <= LAST_VALID_SEC else None)
     if last and title and last[0] == title and 0 <= now - last[2] < URL_REFRESH_SEC:
-        return last[1]
+        return previous
     fails, when = _no_bar.get(hwnd, (0, 0.0))
-    if not (back_off and fails >= NO_BAR_AFTER and now - when < NO_BAR_RETRY_SEC):
+    if not (back_off and (not last or last[0] == title) and fails >= NO_BAR_AFTER
+            and now - when < NO_BAR_RETRY_SEC):
         try:
             url = browser_url.browser_url(hwnd)
         except Exception:
             url = None
-        if url is not None:
+        if valid_address(url):
             _no_bar.pop(hwnd, None)
             if len(_seen) > 200:
                 _seen.clear()
-            _seen[hwnd] = (title, url, now)
+            _seen[hwnd] = (title, url.strip(), now, now)
             return url
         if len(_no_bar) > 200:
             _no_bar.clear()
         _no_bar[hwnd] = (fails + 1, now)
+        if fails + 1 >= 10 and now - _url_diagnostics.get(hwnd, float("-inf")) >= 60:
+            if len(_url_diagnostics) > 200:
+                _url_diagnostics.clear()
+            _url_diagnostics[hwnd] = now
+            try:
+                exe = win.process_name(hwnd)
+            except Exception:
+                exe = "browser"
+            log.warning("Browser URL read failed repeatedly: exe=%s reason=%s title_fallback=%s",
+                        exe, "empty or invalid value" if url is not None else "address bar unavailable",
+                        bool(title_site(title, exe)))
         if title:   # (the same page: asked again in URL_REFRESH_SEC, not every tick - the last URL still counts)
             if len(_seen) > 200:
                 _seen.clear()
-            _seen[hwnd] = (title, last[1] if last and last[0] == title else None, now)
-    return last[1] if last and title and last[0] == title else None
+            _seen[hwnd] = (title, previous, now, last[3] if previous else now - LAST_VALID_SEC - 1)
+    return previous
 
 
 def members(db: Database) -> dict:
@@ -392,7 +410,7 @@ class UsageTracker(threading.Thread):
         return self.proc_names
 
     def tick(self, db: Database, sense, running_exes=None):
-        exe, url, idle_sec, *more = sense()
+        exe, url, _unused_idle, *more = sense()
         path = more[0] if more else None
         pid = more[1] if len(more) > 1 else None
         others = more[2] if len(more) > 2 else ()
@@ -421,7 +439,7 @@ class UsageTracker(threading.Thread):
         total = seconds + self.carry   # screen time is whole seconds per minute row: the fraction waits
         screen = int(total)
         self.carry = total - screen
-        switched = self.record_activity(exe, site_of(url), idle_sec, now, screen)
+        switched = self.record_activity(exe, site_of(url), 0.0, now, screen)
         # Never "idle" for limits: the site in the foreground tab counts like the app in front does, input or not.
         # 15 minutes without keyboard or mouse used to stop the count - and a video watched without touching
         # anything is exactly that, so a group's "15 min allowed during blocked hours" never ran out and YouTube
@@ -564,14 +582,17 @@ class UsageTracker(threading.Thread):
             limit_writes += 1
 
     def record_activity(self, exe: str | None, site: str, idle_sec: float, now, seconds: int) -> bool:
-        """Screen time + switch log (written by flush()). Returns True if you just switched to another app/site."""
+        """Screen time + switch log (written by flush()). Returns True on an app/site switch.
+
+        idle_sec is retained for old sensors; all foreground seconds count.
+        """
         focus = (exe, site) if exe else None     # None: nothing in front (e.g. locked)
         switched = False
         if exe:
             if seconds:
                 entry = self.activity.setdefault((now.strftime("%Y-%m-%d %H:%M"), exe, site), [0, 0])
                 entry[0] += seconds
-                entry[1] += seconds if idle_sec < ACTIVE_IDLE_SEC else 0
+                entry[1] += seconds
             if self.last_focus is not _UNSET and focus != self.last_focus:
                 self.switches.append((now, exe, site))
                 self.urgent = True

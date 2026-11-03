@@ -49,7 +49,7 @@ These two pages don't exist yet, so nothing has to be redone. The data behind th
 Purpose: "How am I doing today?" at a glance. Every card is clickable and opens its detail page.
 
 Data available:
-- screen time today (active vs idle), and per day for past days → trend vs yesterday / last week
+- screen time today (all foreground time), and per day for past days → trend vs yesterday / last week
 - time per app and per website today
 - switches today (how often you jumped to another app/site), and which apps/sites you switch to most
 - blocked items: how many are blocked right now, what's coming next ("Night schedule starts at 22:00")
@@ -61,14 +61,14 @@ Wanted elements (from the plan, adjust freely):
 - stat cards row: Screen time today · Blocked now · Switches today · Time saved (optional)
 - "Limits today" list with progress bars (see above)
 - "Coming up" — next blocks starting/ending today
-- today's timeline: a horizontal bar through the day, coloured by what you did (active app / idle)
+- today's timeline: a horizontal bar through the day, coloured by what you did (foreground app)
 - 7-day screen time bar chart with a daily-limit line
 - quick glance: top app, most switched app
 
 ### 4.2 Screen Time page
 
 Tabs: **Overview · Apps · Websites · Switches** (Goals and Limits later).
-- **Overview:** today's active/idle totals, timeline, 7/30-day bar chart, hourly heatmap (days × hours, which hours
+- **Overview:** today's foreground totals, timeline, 7/30-day bar chart, hourly heatmap (days × hours, which hours
   you're most active), category split (productive / neutral / distracting — user can assign a category per app).
 - **Apps / Websites:** ranked list: icon, name, time today, % bar, switches, category; date range picker
   (Today / Yesterday / 7 days / 30 days).

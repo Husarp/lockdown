@@ -182,7 +182,7 @@ class BlockWatcher:
 
     def __init__(self):
         self.warned: dict[tuple, datetime] = {}   # warning key -> when last shown
-        self.prev_blocked: set[int] | None = None
+        self.prev_blocked: set | None = None
         # the messages from the last check that are about something you are using right now. Those get through
         # a mode that mutes, or Do not disturb: being told the thing in front of you
         # is about to go is the one notice that is worth interrupting a game for.
@@ -204,7 +204,7 @@ class BlockWatcher:
         return source, "schedule", when.strftime("%Y%m%d%H%M")
 
     def check(self, items: list[dict], groups: list[dict], usage, now: datetime, in_use: set[int],
-              settings: dict) -> list[str]:
+              settings: dict, active_blocks=None) -> list[str]:
         messages = []
         self.urgent = set()
         self.front = set()
@@ -269,18 +269,20 @@ class BlockWatcher:
                         self.urgent.add(text)
                     messages.append(text)
 
+        if active_blocks is not None:
+            blocked = {(b["item"]["id"] if b["item"]["id"] is not None else
+                        (b["item"]["item_type"], b["item"]["target"])):
+                       (b["item"], (b["reason"], b["until"], b["rule"])) for b in active_blocks}
         if self.prev_blocked is not None and settings["notify.started.enabled"] == "1":
             started: dict[tuple, dict] = {}
             for item_id, (item, (reason, until, rule)) in blocked.items():
                 if item_id in self.prev_blocked:
                     continue
-                # one line per group, and one for everything blocked by its own rules
-                source = ("group", rule["group"]["id"]) if rule.get("group") else ("item",)
+                # Only items with the same reason and end time can share a line.
+                source = (("group", rule["group"]["id"]) if rule.get("group") else ("item",)) + (reason, until)
                 entry = started.setdefault(source, {"rule": rule, "reason": reason, "until": until, "names": []})
                 entry["names"].append(item["display_name"])
                 entry["in_use"] = entry.get("in_use", False) or item_id in in_use
-                if entry["until"] != until or entry["reason"] != reason:
-                    entry["until"], entry["reason"] = None, ""   # they don't share an end: keep the line short
             for e in started.values():
                 text = self._started(e, now)
                 if e.get("in_use"):               # it just went while you were in it
@@ -331,8 +333,7 @@ class BlockWatcher:
         if rule["rule_type"] == "unlock":
             return f"Emergency unlock ends in {minutes} min: {names} will be blocked again."
         if rule["rule_type"] == "pause":
-            count = len(set(e["names"]))
-            what = names if count <= 3 else f"{count} things"
+            what = names
             return (f"Your blocks are back on in {minutes} min ({_when_text(e['when'], now)}): {what} will be "
                     "blocked again.")
         if rule.get("allowance_min"):
@@ -343,17 +344,16 @@ class BlockWatcher:
 
     @staticmethod
     def _started(e: dict, now: datetime) -> str:
-        """Summarized on purpose: a block starting is not something you did, so it is one line for the group
-        (and one for everything else), not a popup per site and app. What you actually try to open still gets
-        its own alert, from the service."""
+        """One line per shared reason and end time, naming every affected app and site."""
         until = f" until {_when_text(e['until'], now)}" if e["until"] else ""
         why = {"limit": " - time limit reached", "switches": " - opened too many times",
-               "temporary": " (temporary block)"}.get(e["reason"], "")
+               "temporary": " (temporary block)",
+               "mode": f" - {e['rule'].get('mode', 'active')} mode"}.get(e["reason"], "")
         names = _names(e["names"])
         count = len(set(e["names"]))
         if e["rule"].get("group"):
             return (f"{e['rule']['group']['name']} started - "
-                    f"{names if count == 1 else f'{count} things'} blocked{until}{why}.")
+                    f"{names} blocked{until}{why}.")
         if count == 1:
             return f"{names} is now blocked{until}{why}."
-        return f"{count} things are now blocked{until}{why}."
+        return f"{names} are now blocked{until}{why}."

@@ -19,6 +19,7 @@ import { openMenu } from "../../menu.js";
 import { confirmButton, el, empty, esc, ic, setText } from "../../ui.js";
 import { createVList } from "../../vlist.js";
 import { takeEarlyOverview } from "./early.js";
+import { blockNow } from "./block_now.js";
 
 export const freshMs = 10_000;
 export const REFRESH_TICKS = 30;          // a reload every 30 s while shown (used times move)
@@ -138,7 +139,7 @@ const STYLE = `<style>
 .bo-st { min-width: 0; display: flex; }
 .bo-st .chip { max-width: 100%; }
 .bo-st .chip span { overflow: hidden; text-overflow: ellipsis; }
-.bo-acts { display: flex; gap: var(--sp-1); justify-content: flex-end; }
+.bo-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); justify-content: flex-end; }
 .bo-alerts { justify-self: start; color: var(--text-2); }
 .bo-ic .aic { position: relative; }
 .bo-ic .aic .bo-tile { width: 62%; height: 62%; stroke-width: 2; }
@@ -158,7 +159,7 @@ const STYLE = `<style>
 .bo-row [data-act="disable"], .bo-row .confirm { display: none; }
 .bo-row[data-t="ghead"] [data-act="disable"], .bo-row[data-t="ghead"] .confirm, .bo-row[data-t="item"] .confirm { display: inline-flex; }
 .bo-row[data-t="ghead"] > .bo-alerts, .bo-row[data-t="member"] > .bo-alerts { visibility: hidden; }
-.bo-row[data-t="member"] .bo-acts { visibility: hidden; }
+.bo-row[data-t="member"] .bo-acts > :not([data-act="block-now"]) { display: none; }
 .bo-row[data-t="member"] .confirm { display: none; }
 .bo-empty { flex: 1; display: grid; align-content: center; }
 .bo-empty[hidden] { display: none; }
@@ -172,7 +173,7 @@ const ROW_HTML = `<span class="bo-ic"><span class="aic"><img alt="" loading="laz
   <div class="bo-chips tags-col"></div>
   <div class="bo-st"><span class="chip">${ic("ban")}<span></span></span></div>
   <button class="btn btn-sm btn-ghost bo-alerts" type="button" data-act="alerts" title="Blocked-visit alerts for this item">${ic("bell")}<span></span></button>
-  <div class="acts bo-acts"><button class="btn btn-sm" type="button" data-act="edit"><span>Edit</span></button><button class="btn btn-sm" type="button" data-act="disable">Disable</button></div>`;
+  <div class="acts bo-acts"><button class="btn btn-sm" type="button" data-act="block-now">Block now</button><button class="btn btn-sm" type="button" data-act="edit"><span>Edit</span></button><button class="btn btn-sm" type="button" data-act="disable">Disable</button></div>`;
 
 // ---------------------------------------------------------------- rows
 
@@ -296,7 +297,8 @@ function onClick(e) {
   const row = node._row, btn = e.target.closest("[data-act]");
   if (!btn) { if (row.k === "member") tab.editItem(row.e.id); return; }
   const act_ = btn.dataset.act;
-  if (act_ === "alerts" && row.k === "item") chooseAlerts(btn, row);
+  if (act_ === "block-now" && row.k !== "dhead") blockNow(row.e.id, row.k === "ghead" || row.e.t === "group", () => tab.reload());
+  else if (act_ === "alerts" && row.k === "item") chooseAlerts(btn, row);
   else if (act_ === "edit") {
     if (row.k === "item") { if (row.e.groups.length) editItemMenu(btn, row.e); else tab.editItem(row.e.id); }
     else if (row.k === "ghead") tab.editGroup(row.e.id);

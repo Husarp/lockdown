@@ -182,12 +182,20 @@ def test_no_fallback_when_the_page_comes_in_time_or_the_screen_went():
 
 def test_the_agent_wires_the_cover_gated_and_bedtime_falls_back_to_a_windows_notification(tmp_path):
     from db import Database
+    from resident.workers import Hub
     db = Database(tmp_path / "w.db")
-    sent = []
+    sent, scheduled = [], []
     win = windows.Windows(overlay=SimpleNamespace(evaluate_js=lambda s: None, show=lambda: None, hide=lambda: None))
+    toaster = SimpleNamespace(works=lambda: True,
+                              send=lambda text, buttons=(), **kw: sent.append((text, kw)))
     ui = SimpleNamespace(worker=SimpleNamespace(db=db, answer=lambda k, a: None, poke=lambda: None),
-                         overlay_handler=None, toaster=SimpleNamespace(send=lambda text, title=None: sent.append((title, text))))
-    hub = SimpleNamespace(snapshot=None, clock=SimpleNamespace(now_with=lambda off: None))
+                         overlay_handler=None, toaster=toaster)
+    hub = Hub(clock=SimpleNamespace(now_with=lambda off: None), win=SimpleNamespace(is_fullscreen=lambda: False))
+    hub.snapshot = SimpleNamespace(pause=None, mode={"mute": True})
+    corner = Corner(Pub(), None, page_ready=False)
+    sink = notices.Notices(hub, corner, toaster, read_format=lambda: "toast", clock=lambda: 0,
+                           schedule=lambda delay, fn: scheduled.append((delay, fn)) or object())
+    hub.notify.show = sink.show
     ctx = SimpleNamespace()
     publisher = overlay_mod.attach(win, hub, ctx, ui)
     try:
@@ -195,11 +203,16 @@ def test_the_agent_wires_the_cover_gated_and_bedtime_falls_back_to_a_windows_not
         assert not cover.page_ok
         cover._fallback("sleep", "Time for bed", "Go to sleep.")
         cover._fallback("break", "Break time", "Look away.")
-        assert sent == [("Time for bed", "Go to sleep.")]                     # (a break keeps the windows down anyway)
+        # Bedtime joins the blocking batch, even through a muting mode; a break only keeps the windows down.
+        assert sent == [] and len(scheduled) == 1 and scheduled[0][0] == 0.75
+        scheduled[0][1]()
+        assert len(sent) == 1 and sent[0][0] == "Time for bed: Go to sleep."
+        assert sent[0][1]["replace_key"] == "blocks" and corner.cards() == []
         windows.page_ready(win, "overlay")
         assert cover.page_ok
     finally:
         publisher.stop()
+        db.close()
 
 
 def test_a_challenge_never_goes_to_a_cover_that_is_not_on_screen():

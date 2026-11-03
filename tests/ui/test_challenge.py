@@ -94,7 +94,7 @@ def test_header_lines_and_more(shell, page, harness):
     lines = page.eval_on_selector_all("#dlg .ch-chg", "els => els.map(e => e.textContent)")
     assert lines == [f"→Change {i}" for i in range(1, 6)]
     assert page.inner_text("#dlg .ch-more") == "and 3 more"
-    assert page.is_disabled("#dlg .dlg-f .btn-primary")
+    assert page.locator("#dlg .dlg-f .btn-primary").count() == 0
     page.keyboard.press("Escape")
     assert result(page) == "CANCELLED"
 
@@ -139,7 +139,7 @@ def test_a_wrong_character_shows_the_mistake_and_the_count(shell, page, harness)
     assert "err" in page.get_attribute("#dlg .ch-msg", "class")
     assert page.inner_text("#dlg .phrase .bad") == P[4]                     # the expected character is marked
     assert page.inner_text("#dlg .phrase .done") == P[:4]
-    assert page.is_disabled("#dlg .dlg-f .btn-primary")
+    assert page.locator("#dlg .dlg-f .btn-primary").count() == 0
     page.keyboard.press("Backspace")
     assert page.inner_text("#dlg .ch-msg") == "Paste is off. Mistakes show in red."
     page.keyboard.press("Escape")
@@ -154,10 +154,8 @@ def test_typing_it_properly_applies_the_change(shell, page, harness, capsys):
     wait_ready(page)
     P = phrase_text(page)
     type_it(page, P)                                         # 45 ms a character: a person
-    assert page.inner_text("#dlg .ch-count") == f"{len(P)} / {len(P)}"
-    assert not page.is_disabled("#dlg .dlg-f .btn-primary")
-    page.click("#dlg .dlg-f .btn-primary")
     assert result(page) == {"saved": 1}                      # the change's own result comes back
+    assert harness.rpc_count("challenge_submit") == 1
     assert applied(harness) and req.ran == 1 and req.cancelled == 0
     assert ab.unlocked_until(ab.settings(harness.db), harness.now)
     page.wait_for_function("!document.getElementById('dlg').open")
@@ -172,14 +170,12 @@ def test_typing_it_instantly_is_refused_and_nothing_changes(shell, page, harness
     wait_ready(page)
     P = phrase_text(page)
     page.fill("#dlg textarea.typed", P)                      # all at once (a macro)
-    page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.startsWith('Too fast')")
     assert page.inner_text("#dlg .ch-msg") == "Too fast - type it yourself."
     assert not applied(harness) and req.ran == 0
     assert page.input_value("#dlg textarea.typed") == ""     # a refused try starts again from nothing
     assert page.evaluate("window.__res") is None             # (still open)
     type_it(page, P)                                         # a person can still pass
-    page.click("#dlg .dlg-f .btn-primary")
     assert result(page) == {"saved": 1}
     assert applied(harness)
 
@@ -216,7 +212,7 @@ def test_a_long_phrase_scrolls_inside_the_dialog(shell, page, harness, capsys):
         return { sh: b.scrollHeight, ch: b.clientHeight, dlg: d.height, top: d.top, bottom: d.bottom, vh: innerHeight, oy: getComputedStyle(b).overflowY }; }""")
     assert box["oy"] == "auto" and box["sh"] > box["ch"] * 2          # the box scrolls ...
     assert box["dlg"] <= box["vh"] and box["top"] >= 0 and box["bottom"] <= box["vh"]    # ... the dialog does not outgrow the window
-    assert page.is_visible("#dlg .dlg-f .btn-primary") or page.is_disabled("#dlg .dlg-f .btn-primary")
+    assert page.is_visible("#dlg .dlg-f .btn")
     # typing follows along: after 1500 characters the box has scrolled
     page.evaluate("""(t) => { const ta = document.querySelector('#dlg textarea.typed'); ta.value = t; ta.dispatchEvent(new Event('input')); }""", P[:1500])
     page.wait_for_function("document.querySelector('.ch-phrase').scrollTop > 100")
@@ -285,14 +281,13 @@ def test_the_grid_walks_through_every_word(shell, page, harness, capsys):
     assert len(boxes) == 9
     assert all(b.get_attribute("tabindex") == "-1" for b in boxes)
     assert page.evaluate("document.activeElement.classList.contains('ch-box')") is False   # nothing focused for you
-    assert page.is_disabled("#dlg .dlg-f .btn-primary")
+    assert page.locator("#dlg .dlg-f .btn-primary").count() == 0
 
     seen_lit, n_words = [], None
     step = 0
-    while True:
+    n_words = int(page.inner_text("#dlg .ch-wi").split(" of ")[1])
+    while step < n_words:
         label = page.inner_text("#dlg .ch-wi")
-        if label == "All words typed.":
-            break
         word = page.inner_text("#dlg .ch-chip")
         n_words = int(label.split(" of ")[1])
         assert label == f"Word {step + 1} of {n_words}"
@@ -317,10 +312,8 @@ def test_the_grid_walks_through_every_word(shell, page, harness, capsys):
         page.keyboard.type(word[-1], delay=40)
         step += 1
     assert step == n_words and len(set(seen_lit)) > 1
-    assert page.is_hidden("#dlg .ch-chip")
-    assert not page.is_disabled("#dlg .dlg-f .btn-primary")
-    page.click("#dlg .dlg-f .btn-primary")
     assert result(page) == {"saved": 1}
+    assert harness.rpc_count("challenge_submit") == 1
     assert applied(harness) and req.ran == 1
     say(capsys, f"grid: {n_words} words, boxes used {seen_lit}")
 
@@ -350,12 +343,12 @@ def test_a_grid_macro_is_refused_and_starts_over(shell, page, harness):
     open_in_page(page, data)
     page.wait_for_selector("#dlg .ch-box")
     words = []
-    while page.inner_text("#dlg .ch-wi") != "All words typed.":
+    n_words = int(page.inner_text("#dlg .ch-wi").split(" of ")[1])
+    for _ in range(n_words):
         word = page.inner_text("#dlg .ch-chip")
         lit = page.locator("#dlg .ch-box.lit")
         lit.fill(word)                                        # instantly
         words.append(word)
-    page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_function("document.querySelector('#dlg .ch-status').textContent.startsWith('Too fast')")
     assert not applied(harness) and req.ran == 0
     assert page.inner_text("#dlg .ch-wi").startswith("Word 1 of")        # back to the first word
@@ -373,7 +366,6 @@ def test_a_wait_after_passing_shows_the_countdown_and_changes_nothing(shell, pag
     wait_ready(page)
     P = phrase_text(page)
     type_it(page, P, per_char_ms=75)                          # slow typing: the countdown must start from Python's time, not ours
-    page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_selector("#dlg .ch-cd")
     assert page.inner_text("#dlg h2") == "Passed - now the wait"
     first = page.inner_text("#dlg .ch-cd")
@@ -425,7 +417,6 @@ def test_a_challenge_open_push_opens_it_in_the_main_window(shell, page, harness,
     assert harness.rpc_count("challenge_begin") == 1
     P = phrase_text(page)
     type_it(page, P)
-    page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_function("!document.getElementById('dlg').open")
     assert applied(harness) and req.ran == 1
 
@@ -454,7 +445,6 @@ def test_guarded_returns_the_final_result_in_one_line(shell, page, harness):
     assert page.evaluate("window.__plain") == {"fine": 1}
     wait_ready(page)
     type_it(page, phrase_text(page))
-    page.click("#dlg .dlg-f .btn-primary")
     assert result(page) == {"saved": 1}
     assert applied(harness)
 
@@ -474,21 +464,20 @@ def test_a_new_request_replaces_the_one_that_is_open(shell, page, harness):
     assert result(page) == "CANCELLED"                        # the first one's promise ended
     wait_ready(page)
     type_it(page, phrase_text(page))
-    page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_function("window.__second !== undefined")
     assert page.evaluate("window.__second") == {"saved": 1} and req2.ran == 1 and req1.ran == 0
 
 
-def test_an_expired_ticket_says_so(shell, page, harness):
+def test_a_cancelled_ticket_says_so(shell, page, harness):
     configure(harness)
     shell()
     req, data = ask(harness)
     open_in_page(page, data)
     wait_ready(page)
-    harness.ctx.guard.cancel(data["ticket"])                  # (as if replaced / expired meanwhile)
+    harness.ctx.guard.cancel(data["ticket"])
     page.fill("#dlg textarea.typed", phrase_text(page))
-    page.click("#dlg .dlg-f .btn-primary")
-    page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.includes('expired')")
+    page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.includes('cancelled')")
+    assert "expired" not in page.inner_text("#dlg .ch-msg")
     assert page.inner_text("#dlg .dlg-f .btn") == "OK"
     page.click("#dlg .dlg-f .btn")
     assert result(page) == "CANCELLED"
@@ -569,7 +558,6 @@ def test_the_editor_survives_a_pass_and_cancel_button(shell, page, harness):
     P = phrase_text(page)
     page.focus("dialog[open] textarea.typed")
     page.keyboard.type(P, delay=45)
-    page.click("dialog.wide[open] .dlg-f .btn-primary")
     assert result(page) == {"saved": 1} and applied(harness) and req2.ran == 1
     page.wait_for_function("document.querySelectorAll('dialog[open]').length === 1")
     st = editor_state(page)
@@ -582,9 +570,8 @@ def test_esc_and_cancel_wait_while_the_answer_is_out(shell, page, harness):
     req, data = ask(harness)
     open_in_page(page, data)
     wait_ready(page)
-    type_it(page, phrase_text(page))
     harness.delays["challenge_submit"] = 1.5
-    page.click("#dlg .dlg-f .btn-primary")                    # Continue: the answer is on its way
+    type_it(page, phrase_text(page))                         # completion sends the answer
     page.wait_for_timeout(150)
     page.keyboard.press("Escape")                             # (a second Esc would be closed by the browser itself: next test)
     page.evaluate("document.querySelector('#dlg .dlg-f .btn:not(.btn-primary)').click()")     # Cancel
@@ -603,9 +590,8 @@ def test_even_a_forced_close_while_the_answer_is_out_gets_the_real_result(shell,
     req, data = ask(harness)
     open_in_page(page, data)
     wait_ready(page)
-    type_it(page, phrase_text(page))
     harness.delays["challenge_submit"] = 0.9
-    page.click("#dlg .dlg-f .btn-primary")
+    type_it(page, phrase_text(page))
     page.wait_for_timeout(100)
     for _ in range(5):                                        # (the browser closes a dialog on repeated Esc whatever the page says)
         page.keyboard.press("Escape")
@@ -620,9 +606,8 @@ def test_a_slow_answer_that_is_a_wait_still_ends_cleanly(shell, page, harness):
     req, data = ask(harness)
     open_in_page(page, data)
     wait_ready(page)
-    type_it(page, phrase_text(page))
     harness.delays["challenge_submit"] = 0.6
-    page.click("#dlg .dlg-f .btn-primary")
+    type_it(page, phrase_text(page))
     page.wait_for_timeout(100)
     page.keyboard.press("Escape")
     page.wait_for_selector("#dlg .ch-cd")                     # the reply decides: the waiting view
@@ -642,7 +627,6 @@ def test_the_standalone_page_runs_the_same_component(page, harness):
     assert page.text_content("#dlg .ch-chg") == "→Uninstall Lockdown"
     assert page.evaluate("document.documentElement.dataset.standalone !== undefined")
     type_it(page, phrase_text(page))
-    page.click("#dlg .dlg-f .btn-primary")
     page.wait_for_function("!document.getElementById('dlg').open")
     assert applied(harness) and req.ran == 1
     page.wait_for_function("window.pywebview", timeout=2000)

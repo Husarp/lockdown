@@ -174,7 +174,7 @@ object AntiBypass {
     fun ruleLooser(old: Rule, new: Rule?, now: LocalDateTime): Boolean {
         if (new == null) return true
         return when (old.type) {
-            RuleType.TEMPORARY -> tempEnd(new, now).isBefore(tempEnd(old, now).minusMinutes(1))
+            RuleType.TEMPORARY -> tempEnd(new, now).isBefore(tempEnd(old, now))
             RuleType.SCHEDULED -> scheduleLooser(old.schedule, new.schedule) ||
                 (new.allowanceMin ?: 0) > (old.allowanceMin ?: 0) ||
                 (old.allowanceShared && !new.allowanceShared)

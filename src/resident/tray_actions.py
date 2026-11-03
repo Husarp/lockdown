@@ -8,6 +8,8 @@ pause is started on the Anti-Bypass page (its card; the Api asks for the challen
 The handlers run on the tray's thread (pystray): they do their little database work there and return."""
 import webbrowser
 
+from notification_batch import BlockingMessage
+
 import modes
 import pause
 import updates
@@ -44,7 +46,13 @@ def start_mode(hub, db, mode_id: str, until=None, force: bool = False) -> bool:
         return False
     modes.start(db, mode["id"], now, until, False)
     state = modes.active(db, now)
-    hub.notify(mode_on_text(mode, state["until"] if state else until), force=True)
+    # Include the names and each end time in the first notice, including bedtime modes.
+    from alerts import until_text
+    blocks = db.blocks(now)
+    details = [f"{b['item']['display_name']}: blocked by {mode['name']} until "
+               f"{until_text(b['until'].strftime('%Y-%m-%d %H:%M:%S') if b['until'] else None, now)}."
+               for b in blocks if b["reason"] == "mode"]
+    hub.notify(BlockingMessage("\n".join([mode_on_text(mode, state["until"] if state else until), *details])), force=True)
     _poke(hub)
     return True
 

@@ -14,7 +14,7 @@
 //   host.cancelBtn, host.onlyOk(foot), host.closed()
 import { esc } from "./ui.js";
 
-export const SHORT = { math: "Math", memory: "Memory", sort: "Sorting", phrase: "Phrase", password: "Password", totp: "Code" };
+export const SHORT = { math: "Math", memory: "Memory", sort: "Sorting", phrase: "Phrase", captcha: "Captcha", password: "Password", totp: "Code" };
 const ONCE = new Set(["password", "totp"]);      // asked once, no level: no "×1" / "0/1" on their chip
 
 // ---------------------------------------------------------------- plain helpers (node tests)
@@ -187,6 +187,43 @@ export function mountMath(host, data) {
   input.focus();
 }
 
+// ---------------------------------------------------------------- captcha
+
+/** Python sends a PNG and length only. Submit once at that length; Python judges and replaces wrong pictures. */
+export function mountCaptcha(host, data) {
+  const length = data.captcha_length;
+  host.html(`
+    ${host.frame("Type the characters in the picture (no pasting).")}
+    <div class="ch-captcha">
+      <img class="ch-captcha-image" src="${esc(data.captcha_image)}" alt="Captcha characters" draggable="false">
+      <input class="input ch-captcha-input" type="text" maxlength="${length}" autocomplete="off" autocapitalize="characters"
+        spellcheck="false" aria-label="Type the captcha">
+    </div>
+    <div class="small ch-msg-line"><span class="muted ch-msg">${length} characters. Upper or lower case is fine. Paste is off.</span></div>`,
+  [host.cancelBtn]);
+  const input = host.q(".ch-captcha-input"), msg = host.q(".ch-msg");
+  if (host.message) { msg.textContent = host.message; msg.classList.add("err"); }
+  let busy = false, composing = false;
+  function go() {
+    if (busy || input.value.length !== length || composing) return;
+    busy = true;
+    input.disabled = true;
+    host.send(input.value, (err, gone) => {
+      busy = false;
+      input.disabled = false;
+      input.value = "";
+      msg.textContent = err;
+      msg.classList.add("err");
+      if (gone) host.onlyOk(host.foot()); else input.focus();
+    });
+  }
+  input.addEventListener("input", (e) => { if (!e.isComposing) go(); });
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => { composing = false; go(); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  input.focus();
+}
+
 // ---------------------------------------------------------------- memory grid
 
 export function mountMemory(host, data) {
@@ -260,7 +297,7 @@ export function mountSort(host, data) {
   const reshuffle = reshufflesPool(data.run && data.run.level);
   const ids = items.map((_, i) => i);
   const foot = host.html(`
-    ${host.frame("Tap the numbers from smallest to largest.")}
+    ${host.frame("Tap the numbers from smallest to largest. Tap a placed number to take it back.")}
     <div class="ch-sorta" aria-label="Your order, smallest first"></div>
     <div class="ch-pool" role="group" aria-label="Numbers to sort"></div>
     <div class="small"><span class="muted ch-msg">${reshuffle ? "The rest move around after every tap." : "Tap the smallest first."}</span></div>`,
@@ -268,7 +305,7 @@ export function mountSort(host, data) {
   const answer = host.q(".ch-sorta"), pool = host.q(".ch-pool"), msg = host.q(".ch-msg");
   if (host.message) { msg.textContent = host.message; msg.classList.add("err"); }
   let rest = ids.slice(), taken = [], busy = false;
-  const tile = (id, cls) => `<button type="button" class="ch-tile${cls ? " " + cls : ""}" data-id="${id}"${cls ? " disabled" : ""}>${esc(items[id])}</button>`;
+  const tile = (id, cls) => `<button type="button" class="ch-tile${cls ? " " + cls : ""}" data-id="${id}"${busy ? " disabled" : ""}>${esc(items[id])}</button>`;
   function paint() {
     answer.innerHTML = taken.map((id) => tile(id, "in")).join("");
     pool.innerHTML = rest.map((id) => tile(id)).join("");
@@ -279,6 +316,16 @@ export function mountSort(host, data) {
     taken = [];
     paint();
   }
+  answer.addEventListener("click", (e) => {
+    const b = e.target.closest(".ch-tile");
+    if (!b || busy) return;
+    const id = Number(b.dataset.id);
+    if (!taken.includes(id)) return;
+    taken = taken.filter((x) => x !== id);
+    rest.push(id);
+    if (reshuffle) rest = shuffleKeepIds(rest);
+    paint();
+  });
   pool.addEventListener("click", (e) => {
     const b = e.target.closest(".ch-tile");
     if (!b || busy) return;
@@ -290,6 +337,7 @@ export function mountSort(host, data) {
     paint();
     if (!rest.length) {
       busy = true;
+      paint();
       host.send(taken.slice(), (err, gone) => {
         busy = false;
         clear();

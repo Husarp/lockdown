@@ -258,6 +258,7 @@ private fun GroupRow(g: Group, byId: Map<String, Item>, now: LocalDateTime, onCl
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 MemberStack(members)
                 Text("${members.size} member${if (members.size == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                BlockNowButton(g.id, group = true)
             }
             Icon(Icons.Filled.ChevronRight, null, tint = cs.onSurfaceVariant)
         }
@@ -279,7 +280,10 @@ private fun ItemRow(item: Item, cfg: com.husarp.lockdown.data.Config, memberOf: 
             Text(item.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             PillRow(pills)
         }
-        StatusChip(info?.let { Kinds.chipText(it, now) } ?: statusText(st, cfg, item, now, mode), st, grey = info?.grey == true)
+        Column(horizontalAlignment = Alignment.End) {
+            StatusChip(info?.let { Kinds.chipText(it, now) } ?: statusText(st, cfg, item, now, mode), st, grey = info?.grey == true)
+            BlockNowButton(item.id)
+        }
     }
 }
 

@@ -399,6 +399,9 @@ class FakeWin:
     def __init__(self):
         self.titles = {1: "Cats - YouTube - Google Chrome", 2: "Inbox - Gmail - Google Chrome"}
 
+    def process_name(self, hwnd):
+        return "chrome.exe"
+
     def window_title(self, hwnd):
         return self.titles.get(hwnd, "")
 

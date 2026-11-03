@@ -11,7 +11,7 @@ Draft.save does through the guard (the challenge) - they are `loosen`. The emerg
 (uses per day / week / month) instead of a challenge: its minutes come from the kind, never from the page.
 """
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import emergency
 import group_look
@@ -332,6 +332,87 @@ def blocking_set_sort(ctx, value):
 
 
 # ---------------------------------------------------------------- Api: edits of the draft
+
+def _block_now_notes(ctx, owner, group, now):
+    import antibypass
+    usage = ctx.db.usage_lookup(now)
+    notes = []
+    if antibypass.is_off(ctx.db):
+        notes.append("Lockdown is off; switch it on to apply the block.")
+    if owner.get("disabled"):
+        notes.append("Disabled; enable it to apply the block.")
+    if group and not owner["members"]:
+        notes.append("No members yet; add members to apply the block.")
+    if group and any(i.get("disabled") and i["id"] in owner["members"] for i in ctx.db.list_items()):
+        notes.append("Disabled members stay disabled; enable them to apply the block.")
+    if getattr(usage, "paused", None) and usage.paused > now:
+        notes.append("Blocks are paused; resume them to apply the block.")
+    ids = owner["members"] if group else [owner["id"]]
+    if any(usage.unlocks.get(f"item:{i}", datetime.min) > now for i in ids):
+        notes.append("Emergency unlock is active; the block applies when it ends.")
+    if not _service_running(ctx.db):
+        notes.append("Service off; start it to apply the block.")
+    return " ".join(notes)
+
+
+@core.read
+def blocking_block_now_options(ctx, owner_id, group=False):
+    """Trusted clock and saved end for the confirmation; None previews an empty list (self-test)."""
+    if owner_id is None:
+        return {"now": _iso(ctx.now()), "until": None, "note": "", "name": ""}
+    owner_id = _id(owner_id)
+    if type(group) is not bool:
+        raise ApiError("Bad request: on or off expected.")
+    with drafts.lock:
+        d = drafts.draft_of(ctx)
+        d.refresh_if_clean()
+        saved, pending = (d.saved_groups, d.groups) if group else (d.saved_items, d.items)
+        if owner_id not in saved or owner_id not in pending:
+            raise ApiError("Save this item or group before using Block now.")
+        owner = saved[owner_id]
+        end = max((r.get("temp_until") or "" for r in owner["rules"] if r["rule_type"] == "temporary"), default="")
+        now = ctx.now()
+        return {"now": _iso(now), "until": end.replace(" ", "T") or None, "note": _block_now_notes(ctx, owner, group, now),
+                "name": owner["name"] if group else owner["display_name"]}
+
+
+@core.tighten
+def blocking_block_now(ctx, owner_id, choice="hour", until=None, group=False):
+    """Save only a temporary block, even with Auto-save off. All dates use trusted local time."""
+    from rules import TIME_FMT
+    import applog
+    owner_id = _id(owner_id)
+    if type(group) is not bool:
+        raise ApiError("Bad request: on or off expected.")
+    now = ctx.now()
+    if choice == "hour":
+        end = now + timedelta(hours=1)
+    elif choice == "today":
+        end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif choice == "until":
+        try:
+            end = datetime.fromisoformat(until) if isinstance(until, str) else None
+        except ValueError:
+            end = None
+        if (end is None or end.tzinfo is not None or end <= now or
+                end.date() not in (now.date(), (now + timedelta(days=1)).date())):
+            raise ApiError("Pick a future time today or tomorrow.")
+    else:
+        raise ApiError("Pick 1 hour, Rest of today or Until...")
+    with drafts.lock:
+        d = drafts.draft_of(ctx)
+        d.refresh_if_clean()
+        try:
+            saved_end = d.block_now(owner_id, end, group, now)
+        except ValueError as e:
+            raise ApiError(str(e)) from e
+        owner = (d.saved_groups if group else d.saved_items)[owner_id]
+        name = owner["name"] if group else owner["display_name"]
+        note = _block_now_notes(ctx, owner, group, now)
+        text = f"Block saved until {_short_when(datetime.strptime(saved_end, TIME_FMT))}."
+        applog.record("change", f"{name}: {text}", ctx.db)
+    return {"until": saved_end.replace(" ", "T"), "text": " ".join([text, note]).strip()}
+
 
 @core.ui
 def draft_set_notify(ctx, item_id, notify):

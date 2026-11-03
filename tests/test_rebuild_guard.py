@@ -194,11 +194,64 @@ def test_expired_ticket_is_refused_and_cancelled(env):
     assert ab.status(ab.settings(env.db), NOW) == "phrase"
 
 
-def test_just_inside_ten_minutes_still_works(env):
+@pytest.mark.parametrize("elapsed", [899, 900, 901])
+def test_fifteen_minute_boundary(env, elapsed):
     change = Change()
     ticket, shown = open_challenge(env, change)
-    env.clock.mono += guard.TICKET_TTL_SEC - 1
-    assert env.guard.submit(ticket, shown["phrase"])["ok"] is True
+    env.clock.mono += elapsed
+    got = env.guard.submit(ticket, shown["phrase"])
+    assert got["ok"] is (elapsed <= 900)
+    assert change.ran == int(elapsed <= 900)
+    assert change.cancelled == int(elapsed > 900)
+    if elapsed > 900:
+        assert "expired" in got["error"] and "15 minutes" in got["error"]
+
+
+def test_timeout_starts_at_first_begin_and_repeated_begin_does_not_reset_it(env):
+    change = Change()
+    ticket = ask(env, change)["data"]["ticket"]
+    env.clock.mono += 1800
+    assert env.guard.begin(ticket)["ok"]
+    env.clock.mono += 899
+    shown = env.guard.begin(ticket)["data"]
+    env.clock.mono += 2
+    got = env.guard.submit(ticket, shown["phrase"])
+    assert not got["ok"] and "expired" in got["error"]
+    assert change.ran == 0 and change.cancelled == 1
+
+
+def test_new_puzzles_and_steps_do_not_reset_the_run_timeout(env):
+    steps = [{"id": "s1", "kind": "math", "level": 0, "times": 2},
+             {"id": "s2", "kind": "phrase", "level": 30, "times": 1}]
+    change = Change()
+    ticket = env.guard.request(["Dismiss"], change.action, change.cancel, steps=steps, plain=True)["data"]["ticket"]
+    env.guard.begin(ticket)
+    env.clock.mono += 300
+    assert env.guard.submit(ticket, "wrong")["data"]["wrong"]
+    for _ in range(2):
+        env.clock.mono += 200
+        answer = env.guard._open.run.puzzle.answer
+        assert env.guard.submit(ticket, str(answer))["ok"]
+    shown = env.guard._open.run.puzzle.view
+    env.clock.mono += 201
+    got = env.guard.submit(ticket, shown["phrase"])
+    assert not got["ok"] and "expired" in got["error"]
+    assert change.ran == 0 and change.cancelled == 1
+
+
+@pytest.mark.parametrize("ending", ["cancelled", "replaced", "used"])
+def test_inactive_ticket_explains_why_it_is_gone(env, ending):
+    change = Change()
+    ticket, shown = open_challenge(env, change)
+    if ending == "cancelled":
+        env.guard.cancel(ticket)
+    elif ending == "replaced":
+        ask(env, Change())
+    else:
+        typing_time(env, shown["phrase"])
+        assert env.guard.submit(ticket, shown["phrase"])["ok"]
+    for got in (env.guard.begin(ticket), env.guard.submit(ticket, shown["phrase"])):
+        assert not got["ok"] and ending in got["error"] and "expired" not in got["error"]
 
 
 def test_a_second_request_cancels_the_first(env):

@@ -173,11 +173,10 @@ class BlockWatcher {
             for ((id, pair) in blocked) {
                 if (id in prev) continue
                 val (item, block) = pair
-                val source = block.rule.groupId?.let { "group:$it" } ?: "item"
+                val source = "${block.rule.groupId ?: "item"}|${block.reason}|${block.until}"
                 val e = started.getOrPut(source) { Started(block.rule, block.reason, block.until) }
                 e.names.add(item.name)
                 e.inUse = e.inUse || id in inUse
-                if (e.until != block.until || e.reason != block.reason) { e.until = null; e.reason = null }   // no shared end
             }
             for (e in started.values) {
                 val text = startedText(e, now)
@@ -241,7 +240,7 @@ class BlockWatcher {
         }
         val names = names(e.names)
         val count = e.names.toSet().size
-        e.eff.groupName?.let { g -> return "$g started - ${if (count == 1) names else "$count things"} blocked$until$why." }
-        return if (count == 1) "$names is now blocked$until$why." else "$count things are now blocked$until$why."
+        e.eff.groupName?.let { g -> return "$g started - $names blocked$until$why." }
+        return if (count == 1) "$names is now blocked$until$why." else "$names are now blocked$until$why."
     }
 }

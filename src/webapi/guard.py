@@ -14,8 +14,8 @@ as the answer): it is used up, a new one is made at once and the reply carries i
 The uninstaller's challenge (`uninstall`, from `--challenge`) asks the list without the password / authenticator steps
 and lets only the uninstall through: it never opens the unlock for other changes (antibypass.uninstall_pass).
 
-One challenge is open at a time (a new request cancels the old one), a ticket works once and expires after 10
-minutes. Grace (an exact revert of a tightening within 10 s needs no challenge) lives here too.
+One challenge is open at a time (a new request cancels the old one), a ticket works once and expires after more than
+15 minutes from its first begin(). Grace (an exact revert of a tightening within 10 s needs no challenge) lives here too.
 
 The bedtime screen's "Challenge before Dismiss" uses the same service with the PLAIN variant of `request` (steps=,
 phrase_opts=, plain=True): it always asks (whatever Anti-Bypass says - there is no Anti-Bypass wait or hours question
@@ -38,10 +38,10 @@ from . import core
 from .core import Envelope, fail, ok
 
 MIN_MS_PER_CHAR = challenges.PHRASE_MS_PER_CHAR   # typing the phrase faster than this per character isn't a human
-TICKET_TTL_SEC = 600        # an open challenge is forgotten after 10 minutes
+TICKET_TTL_SEC = 900        # more than 15 minutes from the first begin(), across every puzzle and step
 GRACE_SEC = 10              # after a tightening change, this long to undo it (revert only) without the challenge
 SHOWN_CHANGES = 5           # lines listed in the challenge; the rest is "and N more"
-MODES = ("phrase", "grid", "math", "memory", "sort", "password", "totp")      # the ones with something to answer
+MODES = ("phrase", "grid", "math", "memory", "sort", "captcha", "password", "totp")  # something to answer
 REFUSED_TEXT = {"password": "That isn't the password - try again.",
                 "totp": "That code isn't right (or it was used already) - type the one your app shows now.",
                 "recovery": "That isn't the recovery code - try again."}
@@ -51,12 +51,12 @@ REFUSED_LOG = {"password": "wrong password", "totp": "wrong authenticator code",
 class _Pending:
     """One request waiting for its challenge."""
 
-    def __init__(self, changes, action, cancel, force, now, dry=False, plain=None, uninstall=False):
+    def __init__(self, changes, action, cancel, force, dry=False, plain=None, uninstall=False):
         self.changes, self.action, self.cancel, self.force = changes, action, cancel, force
         self.uninstall = uninstall  # the uninstaller's challenge: no password / authenticator steps, opens no unlock
         self.dry = dry              # a dry run ("Try the challenge"): a pass opens no unlock and starts no wait
         self.plain = plain          # the bedtime variant: {steps, complex, grid, title, note}, else None (Anti-Bypass)
-        self.created = now
+        self.started = None        # first begin(), never reset by new puzzles or another begin()
         self.mode = None            # set by begin(): phrase | grid | math | memory | sort | password | totp | waiting | closed
         self.run = None             # the challenges.Run (steps, puzzle, progress) while a puzzle is up
 
@@ -83,6 +83,7 @@ class GuardService:
         self._lock = threading.Lock()
         self._ticket: str | None = None
         self._open: _Pending | None = None
+        self._ended: dict[str, str] = {}       # recent ticket endings, for an accurate message (bounded, no answers)
         self._grace: dict[str, tuple] = {}      # domain -> (state to revert to, expiry)
         self.secrets = challenge_secrets.Checker(db_provider)
 
@@ -126,10 +127,11 @@ class GuardService:
             antibypass.uninstall_used(db)               # (its own wait ran out: one uninstall)
             return ok(action())
         changes = [str(c) for c in changes]
-        pending = _Pending(changes, action, cancel, force, self._mono(), dry, variant, uninstall=uninstall and not plain)
+        pending = _Pending(changes, action, cancel, force, dry, variant, uninstall=uninstall and not plain)
         ticket = secrets.token_urlsafe(18)
         with self._lock:
-            previous, self._ticket, self._open = self._open, ticket, pending
+            previous = self._end_locked("was replaced by a new challenge")
+            self._ticket, self._open = ticket, pending
         self._run_cancel(previous)          # one challenge at a time: a new request cancels the one still open
         out = {"needs_challenge": True, "ticket": ticket, "changes": changes[:SHOWN_CHANGES],
                "more": max(0, len(changes) - SHOWN_CHANGES)}
@@ -154,14 +156,28 @@ class GuardService:
                 import traceback
                 core.log_error(f"Challenge cancel failed: {traceback.format_exc()}")
 
+    def _end_locked(self, reason):
+        """Forget the open ticket, retaining only its ending. Caller holds the lock."""
+        pending = self._open
+        if self._ticket is not None:
+            self._ended[self._ticket] = f"This challenge {reason}. Start the change again."
+            if len(self._ended) > 128:
+                del self._ended[next(iter(self._ended))]
+        self._ticket = self._open = None
+        return pending
+
+    def _unavailable(self, ticket):
+        message = self._ended.get(ticket) if isinstance(ticket, str) else None
+        return fail(message or "This challenge is no longer active. Start the change again.")
+
     def _live(self, ticket):
         """The open request for `ticket`, or None (unknown, used, replaced or expired - an expired one is cancelled)."""
         expired = None
         with self._lock:
             if not isinstance(ticket, str) or ticket != self._ticket or self._open is None:
                 return None
-            if self._mono() - self._open.created > TICKET_TTL_SEC:
-                expired, self._ticket, self._open = self._open, None, None
+            if self._open.started is not None and self._mono() - self._open.started > TICKET_TTL_SEC:
+                expired = self._end_locked("expired because it took more than 15 minutes")
             else:
                 return self._open
         self._run_cancel(expired)
@@ -176,7 +192,12 @@ class GuardService:
         whole view (challenges.Run.view: the steps strip, the step, how many are done)."""
         pending = self._live(ticket)
         if pending is None:
-            return fail("This challenge has expired. Start the change again.")
+            return self._unavailable(ticket)
+        with self._lock:
+            if self._open is not pending:
+                return self._unavailable(ticket)
+            if pending.started is None:
+                pending.started = self._mono()
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
         data = {"changes": pending.changes[:SHOWN_CHANGES], "more": max(0, len(pending.changes) - SHOWN_CHANGES),
@@ -210,7 +231,7 @@ class GuardService:
         data["mode"] = mode
         with self._lock:
             if self._open is not pending:        # replaced while we were working
-                return fail("This challenge has expired. Start the change again.")
+                return self._unavailable(ticket)
             pending.mode = mode
             pending.run = run
         return ok(data)
@@ -243,7 +264,7 @@ class GuardService:
         is set, cancels it and says when."""
         pending = self._live(ticket)
         if pending is None:
-            return fail("This challenge has expired. Start the change again.")
+            return self._unavailable(ticket)
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
         if pending.mode not in MODES or pending.run is None:
@@ -254,11 +275,11 @@ class GuardService:
         run = pending.run
         with self._lock:
             if self._open is not pending:
-                return fail("This challenge has expired. Start the change again.")
+                return self._unavailable(ticket)
             was = run.step
             result = run.answer(typed)
             if result == challenges.PASSED:
-                self._ticket = self._open = None    # one use: whatever happens next, this ticket is gone
+                self._end_locked("has already been used")   # one use, whatever happens next
             else:
                 pending.mode = self._mode(run)
             shown = None if result == challenges.PASSED else self._shown(run)
@@ -324,7 +345,7 @@ class GuardService:
         with self._lock:
             if not isinstance(ticket, str) or ticket != self._ticket:
                 return ok()
-            pending, self._ticket, self._open = self._open, None, None
+            pending = self._end_locked("was cancelled")
         self._run_cancel(pending)
         return ok()
 

@@ -85,6 +85,93 @@ def make_run(steps, clock=None, seed=1, **kw):
     return ch.Run(steps, rng=random.Random(seed), clock=clock, **kw), clock
 
 
+@pytest.mark.parametrize("level,length", [(0, 4), (1, 5), (2, 6)])
+def test_captcha_matches_phone_and_only_exposes_a_png(level, length):
+    import base64
+    import io
+    from PIL import Image
+
+    assert ch.CAPTCHA_ALPHABET == "ABCDEFGHJKLMNPQRTUVWXYZ2346789"
+    for seed in range(8):
+        puzzle = ch.captcha_puzzle(level, random.Random(seed))
+        assert len(puzzle.answer) == length and set(puzzle.answer) <= set(ch.CAPTCHA_ALPHABET)
+        assert set(puzzle.view) == {"captcha_image", "captcha_length"}
+        assert puzzle.view["captcha_length"] == length
+        prefix, encoded = puzzle.view["captcha_image"].split(",", 1)
+        assert prefix == "data:image/png;base64"
+        with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
+            assert image.format == "PNG" and image.width >= length * 30 and image.height >= 60
+            assert not image.info and image.convert("L").getextrema()[0] < 100
+        assert puzzle.check("  " + puzzle.answer.lower() + "  ")
+        assert not any(puzzle.check(v) for v in (None, [], 1234, "", puzzle.answer[:-1], "0000"))
+        assert puzzle.min_sec == pytest.approx(length * 0.15)
+
+
+def test_captcha_validation_estimates_and_loosening():
+    rows = [step("captcha", level, 20, f"c{level}") for level in range(3)]
+    assert ch.validate_steps(rows) == ch.read_steps(rows) == rows
+    assert ch.level_range("captcha") == (0, 2)
+    option = next(k for k in ch.options()["kinds"] if k["id"] == "captcha")
+    assert option["label"] == "Captcha" and option["seconds"] == [10, 12, 14]
+    assert [v["label"] for v in option["levels"]] == ["Easy", "Medium", "Hard"]
+    assert [ch.step_seconds(r) for r in rows] == [10, 12, 14]
+    for field, value in (("level", -1), ("level", 3), ("times", 0), ("times", 21)):
+        with pytest.raises(ValueError):
+            ch.validate_steps([{**rows[0], field: value}])
+    assert ch.read_steps([step("captcha", 99, 99)]) == [step("captcha", 2, 20, "c99t99")]
+    old = [step("captcha", 2, 2, "c")]
+    for change in ({"level": 1}, {"times": 1}, {"kind": "sort"}):
+        assert ch.steps_looser(old, [{**old[0], **change}])
+    assert ch.steps_looser(old, [])
+    assert not ch.steps_looser(old, [*old, step("math", 0)])
+
+
+def test_captcha_wrong_and_too_fast_refresh_only_the_current_puzzle():
+    run, clock = make_run([step("captcha", 2, 2), step(MATH, 0)])
+    clock.wait()
+    assert run.answer(run.puzzle.answer.lower()) == ch.RIGHT and run.done == 1
+    previous = run.puzzle.view["captcha_image"]
+    assert run.answer(run.puzzle.answer) == ch.WRONG and run.last_too_fast
+    assert run.done == 1 and run.puzzle.view["captcha_image"] != previous
+    clock.wait()
+    previous = run.puzzle.view["captcha_image"]
+    assert run.answer("000000") == ch.WRONG and not run.last_too_fast
+    assert run.done == 1 and run.puzzle.view["captcha_image"] != previous
+    clock.wait()
+    assert run.answer(run.puzzle.answer) == ch.RIGHT and run.step["kind"] == MATH
+    clock.wait()
+    assert run.answer(solve(run.view())) == ch.PASSED
+
+
+@pytest.mark.parametrize("plain", [False, True])
+def test_captcha_api_never_exposes_the_answer_or_runs_the_action_early(env, plain):
+    import json
+
+    rows = [step("captcha", 1, 2)]
+    ab.save(env.db, {**ab.settings(env.db), "steps": rows})
+    applied = []
+    reply = env.guard.request(["A test change"], lambda: applied.append(True), steps=rows, plain=plain)
+    ticket = reply["data"]["ticket"]
+    shown = env.guard.begin(ticket)["data"]
+    for attempt in range(3):
+        answer = env.guard._open.run.puzzle.answer
+        assert shown["mode"] == "captcha" and shown["captcha_length"] == 5
+        assert set(shown["run"]) == {"steps", "step", "done", "kind", "level", "finished", "recovery",
+                                     "captcha_image", "captcha_length"}
+        # No textual answer in any field, including nested run fields and PNG metadata.
+        assert answer not in json.dumps(shown)
+        assert "phrase" not in shown and "text" not in shown and "answer" not in shown
+        env.clock.mono += 30
+        response = env.guard.submit(ticket, "00000" if attempt == 0 else answer.lower())
+        assert response["ok"], response
+        data = response["data"]
+        if attempt < 2:
+            assert not applied and data.get("wrong", False) == (attempt == 0)
+            shown = data["next"]
+        else:
+            assert data["passed"] and applied == [True]
+
+
 # ---------------------------------------------------------------- generators: ranges, distinct values, right answers
 
 @pytest.mark.parametrize("seed", range(40))
@@ -281,7 +368,7 @@ def test_validate_accepts_a_good_list_and_keeps_only_the_four_keys():
 @pytest.mark.parametrize("bad", [
     [], None, "x", {}, [1], [step(MATH, 4)], [step(MATH, -1)], [step(MEMORY, 3)], [step(SORT, 3)],
     [step(PHRASE, 29)], [step(PHRASE, 2001)], [step(MATH, 0, 0)], [step(MATH, 0, 21)],
-    [{**step(MATH, 0), "kind": "captcha"}], [{**step(MATH, 0), "times": 1.5}], [{**step(MATH, 0), "times": True}],
+        [{**step(MATH, 0), "kind": "unknown"}], [{**step(MATH, 0), "times": 1.5}], [{**step(MATH, 0), "times": True}],
     [{**step(MATH, 0), "level": "2"}], [{"kind": "math", "level": 0, "times": 1}],
     [{**step(MATH, 0), "id": ""}], [{**step(MATH, 0), "id": "x" * 25}], [{**step(MATH, 0), "id": "a b"}],
     [step(MATH, 0, id="same"), step(SORT, 0, id="same")],
@@ -364,7 +451,7 @@ def test_estimates_are_the_spec_numbers_rounded_to_minutes():
 
 def test_options_tell_an_editor_everything():
     o = ch.options()
-    assert [k["id"] for k in o["kinds"]] == ["math", "memory", "sort", "phrase"]
+    assert [k["id"] for k in o["kinds"]] == ["math", "memory", "sort", "phrase", "captcha"]
     assert o["max_steps"] == 6 and o["max_times"] == 20 and o["min_times"] == 1
     math = o["kinds"][0]
     assert [lv["label"] for lv in math["levels"]] == ["Easy", "Medium", "Hard", "Very hard"] and math["seconds"] == [6, 10, 20, 35]
@@ -928,7 +1015,7 @@ def api_data(reply):
 def test_the_page_data_has_the_list_the_kinds_and_the_estimate(page_env):
     d = api_data(page_env.api.antibypass_get())
     assert d["config"]["steps"] == [{"id": "s0", "kind": "phrase", "level": 60, "times": 1}]
-    assert [k["id"] for k in d["challenge"]["kinds"]] == ["math", "memory", "sort", "phrase", "password", "totp"]
+    assert [k["id"] for k in d["challenge"]["kinds"]] == ["math", "memory", "sort", "phrase", "captcha", "password", "totp"]
     assert d["challenge"]["max_steps"] == 6 and d["challenge"]["estimate"]["text"] == "under 1 min"
     ab.save(page_env.db, {**ab.settings(page_env.db), "steps": MIXED, "grid": True})
     d = api_data(page_env.api.antibypass_get())

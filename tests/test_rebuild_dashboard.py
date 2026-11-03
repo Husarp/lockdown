@@ -319,7 +319,7 @@ def test_week_bars_goal_and_unlock_marks(env):
     assert [b["today"] for b in week["bars"]] == [False] * 6 + [True]
     assert week["bars"][-1]["value"] == 60.0 and week["bars"][-1]["unlocks"] == 1
     assert week["bars"][-1]["tip"] == "Monday 14 September  1 h 00 m\nEmergency unlock 08:00–09:00"
-    assert week["bars"][-2]["tip"] == "Sunday 13 September  2 h 00 m" and week["bars"][-2]["unlocks"] == 0
+    assert week["bars"][-2]["tip"] == "Sunday 13 September  1 h 00 m" and week["bars"][-2]["unlocks"] == 0
     assert week["goal"] == 300.0 and week["note"] == "daily goal 5 h" and week["goal_label"] == "5 h"
     env.db.set_setting(dashboard.GOAL_KEY, "0")
     week = card(env, "week")
@@ -430,8 +430,8 @@ def test_the_timeline_has_segments_and_a_legend(env):
     record(env.db, "2026-09-14", "07:13", 60, 0, exe="code.exe")
     today = card(env, "today")
     assert today["start_hour"] == 6
-    assert today["segments"] == [{"start": 432, "len": 1, "kind": "neutral"}, {"start": 433, "len": 1, "kind": "idle"}]
-    assert [e["name"] for e in today["legend"]] == ["Productive", "Neutral", "Games", "Distracting", "Idle"]
+    assert today["segments"] == [{"start": 432, "len": 2, "kind": "neutral"}]
+    assert [e["name"] for e in today["legend"]] == ["Productive", "Neutral", "Games", "Distracting", "Unclassified"]
     assert today["colors"]["productive"] == "var(--cat-prod)"
 
 

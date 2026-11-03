@@ -121,10 +121,9 @@ def test_overview_numbers_equal_stats(fresh, rng):
     rows, (active, total), sessions, focus = old(fresh.ctx.db, rng)
     d = get(fresh.api, "overview", rng)
     assert d["range"] == rng and d["empty"] is False
-    assert card(d, "active") == {"key": "active", "label": "Active", "value": stats.hm(active),
+    assert card(d, "active") == {"key": "active", "label": "Screen time", "value": stats.hm(active),
                                  "sub": f"of {stats.hm(total)} at the PC"}
-    assert card(d, "idle")["value"] == stats.hm(total - active)
-    assert card(d, "idle")["sub"] == "screen on, no input"
+    assert all(c["key"] != "idle" for c in d["cards"])
     assert card(d, "sessions")["value"] == str(len(sessions))
     avg = sum((e - s).total_seconds() for s, e in sessions) / len(sessions)
     assert card(d, "sessions")["sub"] == f"avg {stats.hm(avg)} each"
@@ -177,7 +176,7 @@ def test_the_timeline_is_for_today_and_yesterday_only(fresh):
         else:                                         # (a very broken-up day: the longest ones, in order)
             assert len(got) == st.MAX_SEGMENTS and got == sorted(got) and set(got) <= set(want)
         assert d["start_hour"] == min(6, int(rows[0]["minute"][11:13]))
-        assert {"idle", "productive"} <= set(d["names"]) and d["legend"][-1]["key"] == "idle"
+        assert {"idle", "productive"} <= set(d["names"]) and d["legend"][-1]["name"] == "Unclassified"
     assert get(fresh.api, "overview", "7 days")["timeline"] is None
     assert get(fresh.api, "overview", "30 days")["timeline"] is None
 
@@ -628,7 +627,7 @@ def test_names_blocklist_first_then_the_catalog_then_the_exe(tmp_path):
     assert rows["pythonw.exe"]["name"] == "Lockdown" and rows["pythonw.exe"]["path"] is None
     assert rows["unknown.exe"]["name"] == "Unknown" and rows["chrome.exe"]["name"] == "Chrome"
     # the longest focus on the Overview speaks the same names
-    assert get(api, "overview", "Yesterday")["cards"][2]["sub"].split(",")[0] in {r["name"] for r in rows.values()}
+    assert card(get(api, "overview", "Yesterday"), "focus")["sub"].split(",")[0] in {r["name"] for r in rows.values()}
 
 
 # ---------------------------------------------------------------- the Calendar and what is read

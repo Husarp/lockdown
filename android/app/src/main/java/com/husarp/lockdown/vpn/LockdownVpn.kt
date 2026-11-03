@@ -303,17 +303,7 @@ class LockdownVpn : VpnService() {
                 },
             )
         }
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        return Notification.Builder(this, CHANNEL)
-            .setContentTitle("Lockdown is filtering sites")
-            .setContentText("Blocked-site protection is on.")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentIntent(open)
-            .setOngoing(true)
-            .build()
+        return com.husarp.lockdown.remind.BlockNotifications.notification(this, CHANNEL, foreground = true)
     }
 
     companion object {

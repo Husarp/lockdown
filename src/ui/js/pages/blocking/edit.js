@@ -29,8 +29,9 @@ export function groupsLine(item) {
 
 export const title = (item) => `Edit ${item.name}`;
 
-export function createEditHead({ onAlerts, onDisable, onRemove }) {
+export function createEditHead({ onAlerts, onDisable, onRemove, onBlockNow }) {
   const root = el(`<div class="ad-editacts" hidden>
+    <button class="btn btn-sm" type="button" data-block-now>Block now</button>
     <button class="btn btn-sm" type="button" data-alerts aria-haspopup="menu" title="Blocked-visit alerts for this item">${ic("bell")}<span class="muted">Alerts:</span><span data-word>Default</span></button>
     <button class="btn btn-sm" type="button" data-disable>Disable</button>
   </div>`);
@@ -43,6 +44,7 @@ export function createEditHead({ onAlerts, onDisable, onRemove }) {
     label, checked: v === notify, onClick: () => { if (v !== notify) onAlerts(v); },
   }))]));
   disable.addEventListener("click", () => onDisable());
+  root.querySelector("[data-block-now]").addEventListener("click", () => onBlockNow());
 
   const api = {
     el: root,

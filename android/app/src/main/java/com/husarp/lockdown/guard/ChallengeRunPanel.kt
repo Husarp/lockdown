@@ -1,6 +1,9 @@
 package com.husarp.lockdown.guard
 
+import android.graphics.BitmapFactory
 import android.os.SystemClock
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
@@ -80,7 +84,7 @@ fun ChallengeRunPanel(run: ChallengeRun, onPassed: () -> Unit, onCancel: () -> U
     var epoch by remember { mutableIntStateOf(0) }
     var note by remember { mutableStateOf("") }
     var noteBad by remember { mutableStateOf(false) }
-    val v = remember(epoch) { run.view() }
+    val v = remember(epoch) { run.view(AndroidCaptchaRenderer) }
     // the "too fast" clock starts when the puzzle is drawn
     LaunchedEffect(epoch) { run.shown(SystemClock.elapsedRealtime()) }
 
@@ -106,6 +110,7 @@ fun ChallengeRunPanel(run: ChallengeRun, onPassed: () -> Unit, onCancel: () -> U
         // key: a new puzzle starts with fresh typed / tapped state
         androidx.compose.runtime.key(epoch) {
             when (v.kind) {
+                Challenges.CAPTCHA -> CaptchaPuzzleView(v, onAnswer = { handle(run.answer(it, now()), "Not right - here is a new one.") }, onCancel)
                 Challenges.MATH -> MathPuzzleView(v, onAnswer = { handle(run.answer(it, now()), "Not right - here is a new one.") }, onCancel)
                 Challenges.MEMORY -> MemoryPuzzleView(v, onTaps = { handle(run.answerTaps(it, now()), "Missed - a new pattern.") }, onCancel)
                 Challenges.SORT -> SortPuzzleView(v, onTaps = { handle(run.answerTaps(it, now()), "Not in order - a new set.") }, onCancel)
@@ -234,12 +239,13 @@ private fun ColumnScope.MemoryPuzzleView(v: ChallengeView, onTaps: (List<Int>) -
 // ---------- sorting ----------
 
 /** Tap the items from smallest to largest into the answer row. Hard re-shuffles what is left after every tap (only the
- *  display: the engine judges the tapped indices). Continue sends them once all are in; Clear starts the row again. */
+ *  display: the engine judges the tapped indices). The last tap submits once; Clear starts the row again. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ColumnScope.SortPuzzleView(v: ChallengeView, onTaps: (List<Int>) -> Unit, onCancel: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var taps by remember { mutableStateOf(listOf<Int>()) }
+    val submission = remember { PuzzleSubmission() }
     val hard = v.level >= 2
     val rest = remember(taps) {
         val left = v.items.indices.filter { it !in taps }
@@ -250,17 +256,21 @@ private fun ColumnScope.SortPuzzleView(v: ChallengeView, onTaps: (List<Int>) -> 
         FlowRow(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (taps.isEmpty()) Text("Your order shows here", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(4.dp))
-            for (i in taps) SortItem(v.items[i], picked = true) {}
+            for (i in taps) SortItem(v.items[i], picked = true) { if (!submission.sent) taps = returnSortPiece(taps, i) }
         }
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (i in rest) SortItem(v.items[i], picked = false) { taps = taps + i }
+        for (i in rest) SortItem(v.items[i], picked = false) {
+            if (!submission.sent) {
+                taps = takeSortPiece(taps, i, v.items.size)
+                if (taps.size == v.items.size) submission.submit { onTaps(taps) }
+            }
+        }
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onCancel) { Text("Cancel") }
         Spacer(Modifier.weight(1f))
-        TextButton(onClick = { taps = emptyList() }, enabled = taps.isNotEmpty()) { Text("Clear") }
-        Button(onClick = { onTaps(taps) }, enabled = taps.size == v.items.size) { Text("Continue") }
+        TextButton(onClick = { taps = emptyList() }, enabled = taps.isNotEmpty() && !submission.sent) { Text("Clear") }
     }
 }
 
@@ -269,7 +279,7 @@ private fun SortItem(text: String, picked: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Surface(color = if (picked) cs.primaryContainer else cs.surface, contentColor = if (picked) cs.onPrimaryContainer else cs.onSurface,
         shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, if (picked) cs.primaryContainer else cs.outline),
-        modifier = Modifier.clickable(enabled = !picked) { onClick() }) {
+        modifier = Modifier.clickable { onClick() }) {
         Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.titleMedium)
     }
 }
@@ -277,21 +287,23 @@ private fun SortItem(text: String, picked: Boolean, onClick: () -> Unit) {
 // ---------- typed phrase ----------
 
 /** The phrase as it always was: the phrase in a box, typed (no pasting) into a field with mistakes in red, or word by
- *  word into the 3x3 grid. Next hands what is typed to the engine, which says if it matches. */
+ *  word into the 3x3 grid. Completion sends the answer once to the engine. */
 @Composable
 private fun ColumnScope.PhrasePuzzleView(v: ChallengeView, onAnswer: (String) -> Unit, onCancel: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     if (v.gridWords.isNotEmpty()) {
-        var gridDone by remember { mutableStateOf(false) }
+        val submission = remember { PuzzleSubmission() }
         var status by remember { mutableStateOf("") }
         var error by remember { mutableStateOf(false) }
-        WordGrid(v.gridWords, onDone = { gridDone = true }) { t, e -> status = t; error = e }
+        WordGrid(v.gridWords, onDone = { submission.submit { onAnswer(v.gridWords.joinToString(" ")) } }) { t, e -> status = t; error = e }
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodyMedium, color = if (error) cs.error else cs.onSurfaceVariant)
-        Footer(onCancel, "Next", gridDone) { onAnswer(v.gridWords.joinToString(" ")) }
+        Footer(onCancel)
         return
     }
     val phrase = v.phrase
-    var typed by remember { mutableStateOf("") }
+    val submission = remember { PuzzleSubmission() }
+    var input by remember { mutableStateOf(TextFieldValue()) }
+    val typed = input.text
     val onTrack = phrase.trim().startsWith(typed.trim())
     // a long phrase (up to MAX_LENGTH) scrolls in its own box, so the typing field stays in view
     Surface(Modifier.heightIn(max = 220.dp), color = cs.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
@@ -300,13 +312,18 @@ private fun ColumnScope.PhrasePuzzleView(v: ChallengeView, onAnswer: (String) ->
     }
     // Typed, not pasted (PC block_paste): a chunk dropped in at once - the clipboard, or a known custom phrase from the
     // keyboard's clipboard history - is ignored. No suggestions either.
-    OutlinedTextField(value = typed, onValueChange = { if (AntiBypass.typedNotPasted(typed, it)) typed = it },
+    OutlinedTextField(value = input, onValueChange = { next ->
+        if (!submission.sent) {
+            input = challengeInputChange(input, next)
+            if (input.text.trim() == phrase.trim()) submission.submit { onAnswer(input.text) }
+        }
+    },
         modifier = Modifier.fillMaxWidth(), label = { Text("Type the phrase") }, singleLine = false, maxLines = 6,
         keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = KeyboardType.Password),
         isError = typed.isNotBlank() && !onTrack)
     if (typed.isNotBlank() && !onTrack) Text("That doesn't match the phrase — check it.", style = MaterialTheme.typography.bodySmall, color = cs.error)
     else if (typed.isNotBlank()) Text("Keep going…", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-    Footer(onCancel, "Next", typed.isNotBlank()) { onAnswer(typed) }
+    Footer(onCancel)
 }
 
 /**
@@ -319,7 +336,7 @@ private fun WordGrid(words: List<String>, onDone: () -> Unit, onStatus: (String,
     val cs = MaterialTheme.colorScheme
     var index by remember { mutableIntStateOf(0) }
     var active by remember { mutableIntStateOf(Random.nextInt(9)) }
-    var typed by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf(TextFieldValue()) }
     var error by remember { mutableStateOf(false) }
 
     if (index >= words.size) {
@@ -341,24 +358,24 @@ private fun WordGrid(words: List<String>, onDone: () -> Unit, onStatus: (String,
                     val i = r * 3 + c
                     val lit = i == active
                     OutlinedTextField(
-                        value = if (lit) typed else "",
+                        value = if (lit) input else TextFieldValue(),
                         onValueChange = onValueChange@{ new ->
-                            if (!lit) return@onValueChange
-                            if (!AntiBypass.typedNotPasted(typed, new)) return@onValueChange   // ignore a pasted chunk
-                            typed = new
+                            if (!lit || index >= words.size) return@onValueChange
+                            input = challengeInputChange(input, new)
+                            val text = input.text
                             val word = words[index]
                             when {
-                                new == word -> {
+                                text == word -> {
                                     val next = index + 1
                                     index = next
-                                    typed = ""; error = false
+                                    input = TextFieldValue(); error = false
                                     if (next >= words.size) { onStatus("All words typed.", false); onDone() }
                                     else {
                                         active = (active + 1 + Random.nextInt(8)) % 9   // a different cell
                                         onStatus("$next of ${words.size} done — tap the lit box.", false)
                                     }
                                 }
-                                word.startsWith(new) -> { error = false; onStatus("Tap the lit box and type the word.", false) }
+                                word.startsWith(text) -> { error = false; onStatus("Tap the lit box and type the word.", false) }
                                 else -> { error = true; onStatus("Typo — fix it to go on.", true) }
                             }
                         },
@@ -373,4 +390,26 @@ private fun WordGrid(words: List<String>, onDone: () -> Unit, onStatus: (String,
             }
         }
     }
+}
+
+// ---------- captcha ----------
+
+@Composable
+private fun ColumnScope.CaptchaPuzzleView(v: ChallengeView, onAnswer: (String) -> Unit, onCancel: () -> Unit) {
+    val image = remember(v.captchaImage) {
+        BitmapFactory.decodeByteArray(v.captchaImage, 0, v.captchaImage.size).asImageBitmap()
+    }
+    var input by remember { mutableStateOf(TextFieldValue()) }
+    val submission = remember { PuzzleSubmission() }
+    Image(image, contentDescription = "Captcha picture", modifier = Modifier.fillMaxWidth().height(110.dp))
+    OutlinedTextField(value = input, onValueChange = { next ->
+        val accepted = challengeInputChange(input, next)
+        if (!submission.sent && accepted.text.length <= v.captchaLength && accepted.text.all { it.isLetterOrDigit() }) {
+            input = accepted
+            if (input.text.length == v.captchaLength) submission.submit { onAnswer(input.text) }
+        }
+    }, modifier = Modifier.fillMaxWidth(), label = { Text("Type the characters") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = KeyboardType.Password),
+        supportingText = { Text("Paste is off. Uppercase or lowercase is fine.") })
+    Footer(onCancel)
 }

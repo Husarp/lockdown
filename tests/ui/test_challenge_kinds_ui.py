@@ -6,6 +6,8 @@ The answers are read from the Run that lives inside the GuardService (this test 
 """
 import time
 
+import pytest
+
 import antibypass as ab
 from harness import assert_clean  # noqa: F401  (page fixture checks for console errors itself)
 
@@ -84,7 +86,69 @@ def type_phrase(page, clock, harness):
     wait_ready(page)
     clock.advance()
     page.fill("#dlg textarea.typed", server_run(harness).puzzle.view["phrase"])
-    page.click("#dlg .dlg-f .btn-primary")
+
+
+@pytest.mark.parametrize("grid", [False, True])
+def test_phrase_completion_advances_once_without_continue(shell, page, harness, grid):
+    req, clock = start(harness, page, shell, [step("phrase", 30), step("math", 0)], grid=grid)
+    wait_kind(page, ".ch-box" if grid else "textarea.typed")
+    assert page.locator("#dlg .dlg-f .btn").all_text_contents() == ["Cancel"]
+    puzzle = server_run(harness).puzzle
+    harness.delays["challenge_submit"] = 0.5
+    clock.advance()
+    if grid:
+        words = puzzle.view["grid_words"]
+        for word in words[:-1]:
+            page.fill("#dlg .ch-box.lit", word)
+        selector, value = "#dlg .ch-box.lit", words[-1]
+    else:
+        selector, value = "#dlg textarea.typed", puzzle.view["phrase"]
+    page.evaluate("""([selector, value]) => {
+        const input = document.querySelector(selector);
+        input.value = value;
+        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    }""", [selector, value])
+    wait_kind(page, ".ch-ans")
+    assert prog(page) == "Step 2 of 2 · Math, Easy"
+    assert harness.rpc_count("challenge_submit") == 1
+    assert not applied(harness) and req.ran == 0
+    answer_math(page, clock, harness)
+    assert result(page) == {"saved": 1}
+
+
+def test_expired_run_explains_the_fifteen_minute_limit(shell, page, harness):
+    req, clock = start(harness, page, shell, [step("phrase", 30)])
+    wait_ready(page)
+    phrase = server_run(harness).puzzle.view["phrase"]
+    clock.advance(901)
+    page.fill("#dlg textarea.typed", phrase)
+    page.wait_for_function("document.querySelector('#dlg .ch-msg').textContent.includes('15 minutes')")
+    assert "expired" in page.inner_text("#dlg .ch-msg")
+    assert page.locator("#dlg .dlg-f .btn").all_text_contents() == ["OK"]
+    page.click("#dlg .dlg-f .btn")
+    assert result(page) == "CANCELLED" and req.ran == 0
+
+
+@pytest.mark.parametrize("level", [0, 2])
+def test_sorting_can_take_back_a_middle_piece_and_reselect_it(shell, page, harness, level):
+    req, clock = start(harness, page, shell, [step("sort", level)])
+    wait_kind(page, ".ch-tile")
+    puzzle = server_run(harness).puzzle
+    order = puzzle.answer
+    clock.advance()
+    tap_ids(page, order[:3])
+    page.click(f'#dlg .ch-sorta .ch-tile[data-id="{order[1]}"]')
+    selected = page.eval_on_selector_all("#dlg .ch-sorta .ch-tile", "els => els.map(e => Number(e.dataset.id))")
+    assert selected == [order[0], order[2]]
+    returned = page.locator(f'#dlg .ch-pool .ch-tile[data-id="{order[1]}"]')
+    assert returned.count() == 1 and returned.inner_text() == puzzle.view["items"][order[1]]
+    assert harness.rpc_count("challenge_submit") == 0
+    page.click(f'#dlg .ch-sorta .ch-tile[data-id="{order[2]}"]')
+    tap_ids(page, order[1:])
+    assert result(page) == {"saved": 1} and req.ran == 1
+    assert harness.rpc_count("challenge_submit") == 1
 
 
 def test_a_three_step_run_goes_to_the_end(shell, page, harness):

@@ -21,6 +21,7 @@ import time
 
 import alerts
 from gui import toast as toasts
+from notification_batch import BlockingMessage, NotificationBatch
 
 FORMAT_KEY = "notify.format"
 FORMAT_TTL_SEC = 3          # the setting is re-read at most this often
@@ -49,7 +50,7 @@ def play_sound():
 class Notices:
     """hub.notify.show = Notices(hub, corner, toaster).show"""
 
-    def __init__(self, hub, corner, toaster, read_format=None, spawn=None, clock=time.monotonic, beep=None):
+    def __init__(self, hub, corner, toaster, read_format=None, spawn=None, clock=time.monotonic, beep=None, schedule=None):
         self.hub, self.corner, self.toaster = hub, corner, toaster
         self.spawn = spawn or _spawn
         self._beep = beep or play_sound
@@ -58,6 +59,12 @@ class Notices:
         self._fmt = (None, -1e9)      # (value, read at)
         self._db = None
         self._lock = threading.Lock()
+        self._block_toast = None
+        self._batch = NotificationBatch()
+        self._pending = []
+        self._batch_lock = threading.Lock()
+        self._batch_timer = None
+        self._schedule = schedule or self._timer
         self.last_toast = None        # the Windows notification of the latest notice (to take down again)
 
     # ------------------------------------------------------------------ the setting
@@ -89,34 +96,71 @@ class Notices:
         except Exception:
             return False
 
-    def _front(self, message, buttons, sticky, sound) -> bool:
+    def _front(self, message, buttons, sticky, sound, replace_key=None) -> bool:
         """The warning for the app in front: the corner card (our own window - over a game, through Do Not Disturb, and
         no Windows notification besides), then the sound. False when the corner's page is not ready: the caller then
         takes the ordinary road (the sound has been played all the same)."""
         on_card = getattr(self.corner, "page_ok", True)
         if on_card:
             self.last_toast = None
-            self.corner.notice(message, buttons, sticky=sticky)
+            self.corner.notice(message, buttons, sticky=sticky,
+                               **({"key": "notice:" + replace_key} if replace_key else {}))
         if sound:
             self._beep()
         return on_card
 
+    @staticmethod
+    def _timer(delay, fn):
+        timer = threading.Timer(delay, fn)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _flush_blocks(self):
+        # Serialize flushes as well as offers: a slow WinRT call must not replace a newer burst.
+        with self._batch_lock:
+            pending, self._pending = self._pending, []
+            self._batch_timer = None
+            pending = [(m, f, s) for m, f, s in pending if not self.hub.notify.muted(m.force or f)]
+            text = self._batch.merge([m for m, _, _ in pending], self._clock())
+            if text:
+                self._show(text, front=any(f for _, f, _ in pending),
+                           sound=any(s for _, _, s in pending), replace_key="blocks")
+
     def show(self, message, action=None, actions=None, sticky=False, front=False, sound=False):
+        if isinstance(message, BlockingMessage) and not (action or actions or sticky):
+            with self._batch_lock:
+                self._pending.append((message, front, sound))
+                if self._batch_timer is None:
+                    self._batch_timer = self._schedule(0.75, self._flush_blocks)
+            return
+        self._show(message, action, actions, sticky, front, sound)
+
+    def _show(self, message, action=None, actions=None, sticky=False, front=False, sound=False, replace_key=None):
         buttons = list(actions or ([action] if action else []))
-        if front and self._front(message, buttons, sticky, sound):
+        if replace_key and front and getattr(self.corner, "page_ok", True) and self._block_toast is not None:
+            self.toaster.remove(self._block_toast)
+            self._block_toast = None
+        if front and self._front(message, buttons, sticky, sound, replace_key):
             return
         full = self._fullscreen()
         windows, card = route(self.fmt(), full, bool(buttons), self.toaster.works())
         if card and not getattr(self.corner, "page_ok", True):     # (the corner's page has not said it works yet)
             windows, card = True, False
         self.last_toast = None
+        if replace_key and not card:
+            self.corner.remove("notice:" + replace_key)
         if windows:
             self.last_toast = self.toaster.send(
                 message, buttons, scenario="reminder" if sticky and not full else None,
                 expire_min=toasts.HELD_EXPIRE_MIN if full     # (missed over a game: still there afterwards)
-                else toasts.EXPIRE_MIN if buttons or sticky else toasts.PASSING_EXPIRE_MIN)
+                else toasts.EXPIRE_MIN if buttons or sticky or replace_key else toasts.PASSING_EXPIRE_MIN,
+                **({"replace_key": replace_key} if replace_key else {}))
+        if replace_key:
+            self._block_toast = self.last_toast
         if card:
-            self.corner.notice(message, buttons, sticky=sticky)
+            self.corner.notice(message, buttons, sticky=sticky,
+                               **({"key": "notice:" + replace_key} if replace_key else {}))
 
     def clear(self, toast):
         """Take a Windows notification down (on screen and in the notification centre), off the calling thread."""

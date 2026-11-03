@@ -261,8 +261,9 @@ class LinkService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("Lockdown in Island")
-            .setContentText("Following your main Lockdown's rules")
+            .setContentTitle("Lockdown Island link")
+            .setContentText("Syncing rules with your main Lockdown")
+            .setOnlyAlertOnce(true)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(open)
             .setOngoing(true)

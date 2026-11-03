@@ -140,6 +140,10 @@ fun GroupEditor(group: Group, onClose: () -> Unit) {
                 }
             }
 
+            BlockNowButton(group.id, group = true) { until ->
+                draft = draft.copy(rules = com.husarp.lockdown.data.BlockNow.merge(draft.rules, until))
+            }
+
             SectionLabel("Shared rules (apply to every member)")
             Text("A group can carry several rules at once — e.g. scheduled hours AND a shared daily limit. Time on any member fills the group's limit.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)

@@ -234,7 +234,7 @@ def test_stop_locked_cancelled_changes_nothing(ctx, api):
     ticket = data(api.mode_stop())["ticket"]
     api.challenge_cancel(ticket)
     assert active(ctx)["locked"] is True
-    assert "expired" in refused(api.challenge_submit(ticket, "x"))
+    assert "cancelled" in refused(api.challenge_submit(ticket, "x"))
 
 
 def test_stop_cannot_end_a_scheduled_mode(ctx, api):

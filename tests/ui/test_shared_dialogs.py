@@ -77,8 +77,8 @@ def wait_title(page, text):
 
 def wait_closed(page):
     """No dialog is open any more AND its `close` event has run (that is a task after .open turns false)."""
-    page.wait_for_function("!document.querySelector('dialog[open]')")
-    page.evaluate("new Promise((r) => setTimeout(r, 20))")
+    page.wait_for_function("!document.querySelector('dialog[open]') && "
+                           "document.getElementById('dlg').childElementCount === 0")
 
 
 def esc_close(page):
@@ -341,7 +341,7 @@ def test_the_challenge_then_makes_the_change(ready, harness):
     phrase = page.evaluate("document.querySelector('dialog[open] .ch-phrase').textContent")       # what Python issued
     page.focus("dialog[open] textarea.typed")
     page.keyboard.type(phrase, delay=45)
-    page.click("dialog[open] button:has-text('Continue')")
+    # A completed phrase submits automatically; there is no Continue button.
     page.wait_for_function("document.querySelector('.ab-count')?.textContent.includes('is now Games')")
     assert harness.db.categories()[("app", "zebra.exe")] == "games"
     assert title(page) == "Apps" and page.input_value(".ab input.input") == "zebra"

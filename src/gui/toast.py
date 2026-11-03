@@ -23,6 +23,7 @@ class Toaster:
         a notice (not on a button) - opens Lockdown."""
         self.call_soon, self.fallback, self.on_click = call_soon, fallback, on_click
         self._toaster = None      # created on first use; False = not possible here (then: the balloon)
+        self._replacement_at = {}
         self._live = {}           # tag -> (toast, expires): kept referenced so their click handlers stay alive
 
     def _get(self):
@@ -39,7 +40,7 @@ class Toaster:
         return bool(self._get())
 
     def send(self, text: str, actions=(), scenario: str | None = None, expire_min: float = EXPIRE_MIN,
-             title: str | None = None):
+             title: str | None = None, replace_key: str | None = None):
         """Show `text` (under a bold `title`, if given) with a button per (label, callback) in `actions`.
         scenario "reminder": it stays on screen until answered (needs a button) - only for when nothing is
         full-screen; None: an ordinary notice.
@@ -47,16 +48,17 @@ class Toaster:
         toaster = self._get()
         if toaster:
             try:
-                return self._send(toaster, [title, text] if title else [text], list(actions), scenario, expire_min)
+                return self._send(toaster, [title, text] if title else [text], list(actions), scenario, expire_min, replace_key)
             except Exception:
                 self._toaster = False   # (WinRT refused: say it anyway - and from now on the balloon / pop-ups)
         self.fallback(f"{title}: {text}" if title else text)
         return None
 
-    def _send(self, toaster, lines, actions, scenario, expire_min):
+    def _send(self, toaster, lines, actions, scenario, expire_min, replace_key=None):
         from windows_toasts import Toast, ToastButton, ToastScenario
         now = datetime.now().astimezone()   # (aware: WinRT gets an unambiguous time)
         self._live = {k: v for k, v in self._live.items() if v[1] > now}
+        self._replacement_at = {k: v for k, v in self._replacement_at.items() if k in self._live}
         calls = {f"lockdown:{i}": fn for i, (_label, fn) in enumerate(actions)}
 
         def activated(event):     # (a WinRT thread - never touch Tk here)
@@ -69,6 +71,15 @@ class Toaster:
         toast = Toast(text_fields=lines, expiration_time=expires, on_activated=activated,
                       scenario=ToastScenario.Reminder if reminder else ToastScenario.Default,
                       actions=[ToastButton(label, arg) for arg, (label, _fn) in zip(calls, actions)])
+        if replace_key:
+            # Windows replaces notifications with the same tag; updates do not alert again.
+            tag = "lockdown-" + replace_key
+            previous = self._live.get(tag)
+            toast.tag = tag
+            if previous and (now - self._replacement_at[tag]).total_seconds() <= 10:
+                toast.suppress_popup = True
+            else:
+                self._replacement_at[tag] = now
         toaster.show_toast(toast)
         self._live[toast.tag] = (toast, expires)
         return toast

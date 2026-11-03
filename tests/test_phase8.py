@@ -70,6 +70,31 @@ def test_backup_diff(tmp_path):
     assert "Accent colour will change" in lines
 
 
+def test_captcha_backup_round_trip_keeps_guard_and_bedtime_tier_lists(tmp_path):
+    import antibypass
+    import challenges
+    import reminders
+
+    db = Database(tmp_path / "captcha.db")
+    rows = [{"id": f"c{level}", "kind": "captcha", "level": level, "times": 20} for level in range(3)]
+    antibypass.save(db, {**antibypass.settings(db), "phrase": True, "steps": rows})
+    night = {**reminders.load(db, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP), "challenge": True, "challenge_steps": rows,
+             "tiers": [{"from": "23:00", "every_sec": 300, "challenge_steps": rows[::-1]}]}
+    reminders.save(db, reminders.SLEEP_KEY, night)
+    path = tmp_path / "captcha.json"
+    backup.save(db, str(path))
+    restored = Database(tmp_path / "restored.db")
+    backup.restore(restored, backup.load(str(path)))
+    assert antibypass.settings(restored)["steps"] == rows
+    loaded = reminders.load(restored, reminders.SLEEP_KEY, reminders.DEFAULT_SLEEP)
+    assert loaded["challenge_steps"] == rows and loaded["tiers"][0]["challenge_steps"] == rows[::-1]
+    # The same four-key rows are used in Island configs; the central cleaner must preserve them.
+    assert challenges.read_steps(json.loads(json.dumps(rows))) == rows
+    exported = backup.export(restored)["settings"]
+    assert json.loads(exported["antibypass"])["steps"] == rows
+    assert json.loads(exported[reminders.SLEEP_KEY])["challenge_steps"] == rows
+
+
 def test_backup_diff_reads_an_older_anti_bypass_as_it_is_used(tmp_path):
     db = Database(tmp_path / "c.db")
     older = {"phrase": True, "custom_phrase": "my own words"}                 # from before "Use my own phrase"

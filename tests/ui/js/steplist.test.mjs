@@ -10,10 +10,20 @@ const OPTIONS = {
     { id: "memory", label: "Memory grid", seconds: [8, 10, 15], levels: [{ level: 0, label: "Easy" }] },
     { id: "sort", label: "Sorting", seconds: [6, 10, 20], levels: [{ level: 0, label: "Easy" }] },
     { id: "phrase", label: "Typed phrase", levels: [{ level: 60, label: "Medium" }], min_level: 30, max_level: 2000 },
+    { id: "captcha", label: "Captcha", seconds: [10, 12, 14], levels: [{ level: 0, label: "Easy" }, { level: 1, label: "Medium" }, { level: 2, label: "Hard" }] },
   ],
   max_steps: 6, min_times: 1, max_times: 20, phrase_seconds: { base: 3, per_char: 0.4, grid: 1.3 }, long_seconds: 600,
 };
 const row = (id, kind, level, times) => ({ id, kind, level, times });
+
+test("captcha estimates and loosening match the engine and phone", () => {
+  for (let level = 0; level < 3; level++) assert.equal(stepSeconds(row("c", "captcha", level, 1), OPTIONS), 10 + level * 2);
+  const saved = [row("c", "captcha", 2, 20)];
+  assert.equal(estimate(saved, OPTIONS).seconds, 280);
+  assert.deepEqual(stepsLooser(saved, [row("c", "captcha", 1, 20)], OPTIONS), ["lowered the level of Captcha ×20"]);
+  assert.deepEqual(stepsLooser(saved, [row("c", "captcha", 2, 19)], OPTIONS), ["fewer times on Captcha"]);
+  assert.equal(hasPhrase(saved), false);
+});
 
 test("estimate: the same numbers as Python's challenges.estimate", () => {
   assert.equal(stepSeconds(row("a", "math", 2, 1), OPTIONS), 20);

@@ -1,7 +1,7 @@
 // The Anti-Bypass challenge: ONE component for the main window, the overlay and the uninstaller's standalone window.
 // Python issues and checks everything (webapi/guard.py): this file only shows what challenge_begin returns, collects
 // what is typed and hands it to challenge_submit. It never decides that a challenge passed - the "client check" here
-// (red mistake, enabled Continue) is cosmetic, Python compares again, times the typing and runs the stored change.
+// (red mistake, completed phrase) is cosmetic, Python compares again, times the typing and runs the stored change.
 //
 //   openChallenge(reply)   reply = {ticket, changes, more} from a gated call (or just the ticket). Resolves with the
 //                          change's own result once it passed, or CANCELLED (cancel, Esc, wait set, closed hours).
@@ -15,7 +15,7 @@
 import { ld } from "./bridge.js";
 import { openDialog } from "./dialog.js";
 import { esc } from "./ui.js";
-import { runHeaderHtml, mountMath, mountMemory, mountSort, mountSecret, recoveryTyped, printCode, RECOVERY_DOES, SECRET_STYLE } from "./challenge_kinds.js";
+import { runHeaderHtml, mountMath, mountMemory, mountSort, mountCaptcha, mountSecret, recoveryTyped, printCode, RECOVERY_DOES, SECRET_STYLE } from "./challenge_kinds.js";
 
 export const CANCELLED = Symbol("challenge-cancelled");
 const TITLE = "This loosens your blocks";
@@ -231,7 +231,7 @@ function run(info) {
     }
     if (closed) return;
     begun = { now: data.now, at: performance.now(), info: data };
-    if (["phrase", "grid", "math", "memory", "sort", "password", "totp"].includes(data.mode)) showPuzzle(data, "");
+    if (["phrase", "grid", "math", "memory", "sort", "captcha", "password", "totp"].includes(data.mode)) showPuzzle(data, "");
     else if (data.mode === "waiting") await showWaiting(data.waiting_until, false);
     else showClosed(data);
   }
@@ -249,7 +249,7 @@ function run(info) {
       if (closed) return conclude();
       const msg = err.message || "That didn't work.";
       if (/aren't possible right now|nothing to type/.test(msg)) return begin();     // the state changed: show the right view
-      onError(msg, /expired/.test(msg));
+      onError(msg, /expired|cancelled|replaced|already been used|no longer active/.test(msg));
       return;
     }
     inflight = false;
@@ -290,6 +290,7 @@ function run(info) {
       closed: () => closed,
     };
     if (data.mode === "math") mountMath(host, data);
+    else if (data.mode === "captcha") mountCaptcha(host, data);
     else if (data.mode === "memory") mountMemory(host, data);
     else if (data.mode === "password" || data.mode === "totp") mountSecret(host, data);
     else mountSort(host, data);
@@ -304,8 +305,7 @@ function run(info) {
       <textarea class="textarea typed" rows="3" placeholder="Start typing\u2026" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Type the phrase"></textarea>
       <div class="meter"><i class="ch-fill" style="width:0"></i></div>
       <div class="hstack small"><span class="muted grow ch-msg">Paste is off. Mistakes show in red.</span><span class="num muted ch-count">0 / ${P.length}</span></div>`,
-      [cancelBtn, { label: "Continue", primary: true, disabled: true, onClick: go }]);
-    const go_ = foot.lastChild;
+      [cancelBtn]);
     const box = q(".phrase"), done = q(".done"), bad = q(".bad"), rest = q(".rest"), cur = q(".ch-cur");
     const ta = q("textarea"), msg = q(".ch-msg"), count = q(".ch-count"), fill = q(".ch-fill");
     for (const s of [done, bad, rest]) s.append(document.createTextNode(""));
@@ -328,19 +328,20 @@ function run(info) {
         const c = `${st.i} / ${P.length}`;
         if (count.textContent !== c) count.textContent = c;
       }
-      go_.disabled = !st.complete || busy;
       last = { i: st.i, bad: st.bad, n: t.length };
+      if (st.complete) go();
     }
     function keepInView() {                                  // a long phrase scrolls inside its box, following the typing
       const top = cur.offsetTop, h = box.clientHeight;
       if (top < box.scrollTop + 24 || top > box.scrollTop + h - 40) box.scrollTop = Math.max(0, top - h / 2);
     }
     function go() {
-      if (go_.disabled) return;
+      if (busy || !phraseState(ta.value, P).complete) return;
       busy = true;
-      go_.disabled = true;
+      ta.disabled = true;
       submit(ta.value, (text, gone) => {
         busy = false;
+        ta.disabled = gone;
         ta.value = "";                                       // a refused try starts again from nothing
         last = { i: -1, bad: false, n: -1 };
         paint();
@@ -351,7 +352,7 @@ function run(info) {
     }
     ta.addEventListener("input", paint);
     ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); if (!go_.disabled) go(); }
+      if (e.key === "Enter") { e.preventDefault(); go(); }
     });
     ta.focus();
   }
@@ -363,8 +364,7 @@ function run(info) {
       ${frame("Type each word into the highlighted box (click it first, no pasting).")}
       <div class="ch-ghead"><span class="small muted ch-wi"></span><span class="ch-chip"></span><span class="grow"></span><span class="small muted ch-status"></span></div>
       <div class="ch-board">${'<input class="input ch-box" tabindex="-1" autocomplete="off" spellcheck="false" autocapitalize="off" disabled aria-label="Word box">'.repeat(9)}</div>`,
-      [cancelBtn, { label: "Continue", primary: true, disabled: true, onClick: go }]);
-    const go_ = foot.lastChild;
+      [cancelBtn]);
     const boxes = [...body.querySelectorAll(".ch-box")];
     const wi = q(".ch-wi"), chip = q(".ch-chip"), status = q(".ch-status");
     const typedWords = [];
@@ -377,7 +377,7 @@ function run(info) {
         chip.hidden = true;
         for (const b of boxes) { b.value = ""; b.disabled = true; b.classList.remove("lit", "bad"); }
         say("", false);
-        go_.disabled = busy;
+        go();
         return;
       }
       lit = pickBox(lit);
@@ -394,23 +394,21 @@ function run(info) {
       if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     }
     boxes.forEach((b, k) => b.addEventListener("input", () => {
-      if (k !== lit) return;
+      if (busy || index >= words.length || k !== lit) return;
       const text = b.value.trim(), st = wordState(text, words[index]);
       if (st === "done") { typedWords.push(text); index++; step(); }
       else if (st === "typo") { b.classList.add("bad"); say("Typo - fix it to go on.", true); }
       else { b.classList.remove("bad"); say(`${index} of ${words.length} words done.`, false); }
     }));
     function go() {
-      if (go_.disabled) return;
+      if (busy || index < words.length) return;
       busy = true;
-      go_.disabled = true;
       submit(typedWords.slice(), (text, gone) => {
         busy = false;
         typedWords.length = 0;                               // a refused try starts again from the first word
         index = 0;
         lit = -1;
         step();
-        go_.disabled = true;
         say(text, true);
         if (gone) onlyOk(foot);
       });

@@ -8,13 +8,13 @@ import kotlin.random.Random
 
 /**
  * Challenges you can mix, the same as on the PC: a challenge is an ordered list of steps, each one kind + level + how
- * many times. Math, Memory grid, Sorting and Typed phrase. Anti-Bypass asks the list before anything loosens, the
+ * many times. Math, Memory grid, Sorting, Typed phrase and Captcha. Anti-Bypass asks the list before anything loosens, the
  * bedtime screen before Dismiss. Every puzzle is made and judged HERE (never by the screen), a wrong answer gives a new
  * puzzle of that step, and a [ChallengeRun] holds the answers. No Android in this file: Compose (the dialog) and the
  * plain-View bedtime cover use it alike. Pure and testable.
  */
 
-/** One step of a list. [level]: math 0..3 (Easy..Very hard), memory and sort 0..2, for a phrase its length in letters
+/** One step of a list. [level]: math 0..3 (Easy..Very hard), memory, sort and captcha 0..2, for a phrase its length in letters
  *  (30..2000). [times]: 1..20. [id] 1..24 of [A-Za-z0-9_-], unique in its list: a row keeps it while it is edited, so
  *  the stricter / looser check can follow it. Every field has a default so a half-written row still reads (and is then
  *  cleaned or dropped by [Challenges.clean]) instead of failing the whole config. */
@@ -35,7 +35,7 @@ data class StepView(val kind: String, val level: Int, val times: Int, val label:
 /** What the screen draws now. [step] (0-based) and [done] (in that step) place you in [steps]. Of the puzzle fields only
  *  the current kind's are filled: math [expr] (+ [findX]: ask "x = ?"), memory [size] x [size] and the [lit] squares
  *  (row-major, 0-based; with [ordered] in the order they count), sort the [items] as text (their index is their id),
- *  phrase [phrase] or, in the grid, [gridWords]. Draw the math as a picture, never as selectable text. */
+ *  phrase [phrase] or, in the grid, [gridWords]; captcha [captchaImage] and [captchaLength]. Draw the math as a picture, never as selectable text. */
 data class ChallengeView(
     val steps: List<StepView>,
     val step: Int,
@@ -53,6 +53,8 @@ data class ChallengeView(
     val items: List<String> = emptyList(),
     val phrase: String = "",
     val gridWords: List<String> = emptyList(),
+    val captchaImage: ByteArray = byteArrayOf(),
+    val captchaLength: Int = 0,
 )
 
 internal sealed interface Puzzle { val key: String }
@@ -62,12 +64,21 @@ internal class MemoryPuzzle(val size: Int, val lit: List<Int>, val ordered: Bool
 internal class SortPuzzle(val items: List<String>, val order: List<Int>) : Puzzle { override val key get() = items.joinToString("|") }
 internal class PhrasePuzzle(val phrase: String, val words: List<String>?) : Puzzle { override val key get() = phrase }
 
+/** Only the renderer sees the secret; views carry PNG bytes and the required length. */
+fun interface CaptchaRenderer { fun render(text: String, level: Int): ByteArray }
+
+internal class CaptchaPuzzle(val text: String) : Puzzle { override val key get() = text }
+
 object Challenges {
     const val MATH = "math"
     const val MEMORY = "memory"
     const val SORT = "sort"
     const val PHRASE = "phrase"
-    val KINDS = listOf(MATH, MEMORY, SORT, PHRASE)
+    const val CAPTCHA = "captcha"
+    const val CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRTUVWXYZ2346789"
+    const val CAPTCHA_MS_PER_CHAR = 150L
+    fun captchaLength(level: Int) = 4 + level.coerceIn(0, 2)
+    val KINDS = listOf(MATH, MEMORY, SORT, PHRASE, CAPTCHA)
 
     const val MAX_STEPS = 6
     const val MAX_TIMES = 20
@@ -87,22 +98,22 @@ object Challenges {
     private val DIVIDE = "÷"
     private val ID = Regex("[A-Za-z0-9_-]{1,24}")
     private val LEVELS = mapOf(MATH to listOf("Easy", "Medium", "Hard", "Very hard"), MEMORY to listOf("Easy", "Medium", "Hard"),
-        SORT to listOf("Easy", "Medium", "Hard"))
+        SORT to listOf("Easy", "Medium", "Hard"), CAPTCHA to listOf("Easy", "Medium", "Hard"))
     /** The phrase length quick picks (as Guardrails offers): name to letters. */
     val PHRASE_PRESETS = listOf("Short" to 30, "Medium" to 60, "Long" to 120, "Very long" to 250)
 
     // ---------- names ----------
 
     fun kindLabel(kind: String) = when (kind) {
-        MATH -> "Math"; MEMORY -> "Memory grid"; SORT -> "Sorting"; PHRASE -> "Typed phrase"; else -> kind
+        MATH -> "Math"; MEMORY -> "Memory grid"; SORT -> "Sorting"; PHRASE -> "Typed phrase"; CAPTCHA -> "Captcha"; else -> kind
     }
 
     /** The levels a kind takes (a phrase: its length in letters), or null for an unknown kind. */
     fun levelRange(kind: String): IntRange? = when (kind) {
-        MATH -> 0..3; MEMORY, SORT -> 0..2; PHRASE -> AntiBypass.MIN_LENGTH..AntiBypass.MAX_LENGTH; else -> null
+        MATH -> 0..3; MEMORY, SORT, CAPTCHA -> 0..2; PHRASE -> AntiBypass.MIN_LENGTH..AntiBypass.MAX_LENGTH; else -> null
     }
 
-    /** The levels an editor offers as choices: math 0..3, memory / sort 0..2, a phrase the [PHRASE_PRESETS] (any length
+    /** The levels an editor offers as choices: math 0..3, memory / sort / captcha 0..2, a phrase the [PHRASE_PRESETS] (any length
      *  in between is typed). */
     fun levelChoices(kind: String): List<Int> =
         if (kind == PHRASE) PHRASE_PRESETS.map { it.second } else levelRange(kind)?.toList().orEmpty()
@@ -201,6 +212,7 @@ object Challenges {
     /** Seconds one go of [s] takes: math 6/10/20/35, memory 8/10/15, sort 6/10/20, a phrase 3 + 0.4 a letter (x 1.3 in the grid). */
     fun stepSeconds(s: ChallengeStep, phrase: PhraseOpts = PhraseOpts()): Double = when (s.kind) {
         MATH -> MATH_SEC[s.level.coerceIn(0, 3)].toDouble()
+        CAPTCHA -> (captchaLength(s.level) * 2 + 2).toDouble()
         MEMORY -> MEMORY_SEC[s.level.coerceIn(0, 2)].toDouble()
         SORT -> SORT_SEC[s.level.coerceIn(0, 2)].toDouble()
         PHRASE -> (3 + 0.4 * (ownLetters(phrase.own) ?: s.level)) * (if (phrase.grid) 1.3 else 1.0)
@@ -230,6 +242,7 @@ object Challenges {
         MATH -> newMath(s.level, rng)
         MEMORY -> newMemory(s.level, rng)
         SORT -> newSort(s.level, rng)
+        CAPTCHA -> CaptchaPuzzle(CharArray(captchaLength(s.level)) { CAPTCHA_ALPHABET[rng.nextInt(CAPTCHA_ALPHABET.length)] }.concatToString())
         else -> {
             val text = phrase.own.takeIf { it.isNotBlank() } ?: AntiBypass.newPhrase(s.level.coerceIn(AntiBypass.MIN_LENGTH, AntiBypass.MAX_LENGTH), phrase.complex, rng)
             PhrasePuzzle(if (phrase.grid) "" else text, if (phrase.grid) text.split(Regex("\\s+")).filter { it.isNotEmpty() } else null)
@@ -359,11 +372,13 @@ class ChallengeRun(steps: List<ChallengeStep>, private val phrase: PhraseOpts = 
     private var shownAt = nowMs
     private var puzzle: Puzzle = Challenges.make(this.steps[0], phrase, rng)
 
-    fun view(): ChallengeView {
+    fun view(captchaRenderer: CaptchaRenderer? = null): ChallengeView {
         val s = steps[step]
         val v = ChallengeView(steps.map { StepView(it.kind, it.level, it.times, Challenges.stepLabel(it)) }, step, done,
             s.kind, s.level, s.times, Challenges.stepLabel(s), passed)
         return when (val p = puzzle) {
+            is CaptchaPuzzle -> v.copy(captchaLength = p.text.length,
+                captchaImage = captchaRenderer?.render(p.text, s.level) ?: byteArrayOf())
             is MathPuzzle -> v.copy(expr = p.expr, findX = p.findX)
             is MemoryPuzzle -> v.copy(size = p.size, lit = p.lit, ordered = p.ordered)
             is SortPuzzle -> v.copy(items = p.items)
@@ -378,6 +393,7 @@ class ChallengeRun(steps: List<ChallengeStep>, private val phrase: PhraseOpts = 
     fun answer(value: String, nowMs: Long): ChallengeVerdict {
         if (passed) return ChallengeVerdict.PASSED
         return when (val p = puzzle) {
+            is CaptchaPuzzle -> judge(p.text.equals(value.trim(), ignoreCase = true), p.text.length * Challenges.CAPTCHA_MS_PER_CHAR, nowMs)
             is MathPuzzle -> judge(Challenges.mathOk(p, value), Challenges.MATH_MIN_MS, nowMs)
             is PhrasePuzzle -> {
                 val words = value.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }

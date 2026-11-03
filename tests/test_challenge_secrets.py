@@ -245,14 +245,14 @@ def test_status_never_holds_a_secret_or_a_hash(ctx):
 def test_secret_kinds_are_anti_bypass_only_asked_once_without_a_level():
     rows = [step("password"), step("totp", "t")]
     assert ch.validate_steps(rows, ch.AB_KINDS) == rows
-    with pytest.raises(ValueError, match="Math, Memory grid, Sorting or Typed phrase"):
+    with pytest.raises(ValueError, match="Math, Memory grid, Sorting, Typed phrase or Captcha"):
         ch.validate_steps(rows)                                     # the bedtime list: never
     for bad in ({**rows[0], "times": 2}, {**rows[0], "level": 1}):
         with pytest.raises(ValueError, match="asked once"):
             ch.validate_steps([bad], ch.AB_KINDS)
     assert ch.read_steps(rows) == []                                # the bedtime screen reads none of them
     assert ch.read_steps([{**rows[0], "times": 7, "level": 3}], ch.AB_KINDS) == [step("password")]
-    assert [k["id"] for k in ch.options()["kinds"]] == ["math", "memory", "sort", "phrase"]
+    assert [k["id"] for k in ch.options()["kinds"]] == ["math", "memory", "sort", "phrase", "captcha"]
     secret = [k for k in ch.options(ch.AB_KINDS)["kinds"] if k.get("secret")]
     assert [(k["id"], k["levels"], k["times"]) for k in secret] == [("password", [], 1), ("totp", [], 1)]
     assert ch.step_label(rows[0]) == "Own password"

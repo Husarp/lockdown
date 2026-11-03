@@ -104,7 +104,7 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private val watcher = BlockWatcher()
     private val debounce = com.husarp.lockdown.engine.BlockDebounce()   // leftover events of an app whose notice was just dismissed
     private var shownApp: String? = null              // the app the notice up is for (null: a site / keyword)
-    private var alertSeq = 0
+    private var modeNotified: Set<String> = emptySet()
     @Volatile private var stepDelay = Cadence.STEP_MS   // the wait before the step loop's next run (stretched with the screen off)
 
     /** The screen went off / came on / was unlocked: the loops stretched for the screen being off run now, at the
@@ -189,7 +189,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         speedUpSteps()
         val cfg = Store.config
         // the app whose notice was just dismissed is still closing: not in front (until really brought back)
-        val pkg = currentPkg.takeUnless { debounce.leftover(it, SystemClock.elapsedRealtime()) } ?: ""
+        val pkg = currentPkg.takeUnless {
+            debounce.leftover(it, SystemClock.elapsedRealtime(),
+                confirmedOpening = rootInActiveWindow?.packageName?.toString() == it)
+        } ?: ""
         val now = Enforce.ldt(TrustedTime.now(this))
         UsageStore.counter.clock = cfg.clock()
         val ms = SystemClock.elapsedRealtime()
@@ -305,7 +308,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         if (wasInUse) Media.pause(this)
         when {
             v.site && "back" in flags -> performGlobalAction(GLOBAL_ACTION_BACK)
-            navigates -> performGlobalAction(GLOBAL_ACTION_HOME)
+            navigates -> {
+                if (!v.site) debounce.dismissed(pkg, ms)
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
         }
         // Left the browser: forget the blocked address, so a page opened later isn't judged by it before its bar is read.
         if (v.site && "back" !in flags && navigates) { lastUrl.remove(pkg); privateTabs.remove(pkg) }
@@ -417,8 +423,18 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
             if (pkg == packageName || pkg == "com.android.systemui" || isKeyboard(pkg)) return@runCatching
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 val at = SystemClock.elapsedRealtime()
-                debounce.otherFront(pkg, at)
-                if (debounce.leftover(pkg, at)) return@runCatching     // the dismissed app closing, not opened again
+                // Prefer the active root. Some apps expose no root, so a fresh window-state
+                // event is the fallback foreground signal; debounce still guards the closing interval.
+                val activePkg = rootInActiveWindow?.packageName?.toString()
+                if (activePkg != null && activePkg != pkg) return@runCatching
+                val confirmed = com.husarp.lockdown.engine.BlockDebounce.confirmsWindowState(
+                    activePkg, pkg, SystemClock.uptimeMillis() - event.eventTime)
+                if (confirmed) {
+                    debounce.otherFront(pkg, at)
+                    // Keep a fresh candidate during settling so ticks can retry even if no more events arrive.
+                    currentPkg = pkg
+                }
+                if (debounce.leftover(pkg, at, confirmedOpening = confirmed)) return@runCatching     // the dismissed app closing, not opened again
                 currentPkg = pkg
                 IslandLink.islandFront = null                   // a main-profile window came to the front
                 if (isBrowser(pkg)) readBar(pkg, fresh = true)
@@ -489,31 +505,24 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         removeOverlay()
         shownItemId = v.itemId
         this.homeOnOk = homeOnOk
-        val bg = Color.parseColor("#1A110F"); val onBg = Color.parseColor("#F1DFDA")
-        val muted = Color.parseColor("#D8C2BC"); val accent = Color.parseColor("#FFB59C")
-        val root = FrameLayout(this).apply { setBackgroundColor(bg) }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(72, 72, 72, 72)
-        }
-        col.addView(TextView(this).apply {
-            text = v.headline; textSize = 30f; setTextColor(onBg)
-            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
-        })
-        if (loud && sub != null) col.addView(TextView(this).apply {
-            text = sub; textSize = 16f; setTextColor(muted); setPadding(0, 24, 0, 0)
-        })
-        col.addView(Button(this).apply {
-            text = "OK"; setTextColor(Color.parseColor("#5C1900"))
-            setBackgroundColor(accent)
+        val built = cover.build(CoverLook.Kind.BLOCK, v.headline,
+            if (loud) sub.orEmpty() else "", heroFirst = false)
+        built.buttons.addView(cover.button("OK", CoverLook.Role.PRIMARY).apply {
             setOnClickListener {
                 val home = this@BlockService.homeOnOk
                 shownApp?.let { debounce.dismissed(it, SystemClock.elapsedRealtime()) }
-                removeOverlay(); if (home) { lastUrl.remove(currentPkg); performGlobalAction(GLOBAL_ACTION_HOME) } }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130); lp.topMargin = 48
-            layoutParams = lp
+                removeOverlay(); if (home) { lastUrl.remove(currentPkg); performGlobalAction(GLOBAL_ACTION_HOME) }
+            }
         })
-        root.addView(col, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        // Scroll at large font sizes / in landscape, as on the newer reminder covers.
+        val root = ScrollView(this).apply {
+            background = cover.backdrop(); isFillViewport = true
+            addView(FrameLayout(this@BlockService).apply {
+                addView(built.root, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT))
+        }
         addOverlay(root)
         blockUp = overlay === root
         quietUp = blockUp && !loud
@@ -967,8 +976,10 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         val left = java.time.Duration.between(now, until).toMinutes()
         if (p.silent || IslandLink.isHelper || left >= 5 || pauseWarned == p.until) return
         pauseWarned = p.until
-        Toast.makeText(this, "Your blocks are back on in ${maxOf(1, left)} min (%02d:%02d).".format(until.hour, until.minute),
-            Toast.LENGTH_LONG).show()
+        val details = com.husarp.lockdown.remind.BlockNotifications.details(this, until)
+        if (details.isNotEmpty()) postAlert(
+            "Your blocks are back on in ${maxOf(1, left)} min (%02d:%02d).\n".format(until.hour, until.minute) +
+                details.joinToString("\n"), false)
     }
 
     // ---------- warnings and "block started" ----------
@@ -1004,30 +1015,45 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     private fun watchBlocks() {
         val cfg = Store.config
         // switched off (or the helper): forget what was blocked, so switching back on doesn't announce every rule
-        if (IslandLink.isHelper || !cfg.enabled) { watcher.prevBlocked = null; return }
+        if (IslandLink.isHelper || !cfg.enabled) {
+            watcher.prevBlocked = null; modeNotified = emptySet()
+            if (!IslandLink.isHelper) com.husarp.lockdown.remind.BlockNotifications.refresh(this)
+            return
+        }
         val now = Enforce.ldt(TrustedTime.now(this))
         val messages = watcher.check(cfg.items, cfg.groups, UsageStore.usage, cfg.clock(), now, inUseIds, cfg.alerts,
-            Enforce.paused(cfg, now)) { Enforce.emergencyUntil(cfg, it, now) }
-        if (messages.isEmpty() || Enforce.silenced(cfg, now)) return
+            Enforce.paused(cfg, now)) { Enforce.emergencyUntil(cfg, it, now) }.toMutableList()
+        val mode = ModesStore.current(now)
+        val targets = if (com.husarp.lockdown.engine.Modes.blocking(mode) && !Enforce.paused(cfg, now))
+            com.husarp.lockdown.engine.Modes.targets(mode!!.mode, cfg.items, cfg.groups, cfg.categories) else emptyList()
+        val modeBlocks = targets.mapNotNull { item ->
+            val v = when (item.type) {
+                ItemType.APP -> Enforce.app(cfg, item.target, now, mode, item.name)
+                ItemType.SITE -> Enforce.site(cfg, item.target.substringBefore(' '), now, mode)
+                else -> null
+            }
+            if (v?.reason == "mode") item to v else null
+        }
+        val modeKeys = modeBlocks.map { (i, v) -> "${i.type}:${i.target}:${v.until}:${mode?.mode?.id}" }.toSet()
+        if (cfg.alerts.started) for ((item, v) in modeBlocks) {
+            val key = "${item.type}:${item.target}:${v.until}:${mode?.mode?.id}"
+            if (key !in modeNotified) {
+                val text = "${item.name}: blocked by ${mode?.mode?.name} until ${Alerts.untilText(v.until, now)}."
+                messages.add(text)
+                if (item.itemId in inUseIds) watcher.urgent.add(text)
+            }
+        }
+        modeNotified = modeKeys
+        if (messages.isEmpty() || Enforce.silenced(cfg, now)) {
+            com.husarp.lockdown.remind.BlockNotifications.refresh(this)
+            return
+        }
         val muted = ModesStore.current(now)?.mode?.mute == true
         for (m in messages) if (!muted || m in watcher.urgent) postAlert(m, m in watcher.urgent)
     }
 
-    private fun postAlert(text: String, urgent: Boolean) {
-        val nm = getSystemService(android.app.NotificationManager::class.java)
-        val channel = if (urgent) "alerts-now" else "alerts"
-        if (nm.getNotificationChannel(channel) == null) nm.createNotificationChannel(android.app.NotificationChannel(channel,
-            if (urgent) "Blocks on what you're using" else "Block warnings",
-            if (urgent) android.app.NotificationManager.IMPORTANCE_HIGH else android.app.NotificationManager.IMPORTANCE_DEFAULT))
-        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED) return
-        val n = androidx.core.app.NotificationCompat.Builder(this, channel)
-            .setSmallIcon(com.husarp.lockdown.R.drawable.ic_launcher_foreground)
-            .setContentTitle("Lockdown").setContentText(text)
-            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text))
-            .setAutoCancel(true).build()
-        nm.notify("alert", ALERT_ID + (alertSeq++ % 20), n)
-    }
+    private fun postAlert(text: String, urgent: Boolean) =
+        com.husarp.lockdown.remind.BlockNotifications.post(this, text, urgent)
 
     override fun onInterrupt() {}
     override fun onUnbind(intent: Intent?): Boolean { connected = false; return super.onUnbind(intent) }
@@ -1048,7 +1074,6 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
     }
 
     companion object {
-        private const val ALERT_ID = 60
         private const val KEYBOARDS_MS = 60_000L    // the enabled keyboards are looked up again after this long
         private const val ACT_GAP_MS = 2000L        // act on the same block at most this often (Back / Home)
         private const val PIP_CATCH_MS = 15_000L    // a PiP window this soon after its app's block is the blocked video

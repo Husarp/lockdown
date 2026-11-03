@@ -27,7 +27,7 @@ const STYLE = `<style>
 .st-streak + .st-streak { border-top: 1px solid var(--line); }
 </style>`;
 
-const CARDS = ["active", "idle", "focus", "sessions"];
+const CARDS = ["active", "focus", "sessions"];
 
 // ---------------------------------------------------------------- data for the charts (plain, node tests)
 
@@ -56,7 +56,7 @@ const section = (key, title, note = true, hidden = false) =>
 export function mount(content) {
   root = content;
   root.innerHTML = `${STYLE}<div class="stack st-ov">
-    <div class="grid-4" data-k="cards">${CARDS.map(cardHtml).join("")}</div>
+    <div class="grid-3" data-k="cards">${CARDS.map(cardHtml).join("")}</div>
     ${section("trend", "Trend")}
     <div class="grid-2">
       <div class="stack">${section("timeline", "Day timeline", true, true)}${section("heat", "Active hours - last 7 days", false)}</div>

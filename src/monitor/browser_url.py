@@ -6,6 +6,8 @@ Both are language-independent. Must be called from a thread wrapped in UIAutomat
 """
 import uiautomation as auto
 
+from monitor.address import valid_address
+
 BROWSERS = {"chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe", "vivaldi.exe"}
 SEARCH_DEPTH = 10
 
@@ -42,13 +44,17 @@ def tab_count(hwnd: int) -> int | None:
 def browser_url(hwnd: int) -> str | None:
     """URL/text in the address bar of a browser window, or None."""
     for _attempt in range(2):
-        bar = _cache.get(hwnd) or _find_address_bar(hwnd)
-        if bar is None:
-            return None
         try:
+            bar = _cache.get(hwnd) or _find_address_bar(hwnd)
+            if bar is None:
+                _cache.pop(hwnd, None)
+                continue
             value = bar.GetValuePattern().Value
+            if not valid_address(value):
+                _cache.pop(hwnd, None)
+                continue
             _cache[hwnd] = bar
-            return value
+            return value.strip()
         except Exception:  # stale control (window changed) - search again once
             _cache.pop(hwnd, None)
     return None

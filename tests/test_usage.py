@@ -30,7 +30,7 @@ def test_match_item():
 def test_items_in_use():
     assert [i["id"] for i in items_in_use("discord.exe", None, True, ITEMS)] == [3]       # apps count when idle
     assert [i["id"] for i in items_in_use("brave.exe", "youtube.com/watch", False, ITEMS)] == [1]
-    assert items_in_use("brave.exe", "youtube.com/watch", True, ITEMS) == []              # away from the PC
+    assert [i["id"] for i in items_in_use("brave.exe", "youtube.com/watch", True, ITEMS)] == [1]  # input is irrelevant
     assert items_in_use("brave.exe", "hunger games", False, ITEMS) == []                  # search text
     assert items_in_use(None, None, True, ITEMS) == []
 
@@ -58,7 +58,7 @@ def test_screen_time_and_switches(tmp_path, monkeypatch):
         tracker.tick(db, lambda s=sense: s)
     rows = {(r["exe"], r["site"]): (r["seconds"], r["active_seconds"]) for r in db.conn.execute(
         "SELECT exe, site, SUM(seconds) seconds, SUM(active_seconds) active_seconds FROM activity GROUP BY exe, site")}
-    assert rows == {("code.exe", ""): (6, 6), ("brave.exe", "youtube.com"): (2, 2), ("brave.exe", "reddit.com"): (2, 0)}
+    assert rows == {("code.exe", ""): (6, 6), ("brave.exe", "youtube.com"): (2, 2), ("brave.exe", "reddit.com"): (2, 2)}
     switches = [(r["exe"], r["site"]) for r in db.conn.execute("SELECT exe, site FROM switch_events ORDER BY id")]
     # first tick is the starting point, not a switch; the locked screen in between isn't one either
     assert switches == [("brave.exe", "youtube.com"), ("brave.exe", "reddit.com"), ("code.exe", "")]

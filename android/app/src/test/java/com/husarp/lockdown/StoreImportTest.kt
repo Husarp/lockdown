@@ -69,11 +69,13 @@ class StoreImportTest {
         assertEquals(listOf(ChallengeStep("s0", "phrase", 90, 1)), got.antibypass.stepList)      // nothing changes until it is edited
         assertFalse(got.sleep.challenge)
         assertNull(got.sleep.tiers.single().challengeSteps)
-        val c = Config(antibypass = AntiBypassCfg(phrase = true, steps = listOf(ChallengeStep("a", "math", 2, 5), ChallengeStep("b", "memory", 1, 2))),
-            sleep = SleepCfg(on = true, challenge = true, challengeGrid = true, challengeSteps = listOf(ChallengeStep("g", "sort", 0, 1)),
-                tiers = listOf(ReminderTier("23:00", everySec = 900, challengeSteps = listOf(ChallengeStep("t", "math", 0, 2))))))
+        val c = Config(antibypass = AntiBypassCfg(phrase = true, steps = listOf(ChallengeStep("a", "math", 2, 5), ChallengeStep("b", "memory", 1, 2), ChallengeStep("c", "captcha", 1, 2))),
+            sleep = SleepCfg(on = true, challenge = true, challengeGrid = true, challengeSteps = listOf(ChallengeStep("g", "sort", 0, 1), ChallengeStep("c", "captcha", 0, 1)),
+                tiers = listOf(ReminderTier("23:00", everySec = 900, challengeSteps = listOf(ChallengeStep("t", "math", 0, 2), ChallengeStep("c", "captcha", 2, 2))))))
         val imported = Store.decodeImport(json.encodeToString(c), Config())!!
         assertEquals(c.antibypass, imported.antibypass); assertEquals(c.sleep, imported.sleep)
+        assertEquals(c.antibypass.steps, imported.antibypass.stepList)
+        assertEquals(c.sleep.challengeSteps, imported.sleep.generalChallenge)
         // the Island helper gets main's config as JSON and applies it as it is
         val copy = LinkProtocol.json.decodeFromString<Config>(LinkProtocol.json.encodeToString(c))
         val applied = applyConfig(copy, Config())

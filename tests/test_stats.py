@@ -20,18 +20,18 @@ def test_totals_sessions_focus_timeline(tmp_path):
     db = Database(tmp_path / "t.db")
     fill(db, at(9), 30, "code.exe")                 # 09:00-09:30 VS Code
     fill(db, at(9, 30), 10, "chrome.exe", "youtube.com")
-    fill(db, at(9, 40), 10, "code.exe", active=False)   # idle
+    fill(db, at(9, 40), 10, "code.exe", active=False)   # passive foreground time
     fill(db, at(11), 20, "code.exe")                # after a break: new session
     rows = stats.activity(db, DAY, DAY + timedelta(days=1))
-    assert stats.totals(rows) == (60 * 60, 70 * 60)
-    assert stats.per_app(rows)["code.exe"] == 50 * 60
+    assert stats.totals(rows) == (70 * 60, 70 * 60)
+    assert stats.per_app(rows)["code.exe"] == 60 * 60
     assert stats.per_site(rows) == {"youtube.com": 600}
-    assert [(s.hour, s.minute, e.hour, e.minute) for s, e in stats.sessions(rows)] == [(9, 0, 9, 40), (11, 0, 11, 20)]
+    assert [(s.hour, s.minute, e.hour, e.minute) for s, e in stats.sessions(rows)] == [(9, 0, 9, 50), (11, 0, 11, 20)]
     assert stats.longest_focus(rows) == (30 * 60, "code.exe", at(9))
     cat = lambda exe, site: "distracting" if site else "productive"
-    assert stats.timeline(rows, DAY, cat) == [(540, 30, "productive"), (570, 10, "distracting"), (580, 10, "idle"),
+    assert stats.timeline(rows, DAY, cat) == [(540, 30, "productive"), (570, 10, "distracting"), (580, 10, "productive"),
                                               (660, 20, "productive")]
-    assert stats.heatmap(rows, [DAY])[0][9] == 3 and stats.heatmap(rows, [DAY])[0][11] == 2
+    assert stats.heatmap(rows, [DAY])[0][9] == 4 and stats.heatmap(rows, [DAY])[0][11] == 2
 
 
 def test_switches_and_visits():

@@ -22,6 +22,7 @@ import { draftCall, FAILED } from "../../draft.js";
 import { openMenu } from "../../menu.js";
 import { autoIcon, chipHtml, openLookPicker, paint } from "../../groupicons.js";
 import { createRail } from "../../rules/rail.js";
+import { blockNow, mergeBlockNow } from "./block_now.js";
 import * as S from "../../rules/summary.js";
 import { confirmButton, el, empty, ic, setText, toast } from "../../ui.js";
 import { createVList } from "../../vlist.js";
@@ -295,6 +296,7 @@ async function openEditor(id) {
   paintLook();
   clearErrors();
   els.remove.hidden = els.disable.hidden = g.new;
+  q("block-now").hidden = g.new;
   setText(els.disable, g.disabled ? "Enable" : "Disable");
   rail.load(g.rules);
   ways.set("app", g.ways.app);
@@ -589,6 +591,7 @@ export function mount(host, t) {
       <section class="ge" data-k="g-editor" hidden aria-label="Group editor">
         <div class="card ge-top"><header class="card-h"><button class="kic gp-look hue-orange" type="button" data-k="g-look" aria-haspopup="dialog" aria-label="Group icon and colour" title="Choose the icon and colour">${ic("folder")}</button><h2 data-k="g-title">New group</h2><span class="grow"></span>
           <span data-k="g-removeslot"></span>
+          <button class="btn" type="button" data-k="g-block-now">Block now</button>
           <button class="btn" type="button" data-k="g-disable">Disable</button>
           <button class="btn" type="button" data-k="g-cancel">Cancel</button>
           <button class="btn btn-primary" type="button" data-k="g-done">Done</button></header>
@@ -628,6 +631,9 @@ export function mount(host, t) {
   els.cancel.addEventListener("click", closeEditor);
   els.done.addEventListener("click", done);
   els.disable.addEventListener("click", toggleDisabled);
+  q("block-now").addEventListener("click", () => blockNow(ed.id, true, (r) => {
+    mergeBlockNow(rail, r.until, trustedNow());
+  }));
   els.name.addEventListener("input", () => { els.nameerr.hidden = true; rail.refresh(); paintLook(); });
   els.look.addEventListener("click", pickLook);
   els.name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done(); } });

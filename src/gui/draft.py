@@ -243,6 +243,26 @@ class Draft:
 
     # ---------- save / discard ----------
 
+    def block_now(self, owner_id: int, until, group: bool = False, now=None):
+        """Apply one tightening immediately and rebase it into both sides without saving other drafts."""
+        now = now or now_from_db(self.db)
+        saved = self.saved_groups if group else self.saved_items
+        pending = self.groups if group else self.items
+        if owner_id not in saved or owner_id not in pending:
+            raise ValueError("Save this item or group before using Block now.")
+        end = self.db.block_now(owner_id, until.strftime(TIME_FMT), group)
+        rule = {"rule_type": "temporary", "temp_until": end}
+        saved[owner_id]["rules"] = [r for r in saved[owner_id]["rules"] if r["rule_type"] != "temporary"] + [rule]
+        # Preserve a longer pending temporary block, including a duration whose clock hasn't started yet.
+        old = next((r for r in pending[owner_id]["rules"] if r["rule_type"] == "temporary"), None)
+        chosen = rule
+        if old and (_finalize(old, now).get("temp_until") or "") > end:
+            chosen = old
+        pending[owner_id]["rules"] = ([r for r in pending[owner_id]["rules"] if r["rule_type"] != "temporary"]
+                                     + [copy.deepcopy(chosen)])
+        self._notify("saved")
+        return end
+
     def loosening(self) -> list[str]:
         """The unsaved edits that loosen a block (removed items, higher limits, ...)."""
         return antibypass.draft_changes(self.saved_items, self.items, self.saved_groups, self.groups,

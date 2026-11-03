@@ -341,7 +341,7 @@ class _Day:
 
 def _active_until(db, day, hhmm: str) -> int:
     """Active seconds on `day` up to HH:MM (a string compare, as the old window did), in SQL."""
-    row = db.conn.execute("SELECT COALESCE(SUM(active_seconds), 0) FROM activity WHERE minute >= ? AND minute < ? "
+    row = db.conn.execute("SELECT COALESCE(SUM(COALESCE(seconds, active_seconds)), 0) FROM activity WHERE minute >= ? AND minute < ? "
                           "AND substr(minute, 12) <= ?", (f"{day} 00:00", f"{day + timedelta(days=1)} 00:00", hhmm)).fetchone()
     return row[0]
 
@@ -428,9 +428,9 @@ def _card_today(d: _Day) -> dict:
     used = {kind for _, _, kind in segments}
     colors = {c["key"]: _css_color(c) for c in cats}
     legend = [{"key": c["key"], "name": c["name"], "color": colors[c["key"]]} for c in cats
-              if c["key"] in used or c["builtin"]] + [{"key": "idle", "name": "Idle", "color": "var(--cat-idle)"}]
+              if c["key"] in used or c["builtin"]] + [{"key": "idle", "name": "Unclassified", "color": "var(--cat-idle)"}]
     return {"segments": [{"start": s, "len": n, "kind": k} for s, n, k in segments], "start_hour": start_hour,
-            "colors": colors, "names": {**{c["key"]: c["name"] for c in cats}, "idle": "Idle"}, "legend": legend}
+            "colors": colors, "names": {**{c["key"]: c["name"] for c in cats}, "idle": "Unclassified"}, "legend": legend}
 
 
 def _limit_row(e: dict, now, usage, looks: dict | None = None) -> dict:

@@ -207,6 +207,10 @@ fun RuleEditor(item: Item, onClose: () -> Unit) {
                 }
             }
 
+            BlockNowButton(item.id) { until ->
+                draft = draft.copy(rules = com.husarp.lockdown.data.BlockNow.merge(draft.rules, until))
+            }
+
             SectionLabel("Blocking rules")
             RuleFields(draft.rules) { draft = draft.copy(rules = it) }
 

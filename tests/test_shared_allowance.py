@@ -88,7 +88,8 @@ def test_things_blocked_on_their_own_are_one_line_together():
     watcher.prev_blocked = set()
     items = [_blocked_item(1, "Reddit"), _blocked_item(2, "Twitter")]
     assert watcher.check(items, [], Usage(), NOW, set(), SETTINGS) == \
-        ["2 things are now blocked until Monday 07:00."]
+        ["Reddit, Twitter are now blocked until Monday 07:00."]
+    assert watcher.check(items, [], Usage(), NOW, set(), SETTINGS) == []
 
 
 def test_one_blocked_thing_is_still_named():

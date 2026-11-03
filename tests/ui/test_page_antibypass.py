@@ -58,12 +58,11 @@ def dialog_closed(page, timeout=8000):
 
 
 def type_challenge(page):
-    """Do what a person does: type the phrase Python issued (35 characters at 45 ms) and press Enter."""
+    """Type the issued phrase; its final character submits automatically."""
     page.wait_for_selector("#dlg[open] textarea.typed", timeout=5000)
     text = page.evaluate("document.querySelector('.ch-phrase').textContent")
     page.focus("#dlg textarea.typed")
     page.keyboard.type(text, delay=45)
-    page.keyboard.press("Enter")
     dialog_closed(page)
 
 
@@ -302,7 +301,7 @@ def test_the_stored_steps_are_shown_with_their_kind_level_and_times(shell, page,
     open_page(shell, page)
     assert step_rows(page) == [{"kind": "phrase", "level": "30", "times": "1"}, {"kind": "math", "level": "1", "times": "3"}]
     assert page.locator('[data-step] [data-f="kind"]').first.locator("option").all_inner_texts() == [
-        "Math", "Memory grid", "Sorting", "Typed phrase", "Own password", "Authenticator code"]
+        "Math", "Memory grid", "Sorting", "Typed phrase", "Captcha", "Own password", "Authenticator code"]
     assert page.locator('[data-step] [data-f="level"]').nth(1).locator("option").all_inner_texts() == [
         "Easy", "Medium", "Hard", "Very hard"]
     assert page.locator('[data-step] [data-f="level"]').first.locator("option").all_inner_texts() == [

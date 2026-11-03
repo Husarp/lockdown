@@ -108,7 +108,6 @@ def type_challenge(page):
     phrase = phrase_of(page)
     page.focus("#dlg textarea.typed")
     page.keyboard.type(phrase, delay=45)
-    page.click("#dlg .dlg-f .btn-primary")
     return phrase
 
 

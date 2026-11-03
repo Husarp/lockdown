@@ -447,6 +447,23 @@ class Database:
         """Add a site (default: one permanent rule)."""
         return self.add_item(display_name, hostnames, "site", source, rules or [{"rule_type": "permanent"}], notify)
 
+    @_write
+    def block_now(self, owner_id: int, until: str, group: bool = False) -> str:
+        """Persist only a temporary tightening, atomically merging the longest end. No other edits are saved."""
+        table, owner_col, owners = (("group_rules", "group_id", "block_groups") if group else
+                                    ("block_rules", "item_id", "blocked_items"))
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            if not self.conn.execute(f"SELECT id FROM {owners} WHERE id = ?", (owner_id,)).fetchone():
+                raise ValueError("Save this item or group before using Block now.")
+            ends = [r[0] for r in self.conn.execute(
+                f"SELECT temp_until FROM {table} WHERE {owner_col} = ? AND rule_type = 'temporary'",
+                (owner_id,)) if r[0]]
+            until = max([until, *ends])
+            self.conn.execute(f"DELETE FROM {table} WHERE {owner_col} = ? AND rule_type = 'temporary'", (owner_id,))
+            self._insert_rules(table, owner_col, owner_id, [{"rule_type": "temporary", "temp_until": until}])
+        return until
+
     def _insert_rules(self, table: str, owner_col: str, owner_id: int, rules: list[dict]):
         for r in rules:
             self.conn.execute(

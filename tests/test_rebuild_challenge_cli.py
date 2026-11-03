@@ -151,7 +151,7 @@ def test_a_ticket_left_open_is_dropped_when_the_window_closes(ctx):
     turn_on(ctx)
     tickets = []
     challenge_cli.exit_code(ctx, "x", Show(ctx, lambda c, t: tickets.append(t)))
-    assert ctx.guard.begin(tickets[0]) == {"ok": False, "error": "This challenge has expired. Start the change again."}
+    assert ctx.guard.begin(tickets[0]) == {"ok": False, "error": "This challenge was cancelled. Start the change again."}
 
 
 # ---------------------------------------------------------------- the standalone window's Api

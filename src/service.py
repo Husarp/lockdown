@@ -204,8 +204,9 @@ class Enforcer:
         newly_blocked = sorted(set(dns_blocks) - set(self.dns_blocks))
         if newly_blocked:
             # resolve before the hosts file points them at 127.0.0.1
-            for ip in connections.resolve(hosts.expand(newly_blocked)):
-                self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
+            for host in newly_blocked:
+                for ip in connections.resolve(hosts.expand([host])):
+                    self.queue_cut(ip, host, now)
             self.close_cached(newly_blocked, now)
         self.update_quic(bool(dns_blocks))
 
@@ -226,7 +227,7 @@ class Enforcer:
 
         self.cut_live_connections(now)
         self.update_video_block()
-        self.closing = {ip: until for ip, until in self.closing.items() if until > now}
+        self.prune_cuts(now)
         if self.closing:
             closed = connections.close_to(set(self.closing))
             if closed:
@@ -250,6 +251,20 @@ class Enforcer:
                     return "blocked"
         return self.protection.which(host)
 
+    def queue_cut(self, ip: str, host: str, now: datetime):
+        self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
+        if "closing_hosts" not in self.__dict__:
+            self.closing_hosts = {}
+        self.closing_hosts.setdefault(ip, set()).add(host)
+
+    def prune_cuts(self, now: datetime):
+        """An unlock releases queued cuts immediately; a shared IP stays cut for any still-blocked host."""
+        sources = getattr(self, "closing_hosts", {})
+        self.closing_hosts = {ip: {h for h in sources.get(ip, ()) if self.blocked_name(h)}
+                              for ip, until in self.closing.items() if until > now}
+        self.closing_hosts = {ip: names for ip, names in self.closing_hosts.items() if names}
+        self.closing = {ip: until for ip, until in self.closing.items() if ip in self.closing_hosts}
+
     def cut_live_connections(self, now: datetime):
         """A page that is already open keeps streaming over the connection it has, whatever the hosts file
         says. Anything open to a blocked name (by the name the app actually looked up) gets cut."""
@@ -264,7 +279,7 @@ class Enforcer:
             # we blocked answers 127.0.0.1 here. Taking that at face value put loopback on the kill list and
             # cut every local socket on the machine every couple of seconds.
             if self.blocked_name(name) and not connections.is_loopback(ip):
-                self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
+                self.queue_cut(ip, name, now)
                 self.note_video(ip, name)
 
     def close_cached(self, hostnames: list[str], now: datetime):
@@ -285,7 +300,7 @@ class Enforcer:
         for ip, name in names.items():
             parts = name.lower().rstrip(".").removeprefix("www.").split(".")
             if any(".".join(parts[i:]) in wanted for i in range(len(parts) - 1)) and not connections.is_loopback(ip):
-                self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
+                self.queue_cut(ip, name, now)
                 self.note_video(ip, name)
 
     def note_video(self, ip: str, name: str):

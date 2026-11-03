@@ -112,7 +112,7 @@ _first = itemgetter(0)
 
 
 def _digest_rows(rows) -> dict:
-    """{"YYYY-MM-DD": _Digest} from activity rows (minute, exe, site, seconds, active_seconds) in minute order, one pass.
+    """{"YYYY-MM-DD": _Digest} from activity rows (minute, exe, site, foreground seconds, foreground seconds) in minute order, one pass.
     The app of a minute is the row with most active seconds (the first one when equal) - what stats._minutes picks."""
     out: dict = {}
     d = None
@@ -211,7 +211,7 @@ if forget_all not in retention.changed:
 
 def _activity_rows(db, start: date, end: date):
     """The minute rows for [start, end) - the ONE place this module reads them (a test counts the calls)."""
-    return db.conn.execute("SELECT minute, exe, site, seconds, active_seconds FROM activity "
+    return db.conn.execute("SELECT minute, exe, site, COALESCE(seconds, active_seconds), COALESCE(seconds, active_seconds) FROM activity "
                            "WHERE minute >= ? AND minute < ? ORDER BY minute", (f"{start} 00:00", f"{end} 00:00"))
 
 
@@ -233,7 +233,7 @@ def _digests(req, days: list) -> dict:
         rolled = {}
         if gone:        # (days retention has rolled up: only their totals are left)
             for day, rows in groupby(req.db.conn.execute(
-                    "SELECT day, exe, site, seconds, active_seconds FROM daily_activity WHERE day >= ? AND day <= ? "
+                    "SELECT day, exe, site, COALESCE(seconds, active_seconds), COALESCE(seconds, active_seconds) FROM daily_activity WHERE day >= ? AND day <= ? "
                     "ORDER BY day, first_minute, exe, site", (min(gone).isoformat(), max(gone).isoformat())), _first):
                 rolled[day] = _rolled_digest((r[1:] for r in rows))
         for day in missing:
@@ -515,10 +515,10 @@ def _timeline(req) -> dict | None:
         segments = sorted(sorted(segments, key=lambda g: -g[1])[:MAX_SEGMENTS])
     used = {kind for _, _, kind in segments}
     legend = [{"key": c["key"], "name": c["name"], "color": cats.colors[c["key"]]} for c in cats.list
-              if c["key"] in used or c["builtin"]] + [{"key": "idle", "name": "Idle", "color": "var(--cat-idle)"}]
+              if c["key"] in used or c["builtin"]] + [{"key": "idle", "name": "Unclassified", "color": "var(--cat-idle)"}]
     return {"segments": [{"start": s, "len": n, "kind": k} for s, n, k in segments],
             "start_hour": min(6, int(rows[0]["minute"][11:13])) if rows else 6,
-            "colors": dict(cats.colors), "names": {**cats.names, "idle": "Idle"}, "legend": legend,
+            "colors": dict(cats.colors), "names": {**cats.names, "idle": "Unclassified"}, "legend": legend,
             "note": f"{DAY_NAMES[day.weekday()]} {day.day} {MONTHS[day.month - 1]}"}
 
 
@@ -615,8 +615,7 @@ def _overview(req) -> dict:
     else:
         focus_card = {"value": "-", "sub": ""}
     avg = sum(e - s for s, e in sessions) * 60 / len(sessions) if sessions else 0
-    cards = [{"key": "active", "label": "Active", "value": stats.hm(active), "sub": f"of {stats.hm(total)} at the PC"},
-             {"key": "idle", "label": "Idle", "value": stats.hm(total - active), "sub": "screen on, no input"},
+    cards = [{"key": "active", "label": "Screen time", "value": stats.hm(active), "sub": f"of {stats.hm(total)} at the PC"},
              {"key": "focus", "label": "Longest focus", **focus_card},
              {"key": "sessions", "label": "Sessions", "value": str(len(sessions)),
               "sub": f"avg {stats.hm(avg)} each" if sessions else ""}]

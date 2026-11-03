@@ -4,6 +4,8 @@ bedtime / break cover to the overlay (R08), a popup held back by a full-screen a
 The engine calls these on the ReminderWorker's thread, so everything here returns quickly. Answers come back through
 `Corner.answer` (a card's button) -> `worker.answer(key, action)`, and through a Windows notification's button ->
 `worker.held_answer(key, action)`; both run on the worker's thread, because the engine is not thread-safe."""
+from notification_batch import BlockingMessage
+
 import emergency
 import reminders
 from gui import toast as toasts
@@ -79,7 +81,7 @@ class CornerReminderUI:
         self.hub.win.minimize_all(snapshot.break_allowed(self.hub.snapshot))
         now = getattr(self.engine, "now", None)
         left = max(1, round((until - now).total_seconds() / 60)) if now else 1
-        self.hub.notify(f"Break started - your windows are minimised for {left} min. Step away from the screen.",
+        self.hub.notify(BlockingMessage(f"Break started - your windows are minimised for {left} min. Step away from the screen."),
                         force=True)
         self._break_cover(until)
 
