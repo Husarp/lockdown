@@ -177,6 +177,8 @@ def test_the_timeline_is_for_today_and_yesterday_only(fresh):
             assert len(got) == st.MAX_SEGMENTS and got == sorted(got) and set(got) <= set(want)
         assert d["start_hour"] == min(6, int(rows[0]["minute"][11:13]))
         assert {"idle", "productive"} <= set(d["names"]) and d["legend"][-1]["name"] == "Unclassified"
+        assert d["names"]["unassigned"] == "Not assigned"
+        assert any(c["key"] == "unassigned" and c["name"] == "Not assigned" for c in d["legend"])
     assert get(fresh.api, "overview", "7 days")["timeline"] is None
     assert get(fresh.api, "overview", "30 days")["timeline"] is None
 
@@ -582,18 +584,19 @@ def test_rows_carry_the_category_and_its_colour(tmp_path):
     assert apps["code.exe"]["cat"] == "productive" and apps["code.exe"]["cat_name"] == "Productive"
     assert apps["code.exe"]["color"] == "var(--cat-prod)"
     assert apps["discord.exe"]["cat"] == "distracting" and apps["discord.exe"]["color"] == "var(--cat-dist)"      # on the blocklist
-    assert apps["chrome.exe"]["cat"] == "neutral"
+    assert apps["chrome.exe"]["cat"] == "unassigned"
+    assert apps["chrome.exe"]["cat_name"] == "Not assigned"
     sites = {r["key"]: r for r in get(api, "websites", "Yesterday")["rows"]}
     assert sites["www.youtube.com"]["cat"] == "distracting"                      # a subdomain of a blocked site
     assert sites["docs.python.org"]["cat"] == "productive"
-    # an own category gets its own colour; one that was deleted falls back to neutral
+    # an own category gets its own colour; one that was deleted falls back to Not assigned
     from webapi import categories
     key = categories._add(db, "Study", "#2f9fd8")
     db.set_category("app", "code.exe", key)
     db.set_category("app", "discord.exe", "gone")
     apps = {r["key"]: r for r in get(api, "apps", "Yesterday")["rows"]}
     assert (apps["code.exe"]["cat_name"], apps["code.exe"]["color"]) == ("Study", "#2f9fd8")
-    assert apps["discord.exe"]["cat"] == "neutral"
+    assert apps["discord.exe"]["cat"] == "unassigned"
 
 
 def test_the_category_lookup_gives_what_stats_category_of_gives(fresh):
@@ -606,7 +609,7 @@ def test_the_category_lookup_gives_what_stats_category_of_gives(fresh):
     cats = st._Cats(db)
     for kind, name in names:
         want = stats.category_of(kind, name, db.categories(), db.list_items())
-        assert cats.category(kind, name) == (want if want in cats.keys else "neutral"), (kind, name)
+        assert cats.category(kind, name) == (want if want in cats.keys else "unassigned"), (kind, name)
 
 
 def test_names_blocklist_first_then_the_catalog_then_the_exe(tmp_path):

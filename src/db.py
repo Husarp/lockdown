@@ -355,8 +355,25 @@ class Database:
         self._wal(BUSY_SEC)
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._migrate()
+        self._unassigned_categories()
         if ui:
             self.conn.execute(f"PRAGMA busy_timeout={int(UI_BUSY_SEC * 1000)}")
+
+    def _unassigned_categories(self):
+        """Move legacy Neutral choices once; later deliberate Neutral choices stay put.
+        Keep the marker and the rows in one transaction, including when two processes open together.
+        """
+        if self.get_setting("categories.unassigned", "") == "1":
+            return
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            if self.get_setting("categories.unassigned", "") != "1":
+                self.conn.execute("UPDATE categories SET category = 'unassigned' WHERE category = 'neutral'")
+                self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('categories.unassigned', '1')")
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
 
     def _wal(self, timeout: float):
         """WAL mode (persistent in the file, so normally only read here). Switching a brand-new file to WAL

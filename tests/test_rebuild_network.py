@@ -208,7 +208,7 @@ def test_the_graph_has_60_minutes_and_the_tops(env):
     assert bars[-11]["tone"] == "block" and bars[-11]["tip"] == "15:32\n2 connections\nBlocked visit"
     assert [b["tone"] for b in bars].count("block") == 1
     assert [(a["name"], a["n"]) for a in g["apps"]] == [("Chrome", 10), ("Discord", 2)]
-    assert [(s["site"], s["n"]) for s in g["sites"]] == [("a.com", 6), ("c.com", 4), ("b.com", 2), ("reddit.com", 1)]
+    assert [(s["site"], s["n"]) for s in g["sites"]] == [("a.com", 6), ("c.com", 4), ("b.com", 2), ("Reddit", 1)]
     assert env.api.network_graph({"app": "discord.exe"})["data"]["bars"][-1]["value"] == 2
 
 
@@ -633,3 +633,20 @@ def test_site_to_block():
     assert network.site_to_block("www.example.com") == "example.com"
     assert network.site_to_block("a.b.c.example.com.au") == "example.com.au"
     assert network.site_to_block("cdn.example.org") == "example.org"
+
+
+def test_friendly_services_keep_raw_targets_and_are_searchable(env):
+    env.db.add_network([row(domain="rr1.googlevideo.com", count=3),
+                        row(ip="2.2.2.2", domain="i.ytimg.com", count=2),
+                        row(exe="infatica.exe", ip="3.3.3.3", domain="unknown.example")])
+    d = get(env, {"query": "YouTube"})
+    assert len(d["rows"]) == 2
+    assert {r["service"] for r in d["rows"]} == {"YouTube"}
+    assert {r["host"] for r in d["rows"]} == {"rr1.googlevideo.com", "i.ytimg.com"}
+    assert {r["site"] for r in d["rows"]} == {"rr1.googlevideo.com", "i.ytimg.com"}
+    assert {r["reg"] for r in d["rows"]} == {network.site_to_block(r["host"]) for r in d["rows"]}
+    graph = env.api.network_graph({"query": "YouTube"})["data"]
+    assert graph["sites"] == [{"site": "YouTube", "n": 5}]
+    agent = get(env, {"app": "infatica.exe"})["rows"][0]
+    assert agent["service"] == "unknown.example"
+    assert agent["activity"] == "Background: Infatica (bandwidth sharing)"

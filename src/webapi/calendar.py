@@ -192,7 +192,7 @@ def calendar_get(ctx, start=None, days=1, filter="all"):
         if disabled:
             sub = sub if days == 1 and sub else "not enforced"
         if item["item_type"] == "category":
-            cat = item["target"] if item["target"] in cat_keys else "neutral"
+            cat = item["target"] if item["target"] in cat_keys else "unassigned"
         else:
             cat = stats.category_of(item["item_type"], item["target"].split()[0] if item["target"].split() else "",
                                     saved, all_items)

@@ -50,7 +50,7 @@ def test_categories_default_and_saved(tmp_path):
     db.add_site("Reddit", ["reddit.com"])
     items = db.list_items()
     assert stats.category_of("site", "old.reddit.com", db.categories(), items) == "distracting"
-    assert stats.category_of("app", "code.exe", db.categories(), items) == "neutral"
+    assert stats.category_of("app", "code.exe", db.categories(), items) == "unassigned"
     db.set_category("app", "code.exe", "productive")
     assert stats.category_of("app", "code.exe", db.categories(), items) == "productive"
 

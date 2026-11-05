@@ -653,8 +653,8 @@ def test_the_category_menu_lists_them_with_swatches_and_blocks_the_whole_categor
     open_add(shell, page)
     page.click("[data-cat]")
     page.wait_for_selector("#menu:not([hidden])")
-    assert page.eval_on_selector_all("#menu button span", "els => els.map(e => e.textContent)") == ["Productive", "Neutral", "Games", "Distracting"]
-    assert page.locator("#menu .mn-sw").count() == 4
+    assert page.eval_on_selector_all("#menu button span", "els => els.map(e => e.textContent)") == ["Productive", "Neutral", "Games", "Distracting", "Not assigned"]
+    assert page.locator("#menu .mn-sw").count() == 5
     page.click('#menu button:has-text("Games")')
     assert pills(page) == ["category · Games"] and page.is_visible('[data-g="category"]')
     assert ticked_ways(page, "category") == ["close"]
@@ -734,7 +734,8 @@ def test_disable_and_enable_from_the_edit_bar(shell, page, env):
     on_overview(page)
     assert page.inner_text(NOTICE) == "✓ Discord disabled" and items(env)["Discord"]["disabled"] == 1
     page.wait_for_selector('.vl-row:not([hidden]):has(.name b:text-is("Discord"))')
-    page.locator('.vl-row:not([hidden]):has(.name b:text-is("Discord")) [data-act="edit"]').click()      # (from the Disabled card)
+    page.locator('.vl-row:not([hidden]):has(.name b:text-is("Discord")) [data-act="more"]').click()
+    page.locator("#menu").get_by_role("menuitem", name="Edit", exact=True).click()      # (from the Disabled card)
     page.wait_for_selector('[data-k="ad-title"]:has-text("Edit Discord")')
     assert page.inner_text("[data-disable]") == "Enable"
     page.click("[data-disable]")

@@ -1,6 +1,6 @@
 """Block now applies immediately while unrelated draft edits remain pending."""
 import pytest
-from test_page_blocking_overview import open_page, row
+from test_page_blocking_overview import open_page, option
 
 
 def test_block_now_applies_with_autosave_off(page, harness, shell):
@@ -9,7 +9,7 @@ def test_block_now_applies_with_autosave_off(page, harness, shell):
         {"rule_type": "time_limit", "daily_limit_min": 60}])
     harness.api.draft_set_notify(iid, "off")
     open_page(shell, page)
-    row(page, "Block now test").get_by_role("button", name="Block now", exact=True).click()
+    option(page, "Block now test", "Block now").click()
     dialog = page.get_by_role("dialog")
     dialog.get_by_label("Block duration").select_option("today")
     assert "2026-10-12 00:00" in dialog.locator("[data-preview]").inner_text()
@@ -36,7 +36,7 @@ def test_block_now_keeps_a_longer_unsaved_editor_rule(page, harness, shell, grou
         area = page.locator('[data-k="g-editor"]')
         block = area.locator('[data-k="g-block-now"]')
     else:
-        row(page, "Long draft").locator('[data-act="edit"]').click()
+        option(page, "Long draft", "Edit").click()
         page.wait_for_selector('[data-k="ad-title"]:has-text("Edit")')
         area = page.locator('.ad')
         block = area.locator('[data-block-now]')

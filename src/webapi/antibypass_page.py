@@ -42,10 +42,11 @@ from .core import ApiError
 
 MAX_PHRASE_CHARS = 2000              # the longest own phrase (as long as the longest random one)
 MAX_WINDOWS = 14
-SAVE_KEYS = ("phrase", "steps", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait")
+SAVE_KEYS = ("phrase", "steps", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait",
+             "sort_unassigned")
 OFF_CHANGE = "Turn Lockdown off entirely (no blocking, no limits, no reminders, until you turn it back on)"
 TOTP_SETUP_SEC = 600                 # an authenticator setup that isn't confirmed within this is forgotten
-SECRET_WHAT = {"password": "password", "totp": "authenticator"}
+SECRET_WHAT = {"password": "password", "totp": "authenticator", "supervisor": "supervisor codes"}
 
 
 def _iso(value):
@@ -143,6 +144,7 @@ def _page(ctx) -> dict:
     return {
         "now": _iso(now),
         "config": {"phrase": bool(cfg["phrase"]), "steps": cfg["steps"], "length": cfg["length"],
+                   "sort_unassigned": bool(cfg["sort_unassigned"]),
                    "grid": bool(cfg["grid"]),
                    "complex": bool(cfg.get("complex")), "use_own": bool(antibypass.own_phrase(cfg)),
                    "custom_phrase": cfg.get("custom_phrase") or "",
@@ -255,6 +257,8 @@ def _fields(sent: dict, old: dict) -> dict:
     if unknown:
         raise ApiError(f"Bad request: unknown setting {unknown[0]!r}.")
     new = {}
+    if "sort_unassigned" in sent:
+        new["sort_unassigned"] = _flag(sent["sort_unassigned"], "Let me sort new apps without the challenge")
     if "phrase" in sent:
         new["phrase"] = _flag(sent["phrase"], "Random phrase")
     if "steps" in sent:
@@ -342,7 +346,7 @@ def antibypass_lock(ctx):
 
 
 def _unlock_request(ctx, line: str, force: bool):
-    return ctx.guard.request([line], lambda: _page(ctx), force=force)
+    return ctx.guard.request([line], lambda: _page(ctx), force=force, unlock_only=True)
 
 
 @core.loosen
@@ -424,7 +428,7 @@ def antibypass_password_set(ctx, password, again):
 def antibypass_secret_remove(ctx, kind):
     """Forget your password (`kind` "password") or the authenticator ("totp"). Always the challenge; refused while a
     step of the list asks it (take the step out first - that is the challenge too)."""
-    if kind not in challenges.SECRET_KINDS:
+    if kind not in (*challenges.SECRET_KINDS, "supervisor"):
         raise ApiError("Bad request: password or authenticator expected.")
     if not challenge_secrets.status(ctx.db)[kind]["set"]:
         return _page(ctx)
@@ -445,41 +449,52 @@ def antibypass_secret_remove(ctx, kind):
 
 
 @core.ui
-def antibypass_totp_begin(ctx):
+def antibypass_totp_begin(ctx, kind="totp"):
     """Start setting up an authenticator: a new secret, kept here in memory under a one-time token (nothing is stored
     yet), with its QR code (inline SVG, "" without segno) and the key as text - shown this once. Saving it needs one
     current code of it (antibypass_totp_confirm). -> {token, qr, key, replaces, digits}."""
-    secret = challenge_secrets.new_totp_secret()
-    token = secrets.token_urlsafe(18)
-    ctx.totp_pending = {"token": token, "secret": secret, "at": time.monotonic()}
-    return {"token": token, "qr": challenge_secrets.qr_svg(challenge_secrets.otpauth_uri(secret)),
-            "key": challenge_secrets.group_key(secret), "digits": challenge_secrets.TOTP_DIGITS,
-            "replaces": challenge_secrets.status(ctx.db)["totp"]["set"]}
+    if kind not in ("totp", "supervisor"):
+        raise ApiError("Unknown authenticator kind.")
+
+    def apply():
+        secret = challenge_secrets.new_totp_secret()
+        token = secrets.token_urlsafe(18)
+        setattr(ctx, kind + "_pending", {"token": token, "secret": secret, "at": time.monotonic()})
+        name = challenge_secrets.pc_name() + " supervisor" if kind == "supervisor" else None
+        return {"token": token, "qr": challenge_secrets.qr_svg(challenge_secrets.otpauth_uri(secret, name)),
+                "key": challenge_secrets.group_key(secret), "digits": challenge_secrets.TOTP_DIGITS,
+                "replaces": challenge_secrets.status(ctx.db)[kind]["set"]}
+    # Supervisor codes pass every challenge and wait: creating this access also needs authorization.
+    return ctx.guard.request(["Set up supervisor codes"], apply) if kind == "supervisor" else apply()
 
 
 @core.loosen
-def antibypass_totp_confirm(ctx, token, code):
+def antibypass_totp_confirm(ctx, token, code, kind="totp"):
     """Save the authenticator begun with antibypass_totp_begin once `code` is a current code of it (that code is then
     used). Free while none is set up; replacing one is the challenge (the old one stops working). No recovery code comes
     with it. -> the page data or {needs_challenge, ticket}."""
-    pending = getattr(ctx, "totp_pending", None)
+    if kind not in ("totp", "supervisor"):
+        raise ApiError("Unknown authenticator kind.")
+    pending = getattr(ctx, kind + "_pending", None)
     if (not isinstance(token, str) or not pending or not secrets.compare_digest(token, pending["token"])
             or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
         raise ApiError("Start the authenticator setup again.")
     step = challenge_secrets.match_code(pending["secret"], code, challenge_secrets.trusted_epoch(ctx.db))
     if step is None:
         raise ApiError("That code doesn't match - type the 6-digit code your app shows for Lockdown now.")
-    had = challenge_secrets.status(ctx.db)["totp"]["set"]
+    had = challenge_secrets.status(ctx.db)[kind]["set"]
 
     def apply():
-        if getattr(ctx, "totp_pending", None) is not pending:
+        if (getattr(ctx, kind + "_pending", None) is not pending
+                or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
             raise ApiError("Start the authenticator setup again.")
-        ctx.totp_pending = None                 # (one use)
-        challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now())
-        applog.record("antibypass_change", "Anti-Bypass: authenticator " + (
+        setattr(ctx, kind + "_pending", None)                 # (one use)
+        challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now(), kind)
+        applog.record("antibypass_change", "Anti-Bypass: " + SECRET_WHAT[kind] + " " + (
             "set up again (the old one no longer works)" if had else "set up"), ctx.db)
         return _page(ctx)
-    return ctx.guard.request(["Replace your authenticator (the old one stops working)"], apply) if had else apply()
+    return ctx.guard.request([f"Save your {SECRET_WHAT[kind]} (the old secret stops working)"], apply) \
+        if had or kind == "supervisor" else apply()
 
 
 @core.loosen
@@ -504,3 +519,25 @@ def antibypass_recovery_remove(ctx):
         challenge_secrets.remove(ctx.db, "recovery")
         applog.record("antibypass_change", "Anti-Bypass: recovery code removed", ctx.db)
     return _page(ctx)
+
+
+# Other people's keys are independent of the Anti-Bypass guard.
+def _supervised_pending(ctx):
+    return [p["secret"] for kind in ("totp", "supervisor")
+            if (p := getattr(ctx, kind + "_pending", None))]
+
+
+@core.read
+def supervised_codes_get(ctx):
+    import supervised_codes
+    return supervised_codes.codes(ctx.db, _supervised_pending(ctx))
+
+
+@core.ui
+def supervised_codes_change(ctx, action, name="", value="", entry_id=""):
+    import supervised_codes
+    try:
+        supervised_codes.change(ctx.db, action, name, value, entry_id, _supervised_pending(ctx))
+    except ValueError as e:
+        raise ApiError(str(e)) from None
+    return supervised_codes_get(ctx)

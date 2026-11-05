@@ -11,6 +11,26 @@ from rules import usage_targets, effective_rules
 NOW = datetime(2026, 9, 20, 12, 0)
 
 
+def test_migrated_neutral_keeps_blocks_shared_usage_and_modes(tmp_path):
+    db = Database(tmp_path / "t.db")
+    db.set_category("app", "new.exe", "neutral")
+    db.set_category("site", "new.example", "neutral")
+    iid = db.add_item("Neutral", ["neutral"], "category",
+                      rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])
+    db.write("DELETE FROM settings WHERE key = 'categories.unassigned'")
+    db.close()
+    db = Database(tmp_path / "t.db")
+    items, cats = db.list_items(), db.categories()
+    assert [i["id"] for i in items_in_use("new.exe", None, False, items, cats)] == [iid]
+    assert [i["id"] for i in items_in_use("browser.exe", "https://sub.new.example", False, items, cats)] == [iid]
+    targets = modes.targets({"categories": ["neutral"]}, items, [], cats)
+    assert {("app", "new.exe"), ("site", "new.example")} <= {(i["item_type"], i["target"]) for i in targets}
+    rule = effective_rules(next(i for i in items if i["id"] == iid), [])
+    db.add_usage(usage_targets(rule, iid, NOW), 3600, NOW.date())
+    assert {"new.exe", "new.example"} <= {b["item"]["target"] for b in db.blocks(NOW)}
+    db.close()
+
+
 def _db(tmp_path):
     db = Database(tmp_path / "t.db")
     db.set_category("app", "discord.exe", "distracting")

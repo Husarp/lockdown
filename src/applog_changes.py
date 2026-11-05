@@ -187,7 +187,7 @@ def _simple_text(label: str, how: str, old, new, default=None) -> str:
 
 AB_LABELS = {"phrase": "challenge", "length": "phrase length", "grid": "word grid", "complex": "capitals and digits",
              "use_own": "own phrase", "custom_phrase": "own phrase", "hours": "allowed hours", "windows": "the hours",
-             "wait_min": "wait (min)"}
+             "wait_min": "wait (min)", "sort_unassigned": "sort new apps without the challenge"}
 
 
 def _steps_line(steps, empty: str = "none") -> str:
@@ -207,7 +207,7 @@ def _antibypass(old, new):
     from rules import days_text
     a, b = antibypass.with_defaults(_dict(old)), antibypass.with_defaults(_dict(new))
     parts = _fields(a, b, {k: v for k, v in AB_LABELS.items() if k != "windows"},
-                    flags=("phrase", "grid", "complex", "use_own", "hours"), hidden=("custom_phrase",))
+                    flags=("phrase", "grid", "complex", "use_own", "hours", "sort_unassigned"), hidden=("custom_phrase",))
     parts += _steps_part("challenge steps", a["steps"], b["steps"])
     if a["windows"] != b["windows"]:
         parts.append("hours " + "; ".join(f"{days_text(w['days'])} {w['start']}-{w['end']}"

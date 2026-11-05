@@ -62,7 +62,7 @@ test("the section's lines: set, set up, made, and the warnings", () => {
   assert.equal(dayText("2026-10-13 10:12:00", true), "13 Oct 2026 10:12");
   assert.equal(dayText(""), "");
   assert.deepEqual(secretLines(status(false, false, false)), {
-    password: "Not set.", totp: "Not set up.", recovery: "Off (none made).",
+    password: "Not set.", totp: "Not set up.", supervisor: "Not set up.", recovery: "Off (none made).",
   });
   const on = secretLines(status(true, true, true));
   assert.equal(on.password, "Set 13 Oct 2026.");
@@ -93,3 +93,55 @@ test("offersRecovery: at the start of a run that offers it, and on a password / 
   assert.equal(offersRecovery(at(0, 0, true, true)), false);
   assert.equal(offersRecovery(null), false);
 });
+test("supervisor status stays separate from the user's authenticator", () => {
+  const s = status(false, false, false);
+  s.supervisor = { set: true, since: "2026-10-13 10:12:00" };
+  assert.equal(secretLines(s).supervisor, "Set up 13 Oct 2026.");
+  assert.equal(secretLines(s).totp, "Not set up.");
+});
+
+// Exercise the actual dialog function with its browser/API boundaries stubbed.
+const { readFileSync } = await import("node:fs");
+const { runInNewContext } = await import("node:vm");
+const secretsSource = readFileSync(new URL("../../../src/ui/js/pages/antibypass_secrets.js", import.meta.url), "utf8");
+const totpDialogSource = secretsSource.slice(secretsSource.indexOf("async function totpDialog("), secretsSource.indexOf("\nasync function removeSecret("));
+
+for (const kind of ["totp", "supervisor"]) {
+  test(`${kind} setup copies the key and reports clipboard success or failure`, async () => {
+    const key = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+    const messages = [], writes = [];
+    let copy, dialog, fail = false;
+    const box = { focus() {}, addEventListener() {} };
+    const run = runInNewContext(`(${totpDialogSource})`, {
+      ld: { call: async () => ({ key, qr: "<svg></svg>" }) },
+      guarded: async (reply) => reply,
+      CANCELLED: Symbol("cancelled"),
+      esc: (value) => value,
+      FORGOTTEN,
+      openDialog: (options) => {
+        dialog = options;
+        return {
+          body: { querySelector: (selector) => selector === '[data-k="sx-copy"]'
+            ? { addEventListener: (event, handler) => { assert.equal(event, "click"); copy = handler; } }
+            : box },
+          done: Promise.resolve(),
+        };
+      },
+      navigator: { clipboard: { writeText: async (value) => {
+        if (fail) throw new Error("Clipboard denied");
+        writes.push(value);
+      } } },
+      toast: (message) => messages.push(message),
+    });
+    await run(() => assert.fail("Copy must not save setup"), kind);
+    assert.match(dialog.body, /data-k="sx-key">[^<]+<\/span> <button class="btn btn-sm" type="button" data-k="sx-copy">Copy<\/button>/);
+    if (kind === "supervisor") assert.match(dialog.body, /scan.*or copy the key and send it to them/);
+    await copy();
+    assert.deepEqual(writes, [key]);
+    assert.deepEqual(messages, ["Copied"]);
+    fail = true;
+    await copy();
+    assert.deepEqual(writes, [key]);
+    assert.deepEqual(messages, ["Copied", "Couldn't copy the key."]);
+  });
+}

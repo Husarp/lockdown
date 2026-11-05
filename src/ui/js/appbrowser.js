@@ -34,12 +34,13 @@ export function openAppBrowser(opts = {}) {
   let list = null, offIcons = null, offReady = null;
 
   const body = el(`<div class="ab ${pick ? "ab-pick" : "ab-browse"}">` +
-    `<div class="ab-top"><label class="search">${ic("search")}<input class="input" type="search" placeholder="Search apps and Steam games…" autocomplete="off" spellcheck="false" aria-label="Search apps"></label>` +
+    `<div class="ab-top"><label class="search">${ic("search")}<input class="input" type="search" placeholder="Search apps and games…" autocomplete="off" spellcheck="false" aria-label="Search apps"></label>` +
     (pick ? `<button class="btn" type="button" data-file>${ic("folder")}Pick a program file…</button>` : "") + `</div>` +
     `<div class="ab-line"><span class="ab-count muted small" role="status" aria-live="polite">Loading apps…</span><span class="grow"></span>${seg("abfilter", FILTERS, state.filter)}</div>` +
     `<div class="notice k-limit ab-warn" hidden>${ic("alert")}<div><div class="ab-warn-text"></div><div class="hstack"><button class="btn btn-sm btn-primary" type="button" data-yes></button><button class="btn btn-sm" type="button" data-no>Cancel</button></div></div></div>` +
     `<div style="position:relative"><div class="ab-list" role="listbox" aria-label="Apps"></div><div class="ab-empty" hidden></div></div>` +
-    `<p class="small muted" style="margin:0">${pick ? "Click an app to pick it · right-click for more" : "Right-click an app to set its category, block it or add it to a group"}</p></div>`);
+    `<p class="small muted" style="margin:0">${pick ? "Click an app to pick it · right-click for more" : "Right-click an app to set its category, block it or add it to a group"}</p>` +
+    `<p class="small muted" style="margin:0">If a protected game cannot be closed, also pick its launcher to block future launches. An already-running protected game may stay open.</p></div>`);
   const input = body.querySelector("input.input"), count = body.querySelector(".ab-count"), empty = body.querySelector(".ab-empty");
   const warn = body.querySelector(".ab-warn");
   input.value = state.query;
@@ -60,7 +61,7 @@ export function openAppBrowser(opts = {}) {
   function renderRow(row, app) {
     row._app = app;
     if (row._b.textContent !== app.name) row._b.textContent = app.name;
-    const sub = app.exe + (app.steam ? " · Steam" : "");
+    const sub = app.exe + (app.steam ? " · Steam" : app.launcher ? ` · ${app.launcher}` : "");
     if (row._sub.textContent !== sub) row._sub.textContent = sub;
     row._run.hidden = !app.running;
     const key = iconKey("app", app.exe);

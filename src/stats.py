@@ -112,7 +112,7 @@ def app_totals(db, start: date, end: date) -> Counter:
 # ---------- categories ----------
 
 def category_of(kind: str, name: str, saved: dict, items: list[dict]) -> str:
-    """Saved choice; else blocked things are distracting, everything else neutral."""
+    """Saved choice; else blocked things are distracting, everything else Not assigned."""
     if (kind, name) in saved:
         return saved[(kind, name)]
     for item in items:
@@ -121,7 +121,7 @@ def category_of(kind: str, name: str, saved: dict, items: list[dict]) -> str:
         if kind == "site" and item["item_type"] == "site" and any(
                 name == h or name.endswith("." + h) for h in item["target"].split()):
             return "distracting"
-    return "neutral"
+    return "unassigned"
 
 
 # ---------- totals ----------

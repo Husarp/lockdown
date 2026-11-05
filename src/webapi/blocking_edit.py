@@ -24,7 +24,7 @@ from blocker.site_block import FLAGS as SITE_FLAGS, make_site_block_type, site_f
 from gui.draft import RULE_FIELDS
 from paths import APP_DIR
 
-from . import categories
+from . import blocking, categories
 from . import core
 from . import draft as drafts
 from . import shared, sites as site_list
@@ -186,7 +186,9 @@ def item_get(ctx, item_id=None, target=None):
             item = d.find_item(text) if text else None
             if item is None:
                 return None
-        return _item_view(d, item, ctx.now())
+        now = ctx.now()
+        return {**_item_view(d, item, now),
+                "extra_today": blocking._extra_today(item["id"], False, now, ctx.db.usage_lookup(now))}
 
 
 # ---------------------------------------------------------------- reading what the page sends

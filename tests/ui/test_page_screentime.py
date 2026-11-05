@@ -445,7 +445,7 @@ def test_the_category_chip_opens_the_category_menu_and_picking_one_changes_the_r
     row.locator(".st-chip").click()
     page.wait_for_selector("#menu:not([hidden])")
     labels = page.eval_on_selector_all("#menu button", "els => els.map(e => e.textContent.trim())")
-    assert labels[:4] == ["Productive", "Neutral", "Games", "Distracting"] and "New category…" in labels and "Edit categories…" in labels
+    assert labels[:4] == ["Productive", "Neutral", "Games", "Distracting"] and "Not assigned" in labels and "New category…" in labels and "Edit categories…" in labels
     assert "‹ Back" in labels
     page.click('#menu button:has-text("Productive")')
     page.wait_for_function("(k) => document.querySelector('[data-pane=\"apps\"] .vl-row .name span').textContent === k && "

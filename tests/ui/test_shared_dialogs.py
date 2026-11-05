@@ -279,14 +279,14 @@ def test_the_menu_has_category_block_group_and_explorer(ready, harness):
     search(page, "zebra")
     right_click_row(page, "Zebra Zone")
     texts = menu_texts(page)
-    assert texts[:3] == ["Zebra Zone", "Category: Neutral ›", "Block it…"] and "Add to group ›" in texts and "Show in Explorer" in texts
+    assert texts[:3] == ["Zebra Zone", "Category: Not assigned ›", "Block it…"] and "Add to group ›" in texts and "Show in Explorer" in texts
     click_menu(page, "Category")                                                   # the list replaces the menu
     texts = menu_texts(page)
-    assert texts[:5] == ["Category", "Productive", "Neutral", "Games", "Distracting"]
-    assert page.locator("#menu button", has_text="Neutral").locator(".mk").count() == 1            # the tick
+    assert texts[:6] == ["Category", "Productive", "Neutral", "Games", "Distracting", "Not assigned"]
+    assert page.locator("#menu button", has_text="Not assigned").locator(".mk").count() == 1            # the tick
     assert "New category…" in texts and "Edit categories…" in texts and "‹ Back" in texts
     click_menu(page, "Back")
-    assert menu_texts(page)[1] == "Category: Neutral ›"
+    assert menu_texts(page)[1] == "Category: Not assigned ›"
 
 
 def test_no_groups_yet(ready, harness):
@@ -419,9 +419,9 @@ def test_editor_rows_builtins_recolour_only(ready):
     open_editor(page)
     assert title(page) == "Categories"
     names = page.eval_on_selector_all(".cat-row .cat-name", "els => els.map(e => e.textContent)")
-    assert names == ["Productive", "Neutral", "Games", "Distracting"]
+    assert names == ["Productive", "Neutral", "Games", "Distracting", "Not assigned"]
     assert page.locator(".cat-row .confirm").count() == 0                          # no Delete on the built-in ones
-    assert page.locator(".cat-row .chip", has_text="Built-in").count() == 4
+    assert page.locator(".cat-row .chip", has_text="Built-in").count() == 5
     page.click("text=Done")
     wait_closed(page)
     assert page.evaluate("window.__done") == 1
@@ -491,7 +491,7 @@ def test_a_name_that_exists_is_refused_in_the_page(ready):
     page.fill(".cat-new input.input", "neutral")
     page.click(".cat-new [data-add]")
     assert "already a category called neutral" in page.inner_text(".cat-err")
-    assert page.locator(".cat-row").count() == 4
+    assert page.locator(".cat-row").count() == 5
 
 
 def test_a_change_fires_the_categories_event(ready):

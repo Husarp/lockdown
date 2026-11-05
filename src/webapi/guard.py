@@ -51,8 +51,9 @@ REFUSED_LOG = {"password": "wrong password", "totp": "wrong authenticator code",
 class _Pending:
     """One request waiting for its challenge."""
 
-    def __init__(self, changes, action, cancel, force, dry=False, plain=None, uninstall=False):
+    def __init__(self, changes, action, cancel, force, dry=False, plain=None, uninstall=False, unlock_only=False):
         self.changes, self.action, self.cancel, self.force = changes, action, cancel, force
+        self.unlock_only = unlock_only  # explicit "Unlock to edit", rather than an individual change
         self.uninstall = uninstall  # the uninstaller's challenge: no password / authenticator steps, opens no unlock
         self.dry = dry              # a dry run ("Try the challenge"): a pass opens no unlock and starts no wait
         self.plain = plain          # the bedtime variant: {steps, complex, grid, title, note}, else None (Anti-Bypass)
@@ -97,7 +98,7 @@ class GuardService:
 
     def request(self, changes: list[str], action, cancel=None, force: bool = False, dry: bool = False, steps=None,
                 phrase_opts=None, plain: bool = False, title: str | None = None, note: str | None = None,
-                uninstall: bool = False) -> Envelope:
+                uninstall: bool = False, unlock_only: bool = False) -> Envelope:
         """Run `action` now if Anti-Bypass allows it (status "free"; with force - a locked mode - only while a passed
         challenge is still unlocked), else keep it under a ticket for the challenge. `cancel` undoes whatever the
         page shows if the challenge is cancelled or never passed. `dry`: always the challenge, and passing it only runs
@@ -127,7 +128,8 @@ class GuardService:
             antibypass.uninstall_used(db)               # (its own wait ran out: one uninstall)
             return ok(action())
         changes = [str(c) for c in changes]
-        pending = _Pending(changes, action, cancel, force, dry, variant, uninstall=uninstall and not plain)
+        pending = _Pending(changes, action, cancel, force, dry, variant, uninstall=uninstall and not plain,
+                           unlock_only=unlock_only and not (plain or dry or uninstall))
         ticket = secrets.token_urlsafe(18)
         with self._lock:
             previous = self._end_locked("was replaced by a new challenge")
@@ -228,6 +230,7 @@ class GuardService:
                                  kinds=challenges.AB_KINDS, secrets=self.secrets, recovery=not pending.dry)
             mode = self._mode(run)
             data.update(self._shown(run))
+        data["supervisor"] = challenge_secrets.status(db)["supervisor"]["set"]
         data["mode"] = mode
         with self._lock:
             if self._open is not pending:        # replaced while we were working
@@ -267,6 +270,24 @@ class GuardService:
             return self._unavailable(ticket)
         db = self._db()
         cfg, now = antibypass.settings(db), self._now(db)
+        if isinstance(typed, dict) and list(typed) == ["supervisor"]:
+            # This authorizes just the stored action, including during waits / closed hours.
+            # Preserve existing waits / unlocks unless the explicit action is "Unlock to edit".
+            with self._lock:
+                if self._open is not pending:
+                    return self._unavailable(ticket)
+                if pending.started is None or pending.mode is None:
+                    return fail("Start the challenge first.")
+                if self.secrets.wait_left() > 0:
+                    return fail("Too many wrong tries - wait, then try again.")
+                if not self.secrets.check_totp(typed["supervisor"], "supervisor"):
+                    applog.record("challenge_failed", self._failed(pending, "wrong supervisor code"), db)
+                    return fail("That supervisor code isn't right (or it was used already).")
+                self._end_locked("has already been used")
+            if pending.unlock_only:
+                antibypass.unlock(db, now, wait=False)
+            applog.record("challenge_passed", "Supervisor code accepted (" + self._for(pending) + ")", db)
+            return ok({"passed": True, "result": pending.action()})
         if pending.mode not in MODES or pending.run is None:
             return fail("There is nothing to type right now.")
         if not pending.plain and (antibypass.waiting_until(cfg, now) or antibypass.status(cfg, now) == "closed"

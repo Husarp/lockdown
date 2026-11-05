@@ -1,7 +1,7 @@
 // Categories: the list (cached), the editor dialog, the "New category" prompt, and the two guarded changes the right-click
 // menu makes (put an app / site in a category, make a category and put it there). Python decides and checks everything
 // (webapi/categories.py): adding, deleting and moving something to a category go through the Anti-Bypass challenge while
-// it is locked (`guarded`), recolouring is free.
+// it is locked (`guarded`), except a safe first sort from Not assigned when enabled; recolouring is free.
 //
 //   loadCategories()          [{key, name, color, color_light, builtin}] (asked once, kept until something changes)
 //   colorOf(cat)              the colour for the current theme

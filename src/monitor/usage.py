@@ -28,7 +28,7 @@ from blocker.hosts import normalize_host
 from blocker.site_block import title_site
 from db import Database
 from monitor.address import LAST_VALID_SEC, valid_address
-from rules import (Usage, block_targets, closed_opening, counted_rules, effective_rules, limit_targets,
+from rules import (Usage, block_targets, closed_opening, counted_rules, effective_rules, extra_time_bucket, limit_targets,
                    switch_targets, usage_targets, visit_targets)
 from trusted_time import now_from_db
 
@@ -44,8 +44,8 @@ MAX_GAP_SEC = 60
 # Setting: trusted unix time up to which use has been counted - by this tracker, or by the service's backstop
 # (service.Enforcer.count_unwatched_apps) while this tracker isn't running. One mark, so nothing is counted twice.
 COUNTED_KEY = "usage.counted_until"
-# Setting: JSON {pid: [exe, ...]} the service publishes - running processes that belong to a listed app other than by
-# name: what it started from its own folder (after the starter has gone too), or a program from its game folder
+# Setting: JSON {pid: [exe, ...]} the service publishes - running processes that belong to a listed app by name,
+# what it started from its own folder (after the starter has gone too), or a program from its game folder
 # (service.Enforcer.publish_members). The tray counts the window in front by this as well.
 MEMBERS_KEY = "apps.members"
 _UNSET = object()
@@ -84,18 +84,20 @@ def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict]
     open in the foreground browser tab, with or without input. A blocker on a whole category counts as
     in use whenever one of its members is, so its time limit is one pot for everything in the category.
     The legacy idle argument is ignored; existing callers can keep their sensor tuple."""
-    used = [i for i in items if i["item_type"] == "app" and exe and app_matches(i, exe, path, owners)]
+    used = [i for i in items if i["item_type"] == "app" and (exe or owners) and app_matches(i, exe or "", path, owners)]
     if url:
         try:
-            site = match_item(normalize_host(url), [i for i in items if i["item_type"] == "site"])
+            host = normalize_host(url)
         except ValueError:   # e.g. search text typed in the address bar
-            site = None
-        if site:
-            used.append(site)
+            pass
+        else:
+            # Overlapping entries all have rules to count, even when an earlier entry has no limit.
+            used += [i for i in items if i["item_type"] == "site"
+                     and any(host == h or host.endswith("." + h) for h in i["target"].split())]
     cat_items = [i for i in items if i["item_type"] == "category"]
     if cat_items:
         cats = used_categories(exe, url, idle, used, categories or {})
-        used += [i for i in cat_items if i["target"] in cats]
+        used += [i for i in cat_items if modes.category_keys({i["target"]}) & cats]
     return used
 
 
@@ -149,9 +151,9 @@ def sense_desktop():
 NO_BAR_RETRY_SEC = 30
 NO_BAR_AFTER = 3   # failed reads in a row before a browser window counts as having no address bar
 _no_bar: dict[int, tuple[int, float]] = {}   # browser window -> (failed reads in a row, when last looked)
-# browser window -> (title, last valid URL or None, last attempt time, last successful read time)
+# browser window -> (title, last valid URL under that title or None, last attempt time, last successful read time)
 _seen: dict[int, tuple[str, str | None, float, float]] = {}
-_url_diagnostics: dict[int, float] = {}   # last warning per window; never log addresses or titles
+_url_diagnostics: dict[int, float] = {}   # last warning per window (browser, failure reason, fallback and title)
 
 
 def _read_url(browser_url, win, hwnd: int, back_off: bool, exe: str | None = None) -> str | None:
@@ -164,7 +166,9 @@ def _read_url(browser_url, win, hwnd: int, back_off: bool, exe: str | None = Non
     still caught within URL_REFRESH_SEC - no later than when the tracker ticked every 2 seconds.
 
     Failed reads use the last valid address for the same window and title for at most LAST_VALID_SEC.
-    Title detection remains available after that (including fullscreen autoplay). Reads are retried every
+    After that, a confirmed YouTube host can disambiguate a title with a browser profile suffix; the full
+    address still expires, and a different title or a successful address read replaces the confirmation.
+    Title detection remains available (including fullscreen autoplay). Reads are retried every
     URL_REFRESH_SEC; background windows without a bar back off to NO_BAR_RETRY_SEC after NO_BAR_AFTER failures.
 
     No address read under this title (the bar hidden, and autoplay or a playlist moved the full-screen video on to
@@ -172,14 +176,31 @@ def _read_url(browser_url, win, hwnd: int, back_off: bool, exe: str | None = Non
     Firefox" is youtube.com - site_block.title_site, 0.84.9). That video used to count as no site at all."""
     title = win.window_title(hwnd)
     url = _read_bar(browser_url, win, hwnd, back_off, title)
-    if url is not None:
+    fails, _when = _no_bar.get(hwnd, (0, 0.0))
+    if url is not None and not fails:
         return url
     if exe is None:
         try:
             exe = win.process_name(hwnd)
         except Exception:  # the process may have exited since its title was read
             pass
-    return title_site(title, exe)
+    last = _seen.get(hwnd)
+    confirmed = site_of(last[1]) if last and title and last[0] == title else None
+    fallback = title_site(title, exe)
+    source = "last_valid" if url is not None else "title" if fallback else "none"
+    if fallback is None and confirmed:
+        fallback = title_site(title, exe, confirmed)
+        if url is None and fallback:
+            source = "confirmed_title"
+    now = time.monotonic()
+    if fails >= 10 and now - _url_diagnostics.get(hwnd, float("-inf")) >= 60:
+        if len(_url_diagnostics) > 200:
+            _url_diagnostics.clear()
+        _url_diagnostics[hwnd] = now
+        reason = getattr(browser_url, "_read_failures", {}).get(hwnd, "address bar unavailable or invalid")
+        log.warning("Browser URL read failed repeatedly: exe=%s reason=%s title_fallback=%s source=%s "
+                    "known_site=%s title=%r", exe, reason, bool(fallback), source, confirmed or "", title)
+    return url if url is not None else fallback
 
 
 def _read_bar(browser_url, win, hwnd: int, back_off: bool, title: str) -> str | None:
@@ -205,21 +226,14 @@ def _read_bar(browser_url, win, hwnd: int, back_off: bool, title: str) -> str | 
         if len(_no_bar) > 200:
             _no_bar.clear()
         _no_bar[hwnd] = (fails + 1, now)
-        if fails + 1 >= 10 and now - _url_diagnostics.get(hwnd, float("-inf")) >= 60:
-            if len(_url_diagnostics) > 200:
-                _url_diagnostics.clear()
-            _url_diagnostics[hwnd] = now
-            try:
-                exe = win.process_name(hwnd)
-            except Exception:
-                exe = "browser"
-            log.warning("Browser URL read failed repeatedly: exe=%s reason=%s title_fallback=%s",
-                        exe, "empty or invalid value" if url is not None else "address bar unavailable",
-                        bool(title_site(title, exe)))
         if title:   # (the same page: asked again in URL_REFRESH_SEC, not every tick - the last URL still counts)
             if len(_seen) > 200:
                 _seen.clear()
-            _seen[hwnd] = (title, previous, now, last[3] if previous else now - LAST_VALID_SEC - 1)
+            same = last and last[0] == title
+            _seen[hwnd] = (title, last[1] if same else None, now,
+                           last[3] if same else now - LAST_VALID_SEC - 1)
+        else:
+            _seen.pop(hwnd, None)
     return previous
 
 
@@ -417,7 +431,9 @@ class UsageTracker(threading.Thread):
         for shown in (url, *(o[1] for o in others)):   # (before any database read: a lock can't lose a sighting)
             note_shown(shown)
         published = members(db)   # (read every tick: the program files running are launches, see below)
-        owners = owners_of(db, pid, published) if exe else frozenset()
+        owners = owners_of(db, pid, published)
+        if not exe and owners:
+            exe = sorted(owners)[0]
         # a Java game / a script in front is that file, not javaw.exe / python.exe (the service reads which file
         # an interpreter runs and publishes it with the members): its screen time, its category, its switches
         if interpreter(exe):
@@ -431,6 +447,10 @@ class UsageTracker(threading.Thread):
         categories = db.categories()
         groups = db.list_groups()
         clock = db.limit_clock()
+        grant_owners = {f"{kind}:{o['id']}" for kind, owners in (("item", items), ("group", groups)) for o in owners
+                        if any(r["rule_type"] == "time_limit" for r in o["rules"])}
+        grant_owners |= {f"item:{iid}" for g in groups for iid, own in g["members"].items() if (own or {}).get("time_limit")}
+        grants = Usage(db.usage_of({(owner, extra_time_bucket(now, clock)) for owner in grant_owners}), clock)
         running = running_exes() if running_exes else self.running_now({p for p in (pid, *(o[3] for o in others)) if p})
         running = running | hosted_running(published)   # (launches of a Java game, a script)
         seconds, app_seconds = self.elapsed(db, now_ts)
@@ -449,9 +469,9 @@ class UsageTracker(threading.Thread):
         # The window in front on each other monitor is in use too (0.84.2) - a game left on the second screen while
         # you browse on the first. Each item counts once a tick, however many windows show it (never double time).
         for o_exe, o_url, o_path, o_pid in others:
-            if o_exe or o_url:
+            if o_exe or o_url or o_pid:
                 used += items_in_use(o_exe, o_url, False, items, categories, o_path,
-                                     owners_of(db, o_pid, published) if o_exe else frozenset())
+                                     owners_of(db, o_pid, published))
         used = list({i["id"]: i for i in used}.values())
         used_ids = {i["id"] for i in used}
         for item in items:
@@ -480,7 +500,7 @@ class UsageTracker(threading.Thread):
             for target in usage_targets(rules, item["id"], now, clock):
                 old = buckets.get(target)
                 buckets[target] = (min(old[0], spent), old[1] or is_app) if old else (spent, is_app)
-            for target, limit in limit_targets(rules, now, clock).items():
+            for target, limit in limit_targets(rules, now, clock, grants).items():
                 limits[target] = min(limits.get(target, limit), limit)
             if switched and item["id"] in focused_ids:   # you just switched to it ("every switch" opening limits)
                 switch_to |= self.unless_closed(db, item, groups, switch_targets(rules, item["id"], now, clock),

@@ -404,7 +404,8 @@ def game_folder(path: str | None) -> str | None:
         for i in range(1, len(lowered) - n):   # (not the drive; the exe may sit deeper, in Binaries\\Win64 etc.)
             if tuple(lowered[i:i + n]) == library:
                 return str(PureWindowsPath(*folder.parts[:i + n + 1])).lower()
-    return None
+    from monitor.launchers import game_root
+    return game_root(path)
 
 
 def steam_game_folder(path: str | None) -> str | None:
@@ -439,15 +440,15 @@ def app_folder(item: dict) -> str | None:
     - any other app's install folder, when "also close its background processes" is ticked.
     Otherwise None (an ordinary install folder can hold other programs - Word's holds Excel). What such an app
     starts from its own folder is still the app (service.Enforcer.track_families)."""
-    return _app_folder(item.get("app_path") or typed_path(item.get("target")), item.get("block_type"))
+    path = item.get("app_path") or typed_path(item.get("target"))
+    # Launcher records can appear after an item was first checked. Do not cache a missing game root forever.
+    return game_folder(path) or _app_folder(path, item.get("block_type"))
 
 
 @functools.lru_cache(maxsize=4096)
 def _app_folder(path: str | None, block_type: str | None) -> str | None:
     if not path:
         return None
-    if game := game_folder(path):
-        return game
     # (a program file has no "background processes": hosted_way)
     return helper_folder(path) if kills_background(block_type) and not is_hosted(path) else None
 

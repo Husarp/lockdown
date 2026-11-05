@@ -194,7 +194,7 @@ function fillEdit(data, note = "") {
   els.submit.textContent = "Save";
   els.top.classList.add("edit");
   head.show(data);
-  const line = [note, groupsLine(data)].filter(Boolean).join(" ");
+  const line = [note, groupsLine(data), data.extra_today].filter(Boolean).join(" ");
   setText(els.info, line);
   els.info.hidden = !line;
   els.name.value = data.name;

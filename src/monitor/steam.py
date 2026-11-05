@@ -71,7 +71,7 @@ def main_exe(folder: Path, name: str) -> Path | None:
             # an Unreal game's real process is <Name>-Win64-Shipping.exe in Binaries\Win64; the small <Name>.exe
             # in the game's folder only starts it. Picking that starter named the wrong process on the list.
             shipping = "shipping" in f.lower()
-            score = (shipping, named, -depth, size)
+            score = (shipping, named, "launcher" not in f.lower(), -depth, size)
             if best_score is None or score > best_score:
                 best, best_score = path, score
     return best

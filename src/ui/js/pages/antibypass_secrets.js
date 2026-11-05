@@ -16,7 +16,7 @@ import { csec, csecNote, esc, field, setText, toast } from "../ui.js";
 
 export { FORGOTTEN };      // (uninstalling asks the challenge without the password / authenticator steps)
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const WHAT = { password: "password", totp: "authenticator" };
+const WHAT = { password: "password", totp: "authenticator", supervisor: "supervisor codes" };
 let last = null;                 // the secrets state last painted (antibypass_get().secrets)
 
 // ---------------------------------------------------------------- plain helpers (node tests)
@@ -33,6 +33,7 @@ export function secretLines(s) {
   return {
     password: s.password.set ? `Set${since(s.password.since)}.` : "Not set.",
     totp: s.totp.set ? `Set up${since(s.totp.since)}.` : "Not set up.",
+    supervisor: s.supervisor && s.supervisor.set ? `Set up${since(s.supervisor.since)}.` : "Not set up.",
     recovery: s.recovery.exists ? `Made ${dayText(s.recovery.made, true) || "earlier"} - shown only then.` : "Off (none made).",
   };
 }
@@ -75,6 +76,8 @@ export function secretsSection(k) {
   return csec(k, "lock", "Password & authenticator", `${STYLE}
     ${field("Own password", '<span class="sx-state" data-k="sx-pw"></span>', btn("sx-pw-set", "Set a password") + btn("sx-pw-x", "Remove", "hidden"))}
     ${field("Authenticator app", '<span class="sx-state" data-k="sx-totp"></span>', btn("sx-totp-set", "Set up") + btn("sx-totp-x", "Remove", "hidden"))}
+    ${field("Supervisor codes", '<span class="sx-state" data-k="sx-supervisor"></span>', btn("sx-supervisor-set", "Set up") + btn("sx-supervisor-x", "Remove", "hidden"))}
+    ${csecNote("Give a trusted person this separate authenticator secret. Their code passes all challenges and waits for one action. Setup, replacement and removal ask the challenge.")}
     ${field("Recovery code", '<span class="sx-state" data-k="sx-rec"></span>', btn("sx-rec-new", "Make a recovery code") + btn("sx-rec-x", "Remove", "hidden"))}
     <p class="sx-warn" data-k="sx-missing" role="status" hidden></p>
     ${csecNote(`Add "Own password" or "Authenticator code" as a step above to ask for it. Strongest when someone else sets the password or keeps the authenticator on their phone. ${FORGOTTEN} A recovery code is optional (none by default): a one-time key - ${RECOVERY_DOES.charAt(0).toLowerCase() + RECOVERY_DOES.slice(1)} Making one asks the challenge; removing it is free.`)}`,
@@ -87,9 +90,9 @@ export function paintSecrets(root, d) {
   last = s;
   const q = (k) => root.querySelector(`[data-k="${k}"]`);
   const lines = secretLines(s);
-  for (const [k, on] of [["sx-pw", s.password.set], ["sx-totp", s.totp.set], ["sx-rec", s.recovery.exists]]) {
+  for (const [k, on] of [["sx-supervisor", !!(s.supervisor && s.supervisor.set)], ["sx-pw", s.password.set], ["sx-totp", s.totp.set], ["sx-rec", s.recovery.exists]]) {
     const el = q(k);
-    setText(el, lines[{ "sx-pw": "password", "sx-totp": "totp", "sx-rec": "recovery" }[k]]);
+    setText(el, lines[{ "sx-supervisor": "supervisor", "sx-pw": "password", "sx-totp": "totp", "sx-rec": "recovery" }[k]]);
     el.classList.toggle("on", !!on);
   }
   const act = (a) => root.querySelector(`[data-act="${a}"]`);
@@ -99,6 +102,8 @@ export function paintSecrets(root, d) {
   act("sx-totp-x").hidden = !s.totp.set;
   setText(act("sx-rec-new"), s.recovery.exists ? "Make a new one" : "Make a recovery code");
   act("sx-rec-x").hidden = !s.recovery.exists;
+  setText(act("sx-supervisor-set"), s.supervisor && s.supervisor.set ? "Replace" : "Set up");
+  act("sx-supervisor-x").hidden = !(s.supervisor && s.supervisor.set);
   const warn = q("sx-missing");
   setText(warn, missingText(s));
   warn.hidden = !warn.textContent;
@@ -113,6 +118,8 @@ export function wireSecrets(root, apply) {
     try {
       const act = b.dataset.act;
       if (act === "sx-pw-set") await passwordDialog(!!(last && last.password.set), apply);
+      else if (act === "sx-supervisor-set") await totpDialog(apply, "supervisor");
+      else if (act === "sx-supervisor-x") await removeSecret("supervisor", apply);
       else if (act === "sx-totp-set") await totpDialog(apply);
       else if (act === "sx-pw-x") await removeSecret("password", apply);
       else if (act === "sx-totp-x") await removeSecret("totp", apply);
@@ -176,10 +183,11 @@ function passwordDialog(had, apply) {
   return h.done;
 }
 
-async function totpDialog(apply) {
+async function totpDialog(apply, kind = "totp") {
   let setup;
   try {
-    setup = await ld.call("antibypass_totp_begin");
+    setup = await guarded(ld.call("antibypass_totp_begin", kind));
+    if (setup === CANCELLED) return;
   } catch (err) {
     toast(err.message || "That didn't work.");
     return;
@@ -187,18 +195,28 @@ async function totpDialog(apply) {
   let sending = false;
   const qr = setup.qr ? `<div class="sx-qr" data-k="sx-qr">${setup.qr}</div>` : '<p class="small muted">(No QR code here - type the key below into the app.)</p>';
   const h = openDialog({
-    key: "sx-totp", title: setup.replaces ? "Set up the authenticator again" : "Set up an authenticator", wide: true,
-    body: `<p><b>1.</b> Scan this with an authenticator app (Google or Microsoft Authenticator, 2FAS, Aegis ...) on the phone that will keep it - yours, or a trusted person's, so you can't loosen without them.</p>
+    key: "sx-totp", title: kind === "supervisor" ? "Set up supervisor codes" : setup.replaces ? "Set up the authenticator again" : "Set up an authenticator", wide: true,
+    body: `<p><b>1.</b> ${kind === "supervisor"
+      ? "Have your trusted supervisor scan this separate secret with their authenticator app, or copy the key and send it to them. Their codes pass every challenge and timed wait for one action. They can use an authenticator app or Codes I supervise in Lockdown on their own PC."
+      : "Scan this with an authenticator app (Google or Microsoft Authenticator, 2FAS, Aegis ...) on the phone that will keep it - yours, or a trusted person's, so you can't loosen without them."}</p>
       ${qr}
-      <p class="small">Or type this key into the app: <span class="sx-key" data-k="sx-key">${esc(setup.key)}</span></p>
+      <p class="small">Or type this key into the app: <span class="sx-key" data-k="sx-key">${esc(setup.key)}</span> <button class="btn btn-sm" type="button" data-k="sx-copy">Copy</button></p>
       <p class="small muted">The QR code and the key are shown only now.${setup.replaces ? " Saving replaces the old authenticator: that asks the challenge, and the old one stops working." : ""}</p>
-      <p class="sx-forgot">${esc(FORGOTTEN)}</p>
+      ${kind === "supervisor" ? "<p class=\"small muted\">If your supervisor loses their authenticator, pass the normal challenges to replace or remove this secret.</p>" : `<p class="sx-forgot">${esc(FORGOTTEN)}</p>`}
       <label class="sx-l"><span><b>2.</b> Type the 6-digit code the app shows for Lockdown</span>
         <input class="input sx-codein" data-k="sx-code" type="text" inputmode="numeric" maxlength="6" autocomplete="off" spellcheck="false" placeholder="000000"></label>
       <p class="sx-err" data-k="sx-err" role="alert"></p>`,
     buttons: [{ label: "Cancel", value: false }, { label: "Confirm", kind: "primary", onClick: () => { send(); return false; } }],
   });
   if (!h) return;
+  h.body.querySelector('[data-k="sx-copy"]').addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(setup.key);
+      toast("Copied");
+    } catch (_) {
+      toast("Couldn't copy the key.");
+    }
+  });
   const box = h.body.querySelector('[data-k="sx-code"]');
   box.focus();
   box.addEventListener("input", () => {
@@ -212,7 +230,7 @@ async function totpDialog(apply) {
     sending = true;
     errorIn(h, "");
     try {
-      const res = await guarded(ld.call("antibypass_totp_confirm", setup.token, box.value));
+      const res = await guarded(ld.call("antibypass_totp_confirm", setup.token, box.value, kind));
       if (res === CANCELLED) return;
       h.close(true);
       await h.done;                                          // (closed for good before the recovery code opens)
@@ -231,7 +249,7 @@ async function removeSecret(kind, apply) {
   const what = WHAT[kind];
   const yes = await confirmDialog({
     key: "sx-x", title: `Remove your ${what}?`, ok: "Remove", danger: true,
-    text: `Removing your ${what} asks the challenge. Take its step out of the list first.`,
+    text: `Removing your ${what} asks the challenge. ${kind === "supervisor" ? "" : "Take its step out of the list first."}`,
   });
   if (!yes) return;
   try {

@@ -206,3 +206,16 @@ test("draftCall after a change that went through the challenge asks Python where
   assert.deepEqual(calls, ["draft_remove_item", "draft_get_state"]);
   assert.deepEqual(pushed, [["draft", { dirty: false, autosave: true, change_summary: "" }]]);
 });
+
+
+test("rule summary prefers active and warning chips, keeps ties stable, and handles no rules", () => {
+  const ok = { t: "Later", k: "ok" }, warn = { t: "5m left", k: "warn" };
+  const active = { t: "Blocked", k: "danger" }, second = { t: "Another block", k: "danger" };
+  const chips = [ok, warn, active, second];
+  assert.equal(ov.primaryChip(chips), active);
+  assert.equal(ov.primaryChip([ok, warn]), warn);
+  assert.equal(ov.primaryChip([]), null);
+  const inert = { t: "Unused limit", k: "danger", state: "allowed" };
+  assert.equal(ov.primaryChip([inert, active]), active);
+  assert.deepEqual(chips, [ok, warn, active, second]);
+});

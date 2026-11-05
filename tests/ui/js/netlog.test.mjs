@@ -70,3 +70,13 @@ test("a blocked visit lands after the connections of its minute and before the o
 test("olderText is the old button's text", () => {
   assert.equal(nl.olderText(125), "Show more (125 older)");
 });
+
+test("serviceRows groups CDN connections and preserves raw rows and chronological paging order", () => {
+  const rows = [net("a", "2026-10-11 15:42", 1, { service: "YouTube", site: "rr.googlevideo.com" }),
+    net("b", "2026-10-11 15:41", 1, { service: "Discord" }),
+    net("c", "2026-10-11 15:40", 1, { service: "YouTube", site: "i.ytimg.com" })];
+  assert.deepEqual(keys(nl.serviceRows(rows)), ["b", "a", "c"]);
+  assert.deepEqual(keys(rows), ["a", "b", "c"]);
+  assert.equal(nl.serviceRows(rows)[1], rows[0]);
+  assert.equal(rows[0].site, "rr.googlevideo.com");
+});

@@ -227,6 +227,21 @@ def _procs(monkeypatch, procs, paths=None):
     monkeypatch.setattr(apps, "process_path", lambda pid: (paths or {}).get(pid))
 
 
+@pytest.mark.parametrize("category", ["neutral", "unassigned"])
+def test_service_counts_unassigned_apps_toward_category_limits(tmp_path, monkeypatch, category):
+    db = Database(tmp_path / "t.db")
+    db.set_category("app", "new.exe", "unassigned")
+    iid = db.add_item(category, [category], "category",
+                      rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])
+    _procs(monkeypatch, [(5, 1, "new.exe")])
+    e, now = _bare_enforcer(db), EVENING
+    for _ in range(5):
+        now += timedelta(seconds=2)
+        e.count_unwatched_apps(now)
+    assert used(db, f"item:{iid}", day(now), now) > 0
+    db.close()
+
+
 def test_with_no_tray_app_the_service_counts_a_running_game(tmp_path, monkeypatch):
     """The tray app not running (exited, crashed, frozen): the allowance never ran out and the game was never
     closed. The service sees the processes - it counts a running blocked app itself."""
@@ -437,3 +452,39 @@ def test_quic_is_off_for_browsers_while_a_site_is_blocked(tmp_path, monkeypatch)
 def test_runtime_marks_are_not_in_a_backup():
     import backup
     assert {COUNTED_KEY, service.QUIC_KEY} <= backup.RUNTIME_KEYS
+
+
+@pytest.mark.parametrize("overlap", [False, True])
+@pytest.mark.parametrize("host", ["www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be",
+                                  "rr1.googlevideo.com"])
+def test_youtube_limit_counts_across_3am_reset(tmp_path, monkeypatch, overlap, host):
+    db = Database(tmp_path / "t.db")
+    db.set_setting(rules.RESET_KEY, json.dumps({"time": "03:00"}))
+    # Another list can contain the same site without its own time limit.
+    members = {}
+    if overlap:
+        other = db.add_item("Video sites", ["youtube.com", "youtu.be", "googlevideo.com"], "site", rules=[])
+        members[other] = {}
+    yt = db.add_item("YouTube", ["youtube.com", "youtu.be", "googlevideo.com"], "site",
+                     rules=[{"rule_type": "time_limit", "daily_limit_min": 1}])
+    members[yt] = {}
+    group = db.add_group("Video", [{"rule_type": "time_limit", "daily_limit_min": 10}], members)
+    clock = Clock(monkeypatch, datetime(2026, 10, 3, 2, 58))
+    tracker = counting(clock)
+    sense = lambda: ("chrome.exe", f"https://{host}/watch?v=x", 3600)
+    before = rules.time_bucket("day", clock.now, db.limit_clock())
+    play(db, tracker, clock, 118, 2, sense)
+    tracker.flush(db)
+    assert used(db, f"item:{yt}", before, clock.now) == 118
+    assert reasons(db, clock.now, yt) == ["limit"]
+    play(db, tracker, clock, 2, 2, sense)
+    after = rules.time_bucket("day", clock.now, db.limit_clock())
+    assert before != after
+    assert used(db, f"item:{yt}", after, clock.now) == 2
+    assert reasons(db, clock.now, yt) == []
+    play(db, tracker, clock, 58, 2, sense)
+    tracker.flush(db)
+    assert used(db, f"item:{yt}", before, clock.now) == 118
+    assert used(db, f"item:{yt}", after, clock.now) == 60
+    assert used(db, f"group:{group}", after, clock.now) == 60  # overlapping members never double-count
+    assert reasons(db, clock.now, yt) == ["limit"]

@@ -61,6 +61,7 @@ OFF_KEY = "app.off"           # "" or when Lockdown was switched off entirely - 
 LENGTHS = challenges.PHRASE_LENGTHS   # quick picks; any length in between works
 MIN_LENGTH, MAX_LENGTH = challenges.PHRASE_MIN, challenges.PHRASE_MAX
 DEFAULTS = {"phrase": False, "length": 60, "grid": False, "complex": False, "custom_phrase": "", "hours": False,
+            "sort_unassigned": False,
             "windows": [{"days": [6], "start": "18:00", "end": "20:00"}], "wait_min": 0,
             "unlocked_from": None, "unlocked_until": None}   # (+ "use_own" and "steps", see with_defaults)
 
@@ -165,10 +166,11 @@ def status(cfg: dict, now: datetime) -> str:
     return "free"
 
 
-def unlock(db, now: datetime) -> datetime | None:
-    """The challenge was passed: open the unlock, after the wait if one is set. Returns when the wait ends."""
+def unlock(db, now: datetime, wait: bool = True) -> datetime | None:
+    """The challenge was passed: open the unlock, after the wait if one is set. Returns when the wait ends.
+    `wait=False` is only for a verified supervisor authorizing the explicit "Unlock to edit" action."""
     cfg = settings(db)
-    start = now + timedelta(minutes=cfg.get("wait_min") or 0)
+    start = now + timedelta(minutes=(cfg.get("wait_min") or 0) if wait else 0)
     cfg["unlocked_from"] = start.strftime(TIME_FMT)
     cfg["unlocked_until"] = (start + timedelta(minutes=UNLOCK_MIN)).strftime(TIME_FMT)
     save(db, cfg)
@@ -482,7 +484,8 @@ def settings_looser(old: dict, new: dict) -> bool:
     dropped, other hours, or less waiting before the unlock opens. Switching your own phrase off is free unless the
     random phrase is shorter. The step list is compared row by row (challenges.steps_looser): a step removed, of
     another kind, at a lower level or with fewer times is looser; a step added, raised or moved is not."""
-    return (((new.get("wait_min") or 0) < (old.get("wait_min") or 0))
+    return ((new.get("sort_unassigned", False) and not old.get("sort_unassigned", False))
+            or ((new.get("wait_min") or 0) < (old.get("wait_min") or 0))
             or (old["phrase"] and (not new["phrase"] or _phrase_strength(new) < _phrase_strength(old)
                                 or (own_phrase(new) and not own_phrase(old))
                                 or (old["grid"] and not new["grid"])

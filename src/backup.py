@@ -22,6 +22,7 @@ RUNTIME_KEYS = {"service_heartbeat", "clock_offset", "clock_last_trusted", "cloc
                 "usage.counted_until", "firewall_quic", "firewall_video", "apps.members",
                 "pause.blocks",   # (a running "Pause my blocks" - an import neither carries one in nor ends one)
                 "app.off",        # (Lockdown switched off: switching off has its own challenge, even with none set)
+                "antibypass.supervised",  # other people's authenticator keys stay on this PC too
                 "antibypass.secrets",   # (your password's hash, the authenticator's secret, the recovery code's hash:
 #                                         never in a file you may share; a restore keeps the ones this PC has)
                 "antibypass.uninstall"}   # (the uninstaller's own wait after its challenge: machine state)

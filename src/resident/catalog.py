@@ -1,9 +1,9 @@
-"""The installed-apps catalog: every Start Menu app and Steam game (monitor/applist.list_apps), ready BEFORE anyone opens
+"""The installed-apps catalog: every Start Menu app and launcher game (monitor/applist.list_apps), ready BEFORE anyone opens
 a picker. It is kept on disk (DATA_DIR/app_catalog.json) for 24 hours, so a normal start only reads a file, and it is
 refreshed on a background thread of its own (below normal priority) a little after the agent starts. Searching it is a
 plain in-memory loop over a prepared index: a few milliseconds even for 1 500 apps.
 
-Also here: the one-off pass that puts the owner's Steam games into the Games category (distracting.seed_games - the old
+Also here: the pass that puts the owner's installed games into the Games category (distracting.seed_games - the old
 window did it five seconds after opening), and `path_for(exe)` / `icon_sources(exe)` for the icon service (where a
 program lives, and the other places its icon can be taken from: its shortcut's icon, Steam's, the uninstall entry's).
 
@@ -30,6 +30,10 @@ FORMAT = 2                 # 2: apps carry "icons" (a file of format 1 is used, 
 _WORD = re.compile(r"[a-z0-9]+")
 
 
+def _game_info(app):
+    return {key: app[key] for key in ("game", "launcher") if key in app}
+
+
 def _mask(word: str) -> int:
     """Which of a-z / 0-9 a word contains, one bit each. Two words with at most d edits between them differ in at most
     d letters, so a word that lacks more than d letters of the query can be skipped without measuring the typo."""
@@ -47,7 +51,7 @@ class _Entry:
         self.app = app
         self.name_n = " ".join(_WORD.findall(search.normalize(app["name"])))
         self.exe_n = search.normalize(app["exe"])
-        self.text = search.normalize(f"{app['name']} {app['exe']}" + (" steam" if app.get("steam") else ""))
+        self.text = search.normalize(f"{app['name']} {app['exe']} {app.get('launcher', '')}" + (" steam" if app.get("steam") else ""))
         self.tokens = [(t, _mask(t)) for t in _WORD.findall(self.text)]
         self.sort_name = app["name"].lower()
 
@@ -82,7 +86,7 @@ class AppCatalog:
     """`list_apps()` -> [{name, exe, path, running, steam}] and `running_now()` -> {exe: path} default to the real
     ones (Windows, imported on first use). `after_load(apps)` is called on the worker thread whenever a list has been
     loaded (cache or scan); `on_ready()` too, to tell the page. `seed_games=True` runs distracting.seed_games with the
-    Steam games after each load."""
+    installed games after each load."""
 
     def __init__(self, cache_path: Path | None = None, list_apps=None, running_now=None, clock=time.time,
                  on_ready=None, seed_games: bool = False, db_path=None, start_delay: float = START_DELAY_SEC):
@@ -148,6 +152,7 @@ class AppCatalog:
             self._list_apps = list_apps
         self.scans += 1
         apps = [{"name": a["name"], "exe": a["exe"], "path": a.get("path") or "", "steam": bool(a.get("steam")),
+                 **_game_info(a),
                  **({"icons": [str(i) for i in a["icons"]]} if a.get("icons") else {})}
                 for a in self._list_apps()]
         self._write_file(apps)
@@ -158,11 +163,12 @@ class AppCatalog:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
             apps = [{"name": str(a["name"]), "exe": str(a["exe"]), "path": str(a.get("path") or ""),
                      "steam": bool(a.get("steam")),
+                     **_game_info(a),
                      **({"icons": [str(i) for i in a["icons"]]} if isinstance(a.get("icons"), list) and a["icons"] else {})}
                     for a in data["apps"]]
             if data.get("v") == 1:
                 return 0.0, apps            # (no icon places yet: shown now, scanned again at once)
-            return float(data["saved"]), apps if data.get("v") == FORMAT else None
+            return float(data["saved"]) if data.get("launchers") else 0.0, apps if data.get("v") == FORMAT else None
         except (OSError, ValueError, KeyError, TypeError):
             return 0.0, None
 
@@ -170,7 +176,7 @@ class AppCatalog:
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.cache_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"v": FORMAT, "saved": self.clock(), "apps": apps}), encoding="utf-8")
+            tmp.write_text(json.dumps({"v": FORMAT, "launchers": True, "saved": self.clock(), "apps": apps}), encoding="utf-8")
             tmp.replace(self.cache_path)
         except OSError:
             pass   # (no disk cache this time: the next start scans again)
@@ -186,7 +192,7 @@ class AppCatalog:
         self.loaded.set()
         if self.seed_games:
             try:
-                self._seed([a["exe"] for a in apps if a["steam"]])
+                self._seed([a["exe"] for a in apps if a["steam"] or a.get("game")])
             except Exception:
                 pass   # (seeding is retried at the next load; the list is usable anyway)
         self.on_ready()
@@ -248,7 +254,7 @@ class AppCatalog:
             except Exception:
                 found = self._running
             known = self._known
-            self._extras = [_Entry({"name": PureWindowsPath(p).stem.replace("_", " ").title(), "exe": e, "path": p,
+            self._extras = [_Entry({"name": PureWindowsPath(p or e).stem.replace("_", " ").title(), "exe": e, "path": p,
                                     "steam": False}) for e, p in found.items() if e not in known and not _hidden(e)]
             self._running = found
             if len(self._seen) < 2000:
@@ -273,7 +279,7 @@ class AppCatalog:
         found = []
         for e in entries:
             exe = e.app["exe"]
-            if kind == "games" and not e.app["steam"] or kind == "running" and exe not in running:
+            if kind == "games" and not (e.app["steam"] or e.app.get("game")) or kind == "running" and exe not in running:
                 continue
             s = e.score(words) if words else 0
             if s is None:
@@ -283,7 +289,7 @@ class AppCatalog:
             found.append((s, exact, e.app["steam"], exe not in running, e.sort_name, e))
         found.sort(key=lambda f: f[:5])
         return {"apps": [{"name": f[5].app["name"], "exe": f[5].app["exe"], "path": f[5].app["path"],
-                          "running": not f[3], "steam": f[5].app["steam"]} for f in found[:limit]],
+                          "running": not f[3], "steam": f[5].app["steam"], **_game_info(f[5].app)} for f in found[:limit]],
                 "total": len(found), "loading": False}
 
 
@@ -300,13 +306,8 @@ def _hidden(exe: str) -> bool:
 
 def _running_windows() -> dict:
     """{exe name: path} of the programs with a visible window."""
-    from blocker.apps import exe_name
     from monitor import win
-    found = {}
-    for _hwnd, _title, path in win.top_windows():
-        if path.lower().endswith(".exe"):
-            found.setdefault(exe_name(path), path)
-    return found
+    return win.running_apps()
 
 
 def _lower_thread_priority():

@@ -12,6 +12,7 @@ BROWSERS = {"chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe",
 SEARCH_DEPTH = 10
 
 _cache: dict[int, auto.Control] = {}   # window handle -> its address bar control
+_read_failures: dict[int, str] = {}   # last failure reason, for the tracker's rate-limited diagnostic
 
 
 def _find_address_bar(hwnd: int) -> auto.Control | None:
@@ -43,18 +44,24 @@ def tab_count(hwnd: int) -> int | None:
 
 def browser_url(hwnd: int) -> str | None:
     """URL/text in the address bar of a browser window, or None."""
+    if len(_read_failures) > 200:
+        _read_failures.clear()
     for _attempt in range(2):
         try:
             bar = _cache.get(hwnd) or _find_address_bar(hwnd)
             if bar is None:
                 _cache.pop(hwnd, None)
+                _read_failures[hwnd] = "address bar unavailable"
                 continue
             value = bar.GetValuePattern().Value
             if not valid_address(value):
                 _cache.pop(hwnd, None)
+                _read_failures[hwnd] = "empty or invalid value"
                 continue
             _cache[hwnd] = bar
+            _read_failures.pop(hwnd, None)
             return value.strip()
-        except Exception:  # stale control (window changed) - search again once
+        except Exception as exc:  # stale control (window changed) - search again once
             _cache.pop(hwnd, None)
+            _read_failures[hwnd] = f"UI Automation error ({type(exc).__name__})"
     return None

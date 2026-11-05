@@ -18,9 +18,9 @@ import emergency
 import group_look
 import stats
 from resident import snapshot
-from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, TIME_LIMIT_FIELDS, allowance_left, allowance_owner,
+from rules import (DAY_NAMES, OPEN_LIMIT_FIELDS, PERIOD_WORDS, allowance_left, allowance_owner,
                    block_end, blocked_text, effective_rules, item_block, limits, next_block, opening_bucket,
-                   period_words, rule_block, time_bucket)
+                   period_words, rule_block, time_bucket, time_limits)
 
 from . import categories, core, screentime
 from .core import ApiError
@@ -185,7 +185,7 @@ def upcoming(now, items, groups, usage) -> list[dict]:
                 item["display_name"])
         for r in rules:
             # (a limit set per weekday: today's amount)
-            if r["rule_type"] == "time_limit" and (day := limits(r, TIME_LIMIT_FIELDS, now, usage.clock).get("day")):
+            if r["rule_type"] == "time_limit" and (day := time_limits(r, now, usage).get("day")):
                 left = day * 60 - usage(r["usage_owner"], time_bucket("day", now, usage.clock))
                 # several day limits (the group's, its own extra): the row is the one with least left
                 if 0 < left <= LOW_LIMIT_SEC and left < merged.get(("limit", item["id"]), {}).get("left", left + 1):
@@ -240,7 +240,7 @@ def limit_entries(now, items, groups, usage) -> list[dict]:
             seen.add(key)
             is_time = r["rule_type"] == "time_limit"
             best = None
-            for period, limit in limits(r, TIME_LIMIT_FIELDS if is_time else OPEN_LIMIT_FIELDS, now, clock).items():
+            for period, limit in (time_limits(r, now, usage) if is_time else limits(r, OPEN_LIMIT_FIELDS)).items():
                 bucket = time_bucket(period, now, clock) if is_time else opening_bucket(r, period, now, clock)
                 used = usage(r["usage_owner"], bucket)
                 frac = used / (limit * 60 if is_time else max(limit, 1))
@@ -419,7 +419,7 @@ def _card_today(d: _Day) -> dict:
     def category(exe, site):
         if (exe, site) not in seen:
             cat = stats.category_of(*(("site", site) if site else ("app", exe)), saved, d.items)
-            seen[exe, site] = cat if cat in known else "neutral"
+            seen[exe, site] = cat if cat in known else "unassigned"
         return seen[exe, site]
     segments = stats.timeline(d.rows, d.today, category)
     if len(segments) > MAX_TIMELINE_SEGMENTS:

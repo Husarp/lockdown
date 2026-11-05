@@ -1,4 +1,4 @@
-"""Apps the user can pick to block: Start Menu shortcuts, installed Steam games and apps with an open window.
+"""Apps the user can pick to block: Start Menu shortcuts, installed launcher games and apps with an open window.
 
 Each app also brings the places its icon can be taken from, best first ("icons": "path" or "path,index"), when there is
 more than its own program file: the shortcut's own icon (IconLocation), Steam's icon of the game (a game's uninstall entry
@@ -150,10 +150,8 @@ def list_apps() -> list[dict]:
     """[{name, exe, path, running, steam, icons}] sorted by name; one entry per exe (`icons`: [] when there is nothing
     but the program itself to take the icon from)."""
     from monitor import steam
-    running = {}
-    for _hwnd, title, path in win.top_windows():
-        if path.lower().endswith(".exe"):
-            running.setdefault(win.exe_name(path), (title, path))
+    from monitor import launchers
+    running = win.running_apps()
     try:
         uninstall = uninstall_folders(_uninstall_entries())
     except Exception:
@@ -169,12 +167,15 @@ def list_apps() -> list[dict]:
         games = steam.games(START_MENUS + DESKTOPS)
     except OSError:
         games = []
-    for game in games:   # Steam's own name wins over a shortcut's; its uninstall entry's icon is Steam's .ico of the game
+    games += launchers.games()
+    for game in games:   # the launcher's own name wins over a shortcut's
+        if not game["path"] and game["exe"] in apps:
+            continue   # keep a launcher's shortcut and its usable path
         apps[game["exe"]] = {**game, "running": game["exe"] in running,
                              "icons": icon_places(game["path"], [uninstall_icon(game["path"], uninstall)] + game.get("icons", []))}
-    for exe, (title, path) in running.items():
+    for exe, path in running.items():
         if exe not in apps:
-            name = Path(path).stem.replace("_", " ").title()
+            name = PureWindowsPath(path or exe).stem.replace("_", " ").title()
             apps[exe] = {"name": name, "exe": exe, "path": path, "running": True, "steam": False}
     hidden = HIDDEN | PROTECTED
     return sorted((a for a in apps.values() if a["exe"] not in hidden), key=lambda a: a["name"].lower())

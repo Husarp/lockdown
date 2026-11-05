@@ -15,11 +15,12 @@ import { CANCELLED, parseNaive } from "../../challenge.js";
 import { openDialog } from "../../dialog.js";
 import { draftCall, FAILED } from "../../draft.js";
 import { paint, setHue } from "../../groupicons.js";
-import { openMenu } from "../../menu.js";
-import { confirmButton, el, empty, esc, ic, setText } from "../../ui.js";
+import { closeMenu, openMenu } from "../../menu.js";
+import { el, empty, esc, ic, setText } from "../../ui.js";
 import { createVList } from "../../vlist.js";
 import { takeEarlyOverview } from "./early.js";
 import { blockNow } from "./block_now.js";
+import { addTimeItem } from "./add_time.js";
 
 export const freshMs = 10_000;
 export const REFRESH_TICKS = 30;          // a reload every 30 s while shown (used times move)
@@ -106,6 +107,12 @@ export function chipsHtml(chips) {
   return chips.map((c) => `<span class="bchip ${CHIP_CLASS[c.k] || "k-grey"}">${ic(CHIP_ICON[c.r] || "clock")}<span>${esc(c.t)}</span></span>`).join("");
 }
 
+/** Prefer blocking / nearly exhausted rules; retain the server's order within each state. */
+export function primaryChip(chips) {
+  const rank = { blocked: 0, danger: 0, soon: 1, warn: 1, allowance: 2, allowed: 3, ok: 3, neutral: 4 };
+  return chips.reduce((best, c) => !best || (rank[c.state || c.k] ?? 4) < (rank[best.state || best.k] ?? 4) ? c : best, null);
+}
+
 // ---------------------------------------------------------------- state
 
 let tab = null, root = null, list = null, vl = null;
@@ -123,7 +130,7 @@ const STYLE = `<style>
 .bo .toolbar .search { width: min(260px, 100%); }
 .bo-h { padding-bottom: var(--sp-2); flex-wrap: wrap; }
 .bo-h h3 { flex: none; }
-.bo-grid { grid-template-columns: var(--app-icon) minmax(140px, 1.1fr) minmax(0, 2fr) calc(190px * var(--s)) calc(96px * var(--s)) calc(250px * var(--s)); }
+.bo-grid { grid-template-columns: var(--app-icon) minmax(140px, 1.1fr) minmax(0, 2fr) calc(190px * var(--s)) calc(40px * var(--s)); }
 .bo-head { display: grid; align-items: center; gap: var(--sp-3); height: calc(34px * var(--s)); padding: 0 var(--sp-4); background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .bo-row { padding-right: var(--sp-3); }
 .bo-row .name { gap: 1px; }
@@ -131,7 +138,17 @@ const STYLE = `<style>
 .bo-nl b { min-width: 0; }
 .bo-type { flex: none; font-style: normal; font-weight: var(--fw-regular); }
 .bo-type[hidden] { display: none; }
-.bo-chips { display: flex; flex-wrap: wrap; align-content: center; gap: 3px var(--sp-1); overflow: hidden; max-height: calc(var(--row-h) - 8px); min-width: 0; }
+.bo-chips { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.bo-rules { display: flex; align-items: center; gap: var(--sp-1); width: 100%; min-width: 0; padding: 2px; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
+.bo-rules .bchip { min-width: 0; }
+.bo-more { flex: none; font-size: var(--fs-sm); color: var(--text-2); }
+.bo-rule-tip { position: fixed; inset: auto; margin: 0; padding: var(--sp-3); max-width: min(440px, calc(100vw - 16px)); max-height: 60vh; overflow: auto;
+  border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--surface); color: var(--text); box-shadow: var(--shadow-card); }
+.bo-rule-tip .bchip { height: auto; min-height: calc(20px * var(--s)); white-space: normal; line-height: 1.4; padding-block: 4px; }
+.bo-rule-tip .bchip span { overflow: visible; overflow-wrap: anywhere; }
+.bo-rule-tip .bchip .ic { flex: none; }
+.bo-rule-tip .bchip + .bchip { margin-top: var(--sp-1); }
+.bo-rule-tip > div { display: grid; }
 .bchip { display: inline-flex; align-items: center; gap: 4px; height: calc(20px * var(--s)); max-width: 100%; padding: 0 var(--sp-2); border-radius: var(--r-pill);
   background: var(--k-soft); color: var(--text); font-size: var(--fs-sm); line-height: 1; white-space: nowrap; }
 .bchip .ic { color: var(--k); width: calc(12px * var(--s)); height: calc(12px * var(--s)); }
@@ -140,7 +157,6 @@ const STYLE = `<style>
 .bo-st .chip { max-width: 100%; }
 .bo-st .chip span { overflow: hidden; text-overflow: ellipsis; }
 .bo-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); justify-content: flex-end; }
-.bo-alerts { justify-self: start; color: var(--text-2); }
 .bo-ic .aic { position: relative; }
 .bo-ic .aic .bo-tile { width: 62%; height: 62%; stroke-width: 2; }
 .bo-ic.tile .aic { --c: var(--brand); --fg: var(--on-brand); }
@@ -154,38 +170,40 @@ const STYLE = `<style>
 .bo-row[data-t="dhead"] > :not(.name) { display: none; }
 .bo-row[data-t="dhead"] .name { grid-column: 1 / -1; }
 .bo-row[data-t="dhead"] .name b { font-size: var(--fs-cap); letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); }
-.bo-row[data-t="drow"] > .bo-chips, .bo-row[data-t="drow"] > .bo-st, .bo-row[data-t="drow"] > .bo-alerts { visibility: hidden; }
+.bo-row[data-t="drow"] > .bo-chips, .bo-row[data-t="drow"] > .bo-st { visibility: hidden; }
 .bo-row[data-t="drow"] .name b { color: var(--text-2); }
-.bo-row [data-act="disable"], .bo-row .confirm { display: none; }
-.bo-row[data-t="ghead"] [data-act="disable"], .bo-row[data-t="ghead"] .confirm, .bo-row[data-t="item"] .confirm { display: inline-flex; }
-.bo-row[data-t="ghead"] > .bo-alerts, .bo-row[data-t="member"] > .bo-alerts { visibility: hidden; }
-.bo-row[data-t="member"] .bo-acts > :not([data-act="block-now"]) { display: none; }
-.bo-row[data-t="member"] .confirm { display: none; }
 .bo-empty { flex: 1; display: grid; align-content: center; }
 .bo-empty[hidden] { display: none; }
 .bo-note { padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--line); color: var(--text-2); font-size: var(--fs-sm); }
-@media (max-width: 1100px) { .bo-grid { grid-template-columns: var(--app-icon) minmax(120px, 1fr) minmax(0, 1.4fr) calc(140px * var(--s)) calc(84px * var(--s)) calc(230px * var(--s)); } }
-@media (max-width: 860px) { .bo-grid { grid-template-columns: var(--app-icon) minmax(0, 1fr) calc(130px * var(--s)) auto; } .bo-grid .bo-chips, .bo-grid .bo-alerts, .bo-head .h-chips, .bo-head .h-alerts { display: none; } }
+@media (max-width: 1100px) { .bo-grid { grid-template-columns: var(--app-icon) minmax(120px, 1fr) minmax(0, 1.4fr) calc(140px * var(--s)) calc(40px * var(--s)); } }
+@media (max-width: 860px) { .bo-grid { grid-template-columns: var(--app-icon) minmax(0, 1fr) calc(130px * var(--s)) auto; } .bo-grid .bo-chips, .bo-head .h-chips { display: none; } }
+@media (max-width: 860px) {
+  .bo-row { grid-template-rows: 1fr 1fr; row-gap: 0; }
+  .bo-row > .name { grid-column: 2; grid-row: 1; align-self: end; }
+  .bo-row > .name > span { display: none; }
+  .bo-row > .bo-chips { display: flex; grid-column: 2; grid-row: 2; align-self: start; }
+  .bo-row > .bo-ic { grid-column: 1; grid-row: 1 / 3; }
+  .bo-row > .bo-st { grid-column: 3; grid-row: 1 / 3; }
+  .bo-row > .bo-acts { grid-column: 4; grid-row: 1 / 3; }
+  .bo-row[data-t="dhead"] > .name { grid-column: 1 / -1; grid-row: 1 / 3; align-self: center; }
+}
+@media (max-width: 620px) { .bo-more span { display: none; } }
 </style>`;
 
 const ROW_HTML = `<span class="bo-ic"><span class="aic"><img alt="" loading="lazy" decoding="async" draggable="false">${ic("layers", "bo-tile")}</span></span>
   <div class="name"><div class="bo-nl"><b class="ellip"></b><em class="chip chip-soft chip-xs bo-type" hidden></em></div><span class="ellip"></span></div>
-  <div class="bo-chips tags-col"></div>
+  <div class="bo-chips tags-col"><button type="button" class="bo-rules" data-act="rules"></button></div>
   <div class="bo-st"><span class="chip">${ic("ban")}<span></span></span></div>
-  <button class="btn btn-sm btn-ghost bo-alerts" type="button" data-act="alerts" title="Blocked-visit alerts for this item">${ic("bell")}<span></span></button>
-  <div class="acts bo-acts"><button class="btn btn-sm" type="button" data-act="block-now">Block now</button><button class="btn btn-sm" type="button" data-act="edit"><span>Edit</span></button><button class="btn btn-sm" type="button" data-act="disable">Disable</button></div>`;
+  <div class="acts bo-acts"><button class="btn btn-sm" type="button" data-act="more" aria-label="More options" aria-haspopup="menu" aria-expanded="false">⋯</button></div>`;
 
 // ---------------------------------------------------------------- rows
 
 function createRow() {
   const node = el(`<div class="row bo-row bo-grid">${ROW_HTML}</div>`);
-  const remove = confirmButton({ label: "Remove", confirmLabel: "Confirm", cls: "btn btn-sm", ms: 4000, onConfirm: () => removeRow(node._row) });
-  node.querySelector(".bo-acts").append(remove);
   node._refs = {
     ic: node.querySelector(".bo-ic"), img: node.querySelector("img"), use: node.querySelector(".bo-tile use"),
-    b: node.querySelector(".name b"), type: node.querySelector(".bo-type"), sub: node.querySelector(".name > span"), chips: node.querySelector(".bo-chips"),
+    b: node.querySelector(".name b"), type: node.querySelector(".bo-type"), sub: node.querySelector(".name > span"), chips: node.querySelector(".bo-rules"),
     chip: node.querySelector(".bo-st .chip"), chipUse: node.querySelector(".bo-st .chip use"), chipText: node.querySelector(".bo-st .chip span"),
-    alerts: node.querySelector(".bo-alerts span"), edit: node.querySelector('[data-act="edit"] span'), remove,
   };
   return node;
 }
@@ -216,8 +234,10 @@ function setChips(node, chips) {
   const r = node._refs, sig = JSON.stringify(chips);
   if (node._chipSig !== sig) {
     node._chipSig = sig;
-    r.chips.innerHTML = chipsHtml(chips);
-    r.chips.title = chips.map((c) => c.t).join("\n");
+    const primary = primaryChip(chips);
+    r.chips.innerHTML = primary ? chipsHtml([primary]) + (chips.length > 1 ? `<span class="bo-more">+${chips.length - 1}<span> more</span></span>` : "") : "";
+    r.chips.hidden = !primary;
+    r.chips.setAttribute("aria-label", primary ? `${primary.t}. Show all ${chips.length} rules` : "No rules");
   }
 }
 
@@ -229,8 +249,6 @@ function setType(r, type) {
   setText(r.type, word);
   r.type.hidden = !word;
 }
-
-const ALERT_WORDS = { null: "Default", on: "On", off: "Off" };
 
 function renderRow(node, row) {
   const r = node._refs;
@@ -249,7 +267,6 @@ function renderRow(node, row) {
     setText(r.b, e.t === "group" ? `${e.name} (group)` : e.name);
     setType(r, e.t === "group" ? "" : e.type);
     setText(r.sub, "");
-    setText(r.edit, "Edit");
     return;
   }
   setText(r.b, e.name);
@@ -259,9 +276,6 @@ function renderRow(node, row) {
   else setText(r.sub, e.sub);
   setChips(node, e.chips);
   setStatus(r, e.status);
-  if (row.k === "item") setText(r.alerts, ALERT_WORDS[e.notify]);
-  setText(r.edit, row.k === "item" && e.groups.length ? "Edit ▾" : "Edit");
-  if (r.remove.classList.contains("armed")) { r.remove.classList.remove("armed"); r.remove.textContent = "Remove"; }   // a reused row never stays armed
 }
 
 // ---------------------------------------------------------------- what a click does
@@ -279,33 +293,81 @@ function removeRow(row) {
   else if (row.k === "ghead") act(draftCall("draft_remove_group", row.e.id), () => tab.confirm(`Group ${row.e.name} removed`));
 }
 
+function openRowMenu(btn, items) {
+  btn.focus({ preventScroll: true });
+  const close = () => btn.setAttribute("aria-expanded", "false");
+  openMenu(btn, items.map((it) => it.onClick ? { ...it, onClick: () => { close(); it.onClick(); } } : it), { onClose: close });
+  btn.setAttribute("aria-expanded", "true");
+}
+
 function chooseAlerts(btn, row) {
   const e = row.e;
-  openMenu(btn, [{ heading: "Blocked-visit alerts" }, ...[[null, "Default"], ["on", "On"], ["off", "Off"]].map(([v, label]) => ({
-    label, checked: e.notify === v, onClick: () => { if (e.notify !== v) act(draftCall("draft_set_notify", e.id, v)); },
+  openRowMenu(btn, [{ heading: "Blocked-visit alerts" }, ...[[null, "Default"], ["on", "On"], ["off", "Off"]].map(([v, label]) => ({
+    label, icon: "bell", checked: e.notify === v, onClick: () => { if (e.notify !== v) act(draftCall("draft_set_notify", e.id, v)); },
   }))]);
 }
 
 function editItemMenu(btn, e) {
-  openMenu(btn, [{ label: "Edit its blockers", icon: "pencil", onClick: () => tab.editItem(e.id) },
+  openRowMenu(btn, [{ label: "Edit its blockers", icon: "pencil", onClick: () => tab.editItem(e.id) },
     ...e.groups.map((g) => ({ label: `Edit group ${g.name}`, icon: "layers", onClick: () => tab.editGroup(g.id) }))]);
 }
+
+function rowMenu(btn, row) {
+  if (row.k === "dhead") return;
+  closeRules();
+  const e = row.e, group = row.k === "ghead" || e.t === "group";
+  const edit = () => group ? tab.editGroup(e.id) : row.k === "item" && e.groups.length ? editItemMenu(btn, e) : tab.editItem(e.id);
+  const items = [
+    { label: "Edit", icon: "pencil", onClick: edit },
+    { label: "Block now", icon: "ban", onClick: () => blockNow(e.id, group, () => tab.reload()) },
+    addTimeItem(e, group, () => tab.reload()),
+  ];
+  const off = row.k !== "drow" && e.status?.k !== "disabled";
+  items.push({ label: off ? "Disable" : "Enable", icon: off ? "pause" : "play",
+    onClick: () => act(draftCall(group ? "draft_set_group_disabled" : "draft_set_disabled", e.id, off),
+      () => tab.confirm(`${group ? "Group " : ""}${e.name} ${off ? "disabled" : "enabled"}`)) });
+  if (row.k === "item") items.push({ label: "Blocked-visit alerts", icon: "bell", onClick: () => chooseAlerts(btn, row) });
+  if (row.k === "item" || row.k === "ghead") items.push({ label: "Remove", icon: "trash", danger: true, onClick: () => {
+    // Keep removal a two-step action, then use the same guarded draft call.
+    openRowMenu(btn, [{ label: "Confirm", icon: "trash", danger: true, onClick: () => removeRow(row) }]);
+  } });
+  openRowMenu(btn, items);
+}
+
 
 function onClick(e) {
   const node = e.target.closest(".vl-row");
   if (!node || !node._row) return;
   const row = node._row, btn = e.target.closest("[data-act]");
   if (!btn) { if (row.k === "member") tab.editItem(row.e.id); return; }
-  const act_ = btn.dataset.act;
-  if (act_ === "block-now" && row.k !== "dhead") blockNow(row.e.id, row.k === "ghead" || row.e.t === "group", () => tab.reload());
-  else if (act_ === "alerts" && row.k === "item") chooseAlerts(btn, row);
-  else if (act_ === "edit") {
-    if (row.k === "item") { if (row.e.groups.length) editItemMenu(btn, row.e); else tab.editItem(row.e.id); }
-    else if (row.k === "ghead") tab.editGroup(row.e.id);
-    else if (row.k === "drow") { if (row.e.t === "group") tab.editGroup(row.e.id); else tab.editItem(row.e.id); }
-  } else if (act_ === "disable" && row.k === "ghead") {
-    act(draftCall("draft_set_group_disabled", row.e.id, true), () => tab.confirm(`Group ${row.e.name} disabled`));
-  }
+  if (btn.dataset.act === "rules") showRules(btn, row.e);
+  else if (btn.dataset.act === "more") rowMenu(btn, row);
+}
+
+// One top-layer popover: it escapes the virtual list's clipping and never changes row heights.
+let ruleTip = null, ruleAnchor = null, ruleTimer = 0;
+function closeRules() {
+  clearTimeout(ruleTimer);
+  if (ruleAnchor) ruleAnchor.removeAttribute("aria-describedby");
+  if (ruleTip) { ruleTip.remove(); ruleTip = null; }
+  ruleAnchor = null;
+}
+function showRules(btn, entry) {
+  clearTimeout(ruleTimer);
+  if (!entry || !entry.chips || !entry.chips.length || ruleAnchor === btn) return;
+  closeRules();
+  ruleAnchor = btn;
+  ruleTip = el(`<div class="bo-rule-tip" popover="manual" role="tooltip" id="bo-rule-tip"><div>${chipsHtml(entry.chips)}</div></div>`);
+  root.append(ruleTip);
+  btn.setAttribute("aria-describedby", "bo-rule-tip");
+  const tip = ruleTip;
+  tip.addEventListener("toggle", () => { if (ruleTip === tip && !tip.matches(":popover-open")) closeRules(); });
+  tip.addEventListener("pointerenter", () => clearTimeout(ruleTimer));
+  tip.addEventListener("pointerleave", () => { if (document.activeElement !== btn) closeRules(); });
+  ruleTip.showPopover();
+  const rect = btn.getBoundingClientRect(), bounds = ruleTip.getBoundingClientRect();
+  ruleTip.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - bounds.width - 8))}px`;
+  ruleTip.style.top = `${rect.bottom + bounds.height + 8 < window.innerHeight ? rect.bottom + 4 : Math.max(8, rect.top - bounds.height - 4)}px`;
 }
 
 // ---------------------------------------------------------------- the toolbar
@@ -344,6 +406,8 @@ function showEmergency() {
 // ---------------------------------------------------------------- showing the data
 
 function applyView(keepScroll = true) {
+  closeMenu();
+  closeRules();
   rows = flatten(data.entries, data.disabled, { q: query, filter });
   const none = data.counts.total === 0 && data.disabled.length === 0;
   els.empty.hidden = !none;
@@ -379,7 +443,7 @@ export function mount(host, t) {
         <button class="btn btn-sm" type="button" data-k="sortbtn" aria-haspopup="menu">${ic("sort")}<span class="muted">Sort:</span><span data-k="sort">&nbsp;</span></button>
         <button class="btn btn-sm btn-emerg" type="button" data-k="emergency" hidden>${ic("lifebuoy")}Emergency unlock</button>
         <button class="btn btn-sm btn-primary" type="button" data-k="add">${ic("plus")}Add</button></header>
-      <div class="bo-head bo-grid"><span></span><span class="cap">Item</span><span class="cap h-chips">Rules</span><span class="cap">Status</span><span class="cap h-alerts">Alerts</span><span></span></div>
+      <div class="bo-head bo-grid"><span></span><span class="cap">Item</span><span class="cap h-chips">Rules</span><span class="cap">Status</span><span></span></div>
       <div id="bo-list" data-k="list"></div>
       <div class="bo-empty" data-k="nomatch" hidden>${empty("k-grey", "search", "Nothing matches", "Try another word, or pick All.")}</div>
     </div>
@@ -388,7 +452,21 @@ export function mount(host, t) {
   for (const k of ["toolbar", "search", "count", "sort", "emergency", "title", "list", "nomatch", "empty", "card"]) els[k] = q(k);
   list = els.list;
   vl = createVList(list, { rowVar: "--row-h", rows: [], key: (row) => row.key, create: createRow, render: renderRow });
+  document.addEventListener("pointerdown", (e) => {
+    if (ruleTip && !ruleTip.contains(e.target) && !ruleAnchor.contains(e.target)) closeRules();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRules(); });
   list.addEventListener("click", onClick);
+  for (const event of ["pointerover", "focusin"]) list.addEventListener(event, (e) => {
+    const btn = e.target.closest(".bo-rules");
+    if (btn) showRules(btn, btn.closest(".vl-row")._row.e);
+  });
+  list.addEventListener("focusout", (e) => { if (e.target.closest(".bo-rules")) closeRules(); });
+  list.addEventListener("pointerout", (e) => {
+    const btn = e.target.closest(".bo-rules");
+    if (btn && !btn.contains(e.relatedTarget) && document.activeElement !== btn && !(ruleTip && ruleTip.contains(e.relatedTarget))) ruleTimer = setTimeout(closeRules, 150);
+  });
+  list.addEventListener("scroll", closeRules, true);
   list.addEventListener("keydown", (e) => {
     const node = e.target.closest && e.target.closest('.vl-row[data-t="member"]');
     if (node && e.target === node && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); tab.editItem(node._row.e.id); }
@@ -445,5 +523,7 @@ export function patch({ event, payload }) {
 }
 
 export function hide() {
+  closeMenu();
+  closeRules();
   clearTimeout(searchTimer);
 }

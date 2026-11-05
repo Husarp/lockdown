@@ -195,3 +195,34 @@ def test_the_recovery_code_passes_the_whole_challenge_and_the_new_one_is_shown_o
     assert result(page) == {"saved": 1} and req.ran == 1
     stored = cs.load(harness.db)["recovery"]
     assert cs.verify_secret(cs.clean_recovery(new), stored) and not cs.verify_secret(cs.clean_recovery(code), stored)
+
+
+def test_supervisor_setup_uses_separate_qr_and_secret(shell, page, harness):
+    open_page(shell, page)
+    page.click('[data-act="sx-supervisor-set"]')
+    page.wait_for_selector('#dlg [data-k="sx-key"]')
+    assert "Set up supervisor codes" in page.inner_text("#dlg h2")
+    key = page.inner_text('#dlg [data-k="sx-key"]').replace(" ", "")
+    page.fill('#dlg [data-k="sx-code"]', code_now(harness, key))
+    page.click("#dlg .dlg-f .btn-primary")
+    dialog_closed(page)
+    assert eventually(lambda: cs.status(harness.db)["supervisor"]["set"])
+    assert not cs.status(harness.db)["totp"]["set"]
+    assert key not in page.content()
+
+
+def test_supervisor_option_skips_an_existing_wait_for_one_action(shell, page, harness):
+    key = cs.new_totp_secret()
+    cs.set_totp(harness.db, key, -1, harness.now, "supervisor")
+    lock(harness)
+    ab.save(harness.db, {**ab.settings(harness.db), "wait_min": 9999})
+    ab.unlock(harness.db, harness.now)
+    before = ab.settings(harness.db)
+    shell()
+    req, data = ask(harness)
+    open_in_page(page, data)
+    page.get_by_role("button", name="Supervisor code", exact=True).click()
+    page.fill("#dlg .ch-supervisor", code_now(harness, key))
+    page.get_by_role("button", name="Use code", exact=True).click()
+    assert result(page) == {"saved": 1} and req.ran == 1
+    assert ab.settings(harness.db) == before

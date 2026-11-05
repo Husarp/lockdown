@@ -320,6 +320,7 @@ def _unlocked_until(rules: list[dict], now: datetime, usage) -> datetime | None:
 # Usage is stored per (owner, bucket): owner "item:<id>" or "group:<id>" (shared group limit); bucket
 # "day:<limit day>" / "week:w<monday>" / "month:m<YYYY-MM>" (time limits), "op:<rule key>:<period>" (opening
 # limits), "win:<rule key>:<end of blocked stretch>" (allowance in blocked hours), "sw:<date>" (switch stats).
+# "extra:day:<limit day>" stores granted seconds separately, and stops applying at the next daily reset.
 
 no_usage = Usage()
 
@@ -396,6 +397,23 @@ def day_limits_text(days: list[int | None], fmt=lambda minutes: duration_text(mi
 
 def time_bucket(period: str, now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> str:
     return f"{period}:{clock.period(period, now)[0]}"
+
+
+def extra_time_bucket(now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> str:
+    """One persistent grant pot per limit day, separate from time actually used."""
+    return f"extra:{time_bucket('day', now, clock)}"
+
+
+def extra_time(owner: str, now: datetime, usage=no_usage) -> int:
+    """Seconds granted for this owner in the current limit day."""
+    return usage(owner, extra_time_bucket(now, _clock(usage)))
+
+
+def time_limits(rule: dict, now: datetime, usage=no_usage) -> dict[str, int]:
+    out = limits(rule, TIME_LIMIT_FIELDS, now, _clock(usage))
+    if "day" in out:
+        out["day"] += extra_time(_owner(rule), now, usage) // 60
+    return out
 
 
 def opening_bucket(rule: dict, period: str, now: datetime, clock: LimitClock = DEFAULT_CLOCK) -> str:
@@ -491,7 +509,7 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
         return "schedule", (None if until == datetime.max else until)
     clock = _clock(usage)
     if kind == "time_limit":   # blocked until the end of every period whose limit is used up
-        ends = [clock.period(p, now)[1] for p, limit in limits(rule, TIME_LIMIT_FIELDS, now, clock).items()
+        ends = [clock.period(p, now)[1] for p, limit in time_limits(rule, now, usage).items()
                 if usage(_owner(rule), time_bucket(p, now, clock)) >= limit * 60]
         return ("limit", max(ends)) if ends else None
     if kind == "switch_limit":  # the openings up to the limit are allowed; the next one is blocked
@@ -518,7 +536,7 @@ def rule_state(rule: dict, now: datetime, usage=no_usage) -> str:
         fields = TIME_LIMIT_FIELDS if time_based else OPEN_LIMIT_FIELDS
         used = [usage(_owner(rule), time_bucket(p, now, clock)) / max(limit * 60, 1) if time_based
                 else usage(_owner(rule), opening_bucket(rule, p, now, clock)) / max(limit, 1)
-                for p, limit in limits(rule, fields, now, clock).items()]
+                for p, limit in (time_limits(rule, now, usage) if time_based else limits(rule, fields)).items()]
         return "soon" if used and max(used) >= NEARLY else "allowed"
     if kind == "scheduled" and rule.get("schedule"):
         if allowance_left(rule, now, usage):   # inside its hours, on the allowance: still allowed, not for long
@@ -569,17 +587,19 @@ def usage_targets(rules: list[dict], item_id: int, now: datetime,
 
 
 def limit_targets(rules: list[dict], now: datetime,
-                  clock: LimitClock = DEFAULT_CLOCK) -> dict[tuple[str, str], int]:
+                  clock: LimitClock = DEFAULT_CLOCK, usage=None) -> dict[tuple[str, str], int]:
     """(owner, bucket) -> the seconds at which it blocks, for the buckets usage_targets fills that have a limit:
     every time limit, and the allowance of the blocked stretch you are in. The usage tracker writes its time at
-    once when one of them is about to be reached (it batches the rest), so a block starts on time."""
+    once when one of them is about to be reached (it batches the rest), so a block starts on time.
+    `usage` carries today's extra-time grants when called by the tracker."""
     out: dict[tuple[str, str], int] = {}
+    usage = usage if usage is not None else Usage(clock=clock)
 
     def put(target, seconds):
         out[target] = min(out.get(target, seconds), seconds)
     for r in rules:
         if r["rule_type"] == "time_limit":
-            for p, limit in limits(r, TIME_LIMIT_FIELDS, now, clock).items():
+            for p, limit in time_limits(r, now, usage).items():
                 put((_owner(r), time_bucket(p, now, clock)), limit * 60)
         elif r["rule_type"] == "scheduled" and r.get("allowance_min"):
             until = schedule_until(r["schedule"], now)
@@ -595,6 +615,7 @@ def block_targets(rules: list[dict], now: datetime, clock: LimitClock = DEFAULT_
     for r in rules:
         if r["rule_type"] == "time_limit":
             out |= {(_owner(r), time_bucket(p, now, clock)) for p in limits(r, TIME_LIMIT_FIELDS)}
+            out.add((_owner(r), extra_time_bucket(now, clock)))
         elif r["rule_type"] == "switch_limit":
             out |= _opening_targets(r, now, clock)
         elif r["rule_type"] == "scheduled" and r.get("allowance_min") and r.get("schedule"):
@@ -702,7 +723,7 @@ def next_block(rules: list[dict], now: datetime, usage=no_usage, in_use: bool = 
             elif in_use and r.get("allowance_min"):   # inside the stretch, using the allowance
                 left = r["allowance_min"] * 60 - usage(allowance_owner(r), allowance_bucket(r, until))
                 found.append((now + timedelta(seconds=max(0, left)), r))
-        elif kind == "time_limit" and in_use and (lims := limits(r, TIME_LIMIT_FIELDS, now, _clock(usage))):
+        elif kind == "time_limit" and in_use and (lims := time_limits(r, now, usage)):
             left = min(limit * 60 - usage(_owner(r), time_bucket(p, now, _clock(usage))) for p, limit in lims.items())
             found.append((now + timedelta(seconds=max(0, left)), r))
     return min(found, key=lambda f: f[0]) if found else None
@@ -797,8 +818,12 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = T
     tag = " (group)" if _owner(rule).startswith("group:") else own
     if kind == "time_limit":
         lims = limits(rule, TIME_LIMIT_FIELDS, now, clock)
+        extra = extra_time(_owner(rule), now, usage)
+        day_words = period_words("day", now, clock)
         parts = [(f"{duration_text(usage(_owner(rule), time_bucket(p, now, clock)))} / " if used else "")
-                 + f"{duration_text(limit * 60)} {period_words(p, now, clock)}" for p, limit in lims.items()]
+                 + f"{duration_text(limit * 60)}"
+                 + (f" + {duration_text(extra)} extra today" + (f" ({day_words})" if day_words != "today" else "")
+                    if p == "day" and extra else f" {period_words(p, now, clock)}") for p, limit in lims.items()]
         if "day" not in lims and day_limits(rule):   # set per weekday, and not on this one
             parts.insert(0, f"no limit {period_words('day', now, clock)}")
         return f"Limit{tag}: " + "\n".join(parts)

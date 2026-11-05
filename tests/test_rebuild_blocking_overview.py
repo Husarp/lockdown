@@ -173,6 +173,7 @@ def test_while_one_rule_blocks_the_others_go_red_too(env):
     used(env, f"item:{iid}", 10 * 60)
     chips = entry(overview(env), "Reddit")["chips"]
     assert [c["k"] for c in chips] == ["danger", "danger"]
+    assert [c["state"] for c in chips] == ["blocked", "allowed"]  # summary can identify the actual blocker
     assert "/" not in chips[1]["t"]
 
 
@@ -229,7 +230,7 @@ def test_a_loose_item_in_a_group_lists_the_groups_rules_with_an_arrow(env):
     assert [c["t"] for c in reddit["chips"]] == ["Permanent", "→ Fun · disabled"]
     assert reddit["groups"] == [{"id": env.db.list_groups()[0]["id"], "name": "Fun"}]
     assert view["disabled"] == [{"t": "group", "id": reddit["groups"][0]["id"], "name": "Fun", "icon": "folder",
-                                 "color": group_look.auto_hue(reddit["groups"][0]["id"])}]
+                                 "color": group_look.auto_hue(reddit["groups"][0]["id"]), "add_time": True}]
 
 
 def test_a_group_box_and_a_disabled_group_carry_the_groups_icon_and_colour(env):

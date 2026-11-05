@@ -47,11 +47,13 @@ def text(block_type: str | None) -> str:
                                      ("back", "goes back")) if f in flags)
 
 
-def title_site(title: str | None, exe: str | None = None) -> str | None:
+def title_site(title: str | None, exe: str | None = None, confirmed_host: str | None = None) -> str | None:
     """Recognise the site in a browser title, independent of UI language and tab groups.
 
     A known browser process cannot disambiguate an earlier page-title segment.
     A successful address read always takes precedence.
+    confirmed_host may disambiguate a profile suffix only when an address was read
+    under this exact window title. Callers must forget it on a title or address change.
     """
     if not title:
         return None
@@ -67,6 +69,8 @@ def title_site(title: str | None, exe: str | None = None) -> str | None:
             # the executable doesn't turn an earlier page-title word into a site.
             if not extra and i == len(parts) - 1:
                 return site
+            if not extra and confirmed_host and (confirmed_host == site or confirmed_host.endswith("." + site)):
+                return confirmed_host
             if extra and not (extra[0].isascii() and (extra[0].isalnum() or extra[0] == "_")) and _TAB_COUNT.search(extra):
                 return site
     return None

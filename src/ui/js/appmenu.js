@@ -42,7 +42,7 @@ export async function openAppMenu(anchor, target, opts = {}) {
     try { await fn(...args); } catch (err) { fail(err); }
     if (opts.restore && !isOpen()) opts.restore();
   };
-  const current = cats.find((c) => c.key === info.category) || cats[1] || cats[0];
+  const current = cats.find((c) => c.key === info.category) || cats.find((c) => c.key === "unassigned") || cats[0];
 
   const pickCategory = after(async (c) => {
     const r = await assignCategory(kind, name, c.key);

@@ -11,6 +11,9 @@ of the Anti-Bypass list only (challenges.SECRET_KINDS), never of the bedtime scr
 - Authenticator code (RFC 6238): 6 digits, 30 s, HMAC-SHA1, the step before and after are accepted (a phone clock a
   little off), and a code that was accepted once is never accepted again (nor any older one). Set up by scanning a QR
   code (otpauth://totp/Lockdown:<pc>?secret=...&issuer=Lockdown) and typing one current code to confirm.
+- Supervisor codes: a separate TOTP secret, with the same storage, trusted clock, replay protection and slowdown.
+  A current code authorizes only the pending action, skipping its challenges and waits (a general unlock only for the explicit "Unlock to edit" action).
+  Setup, replacement and removal go through the normal guard (or an existing supervisor code).
 - Recovery code (optional, none by default): a one-time master key - 16 characters in 4 groups from an alphabet without
   look-alikes, kept only as a hash. Making one (or a new one) asks the challenge, so it is never free; it is shown ONCE
   (print it or write it down). Typing it passes ONE whole Anti-Bypass challenge run (every step, any kind); it is then
@@ -176,13 +179,13 @@ def clean_recovery(value) -> str:
 # ---------------------------------------------------------------- what is stored
 
 def load(db) -> dict:
-    """The stored secrets: {"password": {...hash, set}, "totp": {secret, set, last}, "recovery": {...hash, made},
+    """The stored secrets: {"password": {...hash, set}, "totp": {secret, set, last}, "supervisor": {secret, set, last}, "recovery": {...hash, made},
     "tries": {fails, next}} - each part only when it is there ("tries": wrong tries in a row, see Checker)."""
     try:
         data = json.loads(db.get_setting(SECRETS_KEY, "") or "{}")
     except ValueError:
         data = {}
-    return {k: v for k, v in data.items() if k in ("password", "totp", "recovery", "tries") and isinstance(v, dict)} \
+    return {k: v for k, v in data.items() if k in ("password", "totp", "supervisor", "recovery", "tries") and isinstance(v, dict)} \
         if isinstance(data, dict) else {}
 
 
@@ -205,6 +208,7 @@ def status(db) -> dict:
     data = load(db)
     return {"password": {"set": "password" in data, "since": _since(data.get("password", {}).get("set"))},
             "totp": {"set": "totp" in data, "since": _since(data.get("totp", {}).get("set"))},
+            "supervisor": {"set": "supervisor" in data, "since": _since(data.get("supervisor", {}).get("set"))},
             "recovery": {"exists": "recovery" in data, "made": _since(data.get("recovery", {}).get("made"))}}
 
 
@@ -215,12 +219,14 @@ def set_password(db, text: str, now):
     _save(db, data)
 
 
-def set_totp(db, secret: str, step: int, now):
+def set_totp(db, secret: str, step: int, now, kind="totp"):
     """Store the authenticator confirmed with the code of time step `step` (that code is then used). No recovery code
     comes with it."""
+    if kind not in ("totp", "supervisor"):
+        raise ValueError("Unknown authenticator kind.")
     secret_key(secret)                       # (a bad secret fails here, before anything is stored)
     data = load(db)
-    data["totp"] = {"secret": secret, "set": now.strftime(TIME_FMT), "last": int(step)}
+    data[kind] = {"secret": secret, "set": now.strftime(TIME_FMT), "last": int(step)}
     _save(db, data)
 
 
@@ -310,11 +316,11 @@ class Checker:
     def check_password(self, value) -> bool:
         return self._result(verify_secret(value, load(self._db()).get("password")))
 
-    def check_totp(self, value) -> bool:
+    def check_totp(self, value, kind="totp") -> bool:
         """A right code that is newer than the last one accepted; it is then the last one (never accepted again)."""
         db = self._db()
         data = load(db)
-        record = data.get("totp")
+        record = data.get(kind)
         step = None
         if record:
             try:
@@ -322,7 +328,7 @@ class Checker:
             except (KeyError, TypeError, ValueError):
                 step = None
         if step is not None:
-            data["totp"] = {**record, "last": step}
+            data[kind] = {**record, "last": step}
             _save(db, data)
         return self._result(step is not None)
 

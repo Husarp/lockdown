@@ -30,6 +30,7 @@ from logging.handlers import RotatingFileHandler
 import alerts
 import antibypass
 import applog
+import enforcement_wake
 from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection, site_block
 import keywords
 from blocker.listener import BlockListener
@@ -94,7 +95,7 @@ class Enforcer:
     video_seen: dict = {}                  # ip -> video host name of a blocked site, seen since the last update
     net_names: dict = {}                   # ip -> name the network log remembers (NetworkLogger.names, netlog_loop)
     family: dict = {}      # exe -> {pid: (name, start time)} it started from its own folder: they ARE the app
-    members: dict = {}     # pid -> sorted exes of the listed apps it is part of, other than by name (publish_members)
+    members: dict = {}     # pid -> sorted exes of the listed apps it is part of (publish_members)
     published: dict | None = None
     app_items: dict = {}   # exe -> item, for every app on the list (track_families)
     hosted: dict = {}      # pid -> the listed program file (game.jar, tool.py ...) that interpreter runs (hosted_processes)
@@ -429,7 +430,7 @@ class Enforcer:
         # category blockers: the categories of the listed apps that run, and of any running program you put in one
         cats = {modes.item_category(i, categories) for i in used}
         cats |= {cat for (kind, name), cat in categories.items() if kind == "app" and name in running}
-        used += [i for i in items if i["item_type"] == "category" and i["target"] in cats]
+        used += [i for i in items if i["item_type"] == "category" and modes.category_keys({i["target"]}) & cats]
         for item in used:
             self.db.add_usage(usage_targets(counted_rules(item, groups), item["id"], now, clock), seconds, now.date())
         self.db.set_setting(COUNTED_KEY, f"{now_ts:.3f}")
@@ -452,11 +453,12 @@ class Enforcer:
         return False
 
     def publish_members(self):
-        """Tell the tray app which running processes belong to a listed app other than by name - what the app
+        """Tell the tray app which running processes belong to a listed app - by name, what the app
         started from its own folder (also after the starter has gone), or a program from its game folder. The
         tray counts the window in front; it can't follow who started what, and a game protected by anti-cheat
         won't even tell it its path, so before this the real game's window was not counted at all."""
-        members = self.members
+        alive = {pid for pid, _name in apps.list_processes()}
+        members = {pid: exes for pid, exes in self.members.items() if pid in alive}
         if members != self.published:
             self.db.set_setting(MEMBERS_KEY, json.dumps({str(pid): exes for pid, exes in members.items()}))
             self.published = members
@@ -532,6 +534,8 @@ class Enforcer:
         for exe, item in self.app_items.items():
             kept = {pid: v for pid, v in self.family.get(exe, {}).items() if names.get(pid) == v[0]}
             main = set().union(*(by_name.get(n, ()) for n in apps.names_of(exe)), hosted.get(exe, ()))
+            for pid in main:
+                members.setdefault(pid, set()).add(exe)
             folder = apps.app_folder(item)
             if main:
                 homes = {f for pid in main if (f := apps.helper_folder(self._path(pid, names[pid])))}
@@ -642,7 +646,7 @@ class Enforcer:
     def _path(self, pid: int, name: str) -> str:
         """Lowercase exe path of a process ('' if unknown), looked up once per process."""
         cached = self.path_cache.get(pid)
-        if not cached or cached[0] != name:
+        if not cached or cached[0] != name or not cached[1]:
             cached = self.path_cache[pid] = (name, (apps.process_path(pid) or "").lower())
         return cached[1]
 
@@ -911,12 +915,16 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
     threading.Thread(target=protection_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=dns_loop, args=(enforcer,), daemon=True).start()
     stop = stop or threading.Event()
-    while not stop.is_set():
-        try:
-            enforcer.enforce_once()
-        except Exception:
-            log.exception("Enforcement pass failed")
-        stop.wait(INTERVAL_SEC)
+    wake = enforcement_wake.Wake()
+    try:
+        while not stop.is_set():
+            try:
+                enforcer.enforce_once()
+            except Exception:
+                log.exception("Enforcement pass failed")
+            wake.wait(stop, INTERVAL_SEC)
+    finally:
+        wake.close()
     log.info("Service stopped")
     applog.process_stopped(enforcer.db)
     return 0

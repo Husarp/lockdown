@@ -59,6 +59,158 @@ def keys(ctx):
     return [c["key"] for c in page.load(ctx.db)]
 
 
+@pytest.mark.parametrize("kind,name", [("app", "new.exe"), ("site", "new.example")])
+@pytest.mark.parametrize("dest", ["productive", "neutral", "games", "distracting", "reading"])
+def test_first_sort_is_free_only_once(ctx, api, kind, name, dest):
+    data(api.category_add("Reading", "#2f9fd8"))
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    assert data(api.appmenu_info(kind, name))["category"] == "unassigned"
+    assert data(api.category_assign(kind, name, dest))["category"] == dest
+    ticket_of(api.category_assign(kind, name, "unassigned"))
+    ticket_of(api.category_assign(kind, name, "games" if dest != "games" else "productive"))
+    assert ctx.db.categories()[(kind, name)] == dest
+
+
+def test_new_category_and_first_sort_are_free_together(ctx, api):
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    out = data(api.category_add_and_assign("app", "new.exe", "Reading", "#2f9fd8"))
+    assert out["category"] == "reading"
+    ticket_of(api.category_add_and_assign("app", "new.exe", "Chores", "#2f9fd8"))
+    assert "chores" not in keys(ctx)
+    ticket_of(api.category_add("Other", "#2f9fd8"))
+
+
+@pytest.mark.parametrize("old", [None, "unassigned", "neutral", "games", "distracting", "productive"])
+def test_setting_off_keeps_all_category_changes_guarded(ctx, api, old):
+    if old:
+        ctx.db.set_category("app", "new.exe", old)
+    lock(ctx)
+    ticket_of(api.category_assign("app", "new.exe", "productive"))
+
+
+@pytest.mark.parametrize("old", ["neutral", "games", "distracting", "productive"])
+def test_setting_on_never_skips_assigned_sources(ctx, api, old):
+    ctx.db.set_category("app", "new.exe", old)
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    ticket_of(api.category_assign("app", "new.exe", "unassigned"))
+    ticket_of(api.category_assign("app", "new.exe", "neutral"))
+
+
+@pytest.mark.parametrize("source", ["block", "limit", "group", "mode", "scheduled", "extra"])
+@pytest.mark.parametrize("cat", ["unassigned", "neutral"])
+@pytest.mark.parametrize("kind,name", [("app", "new.exe"), ("site", "new.example")])
+def test_first_sort_cannot_remove_category_protection(ctx, api, source, cat, kind, name):
+    import modes
+    ctx.db.set_category(kind, name, "unassigned")
+    if source in ("block", "limit", "group"):
+        rules = ([{"rule_type": "time_limit", "daily_limit_min": 60}] if source == "limit"
+                 else [{"rule_type": "permanent"}])
+        iid = ctx.db.add_item(cat, [cat], "category", rules=[] if source == "group" else rules)
+        if source == "group":
+            ctx.db.add_group("Shared limit", [{"rule_type": "time_limit", "daily_limit_min": 60}], {iid: {}})
+    else:
+        mode = {**modes.load(ctx.db)[0], "categories": [cat] if source != "extra" else []}
+        if source == "scheduled":
+            mode["schedule"] = {"windows": [{"days": [0], "start": "18:00", "end": "19:00"}]}
+        if source == "extra":
+            mode["extra"] = [{"kind": "category", "targets": [cat]}]
+        modes.save(ctx.db, [mode])
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    for dest in ("productive", "games", "distracting"):
+        ticket_of(api.category_assign(kind, name, dest))
+    ticket_of(api.category_add_and_assign(kind, name, "Reading", "#2f9fd8"))
+    assert ctx.db.categories()[(kind, name)] == "unassigned"
+    assert "reading" not in keys(ctx)
+
+
+def test_first_sort_can_keep_neutral_coverage(ctx, api):
+    ctx.db.set_category("app", "new.exe", "unassigned")
+    ctx.db.add_item("Neutral", ["neutral"], "category", rules=[{"rule_type": "permanent"}])
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    assert data(api.category_assign("app", "new.exe", "neutral"))["category"] == "neutral"
+
+
+def test_first_sort_can_add_a_games_limit(ctx, api):
+    ctx.db.add_item("Games", ["games"], "category", rules=[{"rule_type": "time_limit", "daily_limit_min": 60}])
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    assert data(api.category_assign("app", "other.exe", "games"))["category"] == "games"
+
+
+def test_first_sort_is_not_an_unlock_even_during_closed_hours(ctx, api):
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True, "hours": True})
+    lock(ctx)
+    assert ab.status(ab.settings(ctx.db), NOW) == "closed"
+    assert data(api.category_assign("app", "new.exe", "productive"))["category"] == "productive"
+    assert ab.status(ab.settings(ctx.db), NOW) == "closed"
+    ticket_of(api.category_assign("app", "new.exe", "games"))
+
+
+def test_concurrent_first_sorts_cannot_reuse_the_exception(ctx):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    start = Barrier(2)
+    db_path = ctx.db.path
+
+    def assign(dest):
+        other = webapi.make_context(db_path, clock=lambda db: NOW)
+        api = core.build_api(other)
+        other.db
+        start.wait(timeout=10)
+        try:
+            return data(api.category_assign("app", "new.exe", dest))
+        finally:
+            other.db.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(assign, ["productive", "games"]))
+    assert sum(bool(r.get("needs_challenge")) for r in results) == 1
+    assigned = next(r["category"] for r in results if "category" in r)
+    assert ctx.db.categories()[("app", "new.exe")] == assigned
+
+
+def test_failed_first_sort_rolls_back_new_category_too(ctx):
+    import sqlite3
+    ab.save(ctx.db, {**ab.settings(ctx.db), "sort_unassigned": True})
+    lock(ctx)
+    ctx.db.conn.execute("CREATE TRIGGER fail_sort BEFORE INSERT ON categories "
+                        "BEGIN SELECT RAISE(ABORT, 'test write failure'); END")
+    with pytest.raises(sqlite3.IntegrityError):
+        page.category_add_and_assign(ctx, "app", "new.exe", "Reading", "#2f9fd8")
+    assert "reading" not in keys(ctx)
+    assert ("app", "new.exe") not in ctx.db.categories()
+
+
+def test_neutral_migration_is_once_and_preserves_shipped_defaults(tmp_path):
+    from db import Database
+    from importer import distracting
+    db = Database(tmp_path / "old.db")
+    distracting.seed(db)
+    db.set_category("app", "new.exe", "neutral")
+    db.set_category("site", "new.example", "neutral")
+    db.set_category("app", "work.exe", "productive")
+    db.write("DELETE FROM settings WHERE key = 'categories.unassigned'")
+    before = db.categories()
+    db.close()
+    db = Database(tmp_path / "old.db")
+    assert db.categories() == {k: "unassigned" if v == "neutral" else v for k, v in before.items()}
+    assert db.categories()[("app", "cs2.exe")] == "games"
+    assert db.categories()[("site", "tiktok.com")] == "distracting"
+    db.set_category("app", "new.exe", "neutral")
+    db.close()
+    db = Database(tmp_path / "old.db")
+    assert db.categories()[("app", "new.exe")] == "neutral"
+    assert db.categories()[("site", "new.example")] == "unassigned"
+    db.close()
+
+
 # ---------------------------------------------------------------- the list
 
 def test_methods_are_classified():
@@ -73,7 +225,7 @@ def test_methods_are_classified():
 
 def test_the_list_starts_with_the_built_ins(api):
     rows = data(api.categories_list())
-    assert [r["key"] for r in rows] == ["productive", "neutral", "games", "distracting"]
+    assert [r["key"] for r in rows] == ["productive", "neutral", "games", "distracting", "unassigned"]
     assert all(r["builtin"] for r in rows)
     assert rows[0]["color"] == "#27AE60" and rows[0]["color_light"] == "#1E7A46"      # dark / light variants
 
@@ -161,7 +313,7 @@ def test_recolouring_is_free_even_when_locked(ctx, api):
 # ---------------------------------------------------------------- refusals
 
 def test_a_built_in_category_cannot_be_removed(ctx, api):
-    for key in ("productive", "neutral", "games", "distracting"):
+    for key in ("productive", "neutral", "games", "distracting", "unassigned"):
         reply = api.category_remove(key)
         assert not reply["ok"] and "built-in" in reply["error"]
     assert keys(ctx)[:4] == ["productive", "neutral", "games", "distracting"]
@@ -210,7 +362,7 @@ def test_appmenu_info(ctx, api):
     assert info == {"category": "games", "protected": False, "groups": []}
     assert data(api.appmenu_info("app", "lsass.exe"))["protected"] is True
     assert data(api.appmenu_info("site", "lsass.exe"))["protected"] is False
-    assert data(api.appmenu_info("site", "example.com"))["category"] == "neutral"
+    assert data(api.appmenu_info("site", "example.com"))["category"] == "unassigned"
 
 
 def test_appmenu_info_lists_the_groups(ctx, api):
@@ -219,7 +371,7 @@ def test_appmenu_info_lists_the_groups(ctx, api):
     assert [g["name"] for g in data(api.appmenu_info("app", "a.exe"))["groups"]] == ["alpha", "Zeta"]
 
 
-def test_a_deleted_categorys_choice_falls_back_to_neutral(ctx, api):
+def test_a_deleted_categorys_choice_falls_back_to_unassigned(ctx, api):
     data(api.category_add("Reading", "#2f9fd8"))
     ctx.db.set_category("app", "a.exe", "reading")
     page._config(ctx.db)
@@ -227,7 +379,7 @@ def test_a_deleted_categorys_choice_falls_back_to_neutral(ctx, api):
     cfg["custom"] = []                                                  # (the category vanished, the row stayed)
     import json
     ctx.db.set_setting(page.KEY, json.dumps(cfg))
-    assert data(api.appmenu_info("app", "a.exe"))["category"] == "neutral"
+    assert data(api.appmenu_info("app", "a.exe"))["category"] == "unassigned"
 
 
 def test_blocklist_brief(ctx, api):

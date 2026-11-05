@@ -83,9 +83,10 @@ def test_block_started_and_disabled_warnings():
 def test_limit_warning_while_in_use():
     item = {**app(1, "Discord"), "rules": [{"rule_type": "time_limit", "daily_limit_min": 30}]}
     w = BlockWatcher()
-    msgs = w.check([item], [], lambda o, b: 26 * 60, datetime(2026, 9, 14, 12, 0), {1}, SETTINGS)
+    usage = Usage({("item:1", "day:2026-09-14"): 26 * 60})
+    msgs = w.check([item], [], usage, datetime(2026, 9, 14, 12, 0), {1}, SETTINGS)
     assert msgs == ["Discord: 4 min of the time limit left."]
-    assert w.check([item], [], lambda o, b: 26 * 60, datetime(2026, 9, 14, 12, 0), set(), SETTINGS) == []
+    assert w.check([item], [], usage, datetime(2026, 9, 14, 12, 0), set(), SETTINGS) == []
 
 
 def test_unlock_end_warning():
@@ -241,11 +242,24 @@ def test_a_time_limit_running_out_warns_the_app_in_front():
     s = settings(warn_enabled="0")
     w = BlockWatcher()
     now = datetime(2026, 9, 14, 12, 0)
-    assert w.check([item], [], lambda o, b: 26 * 60, now, {1}, s) == []
-    msgs = w.check([item], [], lambda o, b: 29 * 60 + 5, now, {1}, s)
+    used = lambda seconds: Usage({("item:1", "day:2026-09-14"): seconds})
+    assert w.check([item], [], used(26 * 60), now, {1}, s) == []
+    msgs = w.check([item], [], used(29 * 60 + 5), now, {1}, s)
     assert msgs == ["Discord: 1 min of the time limit left."] and w.front == set(msgs)
-    assert w.check([item], [], lambda o, b: 29 * 60 + 20, now, {1}, s) == []         # once for the day
-    assert BlockWatcher().check([item], [], lambda o, b: 29 * 60 + 5, now, set(), s) == []   # (not in front: no prediction)
+    assert w.check([item], [], used(29 * 60 + 20), now, {1}, s) == []         # once for the day
+    assert BlockWatcher().check([item], [], used(29 * 60 + 5), now, set(), s) == []   # (not in front: no prediction)
+
+
+def test_limit_warning_uses_todays_grant_without_changing_real_time_used():
+    from rules import extra_time_bucket, time_bucket
+    item = {**app(1, "Discord"), "rules": [{"rule_type": "time_limit", "daily_limit_min": 30}]}
+    now = datetime(2026, 9, 14, 12, 0)
+    usage = Usage({("item:1", time_bucket("day", now)): 29 * 60,
+                   ("item:1", extra_time_bucket(now)): 15 * 60})
+    w = BlockWatcher()
+    assert w.check([item], [], usage, now, {1}, SETTINGS) == []
+    usage.data[("item:1", time_bucket("day", now))] = 44 * 60
+    assert w.check([item], [], usage, now, {1}, SETTINGS) == ["Discord: 1 min of the time limit left."]
 
 
 def test_an_emergency_unlock_ending_warns_the_app_in_front():

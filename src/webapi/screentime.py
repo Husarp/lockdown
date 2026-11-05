@@ -366,12 +366,12 @@ class _Cats:
             if key in self.saved:
                 found = self.saved[key]
             elif kind == "app":
-                found = "distracting" if name in self.apps else "neutral"
+                found = "distracting" if name in self.apps else "unassigned"
             else:
                 parts = [name] + [name[i + 1:] for i, ch in enumerate(name) if ch == "."]
-                found = "distracting" if any(p in self.hosts for p in parts) else "neutral"
+                found = "distracting" if any(p in self.hosts for p in parts) else "unassigned"
             if found not in self.keys:
-                found = "neutral"
+                found = "unassigned"
             self._memo[key] = found
         return found
 

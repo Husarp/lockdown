@@ -47,7 +47,8 @@ def tab_address(hwnd: int, url: str | None, title: str, exe: str | None = None) 
     tracker counted it (it keeps the last address - usage._read_url). Now the same: the address last read in this
     window for up to 10 seconds while its title is unchanged, else the site the title names
     ("Cats - YouTube — Mozilla Firefox" - site_block.title_site), 0.84.9. Kept apart from the tracker's memory:
-    this runs on its own thread."""
+    this runs on its own thread. A host verified under the same title disambiguates a browser profile suffix
+    after the full address expires; a title or address change discards that confirmation."""
     now = time.monotonic()
     if valid_address(url):
         if len(_bar) > 200:
@@ -55,8 +56,12 @@ def tab_address(hwnd: int, url: str | None, title: str, exe: str | None = None) 
         _bar[hwnd] = (title, url, now)
         return url, False
     last = _bar.get(hwnd)
+    if last and (not title or last[0] != title):
+        _bar.pop(hwnd, None)
+        last = None
     return (last[1] if last and title and last[0] == title
-                       and 0 <= now - last[2] <= LAST_VALID_SEC else site_block.title_site(title, exe)), True
+                       and 0 <= now - last[2] <= LAST_VALID_SEC else
+            site_block.title_site(title, exe, usage.site_of(last[1]) if last else None)), True
 
 
 def act(hwnd: int, action: str) -> bool:

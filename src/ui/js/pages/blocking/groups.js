@@ -299,6 +299,8 @@ async function openEditor(id) {
   q("block-now").hidden = g.new;
   setText(els.disable, g.disabled ? "Enable" : "Disable");
   rail.load(g.rules);
+  setText(q("extra-today"), g.extra_today || "");
+  q("extra-today").hidden = !g.extra_today;
   ways.set("app", g.ways.app);
   ways.set("site", g.ways.site);
   noteWays();
@@ -596,7 +598,7 @@ export function mount(host, t) {
           <button class="btn" type="button" data-k="g-cancel">Cancel</button>
           <button class="btn btn-primary" type="button" data-k="g-done">Done</button></header>
           <div class="card-b ge-name"><label class="rule-lbl" for="ge-name">Name</label><input class="input" id="ge-name" data-k="g-name" placeholder="e.g. Night schedule, Games" autocomplete="off" maxlength="100"><p class="rule-err ge-nameerr" data-k="g-nameerr" role="alert" hidden></p></div></div>
-        <div data-k="g-rail"></div>
+        <p class="small" data-k="g-extra-today" hidden></p><div data-k="g-rail"></div>
         <section class="card"><header class="card-h"><h3>How members are blocked</h3></header><div class="card-b">
           <div class="ge-wcols"><div><h4>Apps</h4><div data-k="g-wapp"></div></div><div><h4>Sites</h4><div data-k="g-wsite"></div></div></div>
           <p class="small muted ge-wnote" data-k="g-wnote"></p></div></section>

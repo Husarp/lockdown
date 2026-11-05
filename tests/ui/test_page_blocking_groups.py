@@ -510,7 +510,7 @@ def test_add_member_picks_a_whole_category(shell, page, harness):
     open_add_menu(page)
     page.click('#menu button:has-text("Category")')
     page.wait_for_selector("#menu button:has-text('Games')", state="visible", timeout=5000)
-    assert [b.inner_text() for b in page.locator("#menu button").all()] == ["Productive", "Neutral", "Games", "Distracting"]
+    assert [b.inner_text() for b in page.locator("#menu button").all()] == ["Productive", "Neutral", "Games", "Distracting", "Not assigned"]
     page.click('#menu button:has-text("Games")')
     wait_for(page, f"document.querySelectorAll('{LIST}').length === 4")
     assert members(page) == ["Games", "Reddit", "Twitch", "YouTube"]
@@ -606,7 +606,8 @@ def test_disable_enable_and_remove_group(shell, page, harness):
 def test_edit_group_from_the_overview_and_the_entry_point(shell, page, harness):
     shell(route="blocking")
     page.wait_for_selector(".bo-row", timeout=8000)
-    page.locator('.vl-row[data-t="ghead"] [data-act="edit"]').click()
+    page.locator('.vl-row[data-t="ghead"] [data-act="more"]').click()
+    page.locator("#menu").get_by_role("menuitem", name="Edit", exact=True).click()
     page.wait_for_selector('[data-tab="groups"][aria-selected="true"]')
     page.wait_for_selector('[data-k="g-editor"]:not([hidden]) [data-k="g-name"]', timeout=8000)
     assert page.input_value('[data-k="g-name"]') == "Fun"

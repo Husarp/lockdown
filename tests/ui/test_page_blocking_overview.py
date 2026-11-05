@@ -48,6 +48,16 @@ def row(page, name):
     return page.locator(f'{LIVE}:has(.name b:text-is("{name}"))').first
 
 
+def option(page, name, label):
+    row(page, name).get_by_role("button", name="More options").click()
+    return page.locator("#menu").get_by_role("menuitem", name=label, exact=True)
+
+
+def removal(page, name):
+    option(page, name, "Remove").click()
+    return page.locator("#menu").get_by_role("menuitem", name="Confirm", exact=True)
+
+
 def kinds_of_rows(page):
     return page.eval_on_selector_all(LIVE, f"els => ({BY_PLACE})(els).map(e => e.dataset.t)")
 
@@ -131,7 +141,7 @@ def test_the_page_opens_on_overview_with_the_list(shell, page, harness):
     # the loose rows carry what Python worked out
     assert status_of(page, "X") == "Blocked"
     assert "Temporary" in row(page, "Discord").locator(".bo-chips").inner_text()
-    assert "Edit" in row(page, "Discord").inner_text() and "Remove" in row(page, "Discord").inner_text()
+    assert row(page, "Discord").get_by_role("button", name="More options").is_visible()
     assert row(page, "Discord").locator(".name span").inner_text().startswith("app · discord.exe")
     # each item says what kind it is (Site / App); a group box has no badge
     assert row(page, "Discord").locator(".bo-type").inner_text() == "App"
@@ -256,9 +266,10 @@ def test_the_filters_and_the_search(shell, page, harness):
 def test_remove_is_two_clicks_and_saves_at_once_with_auto_save(shell, page, harness):
     autosave(harness, True)
     open_page(shell, page)
-    btn = row(page, "Steam").locator(".confirm")
+    btn = option(page, "Steam", "Remove")
     btn.click()
-    assert btn.inner_text() == "Confirm" and "armed" in btn.get_attribute("class")
+    btn = page.locator("#menu").get_by_role("menuitem", name="Confirm", exact=True)
+    assert btn.is_visible()
     assert saved_names(harness).count("Steam") == 1
     btn.click()
     wait_for(page, "!" + listed("Steam"))
@@ -271,8 +282,7 @@ def test_remove_with_auto_save_off_waits_for_save_and_the_save_bar_says_what_cha
     autosave(harness, False)
     open_page(shell, page)
     assert page.is_hidden("#sb-discard") and page.is_disabled("#sb-save") and page.inner_text("#sb-save") == "Saved"
-    row(page, "Steam").locator(".confirm").click()
-    row(page, "Steam").locator(".confirm").click()
+    removal(page, "Steam").click()
     wait_for(page, "!" + listed("Steam"))
     assert page.inner_text('[data-k="notice"]') == "✓ Steam removed - press Save changes to apply"
     assert saved_names(harness).count("Steam") == 1                                    # not applied yet
@@ -290,8 +300,7 @@ def test_remove_with_auto_save_off_waits_for_save_and_the_save_bar_says_what_cha
 def test_save_applies_the_waiting_change(shell, page, harness):
     autosave(harness, False)
     open_page(shell, page)
-    row(page, "Steam").locator(".confirm").click()
-    row(page, "Steam").locator(".confirm").click()
+    removal(page, "Steam").click()
     wait_for(page, "document.querySelector('#sb-save').textContent === 'Save changes'")
     page.click("#sb-save")
     wait_for(page, "document.querySelector('#sb-save').textContent === 'Saved'")
@@ -302,8 +311,7 @@ def test_remove_while_locked_opens_the_challenge_and_the_row_stays(shell, page, 
     autosave(harness, True)
     lock(harness)
     open_page(shell, page)
-    row(page, "Steam").locator(".confirm").click()
-    row(page, "Steam").locator(".confirm").click()
+    removal(page, "Steam").click()
     page.wait_for_selector("#dlg[open] .ch-phrase", timeout=5000)
     assert "Remove Steam" in page.inner_text("#dlg .ch-changes")
     assert row(page, "Steam").is_visible() and "Steam" in saved_names(harness)         # the row stays while it asks
@@ -313,8 +321,7 @@ def test_remove_while_locked_opens_the_challenge_and_the_row_stays(shell, page, 
     assert row(page, "Steam").is_visible() and "Steam" in saved_names(harness)
     assert page.is_hidden("#sb-discard")                                               # (auto-save: the edit was thrown away)
     # again, and this time type the phrase
-    row(page, "Steam").locator(".confirm").click()
-    row(page, "Steam").locator(".confirm").click()
+    removal(page, "Steam").click()
     type_challenge(page)
     wait_for(page, "!" + listed("Steam"))
     assert "Steam" not in saved_names(harness)
@@ -326,8 +333,7 @@ def _locked_with_a_waiting_removal(shell, page, harness):
     autosave(harness, False)
     lock(harness)
     open_page(shell, page)
-    row(page, "Steam").locator(".confirm").click()
-    row(page, "Steam").locator(".confirm").click()
+    removal(page, "Steam").click()
     wait_for(page, "document.querySelector('#sb-save').textContent === 'Save changes'")
     assert "Steam" in saved_names(harness) and not dialog_open(page)
 
@@ -359,16 +365,16 @@ def test_cancelling_the_save_bars_challenge_saves_nothing_and_keeps_the_draft(sh
 def test_removing_a_group_and_disabling_it(shell, page, harness):
     autosave(harness, True)
     open_page(shell, page)
-    head = row(page, "Fun")
-    head.locator('[data-act="disable"]').click()
+    option(page, "Fun", "Disable").click()
     wait_for(page, "document.querySelector('.vl-row[data-t=\"dhead\"]') !== null")
     assert page.inner_text('[data-k="notice"]') == "✓ Group Fun disabled"
     assert harness.db.list_groups()[0]["disabled"] == 1
     assert page.locator('.vl-row[data-t="drow"] .name b').all_inner_texts()[-1] == "Fun (group)"
     # members of a disabled group are loose rows with "→ Fun · disabled" on them
-    assert "→ Fun · disabled" in row(page, "Twitch").locator(".bo-chips").inner_text()
+    row(page, "Twitch").locator(".bo-rules").hover()
+    assert "→ Fun · disabled" in page.locator(".bo-rule-tip").inner_text()
     # edit it back on from the Disabled list: the Groups tab is asked to open that group
-    page.locator('.vl-row[data-t="drow"]:has-text("Fun (group)") [data-act="edit"]').click()
+    option(page, "Fun (group)", "Edit").click()
     page.wait_for_selector('[data-tab="groups"][aria-selected="true"]')
 
 
@@ -383,9 +389,9 @@ def test_remove_group_is_two_clicks(shell, page, harness):
     autosave(harness, True)
     harness.db.add_group("Spare", [{"rule_type": "permanent"}], {})
     open_page(shell, page)
-    btn = row(page, "Spare").locator(".confirm")
+    btn = option(page, "Spare", "Remove")
     btn.click()
-    btn.click()
+    page.locator("#menu").get_by_role("menuitem", name="Confirm", exact=True).click()
     wait_for(page, "!" + listed("Spare"))
     assert [g["name"] for g in harness.db.list_groups()] == ["Fun"]
     assert page.inner_text('[data-k="notice"]') == "✓ Group Spare removed"
@@ -394,12 +400,12 @@ def test_remove_group_is_two_clicks(shell, page, harness):
 def test_a_reused_row_never_stays_armed(shell, page, harness):
     autosave(harness, True)
     open_page(shell, page)
-    btn = row(page, "Steam").locator(".confirm")
+    btn = option(page, "Steam", "Remove")
     btn.click()
-    assert "armed" in btn.get_attribute("class")
+    assert page.locator("#menu").get_by_role("menuitem", name="Confirm").is_visible()
     page.click('[data-filter="groups"]')                                               # the nodes are reused for other rows
     page.click('[data-filter="all"]')
-    assert page.locator(".vl-row .confirm.armed").count() == 0
+    assert page.locator("#menu").is_hidden()
 
 
 # ================================================================ alerts and edit menus
@@ -407,22 +413,21 @@ def test_a_reused_row_never_stays_armed(shell, page, harness):
 def test_the_alerts_menu_sets_default_on_off(shell, page, harness):
     autosave(harness, True)
     open_page(shell, page)
-    row(page, "Steam").locator(".bo-alerts").click()
+    option(page, "Steam", "Blocked-visit alerts").click()
     assert page.locator("#menu button").all_inner_texts() == ["Default", "On", "Off"]
     assert page.locator('#menu button:has-text("Default") .mk').count() == 1
     page.click('#menu button:has-text("Off")')
-    wait_for(page, "[...document.querySelectorAll('.vl-row')].some(r => r.querySelector('.name b').textContent === 'Steam' && r.querySelector('.bo-alerts span').textContent === 'Off')")
+    wait_for(page, "[...document.querySelectorAll('.vl-row')].some(r => r._row?.e?.name === 'Steam' && r._row.e.notify === 'off')")
     assert next(i for i in harness.db.list_items() if i["display_name"] == "Steam")["notify"] == "off"
-    row(page, "Steam").locator(".bo-alerts").click()
+    option(page, "Steam", "Blocked-visit alerts").click()
     page.click('#menu button:has-text("Default")')
-    wait_for(page, "[...document.querySelectorAll('.vl-row')].some(r => r.querySelector('.name b').textContent === 'Steam' && r.querySelector('.bo-alerts span').textContent === 'Default')")
+    wait_for(page, "[...document.querySelectorAll('.vl-row')].some(r => r._row?.e?.name === 'Steam' && r._row.e.notify === null)")
     assert next(i for i in harness.db.list_items() if i["display_name"] == "Steam")["notify"] is None
 
 
 def test_edit_opens_the_add_tab_and_a_member_click_does_too(shell, page, harness):
     open_page(shell, page)
-    assert row(page, "Steam").locator('[data-act="edit"]').inner_text() == "Edit"
-    row(page, "Steam").locator('[data-act="edit"]').click()
+    option(page, "Steam", "Edit").click()
     page.wait_for_selector('[data-tab="add"][aria-selected="true"]')
     page.click('[data-tab="overview"]')
     page.wait_for_selector('[data-pane="overview"]:not([hidden])')
@@ -433,8 +438,8 @@ def test_edit_opens_the_add_tab_and_a_member_click_does_too(shell, page, harness
 def test_edit_with_groups_is_a_menu_with_the_groups(shell, page, harness):
     harness.db.write("UPDATE block_groups SET disabled = 1")           # its members are loose rows, still "in group Fun"
     open_page(shell, page)
-    btn = row(page, "Twitch").locator('[data-act="edit"]')
-    assert btn.inner_text() == "Edit ▾"
+    btn = option(page, "Twitch", "Edit")
+    assert btn.inner_text() == "Edit"
     btn.click()
     assert page.locator("#menu button").all_inner_texts() == ["Edit its blockers", "Edit group Fun"]
     page.click('#menu button:has-text("Edit group Fun")')
@@ -779,3 +784,106 @@ def test_no_console_errors_in_any_theme_and_a_narrow_window(shell, page, harness
     page.set_viewport_size({"width": 800, "height": 600})
     page.wait_for_timeout(200)
     assert page.locator(".bo-row").count() > 3
+
+
+@pytest.mark.parametrize("width", [1280, 800])
+def test_rule_summary_and_full_list_keep_fixed_rows(shell, page, width):
+    def multi_rules(route):
+        reply = route.fetch().json()
+        reply["data"]["entries"][0]["chips"] = [
+            {"t": "Later daily limit " + "long description " * 15, "k": "ok", "r": "time_limit"},
+            {"t": "Blocked now", "k": "danger", "r": "permanent"},
+            {"t": "5 minutes allowed", "k": "allowance", "r": "allowance"},
+        ]
+        route.fulfill(json=reply)
+
+    page.route("**/rpc/blocking_overview_get", multi_rules)
+    open_page(shell, page, width=width, height=800)
+    button = row(page, "Discord").locator(".bo-rules")
+    assert button.inner_text().splitlines() == ["Blocked now", "+2 more"]
+    button.hover()
+    tip = page.locator(".bo-rule-tip:popover-open")
+    assert tip.locator(".bchip").count() == 3
+    assert "long description " * 15 in tip.inner_text()
+    button.click()                        # clicking the hovered summary keeps it open
+    assert tip.is_visible()
+    page.keyboard.press("Escape")
+    assert page.locator(".bo-rule-tip").count() == 0
+    page.locator('[data-k="search"]').focus()
+    button.focus()
+    assert tip.is_visible()                # keyboard focus reveals the same full list
+    page.keyboard.press("Tab")
+    assert page.locator(".bo-rule-tip").count() == 0
+    assert page.eval_on_selector_all(LIVE, "ns => new Set(ns.map(n => n.getBoundingClientRect().height)).size") == 1
+    assert button.evaluate("b => b.scrollWidth <= b.clientWidth")
+
+
+@pytest.mark.parametrize("name", ["Discord", "X", "Fun", "Twitch"])
+def test_card_menu_mouse_and_keyboard(shell, page, name):
+    open_page(shell, page)
+    card = row(page, name)
+    button = card.get_by_role("button", name="More options")
+    assert card.locator(".bo-acts button").count() == 1
+    for key in ["Enter", "Space"]:
+        button.focus()
+        button.press(key)
+        menu = page.locator("#menu")
+        assert menu.is_visible()
+        assert button.get_attribute("aria-expanded") == "true"
+        assert menu.locator("button .ic").count() == menu.locator("button").count()
+        assert menu.get_by_role("menuitem", name="Edit", exact=True).evaluate("b => b === document.activeElement")
+        page.keyboard.press("ArrowDown")
+        assert menu.get_by_role("menuitem", name="Block now", exact=True).evaluate("b => b === document.activeElement")
+        page.keyboard.press("ArrowUp")
+        page.keyboard.press("Escape")
+        assert menu.is_hidden()
+        assert button.evaluate("b => b === document.activeElement")
+        assert button.get_attribute("aria-expanded") == "false"
+    button.click()
+    page.locator('[data-k="title"]').click()
+    assert page.locator("#menu").is_hidden()
+
+
+def test_disabled_group_menu_enables_with_the_existing_draft_flow(shell, page, harness):
+    autosave(harness, True)
+    harness.db.write("UPDATE block_groups SET disabled = 1")
+    open_page(shell, page)
+    option(page, "Fun (group)", "Enable").click()
+    wait_for(page, listed("Fun"))
+    assert harness.db.list_groups()[0]["disabled"] == 0
+    assert page.inner_text('[data-k="notice"]') == "✓ Group Fun enabled"
+
+
+@pytest.mark.parametrize("name", ["Discord", "Fun", "Twitch"])
+def test_card_menu_block_now_opens_existing_duration_flow(shell, page, name):
+    open_page(shell, page)
+    option(page, name, "Block now").click()
+    page.wait_for_selector("#dlg[open] [data-duration]")
+    assert page.locator("#dlg [data-duration] option").all_inner_texts() == ["1 hour", "Rest of today", "Until..."]
+    page.keyboard.press("Escape")
+    dialog_closed(page)
+
+
+
+def test_item_menu_disable_and_enable_uses_the_existing_draft_flow(shell, page, harness):
+    autosave(harness, True)
+    open_page(shell, page)
+    option(page, "Steam", "Disable").click()
+    wait_for(page, "[...document.querySelectorAll('.vl-row')].some(r => r.dataset.t === 'drow' && r._row?.e?.name === 'Steam')")
+    assert next(i for i in harness.db.list_items() if i["display_name"] == "Steam")["disabled"] == 1
+    option(page, "Steam", "Enable").click()
+    wait_for(page, "[...document.querySelectorAll('.vl-row')].some(r => r.dataset.t === 'item' && r._row?.e?.name === 'Steam')")
+    assert next(i for i in harness.db.list_items() if i["display_name"] == "Steam")["disabled"] == 0
+
+
+def test_item_menu_disable_keeps_the_locked_challenge(shell, page, harness):
+    autosave(harness, True)
+    lock(harness)
+    open_page(shell, page)
+    option(page, "Steam", "Disable").click()
+    page.wait_for_selector("#dlg[open] .ch-phrase")
+    assert next(i for i in harness.db.list_items() if i["display_name"] == "Steam")["disabled"] == 0
+    page.keyboard.press("Escape")
+    dialog_closed(page)
+    settle(page)
+    assert next(i for i in harness.db.list_items() if i["display_name"] == "Steam")["disabled"] == 0

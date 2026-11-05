@@ -1,9 +1,10 @@
 """Api for the shared pieces of Screen Time, Blocking, Modes and Settings: the categories (Productive / Neutral / Games /
-Distracting and your own), the right-click menu of an app or a site, and "Show in Explorer".
+Distracting / Not assigned and your own), the right-click menu of an app or a site, and "Show in Explorer".
 
 Categories feed the modes that block a whole category, so changing which category an app or site is in - or adding or
 deleting one - is a loosening change: while Anti-Bypass is locked it goes through the challenge, in either direction
-(`ctx.guard.request`). Only recolouring is free (a colour blocks nothing). The page never says "confirmed": the change
+(`ctx.guard.request`). Recolouring is free; the optional first sort from Not assigned is also free when it removes
+no category protection. The page never says "confirmed": the change
 is a closure built here from validated input, kept under a ticket until Python has checked the challenge.
 
 The categories live in the setting `stats.categories` (KEY below), the same JSON the old window wrote, so a list made
@@ -16,6 +17,8 @@ import subprocess
 import sys
 
 import applog
+import antibypass
+import modes
 from blocker import hosts
 from blocker.apps import PROTECTED, exe_name, make_block_type
 
@@ -26,7 +29,8 @@ from . import shared
 KEY = "stats.categories"      # JSON {"custom": [{"key", "name", "color"}], "colors": {key: "#rrggbb"}}
 # key, name, (light colour, dark colour) - as gui/theme.py SUCCESS / MUTED / DANGER
 BUILTIN = [("productive", "Productive", ("#1E7A46", "#27AE60")), ("neutral", "Neutral", ("#5E6874", "#8D9AA8")),
-           ("games", "Games", ("#8E6CEF", "#8E6CEF")), ("distracting", "Distracting", ("#C0392B", "#E05A44"))]
+           ("games", "Games", ("#8E6CEF", "#8E6CEF")), ("distracting", "Distracting", ("#C0392B", "#E05A44")),
+           ("unassigned", "Not assigned", ("#697580", "#A6AFB8"))]
 BUILTIN_KEYS = tuple(k for k, _n, _c in BUILTIN)
 NEW_COLORS = ["#8E6CEF", "#2F9FD8", "#D4A017", "#E0559B", "#20B2AA", "#9C6B3F"]
 MAX_NAME = 30
@@ -61,7 +65,7 @@ def load(db) -> list[dict]:
     return out
 
 
-def _add(db, name: str, color: str) -> str:
+def _add(db, name: str, color: str, *, pending=False) -> str:
     cfg = _config(db)
     taken = set(BUILTIN_KEYS) | {c["key"] for c in cfg.get("custom", [])}
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "category"
@@ -69,7 +73,10 @@ def _add(db, name: str, color: str) -> str:
     while key in taken:
         key, n = f"{base}-{n}", n + 1
     cfg.setdefault("custom", []).append({"key": key, "name": name, "color": color})
-    db.set_setting(KEY, json.dumps(cfg))
+    if pending:
+        db.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (KEY, json.dumps(cfg)))
+    else:
+        db.set_setting(KEY, json.dumps(cfg))
     return key
 
 
@@ -135,7 +142,7 @@ def _target(kind, name) -> tuple[str, str]:
 
 @core.read
 def categories_list(ctx):
-    """[{key, name, color, color_light, builtin}]: Productive, Neutral, Games, Distracting, then your own."""
+    """[{key, name, color, color_light, builtin}]: the built-in categories, then your own."""
     return load(ctx.db)
 
 
@@ -160,11 +167,56 @@ def appmenu_info(ctx, kind, name):
     db = ctx.db
     keys = {c["key"] for c in load(db)}
     chosen = stats.category_of(kind, name, db.categories(), db.list_items())
-    return {"category": chosen if chosen in keys else "neutral", "protected": kind == "app" and name in PROTECTED,
+    return {"category": chosen if chosen in keys else "unassigned", "protected": kind == "app" and name in PROTECTED,
             "groups": [{"id": g["id"], "name": g["name"]} for g in _groups(ctx)]}
 
 
 # ---------------------------------------------------------------- recolouring (free) and the guarded changes
+
+def _free_assignment(db, kind, name, key) -> bool:
+    """Only first sorting is free, and never at the cost of any category protection.
+    Check every saved mode/rule, including future schedules, breaks and shared category limits.
+    Comparing all members also catches a change to one hostname of a multi-host blocklist item.
+    """
+    import stats
+    if not antibypass.settings(db)["sort_unassigned"] or key == "unassigned":
+        return False
+    items, before = db.list_items(), db.categories()
+    if stats.category_of(kind, name, before, items) != "unassigned":
+        return False
+    before = {**before, (kind, name): "unassigned"}
+    after = {**before, (kind, name): key}
+    protected = {i["target"] for i in items if i["item_type"] == "category"}
+    for mode in modes.load(db):
+        protected.update(mode.get("categories", []))
+        for extra in mode.get("extra", []):
+            if extra["kind"] == "category":
+                protected.update(extra["targets"])
+    for cat in protected:
+        old = {(i["item_type"], i["target"]) for i in modes.category_members({cat}, items, before)}
+        new = {(i["item_type"], i["target"]) for i in modes.category_members({cat}, items, after)}
+        if not old <= new:
+            return False
+    return True
+
+
+def _assign_request(ctx, kind, name, key, changes, action):
+    # Serialize the source-category/protection check with the write: concurrent bridge calls must not
+    # reuse a first move after another call has assigned the item or added a category rule.
+    db = ctx.db
+    db.conn.execute("BEGIN IMMEDIATE")
+    try:
+        if _free_assignment(db, kind, name, key):
+            result = action(pending=True)
+            db.conn.commit()
+            applog.record("change", f"Category: {name} moved to {result.get('category_name', key)}", db)
+            return result
+        db.conn.commit()
+    except BaseException:
+        db.conn.rollback()
+        raise
+    return ctx.guard.request(changes, action)
+
 
 @core.ui
 def category_set_color(ctx, key, color):
@@ -201,17 +253,20 @@ def category_remove(ctx, key):
 
 @core.loosen
 def category_assign(ctx, kind, name, key):
-    """Put an app (its .exe) or a site (its host name) in a category. Guarded in either direction while locked: the
-    modes that block a category block whatever is in it."""
+    """Put an app or site in a category. Guarded while locked, except a safe first sort when enabled."""
     kind, name = _target(kind, name)
     found = _find(ctx.db, key)
 
-    def action():
+    def action(pending=False):
         _find(ctx.db, key)
-        ctx.db.set_category(kind, name, key)
-        applog.record("change", f"Category: {name} moved to {found['name']}", ctx.db)
+        if pending:
+            ctx.db.conn.execute("INSERT INTO categories (kind, name, category) VALUES (?, ?, ?) "
+                                "ON CONFLICT(kind, name) DO UPDATE SET category = excluded.category", (kind, name, key))
+        else:
+            ctx.db.set_category(kind, name, key)
+            applog.record("change", f"Category: {name} moved to {found['name']}", ctx.db)
         return {"kind": kind, "name": name, "category": key}
-    return ctx.guard.request([f"Move {name} to the {found['name']} category"], action)
+    return _assign_request(ctx, kind, name, key, [f"Move {name} to the {found['name']} category"], action)
 
 
 @core.loosen
@@ -221,13 +276,18 @@ def category_add_and_assign(ctx, kind, name, cat_name, color):
     cat_name, color = _name(cat_name), _color(color)
     _free_name(ctx.db, cat_name)
 
-    def action():
+    def action(pending=False):
         _free_name(ctx.db, cat_name)
-        key = _add(ctx.db, cat_name, color)
-        ctx.db.set_category(kind, name, key)
-        applog.record("change", f"Category: {name} moved to the new category {cat_name}", ctx.db)
+        key = _add(ctx.db, cat_name, color, pending=pending)
+        if pending:
+            ctx.db.conn.execute("INSERT INTO categories (kind, name, category) VALUES (?, ?, ?) "
+                                "ON CONFLICT(kind, name) DO UPDATE SET category = excluded.category", (kind, name, key))
+        else:
+            ctx.db.set_category(kind, name, key)
+            applog.record("change", f"Category: {name} moved to the new category {cat_name}", ctx.db)
         return {"kind": kind, "name": name, "category": key, "color": color, "category_name": cat_name}
-    return ctx.guard.request([f"Add the {cat_name} category and move {name} into it"], action)
+    # None represents a fresh category for the protection check (it cannot preserve any existing coverage).
+    return _assign_request(ctx, kind, name, None, [f"Add the {cat_name} category and move {name} into it"], action)
 
 
 # ---------------------------------------------------------------- Add to group (the draft) and Show in Explorer

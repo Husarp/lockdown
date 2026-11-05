@@ -121,6 +121,11 @@ def stop(db, now: datetime, force: bool = False):
 
 # ---------- what it blocks ----------
 
+def category_keys(cats: set[str]) -> set[str]:
+    """Legacy Neutral rules still cover entries migrated to Not assigned."""
+    return cats | {"unassigned"} if "neutral" in cats else cats
+
+
 def item_category(item: dict, categories: dict[tuple[str, str], str]) -> str:
     """A blocklist item's category: chosen for its exe / one of its sites (or a subdomain), else Distracting."""
     if item["item_type"] == "category":
@@ -152,7 +157,7 @@ def targets(mode: dict, items: list[dict], groups: list[dict], categories: dict[
     """Items to block (existing blocklist items, or made-up ones with id None for things not on the list).
     categories: {(kind, name): category} as chosen on the Screen Time page; things on the blocklist count as
     Distracting unless you chose otherwise."""
-    cats = set(mode.get("categories", []))
+    cats = category_keys(set(mode.get("categories", [])))
     out, seen = [], set()
 
     def add(item):
@@ -188,6 +193,7 @@ def category_members(cats: set[str], items: list[dict], categories: dict[tuple[s
     """Everything in `cats`: the sites and apps you put in that category on Screen Time (made-up items, id None)
     and - with blocklist=True - the things on your blocklist that count as being in it. A category means the
     same for a mode and for a blocker on the category itself."""
+    cats = category_keys(cats)
     out, seen = [], set()
 
     def add(item):

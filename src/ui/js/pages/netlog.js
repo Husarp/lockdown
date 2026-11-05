@@ -22,7 +22,7 @@ export const freshMs = 3000;
 export const events = ["net_rows", "net_export", "visible"];
 export const PAGE = 100;
 export const SEARCH_MS = 120;
-const HINT = "Keeps the last hour · click a row to block it or copy it";
+const HINT = "Grouped by service among loaded rows · keeps the last hour · click a row to block it or copy it";
 
 // ---------------------------------------------------------------- plain helpers (tested in node)
 
@@ -60,17 +60,22 @@ export function mergeRows(rows, byKey, incoming, { cutoff = "", anchor = 0, comp
   return { above, added, updated, dropped };
 }
 
+export function serviceRows(rows) {
+  return [...rows].sort((a, b) => (a.service || a.site).localeCompare(b.service || b.site) || (before(a, b) ? -1 : before(b, a) ? 1 : 0));
+}
+
 export const olderText = (n) => `Show more (${n} older)`;
 
 // ---------------------------------------------------------------- the page
 
 const STYLE = `<style>
-.nl-g { grid-template-columns: minmax(0, 1.25fr) calc(60px * var(--s)) minmax(0, 2fr) minmax(0, 1.1fr) calc(60px * var(--s)) calc(100px * var(--s)); font-size: var(--fs-sm); }
+.nl-g { grid-template-columns: minmax(0, 2fr) calc(60px * var(--s)) minmax(0, 1.25fr) minmax(0, 1.1fr) calc(60px * var(--s)) calc(100px * var(--s)); font-size: var(--fs-sm); }
 .nl-head, #nl-list { scrollbar-gutter: stable; }                       /* (the header and the rows keep the same width with or without a scroll bar) */
 .nl-head { overflow-y: hidden; }
 .nl-app { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .nl-app .aic img { background: transparent; }
 .nl-g .time, .nl-g .port { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.nl-g [data-r="site"] { font-size: var(--fs-cap); }
 .nl-g .n { color: var(--text-3); margin-left: var(--sp-1); }
 .nl-g .st { white-space: nowrap; color: var(--ok); }
 .nl-g.blk { background: color-mix(in srgb, var(--k-block) 9%, var(--surface)); }
@@ -86,12 +91,12 @@ const STYLE = `<style>
 .nl-top .mini-row { padding: 0 var(--sp-4); }
 .nl-top .mini-row .grow { display: block; }
 .nl-top .aic img { background: transparent; }
-@media (max-width: 860px) { .nl-g { grid-template-columns: minmax(0, 1fr) calc(56px * var(--s)) minmax(0, 1.6fr) calc(92px * var(--s)); } .nl-g .rule, .nl-g .port { display: none; } }
+@media (max-width: 860px) { .nl-g { grid-template-columns: minmax(0, 1.6fr) calc(56px * var(--s)) minmax(0, 1fr) calc(92px * var(--s)); } .nl-g .rule, .nl-g .port { display: none; } }
 </style>`;
 
-const ROW_HTML = `<div class="nl-app"><span class="aic aic-sm"><img alt="" loading="lazy" decoding="async" draggable="false"></span><span class="ellip" data-r="app"></span></div>
+const ROW_HTML = `<span class="ellip"><b data-r="service"></b><br><span class="muted" data-r="site"></span><span class="n" data-r="n"></span></span>
   <span class="time" data-r="t"></span>
-  <span class="ellip"><span data-r="site"></span><span class="n" data-r="n"></span></span>
+  <div class="nl-app"><span class="aic aic-sm"><img alt="" loading="lazy" decoding="async" draggable="false"></span><span class="ellip" data-r="app"></span></div>
   <span class="ellip muted rule" data-r="rule"></span>
   <span class="port" data-r="port"></span>
   <span class="st" data-r="st"></span>`;
@@ -126,7 +131,10 @@ function renderRow(node, row) {
   node._row = row;
   node.classList.toggle("blk", !!row.b);
   if (row.b) setIcon(r.img, "site", row.host || row.site); else setIcon(r.img, "app", row.exe || "unknown");
-  setText(r.app, row.app);
+  setText(r.app, row.activity || row.app);
+  r.app.title = `${row.app} · ${row.exe || "browser"}`;
+  setText(r.service, row.service || row.site);
+  r.site.parentElement.title = `${row.site} · ${row.exe || row.app}`;
   setText(r.t, row.t);
   setText(r.site, row.site);
   setText(r.n, row.n > 1 ? `×${row.n}` : "");
@@ -154,7 +162,7 @@ export function mount(el_, page_) {
       <label class="hstack small">${sw(false, 'data-k="local"')}Local network</label>
     </div>
     <div class="nl-tab" data-k="tabtable"><div class="card list-card">
-      <div class="list-h nl-g nl-head"><span class="cap">App</span><span class="cap">Time</span><span class="cap">Site</span><span class="cap rule">Rule</span><span class="cap port">Port</span><span class="cap">Status</span></div>
+      <div class="list-h nl-g nl-head"><span class="cap">Service / site</span><span class="cap">Time</span><span class="cap">App</span><span class="cap rule">Rule</span><span class="cap port">Port</span><span class="cap">Status</span></div>
       <div class="nl-tab"><div id="nl-list" data-k="list"></div>
         <div class="nl-empty" data-k="empty" hidden></div></div>
       <footer class="nl-foot"><span class="grow" data-k="hint">${esc(HINT)}</span><button class="btn btn-sm" type="button" data-k="more" hidden></button></footer>
@@ -164,7 +172,7 @@ export function mount(el_, page_) {
         <div class="card-b" data-k="chart"></div></section>
       <div class="grid-2 nl-top">
         <section class="card"><header class="card-h"><h3>Top apps</h3></header><div class="card-b" data-k="topapps"></div></section>
-        <section class="card"><header class="card-h"><h3>Top sites</h3></header><div class="card-b" data-k="topsites"></div></section>
+        <section class="card"><header class="card-h"><h3>Top services</h3></header><div class="card-b" data-k="topsites"></div></section>
       </div>
     </div></div>`;
   q = (k) => root.querySelector(`[data-k="${k}"]`);
@@ -219,7 +227,7 @@ async function fetchRows(keepScroll) {
   epoch = d.epoch;
   seq = d.seq;
   paintMeta(d);
-  vl.setRows(rows, { keepScroll });
+  vl.setRows(serviceRows(rows), { keepScroll });
   if (view === "graph") await loadGraph();
   loadedAt = Date.now();
 }
@@ -315,7 +323,7 @@ function paintTop(group, items) {
     r.node.hidden = !it;
     if (!it) return;
     if (group.kind === "app") { setIcon(r.img, "app", it.exe); setText(r.name, it.name); }
-    else { setIcon(r.img, "site", it.site); setText(r.name, it.site); }
+    else { setIcon(r.img, "site", ""); setText(r.name, it.site); }
     setText(r.n, String(it.n));
   });
 }
@@ -344,12 +352,16 @@ function onRows(p) {
   if (p.seq <= seq) return;
   seq = p.seq;
   const anchor = Math.floor(list.scrollTop / vl.rowHeight);
-  const m = mergeRows(rows, byKey, p.rows, { cutoff: p.cutoff, anchor, complete: total <= rows.length });
+  const displayed = serviceRows(rows);
+  const anchorKey = displayed[anchor]?.k;
+  mergeRows(rows, byKey, p.rows, { cutoff: p.cutoff, anchor, complete: total <= rows.length });
   total = p.total;
   paintMeta({ summary: p.summary, apps: p.apps, empty: false });
-  vl.setRows(rows, { keepScroll: true });
-  if (m.above && list.scrollTop > 0) {                           // scrolled down: the same rows stay under the pointer
-    list.scrollTop += m.above * vl.rowHeight;
+  const grouped = serviceRows(rows);
+  vl.setRows(grouped, { keepScroll: true });
+  const position = grouped.findIndex((r) => r.k === anchorKey);
+  if (position >= 0 && list.scrollTop > 0) {                           // scrolled down: the same rows stay under the pointer
+    list.scrollTop += (position - anchor) * vl.rowHeight;
     vl.refresh();
   }
   if (view === "graph") loadGraph().catch(report);

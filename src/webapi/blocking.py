@@ -18,7 +18,8 @@ import group_look
 from blocker import site_block
 from blocker.apps import block_flags
 from rules import (DAY_NAMES, allowance_left, allowance_note, block_end, blocked_text, describe_rule, duration_text,
-                   effective_rules, item_block, next_block, rule_state)
+                   effective_rules, extra_time, extra_time_bucket, item_block, limits, next_block, rule_block,
+                   rule_state, TIME_LIMIT_FIELDS)
 
 from . import core
 from . import draft as drafts
@@ -89,14 +90,15 @@ def _rule_text(rule, now, usage, used: bool = True) -> str:
 
 def _chips(rules: list[dict], now, usage, siblings=None) -> list[dict]:
     """One chip per rule (two for a rule with an allowance): {t: text, k: danger|warn|ok|allowance|neutral, r: rule
-    type}. `siblings`: the other rules on the same thing - while any of them blocks, what a rule still allows is no
+    type, state: blocked|soon|allowed}. `siblings`: the other rules on the same thing - while any of them blocks, what a rule still allows is no
     use, so it goes red with the rest (and shows its limit without the time used or left)."""
     inert = bool(siblings) and bool(item_block(siblings, now, usage))
     out = []
     for rule in rules:
-        kind = "danger" if inert else CHIP_STATES[rule_state(rule, now, usage)]
+        state = rule_state(rule, now, usage)
+        kind = "danger" if inert else CHIP_STATES[state]
         out.append({"t": _rule_text(rule, now, usage, not (inert or kind == "danger")), "k": kind,
-                    "r": rule["rule_type"]})
+                    "r": rule["rule_type"], "state": state})
         if rule.get("allowance_min"):
             note = allowance_note(rule, now, usage, not inert)
             if note:
@@ -114,6 +116,21 @@ def _group_rule(group: dict, rule: dict) -> dict:
 def _icon(item: dict) -> dict:
     kind = {"site": "site", "app": "app"}.get(item["item_type"], "category")
     return {"k": kind, "n": item["target"].split()[0] if item["target"].split() else item["display_name"]}
+
+
+def _has_daily_limit(owner, now, clock, groups=()):
+    rules = list(owner["rules"])
+    for g in groups:
+        extra = (g["members"].get(owner.get("id")) or {}).get("time_limit")
+        if extra and not g.get("disabled"):
+            rules.append({**extra, "rule_type": "time_limit"})
+    return any(r["rule_type"] == "time_limit" and limits(r, TIME_LIMIT_FIELDS, now, clock).get("day")
+               for r in rules)
+
+
+def _extra_today(owner_id, group, now, usage):
+    seconds = extra_time(f"{'group' if group else 'item'}:{owner_id}", now, usage)
+    return f"{duration_text(seconds)} extra today · until {_short_when(usage.clock.day(now)[1])}" if seconds else ""
 
 
 # ---------------------------------------------------------------- one Overview, built
@@ -222,6 +239,7 @@ class _Build:
                 chips.append({"t": f"→ {g['name']} · disabled", "k": "neutral", "r": "group"})
         status = self.status(item)
         return {"t": "item", "id": item["id"], "name": item["display_name"], "type": item["item_type"],
+                "add_time": _has_daily_limit(d.saved_items.get(item["id"], {"rules": []}), now, usage.clock, self.saved_groups),
                 "icon": _icon(item), "sub": _targets_text(item), "notify": item.get("notify"), "status": status,
                 "chips": chips, "groups": [{"id": g["id"], "name": g["name"]} for g in d.groups_of(item["id"])],
                 "low": status["k"] not in ("blocked", "pending") and any(c["k"] == "warn" for c in chips)}
@@ -241,6 +259,7 @@ class _Build:
                 words = ", ".join(RULE_WORDS.get(r["rule_type"], r["rule_type"]) for r in extras)
                 note = f"its own {words} in this group"
         return {"id": item["id"], "name": item["display_name"], "type": item["item_type"], "icon": _icon(item),
+                "add_time": _has_daily_limit(self.d.saved_items.get(item["id"], {"rules": []}), now, usage.clock, self.saved_groups),
                 "status": status, "chips": own, "note": note}
 
     def group_entry(self, group) -> dict:
@@ -248,6 +267,7 @@ class _Build:
         members = sorted((d.items[i] for i in group["members"] if i in d.items), key=lambda i: i["display_name"].lower())
         own_rules = [_group_rule(group, r) for r in group["rules"]]
         return {"t": "group", "id": group["id"], "name": group["name"], "count": len(members),
+                "add_time": _has_daily_limit(d.saved_groups.get(group["id"], {"rules": []}), now, usage.clock),
                 **_look(group),
                 "status": self.group_status(group), "chips": _chips(own_rules, now, usage, own_rules),
                 "members": [self.member_entry(m, group) for m in members],
@@ -291,7 +311,7 @@ def blocking_overview_get(ctx, sort=None):
     """The whole Overview: {now, sort, sorts, autosave, emergency, counts, entries, disabled}.
     entries: the boxes and loose rows in the chosen order - {t: "item", id, name, type, icon, sub, notify, status,
     chips, groups, low} or {t: "group", id, name, count, status, chips, members: [...]}; status = {k, text, until?}
-    (k: unsaved / disabled / paused / unlocked / allowance / allowed / pending / blocked); chips = [{t, k, r}].
+    (k: unsaved / disabled / paused / unlocked / allowance / allowed / pending / blocked); chips = [{t, k, r, state?}] (state ranks rules independently of their display colour).
     disabled: [{t, id, name, type, icon?}]. `sort` (optional) is one of SORTS, else the saved choice."""
     if sort is not None and sort not in SORTS:
         raise ApiError("Unknown sort order.")
@@ -316,6 +336,10 @@ def blocking_overview_get(ctx, sort=None):
         disabled = [{"t": "item", "id": i["id"], "name": i["display_name"], "type": i["item_type"], "icon": _icon(i)}
                     for i in d.sorted_items() if i.get("disabled")]
         disabled += [{"t": "group", "id": g["id"], "name": g["name"], **_look(g)} for g in d.sorted_groups() if g.get("disabled")]
+        for e in disabled:
+            saved = d.saved_groups if e["t"] == "group" else d.saved_items
+            e["add_time"] = _has_daily_limit(saved.get(e["id"], {"rules": []}), now, usage.clock,
+                                             b.saved_groups if e["t"] == "item" else ())
         autosave = d.autosave
     return {"now": _iso(now), "sort": how, "sorts": SORTS, "autosave": autosave,
             "emergency": emergency.usable(db), "counts": {"total": len(seen), "blocked": blocked, "groups": len(groups),
@@ -332,6 +356,81 @@ def blocking_set_sort(ctx, value):
 
 
 # ---------------------------------------------------------------- Api: edits of the draft
+
+def _add_time_options(ctx, owner_id, group):
+    owner_id = _id(owner_id)
+    if type(group) is not bool:
+        raise ApiError("Bad request: on or off expected.")
+    db, now = ctx.db, ctx.now()
+    owners = db.list_groups() if group else db.list_items()
+    owner = next((o for o in owners if o["id"] == owner_id), None)
+    if owner is None:
+        raise ApiError("Save this item or group before adding time.")
+    usage = db.usage_lookup(now)
+    groups = db.list_groups()
+    if not _has_daily_limit(owner, now, usage.clock, () if group else groups):
+        raise ApiError("No daily time limit today. For a shared limit, use the group's Add time.")
+    checks = [("", [_group_rule(owner, r) for r in owner["rules"]])] if group else [("", effective_rules(owner, groups))]
+    if group:
+        checks += [(f"{i['display_name']}: ", effective_rules(i, groups)) for i in db.list_items()
+                   if i["id"] in owner["members"]]
+    notes = []
+    for prefix, rules in checks:
+        for r in rules:
+            if prefix and (r.get("group") or {}).get("id") == owner_id:
+                continue  # the group's own rule was already described above its members
+            if r["rule_type"] == "time_limit":
+                continue
+            block = rule_block(r, now, usage)
+            if block:
+                reason, until = block
+                reason = {"schedule": "scheduled blocked hours", "temporary": "Block now",
+                          "permanent": "an always blocked rule", "switches": "an opening limit"}.get(reason, reason)
+                end = _short_when(until) if until and until != datetime.max else "it is changed"
+                notes.append(f"{prefix}Extra time only applies to the time limit; this item is blocked by {reason} until {end}.")
+    return {"name": owner["name"] if group else owner["display_name"], "now": _iso(now),
+            "until": _iso(usage.clock.day(now)[1]), "extra_today": _extra_today(owner_id, group, now, usage),
+            "note": " ".join(dict.fromkeys(notes))}
+
+
+@core.read
+def blocking_add_time_options(ctx, owner_id, group=False):
+    """Preview saved daily limits and disclose the other rules that still block."""
+    if owner_id is None:
+        now = ctx.now()
+        return {"name": "", "now": _iso(now), "until": _iso(ctx.db.limit_clock().day(now)[1]),
+                "extra_today": "", "note": "No daily time limit today."}
+    return _add_time_options(ctx, owner_id, group)
+
+
+@core.loosen
+def blocking_add_time(ctx, owner_id, minutes, group=False):
+    """Grant time immediately, through the normal guard, without saving unrelated drafts."""
+    if type(minutes) is not int or not 1 <= minutes <= 1440:
+        raise ApiError("Enter a whole number of minutes from 1 to 1440.")
+    options = _add_time_options(ctx, owner_id, group)
+    day = ctx.db.limit_clock().period("day", ctx.now())[0]
+
+    def grant():
+        import applog
+        import enforcement_wake
+        # A challenge can cross a reset or an owner can change while it is open. Recheck both at the write.
+        current = _add_time_options(ctx, owner_id, group)
+        db, now = ctx.db, ctx.now()
+        clock = db.limit_clock()
+        if clock.period("day", now)[0] != day:
+            raise ApiError("The daily limit has reset. Start Add time again.")
+        db.add_usage([(f"{'group' if group else 'item'}:{owner_id}", extra_time_bucket(now, clock))],
+                     minutes * 60, now.date())
+        text = f"{current['name']}: {minutes} min added until {_short_when(clock.day(now)[1])}."
+        applog.record("change", text, db)
+        drafts._publish(ctx, "blocks_changed", {"rev": next(drafts._rev)})
+        drafts._poke(ctx)
+        enforcement_wake.request()
+        return {"text": text, "until": current["until"]}
+
+    return ctx.guard.request([f"{options['name']}: add {minutes} min to today's daily time limit"], grant)
+
 
 def _block_now_notes(ctx, owner, group, now):
     import antibypass

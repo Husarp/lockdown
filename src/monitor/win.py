@@ -11,6 +11,11 @@ SW_MINIMIZE = 6
 
 _user32 = ctypes.windll.user32
 _kernel32 = ctypes.windll.kernel32
+_kernel32.OpenProcess.restype = wintypes.HANDLE
+_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                               ctypes.POINTER(wintypes.DWORD)]
+_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 _WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -144,6 +149,22 @@ def top_windows() -> list[tuple[int, str, str]]:
         return True
 
     _user32.EnumWindows(_WNDENUMPROC(callback), 0)
+    return found
+
+
+def running_apps() -> dict[str, str]:
+    """Visible apps, even when elevation/anti-cheat hides their path. Unknown paths stay empty, never invented."""
+    from blocker.apps import list_processes
+    found, snapshot = {}, None
+    for hwnd, _title, path in top_windows():
+        if path:
+            name = exe_name(path)
+        else:
+            if snapshot is None:
+                snapshot = dict(list_processes())
+            name = snapshot.get(content_pid(hwnd), "")
+        if name.endswith(".exe"):
+            found[name] = path or found.get(name, "")
     return found
 
 

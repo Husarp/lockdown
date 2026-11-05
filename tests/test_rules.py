@@ -79,7 +79,7 @@ def test_temporary():
 
 
 def used(seconds):
-    return lambda owner, bucket: seconds
+    return lambda owner, bucket: 0 if bucket.startswith("extra:") else seconds
 
 
 def test_time_limit():

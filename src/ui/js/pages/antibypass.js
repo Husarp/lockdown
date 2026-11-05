@@ -8,6 +8,7 @@
 // countdown runs from end timestamps on the page's own clock (page.every, 1 s, only while visible) - no Api call per
 // tick; when a countdown reaches its end the page asks once for the new state. `status` pushes (a pause or unlock
 // that started elsewhere) reload the page only when they differ from what it shows.
+import { supervisedSection, wireSupervised } from "./supervised_codes.js";
 import { ld } from "../bridge.js";
 import { CANCELLED, clockOf, countdownText, guarded, parseNaive, whenText } from "../challenge.js";
 import { openDialog } from "../dialog.js";
@@ -156,9 +157,10 @@ export function mount(el_, pg) {
       <button class="btn btn-sm btn-red" type="button" data-act="unlock" hidden>${ic("unlock")}Unlock to edit</button>
       <div class="meter ab-bar" data-k="b-meter" hidden><i data-k="b-bar" style="width:0%"></i></div></section>
     <div class="grid-2"><div class="stack">${challengeCard()}${alwaysCard()}</div>
-      <div class="stack">${pauseCard()}${offCard()}${protectsCard()}${keepingCard()}</div></div></div>`;
+      <div class="stack">${supervisedSection()}${pauseCard()}${offCard()}${protectsCard()}${keepingCard()}</div></div></div>`;
   wire();
   wireSecrets(root, (res) => apply(res, false, true));
+  wireSupervised(root, page);
   page.every(tick);
 }
 
@@ -191,6 +193,7 @@ function challengeCard() {
         <div class="field sub ab-wins"><div data-k="wins"></div>
           <div class="hstack wrap"><button class="btn btn-sm" type="button" data-act="win-add">${ic("plus")}Add time window</button>
             <button class="btn btn-sm" type="button" data-act="save-hours" data-k="save-hours">Save hours</button></div></div>`)}
+      ${field("Let me sort new apps without the challenge", "First moves from Not assigned are free only when they keep all category blocks and limits. Other category changes still need the challenge. Turning this on needs the challenge.", sw(false, 'data-k="sort_unassigned" aria-label="Let me sort new apps without the challenge"'))}
       <p class="ab-err" data-k="err" role="alert"></p>
     </div></section>`;
 }
@@ -289,6 +292,7 @@ function paintChallenges(keepTyped, committed) {
   setSwitch(q("grid"), c.grid);
   setSwitch(q("own"), c.use_own);
   setSwitch(q("hours"), c.hours);
+  setSwitch(q("sort_unassigned"), c.sort_unassigned);
   paintSteps();
   if (!keepTyped) {
     setBox(q("custom"), c.custom_phrase, committed);
@@ -625,7 +629,7 @@ function wire() {
   root.addEventListener("change", (e) => {
     const t = e.target;
     const k = t.dataset && t.dataset.k;
-    if (k === "phrase" || k === "complex" || k === "grid" || k === "hours") save({ [k]: t.checked });
+    if (k === "phrase" || k === "complex" || k === "grid" || k === "hours" || k === "sort_unassigned") save({ [k]: t.checked });
     else if (k === "own") commitOwn(t.checked);
     else if (k === "wait") commitWait();
     else if (k === "lockdown") switchLockdown(t.checked);

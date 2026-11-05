@@ -44,3 +44,6 @@ android/PLAN.md
 _notes/
 android/.gradle/
 core.*
+
+# Files pasted into Claude chats
+pasted/

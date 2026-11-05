@@ -430,8 +430,8 @@ def test_the_timeline_has_segments_and_a_legend(env):
     record(env.db, "2026-09-14", "07:13", 60, 0, exe="code.exe")
     today = card(env, "today")
     assert today["start_hour"] == 6
-    assert today["segments"] == [{"start": 432, "len": 2, "kind": "neutral"}]
-    assert [e["name"] for e in today["legend"]] == ["Productive", "Neutral", "Games", "Distracting", "Unclassified"]
+    assert today["segments"] == [{"start": 432, "len": 2, "kind": "unassigned"}]
+    assert [e["name"] for e in today["legend"]] == ["Productive", "Neutral", "Games", "Distracting", "Not assigned", "Unclassified"]
     assert today["colors"]["productive"] == "var(--cat-prod)"
 
 

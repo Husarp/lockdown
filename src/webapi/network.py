@@ -29,6 +29,7 @@ from typing import NamedTuple
 
 import alerts
 import search
+from network_services import background_app, service_name
 from importer.popular import POPULAR_SITES
 
 from . import core
@@ -170,7 +171,7 @@ class _View:
             if e:
                 per_app[e] += c
             if d:
-                per_site[d] += c
+                per_site[service_name(d)] += c
                 sites.add(d)
         self.rows = rows
         self.connections, self.blocked, self.sites = sum(per_min.values()), len(blocked), len(sites)
@@ -425,7 +426,7 @@ class _Log:
         """search.score(word, "<site> <exe> <app name>") is not None, with the text worked out once per group."""
         found = self.gtext.get(group)
         if found is None:
-            text = search.normalize(f"{group[0]} {group[1]} {self.app_name(group[1])}")
+            text = search.normalize(f"{group[0]} {group[1]} {self.app_name(group[1])} {service_name(group[0])}")
             found = self.gtext[group] = (text, [(t, _mask(t)) for t in search._WORD.findall(text)])
         text, tokens = found
         if word in text:
@@ -512,6 +513,8 @@ class _Log:
         host = r[DOM]
         return {"k": r[K], "m": r[MIN], "t": r[MIN][11:], "exe": r[EXE],
                 "app": "Blocked visit" if r[BLK] else self.app_name(r[EXE]), "host": host,
+                "service": service_name(host) if host else background_app(r[EXE], self.app_name(r[EXE]), bool(r[WIN])),
+                "activity": "Blocked visit" if r[BLK] else background_app(r[EXE], self.app_name(r[EXE]), bool(r[WIN])),
                 "site": host or r[IP], "n": r[CNT], "rule": rule_text(r), "port": r[PORT],
                 "b": 1 if r[BLK] else 0, "w": r[WIN], "l": r[LOC], "i": r[ID],
                 "reg": site_to_block(host) if host else ""}

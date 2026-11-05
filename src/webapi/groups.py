@@ -177,6 +177,7 @@ def group_get(ctx, group_id=None):
                          key=lambda m: m["name"].lower())
         return {"id": g["id"], "name": g["name"], "disabled": bool(g.get("disabled")), **group_look.look(g),
                 "auto_color": group_look.auto_hue(g["id"]), "rules": [_clean_rule(r) for r in g["rules"]],
+                "extra_today": blocking._extra_today(g["id"], True, now, ctx.db.usage_lookup(now)),
                 "ways": {"app": g.get("app_block") or None, "site": g.get("site_block") or None},
                 "members": members, "now": blocking._iso(now), "new": False}
 

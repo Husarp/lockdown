@@ -18,6 +18,26 @@ NOW = datetime(2026, 10, 11, 15, 42, 17)          # a Sunday
 SUN_EVENING = [{"days": [6], "start": "18:00", "end": "20:00"}]
 
 
+def test_sorting_setting_on_needs_challenge_and_off_is_free(ctx, api):
+    locked(ctx)
+    assert data(api.antibypass_get())["config"]["sort_unassigned"] is False
+    pending = data(api.antibypass_save({"sort_unassigned": True}, True))
+    assert pending["needs_challenge"]
+    assert stored(ctx)["sort_unassigned"] is False
+    pass_challenge(ctx, api, pending["ticket"])
+    assert stored(ctx)["sort_unassigned"] is True
+    ab.lock(ctx.db)
+    result = data(api.antibypass_save({"sort_unassigned": False}))
+    assert result["config"]["sort_unassigned"] is False
+    assert result["status"] == "phrase"
+
+
+@pytest.mark.parametrize("value", [1, "yes", None, [], {}])
+def test_sorting_setting_is_a_boolean(ctx, api, value):
+    assert "yes or no" in error(api.antibypass_save({"sort_unassigned": value}))
+    assert stored(ctx)["sort_unassigned"] is False
+
+
 @pytest.fixture(autouse=True)
 def _log(tmp_path, monkeypatch):
     import paths
@@ -110,7 +130,7 @@ def test_the_page_data_has_everything(api, ctx):
     assert d["now"] == "2026-10-11T15:42:17"
     assert d["config"] == {"phrase": False, "length": 60, "grid": False, "complex": False, "use_own": False,
                            "custom_phrase": "", "hours": False, "windows": SUN_EVENING, "wait_min": 0, "wait_text": "Off",
-                           "steps": [{"id": "s0", "kind": "phrase", "level": 60, "times": 1}]}
+                           "steps": [{"id": "s0", "kind": "phrase", "level": 60, "times": 1}], "sort_unassigned": False}
     assert d["status"] == "free" and d["banner"]["kind"] == "off"
     assert d["lengths"] == {"Short": 30, "Medium": 60, "Long": 120, "Very long": 250}
     assert (d["min_length"], d["max_length"], d["unlock_min"]) == (30, 2000, 5)

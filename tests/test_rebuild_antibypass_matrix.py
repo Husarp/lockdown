@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # ================================================================ the classification (every method, by hand)
 
-READ = """about_get antibypass_get applog_get applog_text antibypass_status appmenu_info apps_list blocking_block_now_options blocking_overview_get blocklist_brief calendar_get
+READ = """supervised_codes_get about_get antibypass_get applog_get applog_text antibypass_status appmenu_info apps_list blocking_add_time_options blocking_block_now_options blocking_overview_get blocklist_brief calendar_get
 categories_list dashboard_get display_get draft_get_state emergency_get_candidates get_status get_theme group_get
 group_member_search groups_list host_normalize item_get manual_get mode_extra_check modes_brief modes_get
 network_block_target network_get network_graph notifications_get overlay_emergency_kinds pause_get pick_program_file
@@ -56,7 +56,7 @@ screentime_month settings_get suggest update_notes update_state wordlist_get wor
 TIGHTEN = """antibypass_lock antibypass_recovery_remove antibypass_switch_on blocking_block_now break_allow_remove draft_add_to_group manual_create pause_resume
 protection_connect protection_unallow service_start"""
 LOOSEN = """antibypass_save antibypass_try antibypass_unlock_to_edit antibypass_password_set antibypass_secret_remove
-antibypass_totp_confirm antibypass_recovery_new backup_import_apply break_allow_add break_allow_restore
+antibypass_totp_confirm antibypass_recovery_new backup_import_apply blocking_add_time break_allow_add break_allow_restore
 category_add category_add_and_assign
 category_assign category_remove draft_remove_group draft_remove_item draft_save draft_set_autosave draft_set_disabled
 draft_set_group draft_set_group_disabled draft_submit_item emergency_settings_save emergency_unlock lockdown_switch_off
@@ -64,7 +64,7 @@ manual_remove manual_save_entries manual_set_enabled mode_delete mode_save mode_
 overlay_disable overlay_emergency pause_start protection_allow protection_allow_words protection_remove_custom protection_set_list_enabled
 reminder_delete reminder_save_break reminder_save_custom reminder_save_sleep reminder_set_on reset_change_apply
 words_update"""
-UI = """antibypass_totp_begin applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
+UI = """supervised_codes_change antibypass_totp_begin applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
 corner_answer corner_ready corner_size digest_set display_set draft_discard draft_set_notify draft_set_setting
 log_client_error network_export_csv network_live_stop notify_front_steps_set notify_repeat_set notify_test open_path
 open_url overlay_ready
@@ -72,7 +72,7 @@ page_ready protection_preview protection_set_updates protection_update_now revea
 set_accent set_appearance set_goal set_icons_download set_scale suggest_clear_history ui_ready ui_setting update_check
 update_download update_install update_opened update_set_prefs window_seen"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
-COUNTS = {"read": 48, "tighten": 11, "loosen": 47, "ui": 46}           # 152 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log, +5 password / authenticator / recovery code, +1 recovery code removed)
+COUNTS = {"read": 50, "tighten": 11, "loosen": 48, "ui": 47}           # 156 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log, +5 password / authenticator / recovery code, +1 recovery code removed, +2 supervised codes, +2 Add time)
 # Loosen methods that are NOT a challenge: the emergency unlock's quota is their limit (BLUEPRINT 4: "not a challenge").
 QUOTA = ("emergency_unlock", "overlay_emergency")
 
@@ -81,7 +81,7 @@ def test_every_api_method_is_classified_here_and_the_count_is_known():
     table = {name: kind for kind, names in CLASSES.items() for name in names}
     assert sum(len(n) for n in CLASSES.values()) == len(table)              # (no name twice)
     assert dict(webapi.api_methods()) == table
-    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 152
+    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 156
 
 
 def test_every_public_function_of_a_webapi_module_is_an_api_method_or_marked_internal():
@@ -352,6 +352,9 @@ def _totp_code(env):
 
 
 CASES = {
+    "blocking_add_time": Case(lambda e: [e.ids["a"], 15],
+                              lambda e, r: rules.extra_time(f"item:{e.ids['a']}", NOW,
+                                                            _fresh(e).usage_lookup(NOW)) == 900),
     "antibypass_save": Case(lambda e: [{"length": 30}], lambda e, r: ab.settings(_fresh(e))["length"] == 30),
     "antibypass_password_set": Case(lambda e: ["new password", "new password"],
                                     lambda e, r: cs.verify_secret("new password", cs.load(_fresh(e))["password"]),
@@ -638,6 +641,7 @@ def _blocking_state(env) -> list:
 
 
 UI_ARGS = {
+    "supervised_codes_change": ["add", "Other PC", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"],
     "antibypass_totp_begin": [],                        # (keeps a new secret in memory only: nothing is stored)
     # tighten
     "blocking_block_now": lambda e: [e.ids["c"], "hour"],

@@ -197,7 +197,16 @@ function run(info) {
       if (b.primary) btn.dataset.primary = "1";
       foot.append(btn);
     }
+    if (begun.info && begun.info.supervisor && !settled && !holding) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn";
+      btn.textContent = "Supervisor code";
+      btn.addEventListener("click", () => { if (!inflight) showSupervisor(); });
+      foot.prepend(btn);
+    }
   }
+
   function view(title, html, buttons, bare = false) {
     if (closed) return null;
     dlg.querySelector(".dlg-h h2").textContent = title;
@@ -287,7 +296,7 @@ function run(info) {
       foot: () => dlg.querySelector(".dlg-f"),
       setButtons: (buttons) => fillFoot(dlg.querySelector(".dlg-f"), buttons),
       send: (value, onError, wrongText) => submit(value, onError, wrongText),
-      closed: () => closed,
+      closed: () => closed || current !== data,
     };
     if (data.mode === "math") mountMath(host, data);
     else if (data.mode === "captcha") mountCaptcha(host, data);
@@ -468,6 +477,28 @@ function run(info) {
         { label: "I've saved it", primary: true, onClick: () => { holding = false; resolve(); } }], true);
       if (!foot) { holding = false; resolve(); }
     });
+  }
+
+  function showSupervisor() {
+    current = null;          // stop delayed answers from the puzzle we just left
+    if (untick) { untick(); untick = null; }
+    cancelAnimationFrame(raf);
+    const foot = view("Supervisor code", `<p>Ask your supervisor for their current code. It authorizes only this action, skipping all challenges and waits.</p>
+      <input class="input ch-supervisor" inputmode="numeric" maxlength="6" autocomplete="off" aria-label="Supervisor code">
+      <p class="ch-err" role="alert"></p>`,
+    [cancelBtn, { label: "Use code", primary: true, onClick: go }]);
+    if (!foot) return;
+    const input = q(".ch-supervisor"), err = q(".ch-err");
+    function go() {
+      if (inflight) return;
+      submit({ supervisor: input.value }, (text, gone) => {
+        err.textContent = text;
+        input.value = "";
+        if (gone) onlyOk(foot); else input.focus();
+      });
+    }
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+    input.focus();
   }
 
   // ---- waiting / closed -----------------------------------------------------------------

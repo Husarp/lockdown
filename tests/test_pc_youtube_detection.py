@@ -88,7 +88,7 @@ def test_ambiguous_profile_without_tab_count_does_not_attribute_an_earlier_segme
     assert title_site("Cats - YouTube - Reddit — Mozilla Firefox") is None
 
 
-def test_repeated_failure_logs_once_without_addresses(firefox, monkeypatch, caplog):
+def test_repeated_failure_logs_once_with_title_and_reason(firefox, monkeypatch, caplog):
     clock = Clock(monkeypatch)
     usage._url_diagnostics.clear()
     monkeypatch.setattr(win, "process_name", lambda hwnd: "firefox.exe")
@@ -99,8 +99,9 @@ def test_repeated_failure_logs_once_without_addresses(firefox, monkeypatch, capl
     messages = [r.message for r in caplog.records if "URL read failed repeatedly" in r.message]
     assert len(messages) == 1
     assert "exe=firefox.exe" in messages[0] and "title_fallback=True" in messages[0]
-    assert "reason=address bar unavailable" in messages[0]
-    assert "youtube" not in messages[0].lower() and "Cats" not in messages[0]
+    assert "reason=empty or invalid value" in messages[0]
+    assert "source=title" in messages[0]
+    assert f"title={firefox.title!r}" in messages[0]
 
 
 def test_limit_card_and_screen_statistics_count_passive_foreground_time(env):
