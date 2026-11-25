@@ -142,6 +142,7 @@ def _blocked_intervals(schedule_json: str) -> tuple:
 
 # ---------- limit periods ----------
 
+@functools.lru_cache(maxsize=512)
 def _parse_dt(text: str | None) -> datetime | None:
     return datetime.strptime(text, TIME_FMT) if text else None
 
@@ -497,7 +498,7 @@ def rule_block(rule: dict, now: datetime, usage=no_usage) -> tuple[str, datetime
     if kind == "permanent":
         return "permanent", None
     if kind == "temporary" and rule.get("temp_until"):
-        until = datetime.strptime(rule["temp_until"], TIME_FMT)
+        until = _parse_dt(rule["temp_until"])
         return ("temporary", until) if now < until else None
     if kind == "scheduled" and rule.get("schedule"):
         until = schedule_until(rule["schedule"], now)
@@ -573,7 +574,11 @@ def block_end(rules: list[dict], now: datetime, usage=no_usage) -> datetime | No
 
 def usage_targets(rules: list[dict], item_id: int, now: datetime,
                   clock: LimitClock = DEFAULT_CLOCK) -> set[tuple[str, str]]:
-    """(owner, bucket) pairs to add time to while the item is being used."""
+    """Paid (owner, bucket) pairs. The calendar-day total can be the midnight quota bucket.
+
+    Screen Time is written independently through activity, so callers apply exemption intervals before
+    requesting any of these targets, including the generic calendar-day counter.
+    """
     me = f"item:{item_id}"
     targets = {(me, day_bucket(now))}
     for r in rules:
@@ -640,7 +645,7 @@ def closed_opening(rules: list[dict], targets: set[tuple[str, str]], now: dateti
     - this opening is the one that goes over a limit: only the counters that go over (that is what blocks it);
     - otherwise: all of them.
     Blocks that end within CLOSED_GRACE_SEC count as usual, so an app started just before its block ends -
-    and not closed in time - still has its opening counted. An emergency unlock blocks nothing: all count."""
+    and not closed in time - still has its opening counted. Callers exclude exempt openings before this check."""
     def closes(block) -> bool:
         return block is not None and (block[1] is None or (block[1] - now).total_seconds() > CLOSED_GRACE_SEC)
     if not rules:
@@ -693,6 +698,7 @@ def visit_targets(rules: list[dict], item: dict, now: datetime, launched: bool,
     return targets
 
 
+@functools.lru_cache(maxsize=512)
 def _schedule_next_start(schedule_json: str, now: datetime) -> datetime | None:
     """When the next blocked stretch starts (the rule isn't blocking now)."""
     s = load_schedule(schedule_json)
@@ -811,7 +817,7 @@ def describe_rule(rule: dict, now: datetime, usage=no_usage, allowance: bool = T
         return f"{text}\n{note}" if note else text
     if kind == "temporary":
         if rule.get("temp_until"):
-            left = datetime.strptime(rule["temp_until"], TIME_FMT) - now
+            left = _parse_dt(rule["temp_until"]) - now
             return f"Temporary{own}: {duration_text(left.total_seconds())} left"
         return f"Temporary{own}: {duration_text(rule['duration_min'] * 60)} (starts when saved)"
     clock = _clock(usage)

@@ -98,6 +98,7 @@ import java.time.LocalDateTime
 fun GuardrailsScreen(onBack: () -> Unit = {}) {
     val cfg by Store.state.collectAsStateWithLifecycle()
     val guard = rememberGuard()
+    val unlockGuard = rememberGuard(allowSupervisor = false)
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val ex = com.husarp.lockdown.ui.theme.LockdownTheme.extra
@@ -194,7 +195,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                             Text(if (status == "closed") "Only inside your allowed hours" else "Unlock to make changes without re-asking each time",
                                 style = MaterialTheme.typography.bodySmall)
                         }
-                        Button(onClick = { guard(true) {} }, enabled = status != "closed") { Text("Unlock") }
+                        Button(onClick = { unlockGuard(true) {} }, enabled = status != "closed") { Text("Unlock") }
                     }
                 }
             }
@@ -298,6 +299,7 @@ fun GuardrailsScreen(onBack: () -> Unit = {}) {
                 HoursEditor(dab.windows) { w -> setAb { it.copy(windows = w) } }
             }
         }
+        SupervisorCodesCard()
         }
 
         if (section == "emergency") {
@@ -509,8 +511,8 @@ private fun PauseCard(now: LocalDateTime, guard: (Boolean, () -> Unit) -> Unit) 
             }) { Text("Pause my blocks") }
         }
         Text("Unblocks every app and site on your list for a while - hours, time limits, opening limits, modes, temporary " +
-            "and permanent blocks. The protection lists, blocked words and SafeSearch keep working, and the time you use " +
-            "still counts toward your limits. It ends by itself (Rest of the day: at the next reset time). Starting it " +
+            "and permanent blocks. The protection lists, blocked words and SafeSearch keep working. While paused, use " +
+            "doesn’t spend any personal quotas. It ends by itself (Rest of the day: at the next reset time). Starting it " +
             "needs the challenge; resuming early never does. No emergency unlock is used.",
             Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
     }
@@ -596,10 +598,10 @@ internal fun EmergencyDialog(onDismiss: () -> Unit) {
             }
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (tiers.size == 1) Text("Unblock apps or sites for ${tiers[0].minutes} minutes (one use, however many you tick). " +
-                    "Permanent blocks and protection lists stay on. Time you use still counts toward your limits.")
+                    "Permanent blocks and protection lists stay on. Use of the selected activity doesn’t spend its quotas.")
                 else {
                     Text("Unblock apps or sites (one use of the kind you pick, however many you tick). " +
-                        "Permanent blocks and protection lists stay on. Time you use still counts toward your limits.")
+                        "Permanent blocks and protection lists stay on. Use of the selected activity doesn’t spend its quotas.")
                     Text("How long", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.titleSmall)
                     for (t in tiers) {
                         val u = left.getValue(t.id)

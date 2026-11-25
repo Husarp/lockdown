@@ -2,8 +2,7 @@
 
 What it lifts: every site and app blocked by your items, groups, modes and categories - hours, time limits,
 opening limits, temporary and permanent blocks alike. What it never lifts: the protection lists (the DNS filter),
-the blocked words, SafeSearch / YouTube Restricted. Time used meanwhile still counts toward your limits
-(rules.counted_rules counts every rule, enforced or not), so the limit is just as used up when it ends.
+the blocked words, SafeSearch / YouTube Restricted. Activity during an authorized pause spends no quota.
 
 Starting it is loosening, so it needs the Anti-Bypass challenge (LockdownApp.pause_blocks, through app.guard);
 ending it early is free. It is not the whole-app off switch (antibypass.OFF_KEY - that stops everything, the
@@ -19,8 +18,6 @@ pop-ups, Windows notifications) for the same while.
 import json
 from datetime import datetime, timedelta
 
-from rules import TIME_FMT
-
 KEY = "pause.blocks"   # JSON {"started", "until" (trusted local time), "silent": bool}; "" = not paused
 REST_OF_DAY = "Rest of the day"
 DURATIONS = {"30 min": 30, "1 h": 60, "2 h": 120, "4 h": 240, REST_OF_DAY: None}   # label -> minutes (None: the day)
@@ -30,8 +27,9 @@ MAX_SPAN = timedelta(days=1)   # the longest a pause can run ("Rest of the day" 
 def _load(text: str | None) -> dict | None:
     try:
         raw = json.loads(text or "null")
-        return {"started": datetime.strptime(raw["started"], TIME_FMT),
-                "until": datetime.strptime(raw["until"], TIME_FMT), "silent": bool(raw.get("silent"))}
+        started, until = (datetime.fromisoformat(raw[key]) for key in ("started", "until"))
+        if started.tzinfo is None and until.tzinfo is None and timedelta(0) < until - started <= MAX_SPAN:
+            return {"started": started, "until": until, "silent": bool(raw.get("silent"))}
     except (ValueError, TypeError, KeyError):
         return None
 
@@ -40,7 +38,7 @@ def state(db, now: datetime) -> dict | None:
     """{"started", "until", "silent"} while a pause is running at `now`, else None."""
     parsed = getattr(db, "parsed", None)
     p = parsed(KEY, _load, "") if parsed else _load(db.get_setting(KEY, ""))
-    if p and p["started"] <= now < p["until"] and p["until"] - p["started"] <= MAX_SPAN:
+    if p and p["started"] <= now < p["until"]:
         return p
     return None
 
@@ -69,14 +67,15 @@ def end_for(db, minutes: int | None, now: datetime) -> datetime:
 def start(db, now: datetime, minutes: int | None, silent: bool) -> datetime:
     """Pause the blocks (the caller has had the challenge passed). Replaces a pause already running."""
     end = end_for(db, minutes, now)
-    db.set_setting(KEY, json.dumps({"started": now.strftime(TIME_FMT), "until": end.strftime(TIME_FMT),
-                                    "silent": bool(silent)}))
+    db.change_pause(now, json.dumps({"started": now.isoformat(" "), "until": end.isoformat(" "),
+                                     "silent": bool(silent)}))
     return end
 
 
-def resume(db):
+def resume(db, now: datetime | None = None):
     """Blocking back on now - always free."""
-    db.set_setting(KEY, "")
+    from trusted_time import now_from_db
+    db.change_pause(now if now is not None else now_from_db(db), "")
 
 
 def label(minutes: int | None) -> str:

@@ -1,5 +1,9 @@
 # Changelog — Lockdown Mobile
 
+## 0.5.25 - 2026-11-25
+- **Supervisor codes on the phone.** Pair with a supervisor (40-second codes), paste a one-use code into the challenge, and see when each supervised code changes and expires. Tests: `SupervisorCodesTest`, `ChallengeInputTest`.
+- **Pause and emergency time is free.** Time used during a pause or an emergency unlock no longer spends any limit, also across the daily reset. Tests: `UsageCounterTest`, `PauseAndTimeTest`, `IslandUseTest`.
+
 ## 0.5.24 - 2026-11-03 17:20
 - **Overlapping site limits all count, and shared group time counts once.** Visiting sub.example.com now uses both its own limit and a matching example.com limit. A browser and its site no longer spend the same group's time twice as fast. Tests: `PhoneUsageTest`.
 - **Protection exceptions apply as soon as you Save.** Changing an allowed site or word used to leave the old filter running until it reloaded later; Save now reloads it. Tests: `PhoneSettingsWiringTest`.

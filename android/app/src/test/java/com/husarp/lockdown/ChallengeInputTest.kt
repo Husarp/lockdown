@@ -3,14 +3,42 @@ package com.husarp.lockdown
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.husarp.lockdown.guard.challengeInputChange
+import com.husarp.lockdown.engine.SupervisorCodes
+import com.husarp.lockdown.guard.PendingGuardAction
 import com.husarp.lockdown.guard.PuzzleSubmission
 import com.husarp.lockdown.guard.returnSortPiece
 import com.husarp.lockdown.guard.takeSortPiece
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChallengeInputTest {
+    @Test fun supervisor_approval_runs_once_without_the_normal_unlock_hook() {
+        var edits = 0
+        var unlocks = 0
+        val request = PendingGuardAction { edits++ }
+        request.complete {}
+        request.complete { unlocks++ }
+        assertEquals(1, edits)
+        assertEquals(0, unlocks)
+        val cancelled = PendingGuardAction { edits++ }
+        assertTrue(cancelled.cancel())
+        cancelled.complete { unlocks++ }
+        assertEquals(1, edits)
+        assertEquals(0, unlocks)
+    }
+
+    @Test fun six_digit_supervisor_replacement_keeps_the_leading_zero() {
+        for (pasted in listOf("003784", "081804")) {
+            assertTrue(SupervisorCodes.validCode(pasted))
+            assertEquals("", challengeInputChange("", pasted))
+        }
+        for (invalid in listOf("03784", "0037840", " 003784", "００３７８４")) {
+            assertFalse(SupervisorCodes.validCode(invalid))
+        }
+    }
+
     @Test fun auto_submit_locks_before_callback_and_ignores_stale_events() {
         val submission = PuzzleSubmission()
         var answers = 0

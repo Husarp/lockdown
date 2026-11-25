@@ -27,12 +27,15 @@ ticket (ctx.guard.request) and the page only gets the ticket; nothing here reads
 import hashlib
 import json
 import secrets
+import threading
 import time
 
 import antibypass
 import backup
 import emergency
 import reminders
+from blocker.site_block import (MINIMIZE_INTERVAL_DEFAULT, MINIMIZE_INTERVAL_KEY, MINIMIZE_INTERVAL_MAX,
+                                MINIMIZE_INTERVAL_MIN, minimize_interval)
 from resident import icons
 from rules import DAY_NAMES, RESET_KEY, apply_reset_now, change_reset, parse_hhmm, reset_is_looser
 
@@ -51,6 +54,7 @@ MAX_ALLOWED_WORDS = 2000            # (webapi.protection.MAX_ALLOWED: the allowe
 PAGES = ("dashboard", "blocking", "antibypass", "screentime", "netlog", "modes", "reminders", "notifications",
          "settings", "about")
 FILE_FILTER = "Lockdown backup (*.json)"
+_minimize_interval_lock = threading.RLock()
 
 
 def _iso(value):
@@ -127,7 +131,7 @@ def settings_get(ctx):
         "now": _iso(now), "look": shell.get_theme(ctx), "motion": db.get_setting(MOTION_KEY) == "1",
         "goal": goal, "goal_options": sorted({*GOAL_HOURS, goal}),
         "reset": _reset_info(db, now), "categories": categories.load(db), "emergency": _emergency_info(db, now),
-        "icons_download": icons.download_on(db),
+        "icons_download": icons.download_on(db), "site_minimize_interval": minimize_interval(db),
     }
 
 
@@ -227,6 +231,23 @@ def _int(value, low, high, what) -> int:
     if type(value) is not int or not low <= value <= high:
         raise ApiError(f"{what} must be a whole number from {low} to {high}.")
     return value
+
+
+@core.loosen
+def set_site_minimize_interval(ctx, seconds):
+    """A longer interval leaves blocked windows visible for longer."""
+    seconds = _int(seconds, MINIMIZE_INTERVAL_MIN, MINIMIZE_INTERVAL_MAX, "Site minimize interval")
+
+    def save():
+        with _minimize_interval_lock:
+            if seconds != minimize_interval(ctx.db):
+                ctx.db.set_setting(MINIMIZE_INTERVAL_KEY, str(seconds))
+            return {"site_minimize_interval": seconds}
+
+    with _minimize_interval_lock:
+        if seconds > minimize_interval(ctx.db):
+            return ctx.guard.request([f"Check minimized-site rules less often (every {seconds} seconds)"], save)
+        return core.ok(save())
 
 
 def _emergency_config(ctx, cfg) -> dict:
@@ -399,6 +420,8 @@ def _check_shape(data: dict):
           and all(isinstance(c, dict) and all(isinstance(c.get(k), str) for k in ("kind", "name", "category"))
                   for c in cats))
     ok = ok and all(_group_ok(g) for g in groups) and _break_allow_ok(sets) and _protection_ok(sets)
+    if ok and MINIMIZE_INTERVAL_KEY in sets:
+        ok = sets[MINIMIZE_INTERVAL_KEY] in {str(s) for s in range(MINIMIZE_INTERVAL_MIN, MINIMIZE_INTERVAL_MAX + 1)}
     if not ok:
         raise ApiError("That backup file is damaged, so it can't be imported.")
 
@@ -456,7 +479,9 @@ def backup_import_apply(ctx, token):
     def restore():
         again, _ = _load_checked(path, sha)           # (the challenge can take minutes: look again right before)
         again["settings"] = {k: v for k, v in again.get("settings", {}).items() if k != antibypass.OFF_KEY}
-        warnings = backup.restore(ctx.db, again)
+        again["settings"].setdefault(MINIMIZE_INTERVAL_KEY, str(MINIMIZE_INTERVAL_DEFAULT))
+        with _minimize_interval_lock:
+            warnings = backup.restore(ctx.db, again)
         d = drafts.draft_of(ctx)
         with drafts.lock:
             d.discard()                               # (the blocks are the backup's now: reload them everywhere)

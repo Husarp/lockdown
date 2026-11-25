@@ -80,7 +80,7 @@ export async function openEmergency({ onDone } = {}) {
   const kindsHtml = kinds.map((k) => `<label class="rcard k-emerg em-kind"><input type="radio" name="em-kind" value="${esc(k.id)}" ${k.id === chosen ? "checked" : ""} ${k.left > 0 ? "" : "disabled"}>` +
     `<span class="grow"><b>${k.minutes} min</b><span class="small muted">${esc(kindText(k))}</span></span>` +
     `<span class="uses" aria-hidden="true">${Array.from({ length: k.allowed }, (_, i) => `<i class="${i < k.allowed - k.left ? "used" : ""}"></i>`).join("")}</span></label>`).join("");
-  const body = `${STYLE}<p class="small muted">Unblocks what you choose for a short time. Several at once count as one use. The time you use still counts toward your limits and allowances.</p>
+  const body = `${STYLE}<p class="small muted">Unblocks what you choose for a short time. Several at once count as one use. The activities you choose spend no time, allowance or openings from personal or shared limits during the unlock.</p>
     <div class="stack-sm"><span class="cap">How long</span><div class="em-kinds" data-k="kinds">${kindsHtml}</div></div>
     <div class="stack-sm" ${rows.length ? "" : "hidden"}><span class="cap">Unblock</span><div class="em-list" data-k="items"></div></div>
     <p class="small muted" data-k="none" ${rows.length ? "hidden" : ""}>Nothing on your list can be unlocked right now.</p>

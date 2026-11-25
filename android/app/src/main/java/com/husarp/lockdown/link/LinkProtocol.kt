@@ -26,7 +26,8 @@ data class Frame(
 
 /** One usage batch the helper sends until main acks it. */
 @Serializable
-data class Batch(val seq: Long, val deltas: Map<String, Int>)
+data class Batch(val seq: Long, val deltas: Map<String, Int>,
+                 val contributions: List<com.husarp.lockdown.engine.QuotaContribution> = emptyList())
 
 @Serializable
 data class IslandApp(val pkg: String, val label: String)
@@ -47,6 +48,9 @@ data class SyncBody(
     val use: List<com.husarp.lockdown.engine.IslandUseRow>? = null,   // per-day app time in Island, only when it changed (Insights)
     val useHours: List<com.husarp.lockdown.engine.IslandHourRow>? = null,   // Island seconds per hour, today and yesterday, only when changed
     val endPause: com.husarp.lockdown.engine.BlockPause? = null,   // "Resume now" in Island: main ends this pause only (Pause.endEarly)
+    val endPauseAt: String? = null,                    // trusted effective end on the helper
+    val quota: List<com.husarp.lockdown.engine.QuotaContribution>? = null,
+    val legacyDeltas: Map<String, Int>? = null,         // untimed balances from before the upgrade
     val fronts: List<com.husarp.lockdown.engine.IslandFront>? = null,   // Island's recent visits: does main see them itself? (IslandSight)
     val opens: List<com.husarp.lockdown.engine.IslandOpen>? = null,     // Island apps opened that ended after main's opensMark (Activity log, IslandOpens)
 )
@@ -63,6 +67,7 @@ data class StateBody(
     val unlink: Boolean = false,
     val app: Long = 0,
     val covers: Boolean = false,                        // main sees and blocks Island apps itself: the helper needs no service (IslandSight)
+    val quotaPauses: List<com.husarp.lockdown.engine.BlockPause>? = null,
     val opensMark: Long? = null,                        // the latest end of an Island app visit main has (IslandOpens); null: an older main, send none
 )
 

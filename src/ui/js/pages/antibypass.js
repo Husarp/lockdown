@@ -206,7 +206,7 @@ function pauseCard() {
         <label class="check"><input type="checkbox" data-k="p-silent"><span>Silence all notifications (warnings, reminders, bedtime and break alerts, pop-ups)</span></label></div>
       <div class="hstack"><button class="btn btn-primary" type="button" data-act="pause" data-k="p-start">${ic("pause")}Pause my blocks</button>
         <button class="btn btn-primary" type="button" data-act="resume" data-k="p-resume" hidden>${ic("play")}Resume blocking</button></div>
-      <p class="small muted">Unblocks every site and app on your list for a while - hours, time limits, opening limits, modes, temporary and permanent blocks. The protection lists, blocked words and SafeSearch keep working, and the time you use still counts toward your limits. It ends by itself; starting it needs the challenge, resuming early never does. No emergency unlock is used.</p>
+      <p class="small muted">Unblocks every site and app on your list for a while - hours, time limits, opening limits, modes, temporary and permanent blocks. The protection lists, blocked words and SafeSearch keep working. Your time, allowances and openings stay available while paused. The pause ends by itself. Starting it needs the challenge, and resuming early is free. No emergency unlock is used.</p>
     </div></section>`;
 }
 

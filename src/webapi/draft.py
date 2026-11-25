@@ -255,7 +255,7 @@ def _setting_ok(key: str, value: str) -> bool:
         return value in alerts.FORMATS
     if key.startswith("notify.msg."):
         return True
-    return value in ("1", "0")
+    return alerts.DEFAULTS[key] in ("1", "0") and value in ("1", "0")
 
 
 # ---------------------------------------------------------------- Api

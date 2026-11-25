@@ -20,6 +20,7 @@ Usage:
 import ctypes
 import json
 import logging
+import ntpath
 import os
 import sys
 import threading
@@ -31,15 +32,13 @@ import alerts
 import antibypass
 import applog
 import enforcement_wake
-from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, protection, site_block
+from blocker import apps, browser_policy, connections, dnsfilter, firewall, hosts, netlog, pause_request, protection, site_block
 import keywords
 from blocker.listener import BlockListener
 from db import Database
 from monitor.usage import COUNTED_KEY, MAX_GAP_SEC, MEMBERS_KEY
 from paths import APP_DIR, DATA_DIR, LOG_PATH
-import modes
 import pause
-from rules import counted_rules, usage_targets, visit_targets
 from trusted_time import LAST_TRUSTED_KEY, OFFSET_KEY, ZONE_KEY, TrustedClock, utc_offset, zone_name, zone_step
 
 INTERVAL_SEC = 2
@@ -47,13 +46,18 @@ CLOCK_JUMP_SEC = 60
 HEARTBEAT_KEY = "service_heartbeat"
 # Keep closing connections to a newly blocked site for this long (browsers cache DNS ~1 min).
 CLOSE_CONNECTIONS_FOR = timedelta(minutes=3)
+ENDPOINT_LOOKUP_SEC = 0.2
 VISIT_DEDUPE_SEC = 10
 APP_CHECK_SEC = 0.25
 APP_GRACE_SEC = 10          # app already open when its block began: asked to close, force-killed after this
 LAUNCH_SLACK_SEC = 1        # started more than this after the block began = launched while blocked
 FIREWALL_KEY = "firewall_rules"   # JSON {exe: path} of firewall rules Lockdown has added
-QUIC_KEY = "firewall_quic"        # JSON {browser exe: path} of the "no QUIC" rules in place (update_quic)
-VIDEO_KEY = "firewall_video"      # JSON {ip: name} in the "video hosts" firewall rule (update_video_block)
+QUIC_KEY = "firewall_quic"        # known browser paths and any legacy rules still to migrate
+VIDEO_KEY = "firewall_video"      # remembered video address evidence
+MEDIA_PAGES = {"youtube.com": "googlevideo.com", "youtu.be": "googlevideo.com",
+               "netflix.com": "nflxvideo.net", "twitch.tv": "ttvnw.net"}
+SHARED_GOOGLE_PAGES = ("youtube.com", "youtu.be", "youtube-nocookie.com", "google.com", "googleusercontent.com",
+                       "googleapis.com", "gstatic.com", "ytimg.com")
 VIDEO_MAX = 300                   # at most this many addresses in it (the newest)
 NETLOG_SEC = 2
 NETLOG_KEEP = timedelta(hours=1)  # the network log only shows the last hour
@@ -66,6 +70,39 @@ LEARN_PATHS_SEC = 30              # how often apps added by name only get their 
 TRACKER_STALE_SEC = 10
 
 log = logging.getLogger("lockdown.service")
+
+
+def _under(host, parent):
+    host = host.lower().rstrip(".").removeprefix("www.")
+    return host == parent or host.endswith("." + parent)
+
+
+def _shared_page(host):
+    return any(_under(host, parent) for parent in SHARED_GOOGLE_PAGES)
+
+
+def _in_scope(host, scope):
+    parts = host.lower().rstrip(".").removeprefix("www.").split(".")
+    return any(".".join(parts[i:]) in scope for i in range(len(parts) - 1))
+
+
+def _saved(db, key):
+    try:
+        value = json.loads(db.get_setting(key, "{}"))
+    except (ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _path_map(value):
+    return {key: firewall.program_path(path) for key, path in value.items()
+            if isinstance(path, str) and ntpath.isabs(path)} if isinstance(value, dict) else {}
+
+
+def _video_map(value):
+    return {ip: name for ip, name in value.items()
+            if isinstance(name, str) and firewall.is_video_host(name)
+            and not connections.is_loopback(ip)} if isinstance(value, dict) else {}
 
 
 def setup_logging():
@@ -90,8 +127,7 @@ class Enforcer:
     count_mark = None      # the mark the service itself wrote last
     kill_failed: frozenset = frozenset()   # pids that couldn't be closed (logged once each)
     count_paths: dict = {}                 # pid -> (exe, lowercase path), for count_unwatched_apps
-    quic: dict = {}                        # browser exe -> path with a "no QUIC" firewall rule (update_quic)
-    video_ips: dict = {}                   # ip -> video host name in the "video hosts" rule (update_video_block)
+    video_ips: dict = {}                   # remembered ip -> media host evidence
     video_seen: dict = {}                  # ip -> video host name of a blocked site, seen since the last update
     net_names: dict = {}                   # ip -> name the network log remembers (NetworkLogger.names, netlog_loop)
     family: dict = {}      # exe -> {pid: (name, start time)} it started from its own folder: they ARE the app
@@ -119,8 +155,14 @@ class Enforcer:
         self.helpers: dict[str, set[int]] = {}     # exe -> pids it started ("also close background processes")
         self.path_cache: dict[int, tuple[str, str]] = {}   # pid -> (exe, lowercase path)
         self.firewalled: dict[str, str] = json.loads(db.get_setting(FIREWALL_KEY, "{}"))
-        self.quic: dict[str, str] = json.loads(db.get_setting(QUIC_KEY, "{}"))
-        self.video_ips: dict[str, str] = json.loads(db.get_setting(VIDEO_KEY, "{}"))
+        self._load_site_transport()
+        self.flush_at, self.flush_delay = None, INTERVAL_SEC
+        self.stop = None
+        self.dns_diagnostics_lock = threading.Lock()
+        self.dns_generation = None
+        self.dns_answers = set()
+        self.policy_reported = False
+        self.cache_status = {}
         self.protection = protection.Protection()   # always-on scam / phishing / malware / adult lists
 
     def update_clock(self) -> datetime:
@@ -170,14 +212,7 @@ class Enforcer:
             log.info("Your blocks are %s", f"paused until {paused:%H:%M}" if paused else "back on")
             self.was_paused = bool(paused)
         all_blocks = [] if off else self.db.blocks(now)
-        blocks, dns_blocks = {}, {}
-        for b in all_blocks:
-            if b["item"]["item_type"] == "site":
-                for h in b["item"]["target"].split():
-                    blocks.setdefault(h, b)
-                    # a site set to "close the tab" only is not sent nowhere - the tray agent acts instead
-                    if site_block.blocks_dns(b["item"].get("block_type")):
-                        dns_blocks.setdefault(h, b)
+        blocks, dns_blocks = self.site_scopes(all_blocks)
         # (by the bare exe name: a target typed as a full path is still that exe - apps.exe_name; two blocks on
         # one exe become one that does what both ask, closing winning - apps.merge_blocks)
         # (a program file - game.jar, a script - is closed or minimised only: apps.hosted_way)
@@ -189,6 +224,7 @@ class Enforcer:
                 b = {**b, "item": {**b["item"], "block_type": way}} if way else None
             if b and exe and exe not in apps.PROTECTED:
                 app_blocks[exe] = apps.merge_blocks(app_blocks.get(exe), b)
+        self.update_dns_scope(blocks, dns_blocks, now)
         self.app_blocks = app_blocks
         # every app on the list, blocked now or not: what it starts is followed all the time (track_families)
         app_items = {exe: b["item"] for exe, b in app_blocks.items()}
@@ -202,159 +238,255 @@ class Enforcer:
             self.learn_paths()
         self.publish_members()
 
-        newly_blocked = sorted(set(dns_blocks) - set(self.dns_blocks))
-        if newly_blocked:
-            # resolve before the hosts file points them at 127.0.0.1
-            for host in newly_blocked:
-                for ip in connections.resolve(hosts.expand([host])):
-                    self.queue_cut(ip, host, now)
-            self.close_cached(newly_blocked, now)
-        self.update_quic(bool(dns_blocks))
-
-        # (the protection lists are not in the hosts file: Windows' DNS client hangs on huge hosts files - they're
-        # blocked by the DNS filter, see dns_loop)
-        if hosts.apply(sorted(dns_blocks)):
-            hosts.flush_dns()
-            log.info("Hosts file updated: %d hostnames blocked", len(dns_blocks))
-            if hosts.repaired:
-                log.warning("The hosts file was edited by something else - Lockdown's entries were put back")
-                applog.record("hosts_repaired", "The hosts file was edited by something else (not by Lockdown): "
-                              "Lockdown's entries were put back", self.db)
-        self.blocks, self.dns_blocks = blocks, dns_blocks
-
-        kw = keywords.settings(self.db)
-        if browser_policy.apply(safe_search=not off and kw["safesearch"], youtube=not off and kw["youtube"]):
-            log.info("Browser policies (re)applied")
-
+        self.update_quic(bool(self.dns_blocks))
+        self.update_hosts()
         self.cut_live_connections(now)
         self.update_video_block()
         self.prune_cuts(now)
         if self.closing:
             closed = connections.close_to(set(self.closing))
             if closed:
-                log.info("Closed %d open connection(s) to blocked sites: %s", len(closed),
-                         ", ".join(f"{ip}:{port}" for ip, port in sorted(closed)))
+                log.info("Site transport IPv4 TCP cut: %d connection(s)", len(closed))
+
+        kw = keywords.settings(self.db)
+        if browser_policy.apply(safe_search=not off and kw["safesearch"], youtube=not off and kw["youtube"]):
+            self.policy_reported = False
+        if not self.policy_reported:
+            log.info("Chrome/Edge/Brave/Firefox browser policies checked in HKLM (effective in-browser status unknown)")
+            self.policy_reported = True
 
         self.db.set_setting(HEARTBEAT_KEY, str(time.time()))
 
+    @staticmethod
+    def site_scopes(all_blocks):
+        blocks, dns_blocks = {}, {}
+        for block in all_blocks:
+            item = block["item"]
+            if item["item_type"] != "site":
+                continue
+            for host in item["target"].split():
+                blocks.setdefault(host, block)
+                if site_block.blocks_dns(item.get("block_type")):
+                    dns_blocks.setdefault(host, block)
+        return blocks, dns_blocks
+
+    def update_dns_scope(self, blocks, dns_blocks, now):
+        previous = self.dns_blocks
+        newly_blocked = sorted(host for host in dns_blocks if not _in_scope(host, previous))
+        receipt = None
+        if newly_blocked:
+            log.info("Site Pause request before DNS/hosts/firewall/TCP cut: %d new host(s)", len(newly_blocked))
+            try:
+                receipt = pause_request.request(newly_blocked, stop=self.stop)
+                log.info("Site Pause generation=%s outcomes=%s before enforcement",
+                         receipt.generation, ",".join(receipt.outcomes))
+            except Exception as error:
+                log.warning("Site Pause request failed (%s). Enforcing the block.", type(error).__name__)
+            try:
+                # An unlock/reset can land during the desktop wait. A rule newly active since
+                # this request will get its own bounded preflight on the next pass.
+                latest = [] if antibypass.is_off(self.db) else self.db.blocks(self.clock.now())
+                latest_blocks, latest_dns = self.site_scopes(latest)
+                blocks = {h: latest_blocks[h] for h in blocks.keys() & latest_blocks.keys()}
+                dns_blocks = {h: latest_dns[h] for h in dns_blocks.keys() & latest_dns.keys()}
+            except Exception:
+                log.exception("Site DNS rules could not be reread after Pause preflight")
+            if new_scope := sorted(set(newly_blocked) & dns_blocks.keys()):
+                self.close_cached(new_scope, now)
+        with self.dns_diagnostics_lock:
+            if previous.keys() != dns_blocks.keys():
+                if self.dns_generation is not None:
+                    log.info("Site DNS generation=%s filter_answered=%s", self.dns_generation,
+                             ",".join(sorted(self.dns_answers)) or "none observed")
+                if not dns_blocks:
+                    self.dns_generation = None
+                elif newly_blocked:
+                    self.dns_generation = receipt.generation if receipt else "unavailable"
+                self.dns_answers.clear()
+                for page, media in MEDIA_PAGES.items():
+                    if any(_under(host, page) for host in dns_blocks):
+                        log.info("Site DNS coverage %s: configured media host %s=%s",
+                                 page, media, _in_scope(media, dns_blocks))
+            self.blocks, self.dns_blocks = blocks, dns_blocks
+
+    def update_hosts(self):
+        if hosts.apply(sorted(self.dns_blocks)):
+            log.info("Hosts file updated: %d hostnames blocked", len(self.dns_blocks))
+            self.flush_at, self.flush_delay = time.monotonic(), INTERVAL_SEC
+            if hosts.repaired:
+                log.warning("The hosts file was edited by something else - Lockdown's entries were put back")
+                applog.record("hosts_repaired", "The hosts file was edited by something else (not by Lockdown): "
+                              "Lockdown's entries were put back", self.db)
+        now = time.monotonic()
+        if self.flush_at is not None and now >= self.flush_at:
+            if hosts.flush_dns() is False:
+                self.flush_at = now + self.flush_delay
+                self.flush_delay = min(30, self.flush_delay * 2)
+            else:
+                self.flush_at = None
+
+    def on_dns_answer(self, host, category):
+        if category != "blocked":
+            return
+        with self.dns_diagnostics_lock:
+            kind = "media" if firewall.is_video_host(host) else "site"
+            if (_in_scope(host, self.dns_blocks) and self.dns_generation is not None
+                    and kind not in self.dns_answers):
+                self.dns_answers.add(kind)
+                log.info("Site DNS generation=%s filter_answered=%s", self.dns_generation, kind)
+
     def blocked_name(self, host: str) -> str | None:
-        """What the DNS filter asks about every lookup: a site you blocked - the name itself or anything under
-        it, which is how googlevideo.com covers rr1---sn-xxxx.googlevideo.com - or a protection list.
-        Called from the filter's threads; self.dns_blocks is replaced whole, never edited in place."""
-        if self.was_off:      # switched off: the filter still runs, it just blocks nothing at all
+        """Called by DNS threads. The entire personal DNS scope is published in one assignment."""
+        if self.was_off:
             return None
         host = host.lower().rstrip(".").removeprefix("www.")
-        blocks = self.dns_blocks
-        if blocks:
-            parts = host.split(".")
-            for i in range(len(parts) - 1):
-                if ".".join(parts[i:]) in blocks:
-                    return "blocked"
-        return self.protection.which(host)
+        return "blocked" if _in_scope(host, self.dns_blocks) else self.protection.which(host)
 
     def queue_cut(self, ip: str, host: str, now: datetime):
+        # SetTcpEntry is IPv4-only. Shared page endpoints can also handle Google Search and Gmail.
+        if ":" in ip or connections.is_loopback(ip) or _shared_page(host):
+            return
         self.closing[ip] = now + CLOSE_CONNECTIONS_FOR
         if "closing_hosts" not in self.__dict__:
             self.closing_hosts = {}
         self.closing_hosts.setdefault(ip, set()).add(host)
 
     def prune_cuts(self, now: datetime):
-        """An unlock releases queued cuts immediately; a shared IP stays cut for any still-blocked host."""
-        sources = getattr(self, "closing_hosts", {})
-        self.closing_hosts = {ip: {h for h in sources.get(ip, ()) if self.blocked_name(h)}
+        """An unlock releases queued cuts for that host even if another site stays blocked."""
+        self.closing_hosts = {ip: {h for h in getattr(self, "closing_hosts", {}).get(ip, ())
+                                  if _in_scope(h, self.dns_blocks)}
                               for ip, until in self.closing.items() if until > now}
         self.closing_hosts = {ip: names for ip, names in self.closing_hosts.items() if names}
         self.closing = {ip: until for ip, until in self.closing.items() if ip in self.closing_hosts}
 
-    def cut_live_connections(self, now: datetime):
-        """A page that is already open keeps streaming over the connection it has, whatever the hosts file
-        says. Anything open to a blocked name (by the name the app actually looked up) gets cut."""
-        if not self.dns_blocks:
-            return
+    def _discover_endpoints(self, scope, now, phase):
         try:
             names = netlog.dns_names()
-        except OSError:
-            return
-        for ip, name in names.items():
-            # Windows loads the hosts file into its DNS cache, and this reads that cache back - so every name
-            # we blocked answers 127.0.0.1 here. Taking that at face value put loopback on the kill list and
-            # cut every local socket on the machine every couple of seconds.
-            if self.blocked_name(name) and not connections.is_loopback(ip):
-                self.queue_cut(ip, name, now)
-                self.note_video(ip, name)
+        except OSError as error:
+            names = {}
+            status = f"cache_read_exception:{type(error).__name__}"
+        else:
+            matching = [ip for ip, name in names.items() if _in_scope(name, scope)]
+            status = ("no_results" if not matching else "loopback_only" if
+                      all(connections.is_loopback(ip) for ip in matching) else "addresses_found")
+        cache_status = self.__dict__.setdefault("cache_status", {})
+        if phase == "before_flush" or cache_status.get(phase) != status:
+            log.info("Site DNS endpoint discovery %s: %s", phase, status)
+            cache_status[phase] = status
 
-    def close_cached(self, hostnames: list[str], now: datetime):
-        """The addresses this PC itself looked the newly blocked names up as - read from the DNS cache BEFORE the
-        hosts file is rewritten and the cache flushed. cut_live_connections reads the cache only after the flush,
-        when the names it holds answer 127.0.0.1, so the open video stream (rr1---sn-....googlevideo.com - a name
-        nobody can resolve in advance) was never on the list and an open YouTube page played on."""
-        try:
-            names = netlog.dns_names()
-        except OSError:
-            return
-        # a video playing for a while may have left the DNS cache (its time ran out, or another block's flush)
-        # while its stream stays open: the network log still knows its host (copied: it grows on its own thread)
-        for ip, name in dict(self.net_names).items():
-            if firewall.is_video_host(name):
-                names.setdefault(ip, name)
-        wanted = set(hostnames)
-        for ip, name in names.items():
-            parts = name.lower().rstrip(".").removeprefix("www.").split(".")
-            if any(".".join(parts[i:]) in wanted for i in range(len(parts) - 1)) and not connections.is_loopback(ip):
-                self.queue_cut(ip, name, now)
+        aliases = getattr(names, "aliases", None)
+        if aliases is None:
+            aliases = {ip: (name,) for ip, name in names.items()}
+        # Only the dedicated CDN names from the logger survive a DNS cache miss.
+        remembered = {ip: name for ip, name in self.net_names.items() if firewall.is_video_host(name)}
+        evidence = {**remembered, **names}
+        unsafe = self.__dict__.setdefault("unsafe_video_ips", set())
+        current_scope = self.dns_blocks.keys() | scope if hasattr(self, "dns_blocks") else scope
+        for ip, name in evidence.items():
+            if connections.is_loopback(ip):
+                continue
+            others = aliases.get(ip, ()) or (name,)
+            in_scope = _in_scope(name, scope)
+            video = firewall.is_video_host(name)
+            was_video = ip in self.video_ips or ip in self.video_seen or ip in remembered
+            if (any(_shared_page(alias) for alias in others)
+                    or (was_video or video) and any(not firewall.is_video_host(alias) for alias in others)):
+                if was_video or (in_scope and video):
+                    unsafe.add(ip)
+                self.closing.pop(ip, None)
+                continue
+            if ip in unsafe or not in_scope:
+                continue
+            if video:
                 self.note_video(ip, name)
+            elif any(not _in_scope(alias, current_scope) for alias in others):
+                self.closing.pop(ip, None)
+                continue
+            self.queue_cut(ip, name, now)
+
+        return aliases
+
+    def cut_live_connections(self, now: datetime):
+        if self.dns_blocks:
+            self._discover_endpoints(self.dns_blocks.keys(), now, "live")
+
+    def close_cached(self, hostnames, now: datetime):
+        scope = set(hostnames)
+        aliases = self._discover_endpoints(scope, now, "before_flush")
+        # Ordinary IPv4 connections can outlive the cache entry. Give direct DNS
+        # one budget across the new sites and keep shared page and CDN IPs out.
+        if sys.platform != "win32":
+            return
+        deadline = time.monotonic() + ENDPOINT_LOOKUP_SEC
+        current_scope = self.dns_blocks.keys() | scope
+        for host in sorted(scope):
+            if time.monotonic() >= deadline:
+                break
+            if firewall.is_video_host(host) or _shared_page(host):
+                continue
+            try:
+                ips = connections.resolve(hosts.expand([host]), deadline=deadline)
+            except OSError as error:
+                log.warning("Site DNS direct lookup failed: %s", type(error).__name__)
+                break
+            for ip in ips:
+                if ip not in self.unsafe_video_ips and all(
+                        not _shared_page(name) and _in_scope(name, current_scope) for name in aliases.get(ip, ())):
+                    self.queue_cut(ip, host, now)
 
     def note_video(self, ip: str, name: str):
-        if firewall.is_video_host(name):
+        if firewall.is_video_host(name) and not connections.is_loopback(ip):
             self.video_seen = {**self.video_seen, ip: name.lower().rstrip(".")}
 
+    def _load_site_transport(self):
+        quic = _saved(self.db, QUIC_KEY)
+        self.quic_legacy = _path_map(quic.get("legacy", {}) if "paths" in quic else quic)
+        self.quic_paths = set(_path_map(quic.get("paths", {})).values()) | set(self.quic_legacy.values())
+        video = _saved(self.db, VIDEO_KEY)
+        self.video_ips = _video_map(video.get("addresses", {}) if "addresses" in video else video)
+        self.video_legacy = _video_map(video.get("legacy", {}) if "addresses" in video else video)
+        self.quic_state = firewall.SiteRules("quic")
+        self.video_state = firewall.SiteRules("video")
+
+    def _save_site_state(self, key, state):
+        saved = json.dumps(state, sort_keys=True) if any(state.values()) else "{}"
+        if self.db.get_setting(key, "{}") != saved:
+            self.db.set_setting(key, saved)
+
     def update_video_block(self):
-        """Firewall the addresses of a blocked site's video hosts (rr1---sn-....googlevideo.com), IPv4 and IPv6,
-        for as long as the site stays blocked. Cutting the connections every 2 s didn't stop a video that was
-        already playing (0.84.9): the hosts file can't list the video hosts (each video has its own random
-        name), the browser keeps its own DNS cache for about a minute and reconnects at once, and an IPv6
-        connection can't be cut at all. Only video hosts: youtube.com's own addresses are Google search's and
-        Gmail's too. The addresses come from this PC's DNS cache (close_cached before the flush,
-        cut_live_connections after it); one whose site is no longer blocked leaves the rule, and the rule goes
-        when none is left."""
+        """Retain CDN evidence until the matching effective DNS rule lifts."""
         seen, self.video_seen = self.video_seen, {}
+        unsafe = getattr(self, "unsafe_video_ips", set())
         wanted = {ip: name for ip, name in {**self.video_ips, **seen}.items()
-                  if self.blocked_name(name) == "blocked" and not connections.is_loopback(ip)}
-        wanted = dict(list(wanted.items())[-VIDEO_MAX:])
-        if wanted == self.video_ips:
-            return
-        self.db.set_setting(VIDEO_KEY, json.dumps(wanted))   # (a restart rebuilds the rule from it - main)
-        self.video_ips = wanted
-        if not wanted:
-            firewall.remove_video_block()
-            log.info("Video hosts no longer firewalled")
-        elif firewall.set_video_block(sorted(wanted)):
-            log.info("Video hosts firewalled while blocked: %d address(es)", len(wanted))
-        else:
-            log.warning("Couldn't add the firewall rule for video hosts")
+                  if ip not in unsafe and _in_scope(name, self.dns_blocks)}
+        self.video_ips = dict(list(wanted.items())[-VIDEO_MAX:])
+        # Evidence is safe to persist before native application, including after a failed add.
+        self._save_site_state(VIDEO_KEY, {"addresses": self.video_ips, "legacy": self.video_legacy})
+        legacy = {firewall.VIDEO_RULE: firewall.video_rule(self.video_legacy)} if self.video_legacy else {}
+        self.video_state.reconcile([firewall.video_rule(self.video_ips)] if self.video_ips else [],
+                                   legacy, time.monotonic(), unsafe=unsafe)
+        if not self.dns_blocks:
+            unsafe.clear()
+        if legacy and self.video_state.confirmed_absent(firewall.VIDEO_RULE):
+            self.video_legacy = {}
+            self._save_site_state(VIDEO_KEY, {"addresses": self.video_ips, "legacy": {}})
 
     def update_quic(self, active: bool):
-        """While any site is sent nowhere, browsers may not use QUIC (HTTP/3 over UDP 443): a firewall rule per
-        browser. A QUIC connection can't be cut from outside like a TCP one, so a page open when its block
-        began kept streaming over it - the QuicAllowed policy only covers Chrome and Edge, and only after a
-        restart. Browsers fall back to TCP at once, which the service can cut. Removed when no site is blocked."""
+        """Deny UDP 443 by validated executable path, including simultaneous installs of a product."""
+        wanted = set()
         if active:
-            wanted = dict(self.quic)
-            for pid, name in apps.list_processes():
-                if name in firewall.BROWSERS and name not in wanted and (path := apps.process_path(pid)):
-                    wanted[name] = path
-        else:
-            wanted = {}
-        if wanted == self.quic:
-            return
-        for exe in set(self.quic) - set(wanted):
-            firewall.remove_quic(exe)
-        for exe, path in wanted.items():
-            if self.quic.get(exe) != path:
-                firewall.add_quic(exe, path)
-                log.info("QUIC (UDP 443) blocked for %s while sites are blocked", exe)
-        self.quic = wanted
-        self.db.set_setting(QUIC_KEY, json.dumps(wanted))
+            candidates = {(ntpath.basename(path), path) for path in self.quic_paths if apps.is_file(path)}
+            candidates.update((exe, path) for pid, exe in apps.list_processes() if (path := apps.process_path(pid)))
+            if candidates:
+                from monitor import browser_catalog
+                wanted = {firewall.program_path(path) for exe, path in candidates
+                          if ntpath.isabs(path) and browser_catalog.identify(exe, path)}
+        legacy = {firewall.QUIC_PREFIX + exe: firewall.quic_rule(path) for exe, path in self.quic_legacy.items()}
+        self.quic_state.reconcile([firewall.quic_rule(path) for path in wanted], legacy, time.monotonic())
+        self.quic_paths = wanted
+        self.quic_legacy = {exe: path for exe, path in self.quic_legacy.items()
+                            if not self.quic_state.confirmed_absent(firewall.QUIC_PREFIX + exe)}
+        self._save_site_state(QUIC_KEY, {"paths": {path: path for path in sorted(wanted)}, "legacy": self.quic_legacy})
 
     def on_visit(self, hostname: str):
         """Called by listener threads when a browser tries to open a blocked hostname."""
@@ -381,60 +513,9 @@ class Enforcer:
     # ---------- counting app time when the tray app doesn't ----------
 
     def count_unwatched_apps(self, now: datetime):
-        """Backstop for the tray app's usage tracker. Only the tray can see which window is in front, so it does
-        the counting - but when it isn't running, has frozen, or its tracker has stalled, nothing was counted
-        at all: a daily limit never filled and the "N minutes allowed during blocked hours" never ran out, so
-        the game played on for hours outside its allowed time. Now, once nothing has been counted for
-        TRACKER_STALE_SEC, the service counts every listed app that is running (its own exe, what it started, or
-        any program from its game folder), the category blockers those apps belong to (one pot per category, as
-        the tray counts it), and app launches for opening limits - erring on the side of counting, never of
-        losing time. Both write the same mark (COUNTED_KEY), so a stretch is counted by one of them, not by both
-        and not by neither."""
-        now_ts = now.timestamp()
-        try:
-            mark = float(self.db.get_setting(COUNTED_KEY) or 0)
-        except ValueError:
-            mark = 0.0
-        gap = now_ts - mark
-        if mark and abs(gap) <= TRACKER_STALE_SEC:   # counted a moment ago (by the tray, or by us)
-            if self.counting and mark != self.count_mark:
-                log.info("The tray app is counting usage again")
-                self.counting = False
-                self.count_running = None
-            return
-        if not self.counting:
-            log.warning("The tray app isn't counting usage - the service counts running blocked apps instead")
-            self.counting = True
-        total = (min(gap, MAX_GAP_SEC) if mark and gap > 0 else INTERVAL_SEC) + self.count_carry
-        seconds = int(total)
-        self.count_carry = total - seconds
-        procs = apps.list_processes_full()
-        alive = {pid for pid, _ppid, _name in procs}
-        self.count_paths = {pid: v for pid, v in self.count_paths.items() if pid in alive}
-        running = {name for _pid, _ppid, name in procs}
-        running |= {file for pid, file in self.hosted.items() if pid in alive}   # (a Java game, a script)
-        launched = running - self.count_running if self.count_running is not None else set()
-        self.count_running = running
-        members = {exe for pid, exes in self.members.items() if pid in alive for exe in exes}
-        groups, clock, categories = self.db.list_groups(), self.db.limit_clock(), self.db.categories()
-        items = self.db.list_items()
-        used = []
-        for item in items:
-            if item["item_type"] != "app":
-                continue
-            rules = counted_rules(item, groups)
-            if apps.names_of(item["target"]) & launched:   # opening limits ("launches")
-                self.db.add_usage(visit_targets(rules, item, now, True, None, clock), 1, now.date())
-            if apps.exe_name(item["target"]) in members or self._running(item, running, procs):
-                used.append(item)
-        # category blockers: the categories of the listed apps that run, and of any running program you put in one
-        cats = {modes.item_category(i, categories) for i in used}
-        cats |= {cat for (kind, name), cat in categories.items() if kind == "app" and name in running}
-        used += [i for i in items if i["item_type"] == "category" and modes.category_keys({i["target"]}) & cats]
-        for item in used:
-            self.db.add_usage(usage_targets(counted_rules(item, groups), item["id"], now, clock), seconds, now.date())
-        self.db.set_setting(COUNTED_KEY, f"{now_ts:.3f}")
-        self.count_mark = float(f"{now_ts:.3f}")
+        """Run the shared service quota accounting at its existing point in the pass."""
+        from quota_accounting import count_unwatched_apps
+        return count_unwatched_apps(self, now)
 
     def _running(self, item: dict, running: set[str], procs) -> bool:
         """Is the app running: its exe (bare name, any case; Unreal's Shipping exe too - apps.names_of), or a
@@ -772,7 +853,10 @@ class NetworkLogger:
         exe_by_pid = dict(apps.list_processes())
         self.procs = {pid: v for pid, v in self.procs.items() if pid in exe_by_pid}
         if any(ip not in self.names and not netlog.is_local(ip) for _, ip, _, _ in new):
-            self.names.update(netlog.dns_names())
+            try:
+                self.names = {**self.names, **netlog.dns_names()}
+            except OSError as error:
+                log.warning("Network log DNS cache read failed (%s). Using remembered names.", type(error).__name__)
             if len(self.names) > 20000:
                 self.names = dict(list(self.names.items())[-10000:])
         rows: dict[tuple, dict] = {}
@@ -808,43 +892,65 @@ def filter_wanted(enforcer: Enforcer, safe: dict) -> bool:
                                         or enforcer.dns_blocks)
 
 
-def dns_loop(enforcer: Enforcer):
-    """DNS filter for the protection lists: keep the lists loaded (a big list takes a few seconds, so not in the
-    2-second loop) and the network adapters pointed at the filter; restore them if every list is off."""
+def dns_loop(enforcer: Enforcer, stop=None):
+    """Keep protection loaded and configure adapters only after all DNS sockets bind."""
     db = Database()
-    safe = {"search": False, "youtube": False}   # forced SafeSearch / YouTube Restricted (Protection tab), read every 2 s
-    server = dnsfilter.Server(enforcer.blocked_name, log,
-                              safe=lambda name: keywords.safe_target(name, safe["search"], safe["youtube"]))
+    safe = {"search": False, "youtube": False}
+    server = None
+    retry_at, retry_delay = float("-inf"), INTERVAL_SEC
+    next_adapters = float("-inf")
     try:
-        server.start()
-    except OSError as e:   # port 53 taken by another program: never point Windows at a filter that isn't there
-        log.error("DNS filter couldn't start (%s) - protection lists are not enforced", e)
-        dnsfilter.restore(db, log)
-        return
-    last_adapters = 0.0
-    while True:
-        try:
-            cfg = protection.settings(db)
-            if enforcer.protection.refresh(cfg):
-                log.info("Protection lists loaded: %d domains", enforcer.protection.count())
-                hosts.flush_dns()   # a site you just allowed would otherwise stay blocked in the DNS cache
-            kw = keywords.settings(db)
-            off = antibypass.is_off(db)
-            safe["search"], safe["youtube"] = not off and kw["safesearch"], not off and kw["youtube"]
-            if time.monotonic() - last_adapters >= DNS_ADAPTER_CHECK_SEC:
-                last_adapters = time.monotonic()
-                if filter_wanted(enforcer, safe):
-                    server.upstreams = dnsfilter.point_to_filter(db, log)
-                elif db.get_setting(dnsfilter.SAVED_KEY, "{}") != "{}":
-                    dnsfilter.restore(db, log)
-        except Exception:
-            log.exception("DNS filter upkeep failed")
-        time.sleep(INTERVAL_SEC)
+        while not (stop and stop.is_set()):
+            try:
+                cfg = protection.settings(db)
+                if enforcer.protection.refresh(cfg):
+                    log.info("Protection lists loaded: %d domains", enforcer.protection.count())
+                    if hosts.flush_dns() is False:
+                        log.warning("DNS filter: Windows may still hold cached protection-list answers")
+                kw = keywords.settings(db)
+                off = antibypass.is_off(db)
+                safe["search"], safe["youtube"] = not off and kw["safesearch"], not off and kw["youtube"]
+                now = time.monotonic()
+                if server is None and now >= retry_at:
+                    candidate = dnsfilter.Server(enforcer.blocked_name, log,
+                                                  safe=lambda name: keywords.safe_target(name, safe["search"],
+                                                                                         safe["youtube"]))
+                    candidate.on_block = enforcer.on_dns_answer
+                    try:
+                        candidate.start()
+                    except OSError as error:
+                        candidate.close()
+                        retry_at = now + retry_delay
+                        retry_delay = min(30, retry_delay * 2)
+                        log.error("DNS filter bind failed (%s). Restoring adapter DNS before retry.",
+                                  type(error).__name__)
+                        dnsfilter.restore(db, log)
+                    else:
+                        server = candidate
+                        log.info("DNS filter listening on IPv4 and IPv6 loopback")
+                if server is not None and now >= next_adapters:
+                    next_adapters = now + DNS_ADAPTER_CHECK_SEC
+                    if filter_wanted(enforcer, safe):
+                        server.upstreams = dnsfilter.point_to_filter(db, log,
+                                                                     lambda value: setattr(server, "upstreams", value))
+                        if not server.upstreams:
+                            log.warning("DNS filter has no usable adapter upstreams")
+                    elif db.get_setting(dnsfilter.SAVED_KEY, "{}") != "{}":
+                        dnsfilter.restore(db, log)
+            except Exception:
+                log.exception("DNS filter adapter configuration/upkeep failed")
+            (stop.wait if stop else time.sleep)(INTERVAL_SEC)
+    finally:
+        if server and stop is not None:
+            try:
+                dnsfilter.restore(db, log)
+            finally:
+                server.close()
+        db.close()
 
 
 def netlog_loop(enforcer: Enforcer):
     logger = NetworkLogger(Database(), enforcer.clock.now)
-    enforcer.net_names = logger.names   # (replaced whole when trimmed - handed over again after each tick)
     while True:
         try:
             logger.tick()
@@ -884,13 +990,16 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
         for exe in json.loads(db.get_setting(FIREWALL_KEY, "{}")):
             firewall.remove(exe)
         db.set_setting(FIREWALL_KEY, "{}")
-        for exe in json.loads(db.get_setting(QUIC_KEY, "{}")):
-            firewall.remove_quic(exe)
-        db.set_setting(QUIC_KEY, "{}")
-        firewall.remove_video_block()
-        db.set_setting(VIDEO_KEY, "{}")
+        enforcer = Enforcer(db)
+        enforcer.update_quic(False)
+        enforcer.update_video_block()
+        pending = enforcer.quic_state.pending_removal | enforcer.video_state.pending_removal
+        incomplete = pending or not (enforcer.quic_state.verified and enforcer.video_state.verified)
         hosts.apply([])   # (the Lockdown section of the hosts file goes too)
-        hosts.flush_dns()
+        flushed = hosts.flush_dns()
+        if incomplete or flushed is False:
+            log.warning("Policy teardown incomplete. See site firewall and DNS flush diagnostics.")
+            return 1
         log.info("Browser policies, firewall rules, DNS filter and hosts-file entries removed")
         return 0
     enforcer = Enforcer(Database())
@@ -905,16 +1014,12 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
     beat = enforcer.db.get_setting(HEARTBEAT_KEY)
     applog.process_started(enforcer.db, VERSION, extra=(f"last seen alive {datetime.fromtimestamp(float(beat)):%Y-%m-%d %H:%M}"
                                                         if beat and beat.replace('.', '', 1).isdigit() else ""))
-    # the video hosts rule is built again on the first pass from the addresses saved, those still blocked only:
-    # one left in place by a crash, or never added, can't outlast its block
-    firewall.remove_video_block()
-    enforcer.video_seen, enforcer.video_ips = enforcer.video_ips, {}
     BlockListener(enforcer.on_visit, log).start()
     threading.Thread(target=app_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=netlog_loop, args=(enforcer,), daemon=True).start()
     threading.Thread(target=protection_loop, args=(enforcer,), daemon=True).start()
-    threading.Thread(target=dns_loop, args=(enforcer,), daemon=True).start()
-    stop = stop or threading.Event()
+    stop = enforcer.stop = stop or threading.Event()
+    dns_thread = threading.Thread(target=dns_loop, args=(enforcer, stop), daemon=True)
     wake = enforcement_wake.Wake()
     try:
         while not stop.is_set():
@@ -922,8 +1027,13 @@ def main(argv: list[str] | None = None, stop: threading.Event | None = None):
                 enforcer.enforce_once()
             except Exception:
                 log.exception("Enforcement pass failed")
+            if not dns_thread.is_alive() and dns_thread.ident is None:
+                dns_thread.start()
             wake.wait(stop, INTERVAL_SEC)
     finally:
+        stop.set()
+        if dns_thread.is_alive():
+            dns_thread.join(timeout=2)
         wake.close()
     log.info("Service stopped")
     applog.process_stopped(enforcer.db)

@@ -25,6 +25,12 @@ export const events = ["status"];
 export const THEME_CHOICES = [["dark", "Dark"], ["amoled", "AMOLED"], ["light", "Light"], ["system", "System"]];
 export const SCALE_CHOICES = [["auto", "Auto"], ["100", "100%"], ["90", "90%"], ["80", "80%"], ["70", "70%"]];
 export const PER_CHOICES = [["day", "per day"], ["week", "per week"], ["month", "per month"]];
+export const SITE_MINIMIZE_INTERVALS = Array.from({ length: 9 }, (_, i) => i + 2);
+
+export function siteMinimizeSeconds(value) {
+  const seconds = Number(value);
+  return SITE_MINIMIZE_INTERVALS.includes(seconds) ? seconds : null;
+}
 
 // ---------------------------------------------------------------- plain helpers (node tests)
 
@@ -127,6 +133,15 @@ function resetCard() {
     </div></section>`;
 }
 
+function blockBehaviorCard() {
+  const label = "Check minimized-site rules every";
+  return `<section class="card" data-card="block-behavior">
+    <header class="card-h">${kic("k-block", "ban")}<h3>Block behavior</h3></header>
+    <div class="card-b" style="padding:0">
+      ${field(label, "A longer interval needs the Anti-Bypass challenge.", sel("site-minimize", label))}
+    </div></section>`;
+}
+
 function categoriesCard() {
   return `<section class="card" data-card="cats">
     <header class="card-h">${kic("k-protect", "layers")}<h3>Categories</h3><button class="btn btn-sm" type="button" data-act="cats">Manage categories…</button></header>
@@ -175,7 +190,7 @@ export function mount(host, p) {
   host.innerHTML = `${STYLE}<div class="page set"><div class="page-h"><h1>Settings</h1></div>
     <div class="banner k-block set-lock" data-k="lock" hidden>${ic("shield-check")}<span class="grow"><b>Locked</b> <span class="muted"></span></span><button class="btn btn-sm btn-primary" type="button" data-act="unlock">Unlock to edit</button></div>
     <div class="grid-2"><div class="stack">${appearanceCard()}${resetCard()}${categoriesCard()}</div>
-      <div class="stack">${emergencyCard()}${backupCard()}</div></div>${appLogCard()}</div>`;
+      <div class="stack">${blockBehaviorCard()}${emergencyCard()}${backupCard()}</div></div>${appLogCard()}</div>`;
   root = host;
   mountAppLog(host);
   q("reset-slot").replaceWith(confirmButton({ label: "Change", confirmLabel: "Confirm change", onConfirm: changeReset, cls: "btn btn-sm", ms: 4000 }));
@@ -323,6 +338,7 @@ function fill(d) {
   data = d;
   fillLook(d);
   fillReset(d.reset);
+  setOptions(q("site-minimize"), SITE_MINIMIZE_INTERVALS.map((s) => [s, `${s} seconds`]), d.site_minimize_interval);
   renderCategories(d.categories);
   fillEmergency(d.emergency);
   built = true;
@@ -386,6 +402,17 @@ async function setGoal(hours) {
     toast((err && err.message) || "That didn't work.");
     page.reload();
   }
+}
+
+async function setSiteMinimizeInterval(value) {
+  try {
+    const seconds = siteMinimizeSeconds(value);
+    if (seconds === null) throw new Error("Pick 2 to 10 whole seconds.");
+    await guarded(ld.call("set_site_minimize_interval", seconds));
+  } catch (err) {
+    toast((err && err.message) || "That didn't work.");
+  }
+  page.reload();
 }
 
 // ---------------------------------------------------------------- when limits reset
@@ -525,6 +552,7 @@ function onChange(e) {
   if (k === "goal") return setGoal(Number(t.value));
   if (k === "motion") return setMotion(t.checked);
   if (k === "icons") return setIcons(t.checked);
+  if (k === "site-minimize") return setSiteMinimizeInterval(t.value);
   if (k === "accent-input") return lookChange({ accent: t.value });
   if (k === "em-on" || (k && k.startsWith("k-"))) return saveCurrent();
 }

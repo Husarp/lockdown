@@ -3,7 +3,6 @@ package com.husarp.lockdown.data
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -11,7 +10,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import com.husarp.lockdown.block.Enforce
+import com.husarp.lockdown.engine.BlockPause
 import com.husarp.lockdown.engine.Mode
+import com.husarp.lockdown.engine.Pause
+import com.husarp.lockdown.guard.TrustedTime
+import java.time.LocalDateTime
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.Executors
@@ -31,11 +35,20 @@ object Store {
     private var unreadableSource: File? = null
     fun clearError() { _error.value = null }
 
-    fun init(ctx: Context) = init(File(ctx.filesDir, "config.json"))
+    @Volatile var quotaPauses: List<BlockPause> = emptyList()
+        private set
+    private var trustedNow: () -> LocalDateTime = LocalDateTime::now
+
+    fun init(ctx: Context) {
+        init(File(ctx.filesDir, "config.json"))
+        trustedNow = { Enforce.ldt(TrustedTime.now(ctx.applicationContext)) }
+    }
 
     /** File overload also keeps recovery and I/O tests independent of Android. */
     internal fun init(configFile: File) {
         file = configFile
+        trustedNow = LocalDateTime::now
+        quotaPauses = emptyList()
         unreadableSource = null
         _state.value = Config()
         _error.value = null
@@ -46,7 +59,11 @@ object Store {
             return
         }
         runCatching {
-            val read = json.decodeFromString<Config>(file.readText())
+            val live = json.parseToJsonElement(file.readText()) as JsonObject
+            val read = json.decodeFromJsonElement<Config>(live)
+            quotaPauses = live[QUOTA_PAUSES]?.let { value ->
+                runCatching { json.decodeFromJsonElement<List<BlockPause>>(value) }.getOrNull()
+            }.orEmpty()
             val c = ImportedSites.migrate(read)
             _state.value = c
             if (c !== read) persist()
@@ -70,7 +87,14 @@ object Store {
 
     /** Change the config and persist it. Atomic: the UI and the VPN thread can't overwrite each other's change. */
     fun update(block: (Config) -> Config) {
-        synchronized(diskLock) { _state.updateAndGet(block); persist() }
+        synchronized(diskLock) {
+            val updated = block(_state.value)
+            if (updated.pause != _state.value.pause) updatePersisted { updated }
+            else {
+                _state.value = updated
+                persist()
+            }
+        }
     }
 
     private fun persist() {
@@ -105,16 +129,28 @@ object Store {
         return backup.name
     }
 
-    internal fun writeConfig(target: File, config: Config) {
+    private fun encodeLive(config: Config, pauses: List<BlockPause>): String {
+        val encoded = json.encodeToString(config)
+        if (pauses.isEmpty()) return encoded
+        return encoded.dropLast(1) + ",\"$QUOTA_PAUSES\":" + json.encodeToString(pauses) + "}"
+    }
+
+    internal fun writeConfig(target: File, config: Config, pauses: List<BlockPause> = quotaPauses) {
         keepUnreadable()
-        FileWrites.replace(listOf(target to json.encodeToString(config)))
+        FileWrites.replace(listOf(target to encodeLive(config, pauses)))
     }
 
     /** A helper acknowledges only after the replacement reaches disk; failures keep the previous live rules. */
-    internal fun updatePersisted(block: (Config) -> Config): Boolean = synchronized(diskLock) {
+    internal fun updatePersisted(pauseHistory: List<BlockPause>? = null, at: LocalDateTime? = null,
+                                 block: (Config) -> Config): Boolean = synchronized(diskLock) {
         runCatching {
-            val updated = block(_state.value)
-            writeConfig(file, updated)
+            val before = _state.value
+            val updated = block(before)
+            val next = pauseHistory?.filter { Pause.interval(it) != null } ?: if (before.pause != updated.pause) {
+                Pause.remember(quotaPauses, before.pause, at ?: Pause.interval(updated.pause)?.first ?: trustedNow())
+            } else quotaPauses
+            writeConfig(file, updated, next)
+            quotaPauses = next
             _state.value = updated
             _error.value = null
             true
@@ -131,7 +167,7 @@ object Store {
         runCatching {
             keepUnreadable()
             val modeWrite = modes?.let { ModesStore.stageModes(it) }
-            FileWrites.replace(listOfNotNull(modeWrite, file to json.encodeToString(imported)))
+            FileWrites.replace(listOfNotNull(modeWrite, file to encodeLive(imported, quotaPauses)))
             if (modes != null) ModesStore.publishModes(modes)
             _state.value = imported
             _error.value = null
@@ -159,4 +195,7 @@ object Store {
         }
 
     val config get() = _state.value
+
+    // A private field in the live file. Config and its portable backups deliberately cannot decode it.
+    private const val QUOTA_PAUSES = "_quotaPauses"
 }

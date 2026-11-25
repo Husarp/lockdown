@@ -77,7 +77,8 @@ class Corner:
             self._cards.append(card)
         self._changed()
 
-    def notice(self, message: str, actions=(), sticky: bool = False, *, key: str | None = None) -> str:
+    def notice(self, message: str, actions=(), sticky: bool = False, *, key: str | None = None,
+               warning=False) -> str:
         """An in-app notice. `actions`: [(label, callback)]; sticky = only its buttons and the ✕ close it."""
         actions = list(actions)[:MAX_BUTTONS]
         key = key or f"notice:{next(self._ids)}"
@@ -89,8 +90,19 @@ class Corner:
             self._drop(key)
             self._cards.append(card)
             self._meta[key] = {"callbacks": [fn for _label, fn in actions]}
-        self._changed()
+        self._changed(warning=warning)
         return key
+
+    def warning(self, message: str) -> bool:
+        if not self._page_ok or self.host is None:
+            return False
+        key = "notice:warnings"
+        try:
+            self.notice(" • ".join(message.splitlines()), key=key, warning=True)
+        except Exception:
+            self.remove(key)
+            raise
+        return True
 
     def remove(self, key: str) -> bool:
         with self._lock:
@@ -119,13 +131,13 @@ class Corner:
         with self._lock:
             return {"seq": self._seq, "cards": [dict(c) for c in self._cards]}
 
-    def _changed(self):
+    def _changed(self, *, warning=False):
         with self._lock:
             self._seq += 1
             payload = {"seq": self._seq, "cards": [dict(c) for c in self._cards]}
         if self.publisher is not None:
             self.publisher.publish("corner", payload)
-        self._sync_host()
+        self._sync_host(warning=warning)
 
     @property
     def page_ok(self) -> bool:
@@ -139,18 +151,21 @@ class Corner:
         self._page_ok = True
         self._sync_host()
 
-    def _sync_host(self):
+    def _sync_host(self, *, warning=False):
         """Show the window when there are cards, hide it when there are none (self-correcting: it looks at the cards as
         they are NOW, so two threads racing here still end right). Never before the page is ready."""
         if self.host is None:
             return
         with self._host_lock:
             wanted = bool(self._cards)
-            if wanted and not self._shown:
+            if wanted and (warning or not self._shown):
                 if not self._page_ok:
                     return
-                self._shown = True
-                self._guard(self.host.show)
+                if warning:
+                    getattr(self.host, "show_warning", self.host.show)()
+                    self._shown = True
+                else:
+                    self._shown = self._guard(self.host.show)
             elif not wanted and self._shown:
                 self._shown = False
                 self.height = 0
@@ -159,8 +174,10 @@ class Corner:
     def _guard(self, fn, *args):
         try:
             fn(*args)
+            return True
         except Exception as error:      # a window glitch must never stop a reminder
             self.log(f"corner window: {error}")
+            return False
 
     def ready(self) -> dict:
         """What the page asks for when it has loaded: the cards as they are now (it may have missed a push)."""
@@ -212,7 +229,6 @@ def _spawn(fn):
 
 # ====================================================================== the window (Windows only, thin glue)
 
-TITLE = "Lockdown notices"
 WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, GWL_EXSTYLE = 0x08000000, 0x80, 0x40000, -20
 HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE = -1, 0x10, 0x40, 0, 4
 
@@ -245,6 +261,15 @@ def foreground_work_area():
     return None
 
 
+def window_hwnd(window):
+    """Read the existing WinForms handle without creating a window."""
+    if sys.platform == "win32":
+        native = getattr(window, "native", None)
+        if native is not None and native.IsHandleCreated:
+            return native.Handle.ToInt64()
+    return 0
+
+
 class CornerHost:
     """Shows / hides / places the pywebview window `window` ("Lockdown notices"). With Win32 it is placed with
     SWP_NOACTIVATE and WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW (never takes the focus, no taskbar button); without it
@@ -260,6 +285,10 @@ class CornerHost:
         self.work = self._work_area() or self.work       # the monitor with the window in front, as it is now
         self._put()
 
+    def show_warning(self):
+        self.work = self._work_area() or self.work
+        self._put(require_native=sys.platform == "win32")
+
     def place(self, height_css: float, dpr: float = 1.0):
         self.size, self.dpr = (CARD_W, height_css), dpr
         self._put()
@@ -268,14 +297,19 @@ class CornerHost:
         hwnd = self._hwnd()
         if hwnd:
             import ctypes
-            ctypes.WinDLL("user32").ShowWindow(hwnd, SW_HIDE)
+            from ctypes import wintypes
+            show = ctypes.WinDLL("user32").ShowWindow
+            show.argtypes = [wintypes.HWND, ctypes.c_int]
+            show(hwnd, SW_HIDE)
         else:
             self.window.hide()
 
-    def _put(self):
+    def _put(self, *, require_native=False):
         x, y, w, h = corner_rect(self.work, self.size[1], self.dpr)
         hwnd = self._hwnd()
         if not hwnd:
+            if require_native:
+                raise OSError("Missing corner HWND")
             self.window.resize(round(w / self.dpr), round(h / self.dpr))
             self.window.move(x, y)
             self.window.show()
@@ -294,23 +328,20 @@ class CornerHost:
         wanted = (style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
         if wanted != style:
             user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ctypes.c_long(wanted).value)
-        if not user32.IsWindowVisible(hwnd):
-            # Up through ShowWindow first: it sends WM_SHOWWINDOW, which is how WinForms - and with it the WebView2
-            # control, which draws nothing while its form counts as hidden - learns the window is shown. SetWindowPos's
-            # SWP_SHOWWINDOW alone shows the frame and leaves the page undrawn: an empty dark box.
+            if require_native and (user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF) != wanted:
+                raise OSError("Could not apply corner window styles")
+        was_visible = user32.IsWindowVisible(hwnd)
+        if not was_visible:
+            # ShowWindow sends WM_SHOWWINDOW so the WinForms WebView2 control starts drawing.
             user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-        user32.SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        positioned = user32.SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        if require_native and (not positioned or not user32.IsWindowVisible(hwnd)):
+            if not was_visible:
+                user32.ShowWindow(hwnd, SW_HIDE)
+            raise OSError("Could not position or show corner window")
 
-    @staticmethod
-    def _hwnd():
-        if not sys.platform.startswith("win"):
-            return 0
+    def _hwnd(self):
         try:
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.WinDLL("user32")
-            user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
-            user32.FindWindowW.restype = wintypes.HWND
-            return user32.FindWindowW(None, TITLE) or 0
+            return window_hwnd(self.window)
         except Exception:
             return 0

@@ -27,6 +27,7 @@ from monitor import usage as usage_mod
 from monitor import word_guard
 from test_any_program import add_jar, java, jworld  # noqa: F401
 from test_app_limit_enforcement import BOOT, FRIDAY, World, add_game, at, block_during, world  # noqa: F401
+from test_rebuild_add_edit import PERMANENT, data, env, lock  # noqa: F401
 
 NIGHT = rules.make_schedule("block", [(list(range(7)), "21:00", "05:00")])
 EVENING = datetime(2026, 10, 2, 22, 0)
@@ -87,6 +88,29 @@ def test_a_site_member_can_only_add_to_the_group_s_way(tmp_path):
     group = {"app_block": "close", "site_block": "dns,close", "member_blocks": {1: "back", 2: "minimize"}}
     assert block_method.in_group({"id": 1, "item_type": "site", "block_type": None}, group) == "dns,close"
     assert block_method.in_group({"id": 2, "item_type": "app", "block_type": None}, group) == "minimize"   # (own)
+
+
+def test_site_group_editor_keeps_minimize_alongside_foreground_ways(env):
+    db = env.db
+    site = db.add_item("Videos", ["example.org"], "site", rules=[], block_type="dns")
+    data(env.api.draft_set_group(None, "Evening", [PERMANENT], [{"id": site, "way": "minimize"}],
+                                 {"site_block": "dns,back"}))
+    [group] = db.list_groups()
+    gid = group["id"]
+    assert group["member_blocks"] == {site: "minimize"}
+    assert _way(db, site, env.now()) == "dns,back,minimize"
+    lock(env)
+    data(env.api.draft_set_group(gid, "Evening", [PERMANENT], [{"id": site, "way": "minimize"}],
+                                 {"site_block": "dns,close"}))
+    assert _way(db, site, env.now()) == "dns,close,minimize"
+    denied = data(env.api.draft_set_group(gid, "Evening", [PERMANENT], [{"id": site}],
+                                         {"site_block": "dns,close"}))
+    assert denied["needs_challenge"]
+    assert _way(db, site, env.now()) == "dns,close,minimize"
+    [group] = db.list_groups()
+    data(env.api.draft_set_group(gid, "Evening", [PERMANENT], [{"id": site}],
+                                 {"site_block": "dns,close,minimize"}))
+    assert _way(db, site, env.now()) == "dns,close,minimize"
 
 
 def test_an_app_cut_off_by_its_group_is_not_closed_but_firewalled(world):

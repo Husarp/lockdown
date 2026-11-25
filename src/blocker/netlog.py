@@ -51,7 +51,7 @@ DNS_RECORD._fields_ = [("pNext", ctypes.POINTER(DNS_RECORD)), ("pName", ctypes.c
                        ("dwReserved", wintypes.DWORD), ("Data", _DnsData)]
 
 _iphlpapi = ctypes.WinDLL("iphlpapi")
-_dnsapi = ctypes.WinDLL("dnsapi")
+_dnsapi = ctypes.WinDLL("dnsapi", use_last_error=True)
 _dnsapi.DnsQuery_W.argtypes = [wintypes.LPCWSTR, wintypes.WORD, wintypes.DWORD, ctypes.c_void_p,
                                ctypes.POINTER(ctypes.POINTER(DNS_RECORD)), ctypes.c_void_p]
 _dnsapi.DnsRecordListFree.argtypes = [ctypes.POINTER(DNS_RECORD), ctypes.c_int]
@@ -100,7 +100,11 @@ def is_local(ip: str) -> bool:
 
 def cached_names() -> list[str]:
     head = ctypes.POINTER(DNS_CACHE_ENTRY)()
+    if hasattr(ctypes, "set_last_error"):
+        ctypes.set_last_error(0)
     if not _dnsapi.DnsGetCacheDataTable(ctypes.byref(head)):
+        if hasattr(ctypes, "get_last_error") and (error := ctypes.get_last_error()):
+            raise ctypes.WinError(error)
         return []
     names, node = [], head
     while node:
@@ -143,6 +147,17 @@ def names_for_ips(answers: dict[str, tuple[list[str], list[str]]]) -> dict[str, 
     return out
 
 
-def dns_names() -> dict[str, str]:
-    """ip -> name, from everything in the DNS cache right now."""
-    return names_for_ips({name: cached_answers(name) for name in cached_names()})
+class DnsNames(dict):
+    """Display name per IP, with the other known names available to enforcement."""
+
+    def __init__(self, answers):
+        super().__init__(names_for_ips(answers))
+        aliases = {}
+        for name, (ips, _targets) in answers.items():
+            for ip in ips:
+                aliases.setdefault(ip, set()).add(name)
+        self.aliases = {ip: frozenset(names) for ip, names in aliases.items()}
+
+
+def dns_names() -> DnsNames:
+    return DnsNames({name: cached_answers(name) for name in cached_names()})

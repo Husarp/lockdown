@@ -5,7 +5,7 @@
 //                         background processes.
 //   program files         Close app / Minimize only (a Java game or script runs inside javaw / python / cmd, which other
 //                         programs use too: no internet cut, no background processes).
-//   websites              Can't load it  - Close the tab (not with Go back)  - Go back. Default: Can't load it.
+//   websites              Can't load it  - Close the tab (not with Go back)  - Go back  - Minimize. Default: Can't load it.
 // The pure rules are exported (tested in node); createWays() draws the checkboxes. Python re-checks every choice
 // (webapi/blocking_edit.py) - nothing here is trusted.
 import { el, esc, ic } from "./ui.js";
@@ -24,6 +24,7 @@ export const SITE_WAYS = [
   ["dns", "Can't load it", "The address goes nowhere, in every browser - what Lockdown has always done."],
   ["close", "Close the tab", "If you open it anyway, the tab is closed (a browser with one tab gets a fresh tab first)."],
   ["back", "Go back", "The browser goes back instead; if that doesn't leave the page, the tab is closed."],
+  ["minimize", "Minimize", "Minimizes any browser window showing the blocked site in its selected tab, even behind another window. Close the tab and Go back take priority in the foreground."],
 ];
 export const HOSTED_NOTE = "A Java game or a script runs inside javaw.exe / python / cmd / PowerShell, which other programs use too: Lockdown closes or minimises this one only - found by its file name, wherever the file is (a renamed copy is not). It can't cut its internet: that would cut every Java / Python program's.";
 
@@ -72,7 +73,7 @@ export const enabled = (group, flags, flag) => flag !== "background" || flags.in
 
 /** Why nothing can be saved, or "" - the same words as Python's. */
 export function waysProblem(group, flags) {
-  if (group === "site") return flags.length ? "" : "Tick at least one of Can't load it / Close the tab / Go back.";
+  if (group === "site") return flags.length ? "" : "Tick at least one of Can't load it / Close the tab / Go back / Minimize.";
   if (group === "file") return flags.some((f) => f === "close" || f === "minimize") ? "" : "Tick Close app or Minimize.";
   return flags.some((f) => f !== "background") ? "" : "Tick at least one of Close app / Minimize / Grey it / Block internet.";
 }

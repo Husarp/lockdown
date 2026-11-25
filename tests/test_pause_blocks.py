@@ -2,7 +2,7 @@
 
 Every site and app blocked by his items, groups, modes and categories - hours, time limits, opening limits,
 temporary and permanent blocks - stops blocking until the pause ends, then everything is blocked again by itself.
-The protection lists, the blocked words and SafeSearch are not part of it. Time keeps counting toward the limits.
+The protection lists, the blocked words and SafeSearch are not part of it. Paused activity spends no quota.
 Starting it needs the Anti-Bypass challenge; resuming early is free. Optionally every notification is silenced for
 the same while. It is kept in trusted time in the database: the service and the tray app both honour it, it
 survives a restart, ends on the dot, and a clock change can't stretch it. It is neither the whole-app off switch
@@ -18,6 +18,7 @@ import emergency
 import keywords
 import modes
 import pause
+import quota_accounting
 import reminders
 import service
 from db import Database
@@ -27,6 +28,11 @@ from rules import block_targets, effective_rules
 from tests.test_reminders import FakeUI, run
 
 NOW = datetime(2026, 10, 2, 22, 0)   # a Friday evening
+
+
+@pytest.fixture(autouse=True)
+def service_delegate(monkeypatch):
+    monkeypatch.setattr(service.Enforcer, "count_unwatched_apps", quota_accounting.count_unwatched_apps)
 
 
 def everything(w):
@@ -86,18 +92,19 @@ def test_every_block_of_yours_is_lifted_and_comes_back_on_time(world):
     assert not w.alive(game) and not w.alive(discord)
 
 
-def test_time_keeps_counting_during_the_pause(world):
+def test_time_spends_no_quota_during_the_pause(world):
     w = world(at(FRIDAY, "14:00"))
     item = add_game(w, [{"rule_type": "time_limit", "daily_limit_min": 30}])
     w.step()
-    pause.start(w.gui, w.now, 60, silent=False)
+    end = pause.start(w.gui, w.now, 60, silent=False)
     game = w.launch("hollowgame.exe", BOOT)
     w.play(game)
     w.run(45)                                                       # 45 min played, limit 30: paused, not blocked
     assert w.alive(game) and w.reason(item) is None
-    assert w.used(item) >= 44 * 60
-    w.run(16, every=2)                                              # the pause ends: the limit is used up
-    assert w.reason(item) == "limit" and not w.alive(game)
+    assert w.used(item) == 0
+    w.run(16, every=2)                                              # one paid minute since the pause ended
+    assert w.used(item) == int((w.now - end).total_seconds())
+    assert w.reason(item) is None and w.alive(game)
 
 
 def test_the_protection_lists_words_and_safesearch_are_untouched(world, monkeypatch):
@@ -136,7 +143,7 @@ def test_resuming_early_blocks_again_at_once(world):
     game = w.launch("hollowgame.exe", BOOT)
     w.run(10)
     assert w.alive(game)
-    pause.resume(w.gui)
+    pause.resume(w.gui, w.now)
     w.run(12 / 60, every=2)                                         # next pass: asked to close, closed after 10 s
     assert w.reason(item) == "schedule" and not w.alive(game)
 

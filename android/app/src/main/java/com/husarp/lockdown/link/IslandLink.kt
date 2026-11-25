@@ -26,6 +26,10 @@ import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.engine.AppSpan
 import com.husarp.lockdown.engine.AppTime
+import com.husarp.lockdown.engine.BlockPause
+import com.husarp.lockdown.engine.Pause
+import com.husarp.lockdown.engine.QuotaContribution
+import com.husarp.lockdown.engine.QuotaExemptions
 import com.husarp.lockdown.engine.IslandFront
 import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandOpen
@@ -101,7 +105,9 @@ object IslandLink {
             val st = readHelper() ?: return
             helperState = st
             UsageStore.base = st.base
-            UsageStore.inflight = st.inflight
+            UsageStore.restoreHelper(LinkCrypto.sha256(st.secret), st.inflight, st.nextSeq)
+            endPauseAsked = st.endPause
+            endPauseAt = st.endPauseAt
             coveredNow = st.covered
             _status.value = HelperStatus(lastOk = st.lastOk, mainApp = st.mainApp, covered = st.covered)
             _helper.value = true
@@ -356,14 +362,26 @@ object IslandLink {
             forget(); return
         }
 
-        // The helper's time, once per batch. Applied, then marked: a crash between counts it twice, never zero times.
-        var lastSeq = p.getLong("lastSeq", 0)
-        if (LinkProtocol.shouldApply(body.seq, lastSeq)) {
-            val d = LinkProtocol.cleanDeltas(body.deltas)
-            if (d.isNotEmpty() && !onMain { UsageStore.addDeltas(d); UsageStore.flush() }) return   // sent again next time
-            lastSeq = body.seq
-            p.edit().putLong("lastSeq", lastSeq).commit()
-        }
+        val now = Enforce.ldt(TrustedTime.now(app))
+        val link = LinkCrypto.sha256(LinkCrypto.b64(secret))
+        val legacySeq = p.getLong("lastSeq", 0)
+        var lastSeq = 0L
+        var applied = false
+        if (!onMain {
+                // End the named pause before checking the batch against it.
+                val before = Store.config.pause
+                val asked = body.endPause
+                if (before != null && before == asked) {
+                    val at = body.endPauseAt?.let(QuotaExemptions::parse)?.coerceAtMost(now) ?: now
+                    if (!Store.updatePersisted(at = at) { it.copy(pause = Pause.endEarly(it.pause, asked)) })
+                        return@onMain
+                    runCatching { Grayscale.sync(app) }
+                }
+                val batch = Batch(body.seq, if (body.quota == null) body.deltas else body.legacyDeltas.orEmpty(),
+                    body.quota.orEmpty())
+                applied = UsageStore.applyIsland(link, batch, legacySeq)
+                lastSeq = UsageStore.appliedSeq(link, legacySeq)
+            } || !applied) return
         body.fronts?.let { runCatching { judgeFronts(it) } }
         val covers = mainCovers()
         // Main sees Island apps itself while it covers: a report of the app in front would only stop it counting them.
@@ -373,15 +391,7 @@ object IslandLink {
         body.use?.let { saveIslandUse(it) }
         body.useHours?.let { saveIslandHours(it) }
         body.opens?.let { saveIslandOpens(it) }
-        // "Resume now" in Island: ends only the pause it names (a tightening, no challenge); never starts or lengthens one.
-        body.endPause?.let { asked ->
-            val before = Store.config.pause
-            Store.update { it.copy(pause = com.husarp.lockdown.engine.Pause.endEarly(it.pause, asked)) }
-            if (Store.config.pause != before) runCatching { Grayscale.sync(app) }
-        }
-
         val cfg = Store.config
-        val now = Enforce.ldt(TrustedTime.now(app))
         var usage: Map<String, Int> = emptyMap()
         if (!onMain { usage = LinkUsage.current(UsageStore.counter.counters, now, cfg.clock()) }) return
         val (cfgJson, cfgHash) = configJson(cfg)
@@ -392,6 +402,7 @@ object IslandLink {
             cfg = cfgJson.takeIf { body.cfg != cfgHash }, cfgHash = cfgHash,
             modes = modesJson.takeIf { body.modes != modesHash }, modesHash = modesHash,
             unlink = unlinking, app = versionCode(app), covers = covers, opensMark = islandOpensMark(),
+            quotaPauses = Store.quotaPauses,
         )
         LinkProtocol.write(out, LinkProtocol.signed("state", secret, LinkProtocol.M2H, nM, nH, json.encodeToString(state)))
 
@@ -525,6 +536,8 @@ object IslandLink {
         val mainApp: Long = 0,
         val linkedAt: Long = 0,               // wall ms this copy was linked (0: by an older version)
         val covered: Boolean = false,         // main said at the last check-in that it covers Island itself
+        val endPause: BlockPause? = null,
+        val endPauseAt: String? = null,
         val opensMark: Long? = null,          // main's latest Island visit end at the last check-in (IslandOpens); null: not known yet, or an older main
     )
 
@@ -550,15 +563,19 @@ object IslandLink {
     @Volatile private var useCache: Pair<Long, IslandRead>? = null
     @Volatile private var appsCache: Pair<Long, List<IslandApp>>? = null
     /** "Resume now" tapped here: the pause to end, sent to main until it answers. */
-    @Volatile private var endPauseAsked: com.husarp.lockdown.engine.BlockPause? = null
+    @Volatile private var endPauseAsked: BlockPause? = null
+    @Volatile private var endPauseAt: String? = null
 
     /** Helper: "Resume now". Blocking comes back here at once; main is asked to end the same pause (only that one),
      *  and its rules are taken whole again on the next sync, so this copy shows what main really has. */
     fun endPause() = thread(isDaemon = true, name = "lockdown-link-resume") {
         synchronized(clientLock) {              // not in the middle of a sync, which could put the old rules back
             val p = Store.config.pause ?: return@thread
+            val at = Enforce.ldt(TrustedTime.now(app))
+            if (!Store.updatePersisted(at = at) { it.copy(pause = null) }) return@thread
             endPauseAsked = p
-            Store.update { it.copy(pause = null) }
+            endPauseAt = at.toString()
+            saveHelper()
             cfgHash = ""
         }
         if (LinkService.alive) kick() else runCatching { syncOnce(app) }     // no service while main covers Island
@@ -633,7 +650,8 @@ object IslandLink {
         runCatching {
             val f = helperFile(app)
             val tmp = File(f.path + ".tmp")
-            tmp.writeText(json.encodeToString(st.copy(inflight = UsageStore.inflight, base = UsageStore.base)))
+            tmp.writeText(json.encodeToString(st.copy(inflight = null, base = UsageStore.base,
+                endPause = endPauseAsked, endPauseAt = endPauseAt)))
             if (!tmp.renameTo(f)) f.writeText(tmp.readText())
         }
     }
@@ -698,16 +716,17 @@ object IslandLink {
             else -> "Can't reach Lockdown in your main profile. Is it installed and running? If you use AFWall, allow Lockdown in both profiles."
         }
         // A new link: a batch that was out goes back into pending and seq starts again (main starts again too).
+        var savedUsage = false
         val ok = onMain {
-            LinkUsage.foldBack(UsageStore.counter.counters, UsageStore.inflight)
-            UsageStore.inflight = null
+            val encoded = LinkCrypto.b64(secret!!)
+            if (!UsageStore.newHelper(LinkCrypto.sha256(encoded))) return@onMain
             UsageStore.base = emptyMap()
-            helperState = HelperState(LinkCrypto.b64(secret!!), port = reply.port, linkedAt = System.currentTimeMillis())
+            helperState = HelperState(encoded, port = reply.port, linkedAt = System.currentTimeMillis())
             cfgHash = ""; modesHash = ""; cfgFailed = null
             saveHelper()
-            UsageStore.flush()
+            savedUsage = true
         }
-        if (!ok) return "Something got in the way. Try again."
+        if (!ok || !savedUsage) return "Something got in the way. Try again."
         _status.value = HelperStatus()
         null
     }
@@ -717,20 +736,18 @@ object IslandLink {
     fun syncOnce(ctx: Context): Boolean = synchronized(clientLock) {
         if (helperState == null) return false
         val secret = LinkCrypto.unb64(helperState?.secret) ?: return false
-        // 1. Pending time becomes the batch out (sent again unchanged until acked).
+        var prepared = false
+        var quota: List<QuotaContribution>? = null
         if (!onMain {
-                val st = helperState ?: return@onMain
-                val (b, next) = LinkUsage.formBatch(UsageStore.counter.counters, UsageStore.inflight, st.nextSeq)
-                if (b !== UsageStore.inflight) {
-                    UsageStore.inflight = b
-                    helperState = st.copy(nextSeq = next)
-                    saveHelper()            // the batch is saved before pending is: a crash counts it twice, never loses it
-                    UsageStore.flush()
+                prepared = UsageStore.prepareBatch()
+                quota = UsageStore.inflight?.let { batch ->
+                    val exemptions = UsageStore.exemptions()
+                    batch.contributions.flatMap(exemptions::clip)
                 }
-            }) return false
+            } || !prepared) return false
         val st = helperState ?: return false
         val batch = UsageStore.inflight
-        var asked: com.husarp.lockdown.engine.BlockPause? = null
+        val asked = endPauseAsked
         val apps = islandApps(ctx)
         val appsHash = LinkCrypto.sha256(apps.joinToString("\n") { it.pkg + "\t" + it.label })
         val (use, hours, opensAll) = islandUseRows(ctx)
@@ -738,12 +755,14 @@ object IslandLink {
         val hoursHash = LinkCrypto.sha256(hours.joinToString("\n") { "${it.day}\t${it.hour}\t${it.sec}" })
         val useHash = LinkCrypto.sha256(use.joinToString("\n") { "${it.day}\t${it.pkg}\t${it.sec}" })
         val body = json.encodeToString(SyncBody(
-            seq = batch?.seq ?: 0, deltas = batch?.deltas ?: emptyMap(),
+            seq = batch?.seq ?: 0,
+            deltas = LinkUsage.sum(batch?.deltas, quota?.let { LinkUsage.tally(it, QuotaExemptions()) }),
+            quota = quota, legacyDeltas = batch?.deltas,
             cfg = cfgFailed ?: cfgHash, modes = modesHash, front = localFront, app = versionCode(ctx),
             cfgError = cfgFailed != null, apps = apps.takeIf { appsHash != st.appsHash }, canBlock = canBlock(ctx),
             use = use.takeIf { it.isNotEmpty() && useHash != st.useHash },
             useHours = hours.takeIf { it.isNotEmpty() && hoursHash != st.hoursHash },
-            endPause = endPauseAsked.also { asked = it },
+            endPause = asked, endPauseAt = endPauseAt,
             fronts = recentFronts(ctx, st.lastOk).takeIf { it.isNotEmpty() },
             opens = opens.takeIf { it.isNotEmpty() },
         ))
@@ -752,37 +771,44 @@ object IslandLink {
         ) { r, nM, nH -> r.t == "state" && LinkProtocol.verify(r, secret, LinkProtocol.M2H, nM, nH) }
         if (reply == null) { coveredNow = false; _status.value = _status.value.copy(problem = problem, covered = false); return false }
         val sb = json.decodeFromString<StateBody>(reply.frame.body!!)
-        if (asked != null && endPauseAsked == asked) endPauseAsked = null      // main has had it (applied, or a newer pause there)
+        if (asked != null && endPauseAsked == asked) {
+            endPauseAsked = null
+            endPauseAt = null
+        }
+        sb.cfg?.let { text ->
+            val c = runCatching { json.decodeFromString<Config>(text) }.getOrNull()
+            if (c == null) cfgFailed = sb.cfgHash        // keep the old rules; main isn't asked to resend the same one
+            else {
+                val before = Store.config
+                if (persistHelperConfig(c, sb.quotaPauses)) {
+                    cfgHash = sb.cfgHash; cfgFailed = null
+                    if (before.protection != c.protection) runCatching { Protection.load(ctx) }
+                } // Keep cfgHash on write failure: main sends this snapshot again next time.
+            }
+        }
+        if (sb.cfg == null && sb.quotaPauses != null && sb.quotaPauses != Store.quotaPauses)
+            Store.updatePersisted(pauseHistory = sb.quotaPauses) { it }
+        sb.modes?.let { if (ModesStore.replace(it)) modesHash = sb.modesHash }
         if (sb.unlink) {
+            if (!unlinkHere(ctx, sb)) return false
             // Say bye (signed), so main drops the link only once this copy has the unlink. If it doesn't arrive,
             // main keeps "Unlinking" and its Forget Island now.
             val bye = json.encodeToString(SyncBody(app = versionCode(ctx), bye = true))
             exchange(reply.port, { nM, nH -> LinkProtocol.signed("sync", secret, LinkProtocol.H2M, nM, nH, bye) },
             ) { r, nM, nH -> r.t == "bye" && LinkProtocol.verify(r, secret, LinkProtocol.M2H, nM, nH) }
             coveredNow = false
-            unlinkHere(ctx, sb); return true
+            return true
         }
 
-        sb.cfg?.let { text ->
-            val c = runCatching { json.decodeFromString<Config>(text) }.getOrNull()
-            if (c == null) cfgFailed = sb.cfgHash        // keep the old rules; main isn't asked to resend the same one
-            else {
-                val before = Store.config
-                if (persistHelperConfig(c)) {
-                    cfgHash = sb.cfgHash; cfgFailed = null
-                    if (before.protection != c.protection) runCatching { Protection.load(ctx) }
-                } // Keep cfgHash on write failure: main sends this snapshot again next time.
-            }
-        }
-        sb.modes?.let { if (ModesStore.replace(it)) modesHash = sb.modesHash }
         val now = System.currentTimeMillis()
-        onMain {
-            UsageStore.inflight = LinkUsage.acked(UsageStore.inflight, sb.ack)
-            UsageStore.base = sb.usage          // already holds every acked batch: nothing counts twice
+        var acknowledged = false
+        if (!onMain {
+            if (!UsageStore.acknowledge(sb.ack, sb.usage)) return@onMain
             val cur = helperState ?: return@onMain
             helperState = cur.copy(port = reply.port, nextSeq = maxOf(cur.nextSeq, sb.ack + 1), lastOk = now, mainApp = sb.app, appsHash = appsHash, useHash = useHash, hoursHash = hoursHash, covered = sb.covers, opensMark = sb.opensMark)
             saveHelper()
-        }
+            acknowledged = true
+        } || !acknowledged) return false
         coveredNow = sb.covers
         _status.value = HelperStatus(lastOk = now, mainApp = sb.app, cfgError = cfgFailed != null, covered = sb.covers)
         true
@@ -851,14 +877,10 @@ object IslandLink {
 
     /** Main said unlink (signed): keep every second counted - main's (as of this reply, so the batch it just acked
      *  isn't added twice), in flight and pending - then stand alone. */
-    private fun unlinkHere(ctx: Context, sb: StateBody) {
-        mainHandler.post {
-            val all = LinkUsage.sum(sb.usage, LinkUsage.acked(UsageStore.inflight, sb.ack)?.deltas, UsageStore.counter.counters)
-            UsageStore.counter.counters.clear()
-            UsageStore.counter.counters.putAll(all)
-            UsageStore.base = emptyMap()
-            UsageStore.inflight = null
-            UsageStore.flush()
+    private fun unlinkHere(ctx: Context, sb: StateBody): Boolean {
+        var saved = false
+        val completed = onMain {
+            if (!UsageStore.finishHelper(sb.ack, sb.usage)) return@onMain
             helperFile(ctx).delete()
             helperState = null
             localFront = null
@@ -867,9 +889,12 @@ object IslandLink {
             Reminders.schedule(ctx)
             runCatching { HelperWatchdog.cancel(ctx) }
             LinkService.stop(ctx)
+            saved = true
         }
+        return completed && saved
     }
 }
 
 /** Persist before the helper acknowledges main's config hash. Kept free of Android runtime dependencies. */
-internal fun persistHelperConfig(config: Config): Boolean = Store.updatePersisted { applyConfig(config, it) }
+internal fun persistHelperConfig(config: Config, pauses: List<BlockPause>? = null): Boolean =
+    Store.updatePersisted(pauseHistory = pauses) { applyConfig(config, it) }

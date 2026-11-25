@@ -297,7 +297,7 @@ def test_ways_are_checked_for_the_kind(env):
         ({"kind": "app", "target": "foo.exe", "ways": []}, "Tick at least one of Close app / Minimize / Grey it / Block internet."),
         ({"kind": "app", "target": "foo.exe", "ways": ["background"]}, "Tick at least one of Close app / Minimize / Grey it / Block internet."),
         ({"kind": "app", "target": "foo.exe", "ways": ["close", "minimize"]}, "Close app and Minimize do the same thing: pick one."),
-        ({"kind": "site", "target": "example.org", "ways": []}, "Tick at least one of Can't load it / Close the tab / Go back."),
+        ({"kind": "site", "target": "example.org", "ways": []}, "Tick at least one of Can't load it / Close the tab / Go back / Minimize."),
         ({"kind": "site", "target": "example.org", "ways": ["close", "back"]}, "Close the tab and Go back do the same thing: pick one."),
         ({"kind": "category", "target": "games", "ways": []}, "Tick at least one of Close app / Minimize / Grey it / Block internet."),
     ]
@@ -306,7 +306,7 @@ def test_ways_are_checked_for_the_kind(env):
         assert got["result"] == "invalid", spec
         assert got["errors"] == [{"rule_type": None, "field": "ways", "message": message}]
     assert env.db.list_items() == []
-    for spec in ({"kind": "site", "target": "example.org", "ways": ["minimize"]},     # (a way of another kind)
+    for spec in ({"kind": "site", "target": "example.org", "ways": ["grey"]},     # (a way of another kind)
                  {"kind": "app", "target": "foo.exe", "ways": ["dns"]},
                  {"kind": "app", "target": "foo.exe", "ways": "close"},
                  {"kind": "app", "target": "foo.exe", "ways": [1]}):

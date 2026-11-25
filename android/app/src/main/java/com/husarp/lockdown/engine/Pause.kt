@@ -13,7 +13,7 @@ data class BlockPause(val started: String, val until: String, val silent: Boolea
  * Pause my blocks, ported from the PC pause.py (0.84.8): every block from your own list (items, groups, modes,
  * categories - hours, time limits, opening limits, temporary and permanent blocks) stops for a while you choose,
  * then comes back by itself. Never lifted: the protection lists, the blocked words, SafeSearch / YouTube Restricted.
- * Time used meanwhile still counts toward the limits. Starting it is loosening (the challenge); ending it is free.
+ * Time and openings during an authorized pause spend no quota. Starting it is loosening (the challenge); ending it is free.
  *
  * It counts only from `started` to `until`: a clock that reads earlier than when it began does not stretch it, and
  * a pause can never run longer than [MAX_SPAN], whatever is written. It lives in the config, so a linked Island
@@ -27,13 +27,26 @@ object Pause {
 
     private fun at(v: String) = runCatching { LocalDateTime.parse(v) }.getOrNull()
 
-    /** [p] while it is running at [now], else null. */
-    fun state(p: BlockPause?, now: LocalDateTime): BlockPause? {
+    internal fun interval(p: BlockPause?): Pair<LocalDateTime, LocalDateTime>? {
         p ?: return null
         val started = at(p.started) ?: return null
         val until = at(p.until) ?: return null
-        val running = !now.isBefore(started) && now.isBefore(until) && Duration.between(started, until) <= MAX_SPAN
-        return if (running) p else null
+        return (started to until).takeIf { until > started && Duration.between(started, until) <= MAX_SPAN }
+    }
+
+    /** [p] while it is running at [now], else null. */
+    fun state(p: BlockPause?, now: LocalDateTime): BlockPause? =
+        p?.takeIf { interval(it)?.let { (start, end) -> now >= start && now < end } == true }
+
+    /** Keep the effective end of a finished or replaced pause in the private accounting history. */
+    internal fun remember(history: List<BlockPause>, previous: BlockPause?, at: LocalDateTime): List<BlockPause> {
+        val retained = history.filter { interval(it)?.second?.isAfter(at.minusDays(45)) == true }
+        val (start, end) = interval(previous) ?: return retained
+        val effectiveEnd = minOf(at, end)
+        return if (effectiveEnd > start)
+            retained.filterNot { it.started == previous?.started } +
+                BlockPause(start.toString(), effectiveEnd.toString())
+        else retained
     }
 
     fun until(p: BlockPause?, now: LocalDateTime): LocalDateTime? = state(p, now)?.let { at(it.until) }

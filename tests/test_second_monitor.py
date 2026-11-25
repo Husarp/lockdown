@@ -9,15 +9,18 @@ many windows show it. Screen time ("what you were doing") stays the foreground w
 Windows is faked at the enumeration: win.enum_windows (the Z-order, top first) and win.window_facts (each window's
 style, rectangle and monitor); the selection (win.pick_front), sense_desktop and the tracker are the real code.
 """
+import time
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 import rules
 from db import Database
-from monitor import browser_url, usage as usage_mod, win
+from monitor import browser_url, tab_reader, usage as usage_mod, win
 from monitor.usage import UsageTracker
 from monitor.win import WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WindowFacts
+from test_browser_tab_reader import Node
 
 EVENING = datetime(2026, 10, 2, 19, 0)
 M1, M2 = (0, 0, 1920, 1080), (1920, 0, 3840, 1080)          # two side-by-side 1080p monitors
@@ -45,9 +48,16 @@ class Desktop:
         monkeypatch.setattr(win, "foreground_process", self._foreground)
         monkeypatch.setattr(win, "session_locked", lambda: locked)
         monkeypatch.setattr(win, "idle_seconds", lambda: 0.0)
-        monkeypatch.setattr(browser_url, "browser_url", lambda hwnd: self.urls.get(hwnd))
-        usage_mod._no_bar.clear()
-        usage_mod._seen.clear()
+        monkeypatch.setattr(win, "window_title", lambda hwnd: "Browser window")
+        monkeypatch.setattr(usage_mod, "_tab_local", SimpleNamespace())
+        monkeypatch.setattr(browser_url.auto, "ControlFromHandle", self._browser_window, raising=False)
+        self.bars = {}
+
+    def _browser_window(self, hwnd):
+        bar = self.bars.setdefault(hwnd, Node("EditControl", cls="OmniboxViewViews"))
+        bar.GetValuePattern = lambda: SimpleNamespace(Value=self.urls.get(hwnd))
+        tab = Node("TabItemControl", token=(hwnd, 1), selected=True)
+        return Node("WindowControl", children=[Node("TabControl", children=[tab]), bar])
 
     def _enum(self):
         self.enumerations += 1
@@ -62,6 +72,8 @@ class Clock:
     def __init__(self, monkeypatch, start=EVENING):
         self.now = start
         monkeypatch.setattr(usage_mod, "now_from_db", lambda db: self.now)
+        monkeypatch.setattr(tab_reader, "time", SimpleNamespace(monotonic=lambda: self.now.timestamp(),
+                                                               perf_counter=time.perf_counter))
 
 
 def counting(clock):
@@ -273,9 +285,10 @@ def test_a_browser_window_without_an_address_bar_is_not_searched_every_tick(tmp_
     """An installed web app (no address bar) on top of monitor 2: after 3 failed reads in a row its UI tree is
     searched again every 30 s, not every 2 s."""
     db, _game, _yt = setup(tmp_path)
-    Desktop(monkeypatch, foreground=3, windows=[facts(3, FULL1), facts(4, FULL2)], procs=PROCS)
+    desk = Desktop(monkeypatch, foreground=3, windows=[facts(3, FULL1), facts(4, FULL2)], procs=PROCS)
     asked = []
-    monkeypatch.setattr(browser_url, "browser_url", lambda hwnd: asked.append(hwnd))
+    monkeypatch.setattr(browser_url.auto, "ControlFromHandle",
+                        lambda hwnd: (asked.append(hwnd), desk._browser_window(hwnd))[1])
     play(db, monkeypatch, seconds=20, every=2)
     assert asked == [4, 4, 4]
 
@@ -287,7 +300,7 @@ def test_a_browser_that_wont_answer_does_not_stop_the_count(tmp_path, monkeypatc
 
     def broken(hwnd):
         raise OSError("UI Automation timed out")
-    monkeypatch.setattr(browser_url, "browser_url", broken)
+    monkeypatch.setattr(browser_url.auto, "ControlFromHandle", broken)
     now, _ = play(db, monkeypatch)
     assert used(db, game, now) == 120                    # side by side on monitor 2: both in front
 

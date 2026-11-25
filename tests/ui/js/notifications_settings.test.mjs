@@ -80,3 +80,27 @@ test("Reduce motion sets and clears data-motion on the root, and leaves it alone
   theme.applyLook({ motion: false }, win);
   assert.equal(root.dataset.motion, undefined);
 });
+
+
+test("the full-screen warning switch saves independently from the in-use timing controls", async () => {
+  const { ld } = await import("../../../src/ui/js/bridge.js");
+  const { flushSettings } = await import("../../../src/ui/js/draft.js");
+  const calls = [];
+  const page = { addEventListener(name, handler) { this[name] = handler; } };
+  const oldCall = ld.call;
+  ld.call = async (...args) => { calls.push(args); return {}; };
+  try {
+    nt.mount(page, {});
+    assert.match(page.innerHTML, /Show warnings over full-screen apps and games/);
+    for (const checked of [false, true]) {
+      page.change({ target: { dataset: { k: "fullscreen-warnings" }, checked } });
+      flushSettings();
+    }
+    assert.deepEqual(calls, [
+      ["draft_set_setting", "notify.warn.fullscreen", "0"],
+      ["draft_set_setting", "notify.warn.fullscreen", "1"],
+    ]);
+  } finally {
+    ld.call = oldCall;
+  }
+});

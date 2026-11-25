@@ -2,12 +2,14 @@
 app's windows politely."""
 import ctypes
 import os
+import time
 from ctypes import wintypes
 from typing import NamedTuple
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WM_CLOSE = 0x0010
 SW_MINIMIZE = 6
+SW_SHOWMINNOACTIVE = 7
 
 _user32 = ctypes.windll.user32
 _kernel32 = ctypes.windll.kernel32
@@ -170,6 +172,7 @@ def running_apps() -> dict[str, str]:
 
 # ---------- the window in front on every monitor (0.84.2) ----------
 GWL_EXSTYLE = -20
+GWL_STYLE, WS_CHILD, GW_OWNER = -16, 0x40000000, 4
 WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = 0x20, 0x80, 0x40000
 WS_EX_LAYERED, WS_EX_NOACTIVATE = 0x80000, 0x08000000
 DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_CLOAKED = 9, 14
@@ -218,6 +221,10 @@ _u32.GetLayeredWindowAttributes.argtypes = [wintypes.HWND, ctypes.POINTER(wintyp
 _u32.GetWindowRgnBox.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 _u32.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
 _u32.FindWindowExW.restype = wintypes.HWND
+_u32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+_u32.GetWindow.restype = wintypes.HWND
+_u32.ShowWindowAsync.argtypes = [wintypes.HWND, ctypes.c_int]
+_u32.ShowWindowAsync.restype = wintypes.BOOL
 
 
 def enum_windows() -> list[int]:
@@ -231,6 +238,33 @@ def enum_windows() -> list[int]:
 
     _user32.EnumWindows(_WNDENUMPROC(callback), 0)
     return found
+
+
+def site_window_pid(hwnd: int) -> int:
+    """PID for a visible, unminimized top-level window eligible for a selected-tab read."""
+    if not _user32.IsWindowVisible(hwnd) or _user32.IsIconic(hwnd):
+        return 0
+    style = _user32.GetWindowLongW(hwnd, GWL_STYLE)
+    exstyle = _user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    if style & WS_CHILD or exstyle & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE):
+        return 0
+    if _u32.GetWindow(hwnd, GW_OWNER) and not exstyle & WS_EX_APPWINDOW:
+        return 0
+    return window_pid(hwnd)
+
+
+def minimize_window(hwnd: int, pid: int) -> bool:
+    """Ask just this window to minimize without activating it, and confirm the result."""
+    if not pid or site_window_pid(hwnd) != pid or not _u32.ShowWindowAsync(hwnd, SW_SHOWMINNOACTIVE):
+        return False
+    deadline = time.monotonic() + 0.1
+    while window_pid(hwnd) == pid:
+        if _user32.IsIconic(hwnd):
+            return True
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    return False
 
 
 def monitors() -> list[Rect]:

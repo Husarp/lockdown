@@ -156,8 +156,8 @@ def attach(win, hub, ctx, show_main, log=None):
 
     from gui.toast import Toaster
     from resident import windows
-    from resident.corner import Corner, CornerHost
-    from resident.notices import Notices
+    from resident.corner import Corner, CornerHost, window_hwnd
+    from resident.notices import Notices, flash_taskbar
     from resident.publisher import Publisher
 
     publisher = Publisher(win.corner, interval=CORNER_PUSH_SEC, visible=True, log=log)   # (always shown: the page is
@@ -165,7 +165,13 @@ def attach(win, hub, ctx, show_main, log=None):
     windows.on_page_ready(win, "corner", corner.page_loaded)     # (shown only once its page has said it works)
     toaster = Toaster(lambda fn: threading.Thread(target=fn, name="lockdown-toast", daemon=True).start(),
                       lambda text: None, on_click=show_main)
-    notices = Notices(hub, corner, toaster)
+    def pulse_tray():
+        # TrayKeeper assigns the current Tray's bound notify method as the fallback when the icon is present.
+        tray = getattr(toaster.fallback, "__self__", None)
+        pulse = getattr(tray, "pulse_warning", None)
+        return pulse() if pulse is not None else False
+
+    notices = Notices(hub, corner, toaster, flash=lambda: flash_taskbar(window_hwnd(win.main)), pulse=pulse_tray)
     hub.notify.show = notices.show
     ui = CornerReminderUI(hub, corner, toaster, notices)
     ctx.corner = corner

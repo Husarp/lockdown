@@ -96,7 +96,9 @@ test("offersRecovery: at the start of a run that offers it, and on a password / 
 test("supervisor status stays separate from the user's authenticator", () => {
   const s = status(false, false, false);
   s.supervisor = { set: true, since: "2026-10-13 10:12:00" };
-  assert.equal(secretLines(s).supervisor, "Set up 13 Oct 2026.");
+  assert.equal(secretLines(s).supervisor, "Set up 13 Oct 2026. 30-second codes. Re-pair for 40-second codes.");
+  s.supervisor.period = 40;
+  assert.equal(secretLines(s).supervisor, "Set up 13 Oct 2026. 40-second codes.");
   assert.equal(secretLines(s).totp, "Not set up.");
 });
 
@@ -107,13 +109,15 @@ const secretsSource = readFileSync(new URL("../../../src/ui/js/pages/antibypass_
 const totpDialogSource = secretsSource.slice(secretsSource.indexOf("async function totpDialog("), secretsSource.indexOf("\nasync function removeSecret("));
 
 for (const kind of ["totp", "supervisor"]) {
-  test(`${kind} setup copies the key and reports clipboard success or failure`, async () => {
+  test(`${kind} setup copies the credential and reports clipboard success or failure`, async () => {
     const key = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+    const uri = "otpauth://totp/Lockdown:PC?secret=" + key + "&period=40";
+    const expected = kind === "supervisor" ? uri : key;
     const messages = [], writes = [];
     let copy, dialog, fail = false;
     const box = { focus() {}, addEventListener() {} };
     const run = runInNewContext(`(${totpDialogSource})`, {
-      ld: { call: async () => ({ key, qr: "<svg></svg>" }) },
+      ld: { call: async () => ({ key, uri, qr: "<svg></svg>" }) },
       guarded: async (reply) => reply,
       CANCELLED: Symbol("cancelled"),
       esc: (value) => value,
@@ -134,14 +138,14 @@ for (const kind of ["totp", "supervisor"]) {
       toast: (message) => messages.push(message),
     });
     await run(() => assert.fail("Copy must not save setup"), kind);
-    assert.match(dialog.body, /data-k="sx-key">[^<]+<\/span> <button class="btn btn-sm" type="button" data-k="sx-copy">Copy<\/button>/);
-    if (kind === "supervisor") assert.match(dialog.body, /scan.*or copy the key and send it to them/);
+    assert.match(dialog.body, /data-k="sx-key">[^<]+<\/span> <button class="btn btn-sm" type="button" data-k="sx-copy">Copy(?: pairing link)?<\/button>/);
+    if (kind === "supervisor") assert.match(dialog.body, /Copy pairing link.*40-second period/);
     await copy();
-    assert.deepEqual(writes, [key]);
+    assert.deepEqual(writes, [expected]);
     assert.deepEqual(messages, ["Copied"]);
     fail = true;
     await copy();
-    assert.deepEqual(writes, [key]);
+    assert.deepEqual(writes, [expected]);
     assert.deepEqual(messages, ["Copied", "Couldn't copy the key."]);
   });
 }

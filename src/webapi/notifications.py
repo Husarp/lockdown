@@ -37,7 +37,7 @@ def _options(options, current) -> list:
 def notifications_get(ctx):
     """Everything the page shows: {reasons: [{key, label, default}], enabled: {reason: bool}, messages: {reason: text},
     cooldown, cooldown_options, format, formats: [{key, label}], warn: {enabled, minutes, repeat_sec, repeat_text},
-    front: {enabled, steps, steps_text, sound}, started, digest: {enabled, day, time, days, times, text}, draft: {dirty, autosave, change_summary}}.
+    fullscreen_warnings, front: {enabled, steps, steps_text, sound}, started, digest: {enabled, day, time, days, times, text}, draft: {dirty, autosave, change_summary}}.
     The notification settings are the DRAFT's (unsaved edits included), the weekly summary is the saved one."""
     db = ctx.db
     d = drafts.draft_of(ctx)
@@ -59,6 +59,7 @@ def notifications_get(ctx):
         "format": s["notify.format"], "formats": [{"key": k, "label": v} for k, v in alerts.FORMATS.items()],
         "warn": {"enabled": _flag(s["notify.warn.enabled"]), "minutes": minutes, "repeat_sec": repeat,
                  "repeat_text": reminders.seconds_text(repeat)},
+        "fullscreen_warnings": _flag(s[alerts.FULLSCREEN_WARNINGS]),
         "front": {"enabled": _flag(s["notify.front.enabled"]), "steps": steps,
                   "steps_text": alerts.front_steps_text(steps), "sound": _flag(s["notify.front.sound"])},
         "started": _flag(s["notify.started.enabled"]),

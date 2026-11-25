@@ -741,3 +741,23 @@ def test_an_import_restores_settings_groups_and_categories(api, ctx, dialogs, tm
 def test_csv_export_is_the_screen_time_modules_and_not_registered_twice():
     names = [n for n, _kind in webapi.api_methods()]
     assert names.count("screentime_export_csv") == 1
+
+
+def test_fullscreen_warning_preference_defaults_on_and_is_free_to_change_in_either_direction(api, ctx):
+    locked(ctx)
+    key = alerts.FULLSCREEN_WARNINGS
+    assert saved(ctx, key) is None
+    assert data(api.notifications_get())["fullscreen_warnings"] is True
+    for bad in (True, 0, "true", "2"):
+        assert "isn't valid" in error(api.draft_set_setting(key, bad))
+
+    data(api.draft_set_autosave(False))
+    assert data(api.draft_set_setting(key, "0"))["dirty"]
+    assert data(api.notifications_get())["fullscreen_warnings"] is False
+    assert saved(ctx, key) is None
+    assert not data(api.draft_save()).get("needs_challenge")
+    assert saved(ctx, key) == "0"
+    data(api.draft_set_autosave(True))
+    assert not data(api.draft_set_setting(key, "1")).get("needs_challenge")
+    assert data(api.notifications_get())["fullscreen_warnings"] is True
+    assert saved(ctx, key) == "1"

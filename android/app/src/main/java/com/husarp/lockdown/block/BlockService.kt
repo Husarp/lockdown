@@ -30,7 +30,6 @@ import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
 import com.husarp.lockdown.data.Config
-import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Alerts
 import com.husarp.lockdown.engine.BlockWatcher
 import com.husarp.lockdown.engine.BreakAllow
@@ -44,7 +43,6 @@ import com.husarp.lockdown.engine.ItemIndex
 import com.husarp.lockdown.engine.ItemType
 import com.husarp.lockdown.engine.foregroundItems
 import com.husarp.lockdown.engine.ModeState
-import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.engine.RPrompt
 import com.husarp.lockdown.engine.RemindersEngine
 import com.husarp.lockdown.guard.TrustedTime
@@ -195,7 +193,6 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
                 confirmedOpening = rootInActiveWindow?.packageName?.toString() == it)
         } ?: ""
         val now = Enforce.ldt(TrustedTime.now(this))
-        UsageStore.counter.clock = cfg.clock()
         val ms = SystemClock.elapsedRealtime()
         val dt = ((ms - lastHistMs) / 1000.0).coerceIn(0.0, 10.0)   // (a long gap was the phone asleep)
         lastHistMs = ms
@@ -233,17 +230,12 @@ class BlockService : AccessibilityService(), ReminderRunner.Screen {
         val foreground = foregroundItems(cfg.items, pkg, host)
         inUseIds = foreground.mapTo(HashSet()) { it.id }
 
-        // Count what's in use - but not an item that is blocked: its time behind the notice and its retries
-        // aren't use (they used to fill its limits and the group's). The opening that goes over a limit counts.
-        // An app that is only greyed is in use: it counts.
-        val actives = ArrayList<Active>()
-        for (item in foreground) {
-            val counts = if (item.type == ItemType.APP) Enforce.counts(cfg, item, now)
-                else !Enforce.itemBlocked(cfg, item, now)
-            if (counts) actives.add(Active(item, Rules.countedRules(item, cfg.groups),
-                launched = item.type == ItemType.APP && pkg != prevTickPkg))
+        // Pass every observed item so the shared recorder can evaluate the payable part of the tick.
+        val sites = host?.let { h -> ItemIndex.of(cfg.items).sites(h).filter { it.type == ItemType.SITE } }.orEmpty()
+        val actives = (listOfNotNull(appItem) + sites).map { item ->
+            UsageStore.active(item, cfg, launched = item.type == ItemType.APP && pkg != prevTickPkg)
         }
-        UsageStore.record(actives, now)
+        UsageStore.record(actives, now, cfg)
         prevTickPkg = pkg
 
         val label = if (appItem != null) appItem.name else Apps.label(packageManager, pkg)

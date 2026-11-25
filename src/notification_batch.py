@@ -6,6 +6,20 @@ class BlockingMessage(str):
     force = False
 
 
+class AdvanceWarning(BlockingMessage):
+    """The prediction, episode and occurrence travel with the display text."""
+
+    def __new__(cls, text, *, kind, episode, occurrence, triggers, in_use, timing):
+        warning = super().__new__(cls, text)
+        warning.kind = kind
+        warning.episode = episode
+        warning.occurrence = occurrence
+        warning.triggers = triggers
+        warning.in_use = in_use
+        warning.timing = timing
+        return warning
+
+
 class NotificationBatch:
     """Keep all detail in a ten-second burst; suppress identical lines for ten minutes.
 
@@ -17,16 +31,22 @@ class NotificationBatch:
         self.lines = {}
         self.last = float("-inf")
 
-    def merge(self, messages, now):
-        self.seen = {text: at for text, at in self.seen.items() if now - at < 600}
-        fresh = list(dict.fromkeys(line.strip() for text in messages for line in text.splitlines() if line.strip()))
-        fresh = [text for text in fresh if text not in self.seen]
+    def merge(self, messages, now, *, keep_burst=True):
+        self.seen = {key: at for key, at in self.seen.items() if now - at < 600}
+        fresh = {}
+        for message in messages:
+            for line in message.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                key = (message.episode, message.occurrence, line) if isinstance(message, AdvanceWarning) else line
+                if key not in self.seen:
+                    self.seen[key] = now
+                    fresh[line] = None
         if not fresh:
             return None
-        if now - self.last > 10:
+        if not keep_burst or now - self.last > 10:
             self.lines.clear()
             self.last = now
-        for text in fresh:
-            self.seen[text] = now
-            self.lines[text] = None
+        self.lines.update(fresh)
         return "\n".join(self.lines)

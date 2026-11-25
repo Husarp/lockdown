@@ -3,7 +3,11 @@ package com.husarp.lockdown
 import com.husarp.lockdown.block.Enforce
 import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.AntiBypass
+import com.husarp.lockdown.engine.QuotaExemptions
+import com.husarp.lockdown.engine.Rules
+import com.husarp.lockdown.engine.UsageCounter
 import com.husarp.lockdown.engine.AntiBypassCfg
 import com.husarp.lockdown.engine.BlockPause
 import com.husarp.lockdown.engine.BreakCfg
@@ -75,7 +79,7 @@ class PauseAndTimeTest {
         assertTrue(Enforce.silenced(cfg.copy(pause = quiet), t0.plusMinutes(1)))
     }
 
-    @Test fun a_pause_lifts_apps_and_sites_but_counts_their_time_and_ends_by_itself() {
+    @Test fun a_pause_lifts_apps_and_sites_preserves_quota_and_ends_by_itself() {
         assertNotNull(Enforce.app(cfg, "com.game", t0, null))
         assertNotNull(Enforce.site(cfg, "feed.com", t0, null))
         val paused = cfg.copy(pause = Pause.start(t0, 30, false, LocalTime.MIDNIGHT))
@@ -83,8 +87,37 @@ class PauseAndTimeTest {
         assertNull(Enforce.app(paused, "com.game", during, null))
         assertNull(Enforce.site(paused, "feed.com", during, null))      // the site filter asks this too
         assertNull(Enforce.site(paused, "casino.com", during, null))    // permanent blocks too (PC)
-        assertFalse(Enforce.itemBlocked(paused, app, during))           // not blocked -> its time is counted
+        assertFalse(Enforce.itemBlocked(paused, app, during))           // enforcement is lifted
         assertNotNull(Enforce.app(paused, "com.game", t0.plusMinutes(30), null))   // back on the dot
+    }
+
+    @Test fun aReplacedAndResumedPauseKeepsItsEffectiveTimesAfterReload() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        try {
+            val file = dir.resolve("config.json")
+            Store.init(file)
+            Store.update { it.copy(pause = Pause.start(t0.plusSeconds(1), 30, false, LocalTime.MIDNIGHT)) }
+            Store.update { it.copy(pause = Pause.start(t0.plusSeconds(2), 60, false, LocalTime.MIDNIGHT)) }
+            assertTrue(Store.updatePersisted(at = t0.plusSeconds(3)) { it.copy(pause = null) })
+            Store.init(file)
+            assertNull(Store.config.pause)
+            assertEquals(listOf(t0.plusSeconds(2), t0.plusSeconds(3)), Store.quotaPauses.map {
+                LocalDateTime.parse(it.until)
+            })
+            val c = UsageCounter()
+            val items = listOf(Active(app, Rules.countedRules(app, cfg.groups)))
+            val ex = QuotaExemptions(Store.quotaPauses)
+            c.record(items, t0, ex)
+            c.record(items, t0.plusSeconds(4), ex)
+            assertEquals(2, c.usage("item:${app.id}", Rules.dayBucket(t0)))
+            assertNull(Store.decodeImport(Json.encodeToString(Config()), Store.config)!!.pause)
+            val injected = """{"_quotaPauses":[{"started":"2026-06-01T03:00","until":"2026-06-01T04:00"}]}"""
+            assertTrue(Store.importJson(injected))
+            Store.init(file)
+            assertEquals(2, Store.quotaPauses.size)
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 
     @Test fun an_import_neither_brings_a_pause_nor_ends_one() {

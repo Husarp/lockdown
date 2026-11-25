@@ -2,10 +2,12 @@
 by the tray agent - or both."""
 import pytest
 
+import block_method
 from antibypass import item_looser
 from blocker.site_block import blocks_dns, make_site_block_type, site_flags, tab_action, text
 from monitor.word_guard import WordGuard, site_action
 from datetime import datetime
+from test_rebuild_add_edit import PERMANENT, edit, env, items, lock, new  # noqa: F401
 
 NOW = datetime(2026, 9, 21, 12, 0)
 
@@ -22,6 +24,9 @@ def test_what_a_site_did_before_this_existed():
     ("back", False, "back"),
     ("dns,close", True, "close"),
     ("dns,back", True, "back"),
+    ("minimize", False, None),
+    ("dns,minimize", True, None),
+    ("close,minimize", False, "close"),
     ("", True, None),               # nothing readable: back to "can't load"
     ("nonsense", True, None),
 ])
@@ -49,6 +54,42 @@ def test_weakening_how_a_site_is_blocked_needs_the_challenge():
     assert item_looser(_site("dns,close"), _site("dns"), NOW)        # dropped "close the tab"
     assert item_looser(_site("dns"), _site("close"), NOW)            # it can load again
     assert not item_looser(_site("dns"), _site("dns,close"), NOW)    # adding one is free
+
+
+@pytest.mark.parametrize("old, new_way, weaker", [
+    ("back", "close", False),
+    ("close", "back", True),
+    ("minimize", "close", True),
+    ("close", "minimize", True),
+    ("back,minimize", "close,minimize", False),
+    ("dns,minimize", "close,minimize", True),
+    ("dns,close,minimize", "dns,close", True),
+    ("dns,close", "dns,close,minimize", False),
+])
+def test_site_ways_compare_foreground_dns_and_background_coverage(old, new_way, weaker):
+    assert item_looser(_site(old), _site(new_way), NOW) is weaker
+
+
+def test_site_coverage_includes_all_matching_suffixes():
+    ways = {"example.org": "dns,close", "video.example.org": "back,minimize"}
+    assert block_method.merge("site", *block_method.matching_sites("m.video.example.org", ways).values()) == (
+        "dns,close,minimize")
+    assert block_method.matching_sites("notexample.org", ways) == {}
+    assert not block_method.site_coverage_looser({"video.example.org": "back,minimize"},
+                                                {"example.org": "close,minimize"})
+    assert block_method.site_coverage_looser(ways, {"example.org": "dns,close"})
+
+
+def test_direct_site_editor_saves_minimize_and_guards_its_removal(env):
+    new(env, {"kind": "site", "target": "example.org", "name": "Example", "ways": ["minimize"], "rules": [PERMANENT]})
+    item = items(env)["Example"]
+    assert item["block_type"] == "minimize"
+    lock(env)
+    edit(env, item["id"], {"ways": ["dns", "minimize"], "rules": [PERMANENT]})
+    assert items(env)["Example"]["block_type"] == "dns,minimize"
+    assert text("dns,minimize") == "can't load + minimizes the window"
+    assert edit(env, item["id"], {"ways": ["dns", "close"], "rules": [PERMANENT]})["needs_challenge"]
+    assert items(env)["Example"]["block_type"] == "dns,minimize"
 
 
 # ---------- the tray agent acting on the tab ----------

@@ -364,19 +364,20 @@ def test_an_opening_just_before_a_block_ends_still_counts(tmp_path, monkeypatch)
     assert run.used(f"group:{gid}", gid) == 1                    # in time, so it counts
     db.add_unlock([yt], ["YouTube"], at(14, 10), at(14, 40))
     run.now = at(14, 15)
-    run.launch("yt.exe")                                         # not blocked: counts as always
-    assert run.used(f"group:{gid}", gid) == 2
+    run.launch("yt.exe")                                         # an active emergency exempts this opening
+    assert run.used(f"group:{gid}", gid) == 1
 
 
-def test_an_emergency_unlock_counts_the_opening(tmp_path, monkeypatch):
-    db, yt, tw, gid = _launch_group(tmp_path, {"permanent": {"rule_type": "permanent"}}, group_limit=5)
+def test_an_emergency_unlock_exempts_the_opening(tmp_path, monkeypatch):
+    temporary = {"rule_type": "temporary", "temp_until": "2026-09-14 12:00:00"}
+    db, yt, tw, gid = _launch_group(tmp_path, {"temporary": temporary}, group_limit=5)
     run = Launcher(db, monkeypatch, at(10))
     run.launch("yt.exe")
-    assert run.used(f"group:{gid}", gid) == 0                    # always blocked by its own extra: closed at once
+    assert run.used(f"group:{gid}", gid) == 0                    # blocked by its own extra: closed at once
     db.add_unlock([yt], ["YouTube"], at(10, 30), at(11))
     run.now = at(10, 31)
     run.launch("yt.exe")                                         # unlocked: it really is opened
-    assert run.used(f"group:{gid}", gid) == 1
+    assert run.used(f"group:{gid}", gid) == 0
 
 
 def test_blocked_until_is_the_latest_of_the_rules_blocking_it():

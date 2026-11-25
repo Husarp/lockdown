@@ -973,7 +973,7 @@ def test_upcoming_warning_is_once_when_you_are_not_using_it(watch):
     watch.watcher.tick()
     for _ in range(100):
         step(watch)
-    assert len(watch.calls) == 1 and watch.calls[0][1] is False
+    assert len(watch.calls) == 1 and watch.calls[0][0].in_use is False
 
 
 def test_warnings_can_be_switched_off(watch):
@@ -1098,7 +1098,7 @@ def test_the_app_in_front_is_warned_forced_on_the_front_road_with_the_sound(watc
     watch.hub.in_use = lambda: {watch.item}
     got = front_calls(watch)
     to_last_minute(watch)
-    assert got == [("Reddit will be blocked in 10 min (22:10).", True, {}),                        # 10 min: the ordinary one
+    assert got == [("Reddit will be blocked in 10 min (22:10).", True, {"front": True, "sound": True}),
                    ("Reddit will be blocked in 1 min (22:10).", True, {"front": True, "sound": True})]
     for _ in range(3):                                                                              # once per step
         step(watch, 5)
@@ -1114,20 +1114,20 @@ def test_the_sound_follows_its_setting(watch):
     assert got[-1][2] == {"front": True, "sound": False}
 
 
-def test_switched_off_the_front_road_is_never_used(watch):
+def test_turning_off_in_use_steps_preserves_game_delivery_for_the_general_lead(watch):
     watch.db.set_setting("notify.warn.repeat_sec", "0")
     watch.db.set_setting("notify.front.enabled", "0")
     watch.hub.in_use = lambda: {watch.item}
     got = front_calls(watch)
     to_last_minute(watch)
-    assert got == [("Reddit will be blocked in 10 min (22:10).", True, {})]                         # as before: nothing more
+    assert got == [("Reddit will be blocked in 10 min (22:10).", True, {"front": True, "sound": True})]
 
 
-def test_what_is_not_in_front_gets_no_front_warning(watch):
+def test_what_is_not_in_front_gets_the_general_lead_only(watch):
     watch.db.set_setting("notify.warn.repeat_sec", "0")
     got = front_calls(watch)
     to_last_minute(watch)
-    assert all(kw == {} and force is False for _m, force, kw in got) and len(got) == 1
+    assert len(got) == 1 and got[0][0].triggers == ("lead:900s",) and not got[0][0].in_use
 
 
 def real_notifier(watch):
@@ -1146,7 +1146,7 @@ def test_the_front_warning_gets_through_a_muting_mode_and_asks_for_the_front_roa
     modes.start(watch.db, "dnd", NOW, None)                       # Do Not Disturb: a mode that mutes
     to_last_minute(watch)
     assert watch.hub.snapshot.mode["mute"] is True
-    assert shown == [("Reddit will be blocked in 10 min (22:10).", False, False),     # (what you are using: forced too)
+    assert shown == [("Reddit will be blocked in 10 min (22:10).", True, True),
                      ("Reddit will be blocked in 1 min (22:10).", True, True)]
 
 
@@ -1566,7 +1566,10 @@ def test_workers_start_and_all_stop_within_a_second(env, monkeypatch):
     env.real_pacing()
     monkeypatch.setattr(updates, "remove_downloads", lambda *a, **k: [])
     tracker, guard, retention = FakeThread(), FakeThread(), FakeThread()
-    pool = workers.Workers(hub=env.hub, tracker=tracker, word_guard=guard, retention=retention)
+    media, minimize = FakeThread(), FakeThread()
+    media.before_action = lambda *args: None
+    pool = workers.Workers(hub=env.hub, tracker=tracker, word_guard=guard, retention=retention,
+                           site_media=media, site_minimize=minimize)
     pool.start()
     assert wait_for(lambda: env.hub.snapshot is not None)
     assert env.hub.status_worker is pool.status
@@ -1578,6 +1581,7 @@ def test_workers_start_and_all_stop_within_a_second(env, monkeypatch):
     assert time.monotonic() - started < 1
     assert not any(w.is_alive() for w in pool.workers)
     assert tracker.stopped and guard.stop_event.is_set() and retention.stop_event.is_set()
+    assert media.stopped and minimize.stopped and not media.is_alive() and not minimize.is_alive()
     assert pool.alerter._db is None
     assert env.errors == []
 
@@ -1590,8 +1594,67 @@ def test_a_desktop_job_that_cannot_start_is_logged_and_the_workers_carry_on(env,
     pool.start()
     assert wait_for(lambda: env.hub.snapshot is not None and env.errors)
     pool.stop()
-    assert "ModuleNotFoundError" in env.errors[0] and env.errors[0].startswith("ERROR Lockdown startup: ")
+    assert "ModuleNotFoundError" in env.errors[0] and env.errors[0].startswith("ERROR Lockdown startup: tracker: ")
     assert pool.tracker is None and not pool.word_guard.is_alive()
+
+
+def test_desktop_registration_retries_and_shares_the_media_callback(env, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    timeline, callbacks = [], []
+
+    class Media(FakeThread):
+        def __init__(self, hub):
+            assert hub is env.hub
+            super().__init__()
+
+        def start(self):
+            timeline.append("media")
+            if timeline.count("media") == 1:
+                raise OSError("desktop starting")
+            super().start()
+
+        def before_action(self, observation, blocked_hosts, action):
+            timeline.append((observation, blocked_hosts, action))
+            return "attempted"
+
+    class Minimize(FakeThread):
+        def __init__(self, hub, before_action):
+            assert hub is env.hub
+            callbacks.append(before_action)
+            super().__init__()
+
+        def start(self):
+            timeline.append("minimize")
+            super().start()
+
+    class Guard(FakeThread):
+        def __init__(self, on_block, before_action=None):
+            assert callable(on_block)
+            callbacks.append(before_action)
+            super().__init__()
+
+    monkeypatch.setitem(sys.modules, "resident.site_media", SimpleNamespace(SiteMediaWorker=Media))
+    monkeypatch.setitem(sys.modules, "monitor.site_minimize", SimpleNamespace(SiteMinimizeWorker=Minimize))
+    monkeypatch.setitem(sys.modules, "monitor.word_guard", SimpleNamespace(WordGuard=Guard))
+    monkeypatch.setattr(workers, "DESKTOP_RETRY_SEC", 0.01)
+    monkeypatch.setattr(updates, "remove_downloads", lambda: [])
+    env.real_pacing()
+    pool = workers.Workers(hub=env.hub, tracker=FakeThread(), retention=FakeThread())
+    monkeypatch.setattr(pool, "_com_ready", True)
+    pool.start()
+    try:
+        assert wait_for(lambda: pool._media_action is not None and len(callbacks) == 2)
+        assert timeline[:3] == ["media", "minimize", "media"]
+        assert callbacks[0] is callbacks[1]
+        assert callbacks[1](7, {"example.test"}, "minimize") == "attempted"
+        assert timeline[-1] == (7, {"example.test"}, "minimize")
+        assert any("desktop starting" in line for line in env.errors)
+    finally:
+        pool.stop()
+    assert all(not job.is_alive() for job in (pool.site_media, pool.site_minimize, pool.word_guard))
+    assert pool.site_media.stopped and pool.site_minimize.stopped
 
 
 def test_stopping_workers_that_never_started_is_harmless(env):

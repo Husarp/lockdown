@@ -1,6 +1,13 @@
 package com.husarp.lockdown
 
 import com.husarp.lockdown.engine.Active
+import com.husarp.lockdown.engine.BlockPause
+import com.husarp.lockdown.engine.EmergencyUse
+import com.husarp.lockdown.engine.LimitClock
+import com.husarp.lockdown.engine.QuotaExemptions
+import com.husarp.lockdown.engine.Schedule
+import com.husarp.lockdown.engine.SchedMode
+import com.husarp.lockdown.engine.Window
 import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
 import com.husarp.lockdown.engine.ItemType
@@ -16,6 +23,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
+import java.time.LocalTime
 
 class UsageCounterTest {
     private val t0 = LocalDateTime.of(2026, 9, 28, 12, 0, 0)   // Monday noon
@@ -134,4 +142,86 @@ class UsageCounterTest {
         assertEquals(5, c.usage("item:1", "day:2026-09-28"))
         assertTrue(c.usage("item:1", "day:2026-09-28") < 60)
     }
+    @Test fun anEmergencySpansThreeAmWithoutSpendingTheNewDay() {
+        val start = LocalDateTime.of(2026, 6, 1, 2, 0)
+        val end = start.plusMinutes(80)
+        // Two overlapping tiers cover the example without exceeding the existing 60-minute tier maximum.
+        val grants = listOf(
+            EmergencyUse(start.toString(), "long", start.plusHours(1).toString(), listOf("1")),
+            EmergencyUse(start.plusMinutes(50).toString(), "short", end.toString(), listOf("1")),
+        )
+        val ex = QuotaExemptions(uses = grants)
+        val c = UsageCounter(clock = LimitClock(LocalTime.of(3, 0)))
+        val item = Item("1", "Video", "video.example", ItemType.SITE,
+            rules = listOf(Rule(RuleType.TIME_LIMIT, dailyLimitMin = 5, weeklyLimitMin = 15, monthlyLimitMin = 60)))
+        val observed = listOf(active(item))
+        for (minute in 0L..80L) c.record(observed, start.plusMinutes(minute), ex)
+        assertEquals(0, c.usage("item:1", "day:2026-06-01T03:00"))
+        assertEquals(0, c.usage("item:1", "week:w2026-06-01"))
+        assertEquals(0, c.usage("item:1", "month:m2026-06"))
+        c.record(observed, end.plusMinutes(1), ex)
+        assertEquals(60, c.usage("item:1", "day:2026-06-01T03:00"))
+        assertEquals(60, c.usage("item:1", "week:w2026-06-01"))
+        assertEquals(60, c.usage("item:1", "month:m2026-06"))
+    }
+
+    @Test fun aCrossingTickSplitsDayWeekAndMonthAndDoesNotAliasExemptTime() {
+        val midnight = LocalDateTime.of(2026, 6, 1, 0, 0)
+        val item = Item("1", "Video", "video.example", ItemType.SITE,
+            rules = listOf(Rule(RuleType.TIME_LIMIT, dailyLimitMin = 5, weeklyLimitMin = 15, monthlyLimitMin = 60)))
+        for (paused in listOf(false, true)) {
+            val pauses = if (paused) listOf(BlockPause(midnight.minusMinutes(1).toString(), midnight.plusMinutes(1).toString()))
+                else emptyList()
+            val ex = QuotaExemptions(pauses)
+            val c = UsageCounter()
+            c.record(listOf(active(item)), midnight.minusSeconds(2), ex)
+            c.record(listOf(active(item)), midnight.plusSeconds(2), ex)
+            for (bucket in listOf("day:2026-05-31", "day:2026-06-01", "week:w2026-05-25", "week:w2026-06-01",
+                    "month:m2026-05", "month:m2026-06"))
+                assertEquals(bucket, if (paused) 0 else 2, c.usage("item:1", bucket))
+        }
+    }
+
+    @Test fun clippingBeforeRoundingKeepsPaidCarryAndTheOpeningBaseline() {
+        val ex = QuotaExemptions(listOf(BlockPause(t0.plusNanos(750_000_000).toString(),
+            t0.plusNanos(2_250_000_000).toString())))
+        val item = Item("1", "Video", "video.example", ItemType.SITE,
+            rules = listOf(Rule(RuleType.SWITCH_LIMIT, dailySwitchLimit = 3, switchMode = SwitchCount.VISIT)))
+        val c = UsageCounter()
+        c.record(emptyList(), t0, ex)
+        c.record(listOf(active(item)), t0.plusSeconds(1), ex)
+        c.record(listOf(active(item)), t0.plusSeconds(2), ex)
+        c.record(listOf(active(item)), t0.plusNanos(2_500_000_000), ex)
+        assertEquals(1, c.usage("item:1", "day:2026-09-28"))
+        assertEquals(0, c.usage("item:1", "op:i1SWITCH_LIMIT:2026-09-28"))
+        c.record(emptyList(), t0.plusSeconds(3), ex)
+        c.record(listOf(active(item)), t0.plusMinutes(10), ex)
+        assertEquals(1, c.usage("item:1", "op:i1SWITCH_LIMIT:2026-09-28"))
+    }
+
+    @Test fun anUnrelatedMemberPaysTheSharedAllowanceWhenAllowedHoursEnd() {
+        val a = Item("1", "Video", "video.example", ItemType.SITE)
+        val b = Item("2", "Game", "com.game", ItemType.APP)
+        val day = t0.dayOfWeek.value - 1
+        val schedule = Schedule(SchedMode.ALLOW, listOf(Window(listOf(day), "11:00", "12:00")))
+        for (shared in listOf(true, false)) {
+            val g = Group("7", "Shared", rules = listOf(Rule(RuleType.SCHEDULED,
+                schedule = schedule, allowanceMin = 2, allowanceShared = shared)), memberIds = listOf(a.id, b.id),
+                overrides = mapOf(a.id to mapOf("TIME_LIMIT" to Rule(RuleType.TIME_LIMIT, dailyLimitMin = 2))))
+            val ex = QuotaExemptions(uses = listOf(
+                EmergencyUse(t0.minusSeconds(1).toString(), "1", t0.plusMinutes(1).toString(), listOf(a.id)),
+                EmergencyUse(t0.minusSeconds(5).toString(), "2", t0.plusMinutes(2).toString(), alerts = true),
+            ))
+            val c = UsageCounter()
+            val items = listOf(active(a, listOf(g)), active(b, listOf(g)))
+            c.record(items, t0.minusSeconds(2), ex)
+            c.record(items, t0.plusSeconds(2), ex)
+            val bucket = "win:g7SCHEDULED:2026-10-05T11:00"
+            assertEquals(1, c.usage("item:1", "day:2026-09-28"))
+            assertEquals(4, c.usage("item:2", "day:2026-09-28"))
+            assertEquals(2, c.usage(if (shared) "group:7" else "item:2", bucket))
+            assertEquals(0, c.usage("item:1", bucket))
+        }
+    }
+
 }

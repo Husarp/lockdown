@@ -262,9 +262,7 @@ def _way(kind: str, value, who: str, own: bool = False, hosted: bool = False):
     if flags - allowed:
         raise ApiError(f"Bad request: {who} has a way Lockdown doesn't know.")
     if kind == "site":
-        if "close" in flags:
-            flags.discard("back")
-        return site_block.make_site_block_type(flags) or None
+        return block_method.merge("site", site_block.make_site_block_type(flags))
     if hosted and flags & {"internet", "background", "grey"}:
         raise ApiError(f"{who}: a program file is closed or minimised only.")
     if "close" in flags:

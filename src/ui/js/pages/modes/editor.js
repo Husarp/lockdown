@@ -12,7 +12,7 @@ import { ld } from "../../bridge.js";
 import { colorOf } from "../../categories.js";
 import { CANCELLED, guarded } from "../../challenge.js";
 import { confirmButton, csec, days as dayChips, el, esc, field, ic, kic, setText, stepper, sw, tpRange } from "../../ui.js";
-import { createWays, defaultWays, groupOf, GROUPS } from "../../ways.js";
+import { createWays, defaultWays, groupOf, GROUPS, wayText } from "../../ways.js";
 
 export const POMODORO_FIELDS = [["work", "Focus", "min"], ["break", "Break", "min"], ["rounds", "Rounds", ""], ["long", "Long break", "min"]];
 const CAT_HELP = "Categories are set on Screen Time > Apps / Websites; blocked sites and apps count as Distracting unless you chose otherwise.";
@@ -32,7 +32,8 @@ export function chipsOf(mode, brief) {
     const i = items.get(id);
     if (i) out.push({ key: `i:${id}`, kind: "item", id, label: i.name, icon: iconOfTarget(i.kind, i.target) });
   }
-  mode.extra.forEach((e, n) => out.push({ key: `x:${n}`, kind: "extra", id: n, label: e.name, icon: iconOfTarget(e.kind, (e.targets || [])[0]) }));
+  mode.extra.forEach((e, n) => out.push({ key: `x:${n}`, kind: "extra", id: n, label: e.name,
+    icon: iconOfTarget(e.kind, (e.targets || [])[0]), way: e.kind === "site" ? wayText("site", e.block_type || "dns") : "" }));
   return out;
 }
 
@@ -104,7 +105,7 @@ export function createEditor(host, hooks) {
   function renderChips() {
     const chips = chipsOf(cur, brief || { groups: [], items: [] });
     const box = q("chips");
-    box.replaceChildren(...chips.map((c) => el(`<span class="pill" data-key="${esc(c.key)}">${c.kind === "group" ? ic("layers") : c.icon ? `<span class="aic aic-sm">${iconImg(c.icon[0], c.icon[1])}</span>` : ""}<span>${esc(c.label)}</span>` +
+    box.replaceChildren(...chips.map((c) => el(`<span class="pill" data-key="${esc(c.key)}">${c.kind === "group" ? ic("layers") : c.icon ? `<span class="aic aic-sm">${iconImg(c.icon[0], c.icon[1])}</span>` : ""}<span${c.way ? ` title="${esc(c.way)}"` : ""}>${esc(c.label)}</span>` +
       `<button class="icon-btn icon-btn-sm x" type="button" data-act="chip-x" aria-label="Remove ${esc(c.label)}">${ic("x")}</button></span>`)));
     q("nothing").hidden = chips.length > 0;
     fillList();

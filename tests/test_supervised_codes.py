@@ -1,4 +1,5 @@
 import base64
+import json
 from datetime import datetime
 
 import pytest
@@ -22,10 +23,11 @@ def ctx(tmp_path):
                                      (1234567890, "005924"), (2000000000, "279037"), (20000000000, "353130")])
 def test_rfc(ctx, monkeypatch, at, want):
     monkeypatch.setattr(cs, "trusted_epoch", lambda db: at)
-    sc.change(ctx.db, "add", "Someone", RFC)
+    sc.change(ctx.db, "add", "Someone", RFC, period=30)
     data = sc.codes(ctx.db)
     assert data["entries"][0]["code"] == want
-    assert data["remaining"] == 30 - at % 30
+    assert data["entries"][0]["remaining"] == 30 - at % 30
+    assert data["entries"][0]["expires_in"] == 60 - at % 30
     assert "secret" not in data["entries"][0]
 
 
@@ -81,9 +83,30 @@ def test_api_pending_and_free_crud(ctx):
 def test_rollover(ctx, monkeypatch):
     clock = {"at": 1111111109}
     monkeypatch.setattr(cs, "trusted_epoch", lambda db: clock["at"])
-    sc.change(ctx.db, "add", "Other", RFC)
-    assert sc.codes(ctx.db)["remaining"] == 1
+    sc.change(ctx.db, "add", "Other", RFC, period=30)
+    assert sc.codes(ctx.db)["entries"][0]["remaining"] == 1
     assert sc.codes(ctx.db)["entries"][0]["code"] == "081804"
     clock["at"] += 1
-    assert sc.codes(ctx.db)["remaining"] == 30
+    assert sc.codes(ctx.db)["entries"][0]["remaining"] == 30
     assert sc.codes(ctx.db)["entries"][0]["code"] == "050471"
+
+
+def test_mixed_periods_and_legacy_uri_and_row(ctx, monkeypatch):
+    monkeypatch.setattr(cs, "trusted_epoch", lambda db: 79)
+    ctx.db.set_setting(sc.KEY, json.dumps([{"id": "legacy", "name": "Old row", "secret": RFC}]))
+    sc.change(ctx.db, "add", "New raw key", RFC)
+    sc.change(ctx.db, "add", "Explicit legacy", RFC, period=30)
+    sc.change(ctx.db, "add", "Old link", "otpauth://totp/Old?secret=" + RFC)
+    sc.change(ctx.db, "add", "New link", cs.otpauth_uri(RFC, "Phone supervisor", 40), period=30)
+    rows = sc.codes(ctx.db)["entries"]
+    assert [(r["period"], r["code"], r["remaining"], r["expires_in"]) for r in rows] == [
+        (30, "359152", 11, 41), (40, "287082", 1, 41), (30, "359152", 11, 41),
+        (30, "359152", 11, 41), (40, "287082", 1, 41),
+    ]
+
+
+@pytest.mark.parametrize("query", ["period=40&period=30", "period=04", "period=%ZZ", "issuer",
+                                  "issuer=%FF", "issuer=%00", "issuer=", "counter=1", "secret=other", "period=40#fragment"])
+def test_rejects_malformed_or_unsupported_parameters(query):
+    with pytest.raises(ValueError):
+        sc.parse_key("otpauth://totp/Pair?secret=" + RFC + "&" + query)

@@ -41,7 +41,7 @@ test("Close the tab and Go back exclude each other; Can't load it combines with 
   assert.deepEqual(ways.toggleWay("site", ["dns", "close"], "back", true), ["dns", "back"]);
   assert.deepEqual(ways.toggleWay("site", ["dns", "back"], "close", true), ["dns", "close"]);
   assert.deepEqual(ways.toggleWay("site", ["dns"], "dns", false), []);
-  assert.deepEqual(ways.toggleWay("site", ["dns"], "minimize", true), ["dns"], "a way of another kind is ignored");
+  assert.deepEqual(ways.toggleWay("site", ["dns", "close"], "minimize", true), ["dns", "close", "minimize"]);
 });
 
 test("a program file can only be closed or minimised", () => {
@@ -67,7 +67,7 @@ test("the group of a target and the problems with its ways, in Python's words", 
   assert.equal(ways.waysProblem("app", ["close"]), "");
   assert.equal(ways.waysProblem("app", ["background"]), "Tick at least one of Close app / Minimize / Grey it / Block internet.");
   assert.equal(ways.waysProblem("file", ["internet"]), "Tick Close app or Minimize.");
-  assert.equal(ways.waysProblem("site", []), "Tick at least one of Can't load it / Close the tab / Go back.");
+  assert.equal(ways.waysProblem("site", []), "Tick at least one of Can't load it / Close the tab / Go back / Minimize.");
   assert.equal(ways.enabled("app", ["minimize"], "background"), false);
   assert.equal(ways.enabled("app", ["close"], "background"), true);
 });

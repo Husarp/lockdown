@@ -12,7 +12,8 @@ of the Anti-Bypass list only (challenges.SECRET_KINDS), never of the bedtime scr
   little off), and a code that was accepted once is never accepted again (nor any older one). Set up by scanning a QR
   code (otpauth://totp/Lockdown:<pc>?secret=...&issuer=Lockdown) and typing one current code to confirm.
 - Supervisor codes: a separate TOTP secret, with the same storage, trusted clock, replay protection and slowdown.
-  A current code authorizes only the pending action, skipping its challenges and waits (a general unlock only for the explicit "Unlock to edit" action).
+  Pairings use 40 seconds when new and 30 seconds if legacy. Only the current and previous counters are accepted.
+  An accepted code authorizes only the pending action, skipping its challenges and waits (a general unlock only for the explicit "Unlock to edit" action).
   Setup, replacement and removal go through the normal guard (or an existing supervisor code).
 - Recovery code (optional, none by default): a one-time master key - 16 characters in 4 groups from an alphabet without
   look-alikes, kept only as a hash. Making one (or a new one) asks the challenge, so it is never free; it is shown ONCE
@@ -34,8 +35,10 @@ import json
 import platform
 import re
 import secrets as _random
+import sqlite3
 import struct
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from urllib.parse import quote
 
@@ -46,6 +49,7 @@ SCRYPT_MAXMEM = 64 * 1024 * 1024
 SALT_BYTES, HASH_BYTES = 16, 32
 PASSWORD_MIN, PASSWORD_MAX = 4, 200
 TOTP_DIGITS, TOTP_PERIOD, TOTP_WINDOW = 6, 30, 1
+SUPERVISOR_PERIOD = 40
 TOTP_SECRET_BYTES = 20                             # 160 bits, as RFC 4226 recommends
 RECOVERY_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"   # 32 signs: no 0 / O, no 1 / I
 RECOVERY_LEN, RECOVERY_GROUP = 16, 4               # 80 bits, written ABCD-EFGH-JKLM-NPQR
@@ -135,11 +139,32 @@ def match_code(secret: str, code, at: float, last: int = -1) -> int | None:
     return found
 
 
-def otpauth_uri(secret: str, name: str | None = None) -> str:
+def pairing_period(value) -> int:
+    if type(value) is not int or value not in (TOTP_PERIOD, SUPERVISOR_PERIOD):
+        raise ValueError("Choose a 30- or 40-second period.")
+    return value
+
+
+def match_supervisor(secret: str, code, at: float, period: int, last: int = -1) -> int | None:
+    if not isinstance(code, str) or not _CODE.fullmatch(code):
+        return None
+    # Oldest first: the newest match wins unless the same value was already consumed and is still live.
+    key, now = secret_key(secret), int(at // pairing_period(period))
+    found, replay = None, False
+    for step in range(max(0, now - 1), now + 1):
+        if hmac.compare_digest(hotp(key, step), code):
+            if step <= last:
+                replay = True
+            else:
+                found = step
+    return None if replay else found
+
+
+def otpauth_uri(secret: str, name: str | None = None, period: int = TOTP_PERIOD) -> str:
     """otpauth://totp/Lockdown:<pc name>?secret=...&issuer=Lockdown (the QR code's text)."""
     label = quote("Lockdown") + ":" + quote(name or pc_name(), safe="")
     return (f"otpauth://totp/{label}?secret={secret}&issuer=Lockdown&algorithm=SHA1&digits={TOTP_DIGITS}"
-            f"&period={TOTP_PERIOD}")
+            f"&period={period}")
 
 
 def pc_name() -> str:
@@ -189,8 +214,34 @@ def load(db) -> dict:
         if isinstance(data, dict) else {}
 
 
-def _save(db, data: dict):
-    db.set_setting(SECRETS_KEY, json.dumps(data, sort_keys=True))
+@contextmanager
+def _mutation(db):
+    """Serialize the whole read/modify/write on the calling thread's SQLite connection."""
+    conn = db.conn
+    deadline = time.monotonic() + 5
+    old_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    conn.execute("PRAGMA busy_timeout=150")
+    try:
+        while True:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                break
+            except sqlite3.OperationalError as exc:
+                if (exc.sqlite_errorcode & 0xff) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+        with conn:
+            data = load(db)
+            before = json.dumps(data, sort_keys=True)
+            yield data
+            after = json.dumps(data, sort_keys=True)
+            if after != before:
+                conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (SECRETS_KEY, after))
+    finally:
+        conn.execute(f"PRAGMA busy_timeout={old_timeout}")
 
 
 def ready(db) -> set:
@@ -208,33 +259,42 @@ def status(db) -> dict:
     data = load(db)
     return {"password": {"set": "password" in data, "since": _since(data.get("password", {}).get("set"))},
             "totp": {"set": "totp" in data, "since": _since(data.get("totp", {}).get("set"))},
-            "supervisor": {"set": "supervisor" in data, "since": _since(data.get("supervisor", {}).get("set"))},
+            "supervisor": {"set": "supervisor" in data, "since": _since(data.get("supervisor", {}).get("set")),
+                           "period": data.get("supervisor", {}).get("period", TOTP_PERIOD)},
             "recovery": {"exists": "recovery" in data, "made": _since(data.get("recovery", {}).get("made"))}}
 
 
 def set_password(db, text: str, now):
     """Store a new password (its hash). No recovery code comes with it (forgotten = uninstalling is the way out)."""
-    data = load(db)
-    data["password"] = {**hash_secret(check_password_text(text)), "set": now.strftime(TIME_FMT)}
-    _save(db, data)
+    record = {**hash_secret(check_password_text(text)), "set": now.strftime(TIME_FMT)}
+    with _mutation(db) as data:
+        data["password"] = record
 
 
-def set_totp(db, secret: str, step: int, now, kind="totp"):
-    """Store the authenticator confirmed with the code of time step `step` (that code is then used). No recovery code
-    comes with it."""
+def set_totp(db, secret: str, step: int, now, kind="totp", period=TOTP_PERIOD):
+    """Store the authenticator and consume its confirmation counter."""
     if kind not in ("totp", "supervisor"):
         raise ValueError("Unknown authenticator kind.")
-    secret_key(secret)                       # (a bad secret fails here, before anything is stored)
-    data = load(db)
-    data[kind] = {"secret": secret, "set": now.strftime(TIME_FMT), "last": int(step)}
-    _save(db, data)
+    secret_key(secret)
+    with _mutation(db) as data:
+        data[kind] = {"secret": secret, "set": now.strftime(TIME_FMT), "last": int(step)}
+        if kind == "supervisor":
+            data[kind]["period"] = pairing_period(period)
+
+
+def confirm_supervisor(db, secret, step, now, period, replaces):
+    """Check the authorized setup against the still-active pairing and commit the consumed counter."""
+    with _mutation(db) as data:
+        active = data.get("supervisor", {}).get("secret")
+        if active != replaces:
+            raise ValueError("The supervisor pairing changed. Start setup again.")
+        data["supervisor"] = {"secret": secret, "set": now.strftime(TIME_FMT), "last": step, "period": period}
 
 
 def remove(db, kind: str):
-    """Forget the password, the authenticator or the recovery code (`kind` "password" / "totp" / "recovery")."""
-    data = load(db)
-    if data.pop(kind, None) is not None:
-        _save(db, data)
+    """Forget a stored secret."""
+    with _mutation(db) as data:
+        data.pop(kind, None)
 
 
 def _new_recovery(data: dict, now) -> str:
@@ -245,9 +305,10 @@ def _new_recovery(data: dict, now) -> str:
 
 def make_recovery(db, now) -> str:
     """A new recovery code (the old one stops working). Returns it - the only time it is ever shown."""
-    data = load(db)
-    code = _new_recovery(data, now)
-    _save(db, data)
+    record = {}
+    code = _new_recovery(record, now)
+    with _mutation(db) as data:
+        data.update(record)
     return code
 
 
@@ -277,9 +338,12 @@ class Checker:
     def wait_left(self) -> float:
         """Seconds until the next try is looked at (0 = now; never more than MAX_WAIT_SEC, whatever a clock did)."""
         db = self._db()
-        tries = load(db).get("tries") or {}
+        return self._wait(load(db), self._now(db))
+
+    @staticmethod
+    def _wait(data, now) -> float:
         try:
-            left = float(tries.get("next") or 0) - self._now(db)
+            left = float((data.get("tries") or {}).get("next") or 0) - now
         except (TypeError, ValueError):
             left = 0.0
         return max(0.0, min(left, MAX_WAIT_SEC))
@@ -290,21 +354,17 @@ class Checker:
         except (TypeError, ValueError):
             return 0
 
-    def _result(self, right: bool) -> bool:
-        db = self._db()
-        data = load(db)
-        try:
-            fails = int((data.get("tries") or {}).get("fails") or 0)
-        except (TypeError, ValueError):
-            fails = 0
-        if right and fails:
+    @staticmethod
+    def _result(data, right: bool, now: float) -> bool:
+        if right:
             data.pop("tries", None)
-            _save(db, data)
-        elif not right:
-            fails += 1
-            wait = min(MAX_WAIT_SEC, 2 ** (fails - FREE_TRIES)) if fails >= FREE_TRIES else 0
-            data["tries"] = {"fails": fails, "next": self._now(db) + wait if wait else 0}
-            _save(db, data)
+        else:
+            try:
+                fails = int((data.get("tries") or {}).get("fails") or 0) + 1
+            except (TypeError, ValueError):
+                fails = 1
+            wait = min(MAX_WAIT_SEC, 2 ** min(9, fails - FREE_TRIES)) if fails >= FREE_TRIES else 0
+            data["tries"] = {"fails": fails, "next": now + wait if wait else 0}
         return right
 
     def ready(self) -> set:
@@ -314,35 +374,56 @@ class Checker:
         return "recovery" in load(self._db())
 
     def check_password(self, value) -> bool:
-        return self._result(verify_secret(value, load(self._db()).get("password")))
+        db = self._db()
+        record = load(db).get("password")
+        right = verify_secret(value, record)
+        with _mutation(db) as data:
+            now = self._now(db)
+            if self._wait(data, now) or data.get("password") != record:
+                return False
+            return self._result(data, right, now)
 
     def check_totp(self, value, kind="totp") -> bool:
-        """A right code that is newer than the last one accepted; it is then the last one (never accepted again)."""
+        if kind == "supervisor":
+            return self.check_supervisor(value) is True
+        return self._consume_code(value, "totp") is True
+
+    def check_supervisor(self, value) -> bool | None:
+        """True after a committed approval, None during slowdown, False for a refused code."""
+        return self._consume_code(value, "supervisor")
+
+    def _consume_code(self, value, kind) -> bool | None:
         db = self._db()
-        data = load(db)
-        record = data.get(kind)
-        step = None
-        if record:
+        with _mutation(db) as data:
+            now = self._now(db)
+            if self._wait(data, now):
+                return None
+            record = data.get(kind)
+            if not record:
+                return False
+            step = None
             try:
-                step = match_code(record["secret"], value, self._now(db), int(record.get("last", -1)))
+                last = int(record.get("last", -1))
+                if kind == "supervisor":
+                    step = match_supervisor(record["secret"], value, now, record.get("period", TOTP_PERIOD), last)
+                else:
+                    step = match_code(record["secret"], value, now, last)
             except (KeyError, TypeError, ValueError):
-                step = None
-        if step is not None:
-            data[kind] = {**record, "last": step}
-            _save(db, data)
-        return self._result(step is not None)
+                pass
+            if step is not None:
+                record["last"] = step
+            return self._result(data, step is not None, now)
 
     def use_recovery(self, value) -> str | None:
-        """The recovery code typed: when it is the stored one it is used up and a NEW code takes its place at once
-        (made "now" by the trusted clock) - returned to be shown once; else None (a wrong try, counted like any other)."""
+        """Consume the old recovery code and make a new one atomically."""
         db = self._db()
-        data = load(db)
-        record = data.get("recovery")
+        record = load(db).get("recovery")
         code = clean_recovery(value)
-        if not (record and code and verify_secret(code, record)):
-            self._result(False)
-            return None
-        new = _new_recovery(data, datetime.fromtimestamp(self._now(db)))
-        data.pop("tries", None)              # (a right answer clears the wrong tries)
-        _save(db, data)
-        return new
+        right = bool(record and code and verify_secret(code, record))
+        with _mutation(db) as data:
+            now = self._now(db)
+            if self._wait(data, now) or data.get("recovery") != record:
+                return None
+            self._result(data, right, now)
+            if right:
+                return _new_recovery(data, datetime.fromtimestamp(now))

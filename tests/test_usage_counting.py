@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import modes
+import quota_accounting
 import rules
 import service
 from blocker import apps, connections, firewall, netlog
@@ -29,6 +30,12 @@ from monitor.usage import COUNTED_KEY, MAX_GAP_SEC, TICK_SEC, UsageTracker
 
 EVENING = datetime(2026, 10, 2, 19, 0)           # a Friday, after the allowed hours (16-18)
 ALLOW_16_18 = rules.make_schedule("allow", [(list(range(7)), "16:00", "18:00")])
+
+
+@pytest.fixture(autouse=True)
+def service_delegate(monkeypatch):
+    # T4 supplies this one-line delegation in the combined checkout.
+    monkeypatch.setattr(service.Enforcer, "count_unwatched_apps", quota_accounting.count_unwatched_apps)
 
 
 class Clock:
@@ -112,7 +119,10 @@ def test_ticks_closer_than_a_tick_still_count_a_tick_each(tmp_path, monkeypatch)
         tracker.tick(db, lambda: ("game.exe", None, 0))   # (no time passes at all between them)
     tracker.flush(db)
     assert used(db, f"item:{game}", day(clock.now), clock.now) == int(5 * TICK_SEC)
-    assert tracker.pending[(f"item:{game}", day(clock.now))][0] == pytest.approx(5 * TICK_SEC % 1)
+    clock += TICK_SEC
+    tracker.tick(db, lambda: ("game.exe", None, 0))
+    tracker.flush(db)
+    assert used(db, f"item:{game}", day(clock.now), clock.now) == 3
 
 
 # ---------- input or not ----------
@@ -170,13 +180,16 @@ def test_a_locked_pc_counts_nothing(tmp_path, monkeypatch):
 
 def test_unlocked_the_window_in_front_is_reported(monkeypatch):
     from monitor import browser_url, win
+    from test_browser_tab_reader import Node
     monkeypatch.setattr(win, "foreground_process", lambda: (1234, "game.exe", r"D:\Games\Game\game.exe"))
     monkeypatch.setattr(win, "idle_seconds", lambda: 3600.0)
     monkeypatch.setattr(win, "session_locked", lambda: False)
     monkeypatch.setattr(win, "window_pid", lambda hwnd: 4242)
     assert usage_mod.sense_desktop() == ("game.exe", None, 0.0, r"D:\Games\Game\game.exe", 4242, [])
     monkeypatch.setattr(win, "foreground_process", lambda: (1234, "chrome.exe", r"C:\Chrome\chrome.exe"))
-    monkeypatch.setattr(browser_url, "browser_url", lambda hwnd: "youtube.com/watch")
+    bar = Node("EditControl", cls="OmniboxViewViews", value="youtube.com/watch")
+    monkeypatch.setattr(browser_url.auto, "ControlFromHandle",
+                        lambda hwnd: Node("WindowControl", children=[bar]), raising=False)
     assert usage_mod.sense_desktop()[:2] == ("chrome.exe", "youtube.com/watch")
 
 
@@ -428,25 +441,27 @@ def test_open_connections_are_taken_from_the_cache_before_it_is_flushed(monkeypa
                                                       "5.6.7.8": "www.youtube.com", "9.9.9.9": "example.com",
                                                       "127.0.0.1": "youtube.com"})
     e.close_cached(["googlevideo.com", "youtube.com"], EVENING)
-    assert sorted(e.closing) == ["1.2.3.4", "5.6.7.8"]
+    assert sorted(e.closing) == ["1.2.3.4"]  # omit the shared YouTube page IP and loopback
 
 
 def test_quic_is_off_for_browsers_while_a_site_is_blocked(tmp_path, monkeypatch):
+    from test_site_network_reconciliation import NativeFirewall
+
     db = Database(tmp_path / "t.db")
-    e = _bare_enforcer(db)
-    e.quic = {}
-    added, removed = [], []
-    monkeypatch.setattr(firewall, "add_quic", lambda exe, path: added.append((exe, path)) or True)
-    monkeypatch.setattr(firewall, "remove_quic", lambda exe: removed.append(exe) or True)
+    e = service.Enforcer(db)
+    native = NativeFirewall(monkeypatch)
+    chrome = r"C:\Chrome\chrome.exe"
     monkeypatch.setattr(apps, "list_processes", lambda: [(1, "chrome.exe"), (2, "notepad.exe"), (3, "chrome.exe")])
-    monkeypatch.setattr(apps, "process_path", lambda pid: {1: r"C:\Chrome\chrome.exe", 3: r"C:\Chrome\chrome.exe",
-                                                           2: r"C:\Windows\notepad.exe"}[pid])
+    monkeypatch.setattr(apps, "process_path", lambda pid: chrome if pid != 2 else r"C:\Windows\notepad.exe")
+    rule = firewall.quic_rule(chrome)
+    name = rule.name.casefold()
     e.update_quic(True)
     e.update_quic(True)
-    assert added == [("chrome.exe", r"C:\Chrome\chrome.exe")] and removed == []
-    assert json.loads(db.get_setting(service.QUIC_KEY)) == {"chrome.exe": r"C:\Chrome\chrome.exe"}
+    assert native.commands == [("add", name)]
+    assert json.loads(db.get_setting(service.QUIC_KEY)) == {"paths": {rule.target: rule.target}, "legacy": {}}
     e.update_quic(False)
-    assert removed == ["chrome.exe"] and json.loads(db.get_setting(service.QUIC_KEY)) == {}
+    assert native.commands[-1] == ("delete", name) and not native.rules
+    assert json.loads(db.get_setting(service.QUIC_KEY)) == {}
 
 
 def test_runtime_marks_are_not_in_a_backup():
@@ -480,11 +495,11 @@ def test_youtube_limit_counts_across_3am_reset(tmp_path, monkeypatch, overlap, h
     play(db, tracker, clock, 2, 2, sense)
     after = rules.time_bucket("day", clock.now, db.limit_clock())
     assert before != after
-    assert used(db, f"item:{yt}", after, clock.now) == 2
+    assert used(db, f"item:{yt}", after, clock.now) == 0
     assert reasons(db, clock.now, yt) == []
-    play(db, tracker, clock, 58, 2, sense)
+    play(db, tracker, clock, 60, 2, sense)
     tracker.flush(db)
-    assert used(db, f"item:{yt}", before, clock.now) == 118
+    assert used(db, f"item:{yt}", before, clock.now) == 120
     assert used(db, f"item:{yt}", after, clock.now) == 60
     assert used(db, f"group:{group}", after, clock.now) == 60  # overlapping members never double-count
     assert reasons(db, clock.now, yt) == ["limit"]

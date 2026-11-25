@@ -62,7 +62,7 @@ category_assign category_remove draft_remove_group draft_remove_item draft_save 
 draft_set_group draft_set_group_disabled draft_submit_item emergency_settings_save emergency_unlock lockdown_switch_off
 manual_remove manual_save_entries manual_set_enabled mode_delete mode_save mode_start mode_stop overlay_answer
 overlay_disable overlay_emergency pause_start protection_allow protection_allow_words protection_remove_custom protection_set_list_enabled
-reminder_delete reminder_save_break reminder_save_custom reminder_save_sleep reminder_set_on reset_change_apply
+reminder_delete reminder_save_break reminder_save_custom reminder_save_sleep reminder_set_on reset_change_apply set_site_minimize_interval
 words_update"""
 UI = """supervised_codes_change antibypass_totp_begin applog_save backup_export backup_import_pick blocking_set_sort category_set_color challenge_begin challenge_cancel challenge_submit
 corner_answer corner_ready corner_size digest_set display_set draft_discard draft_set_notify draft_set_setting
@@ -72,7 +72,7 @@ page_ready protection_preview protection_set_updates protection_update_now revea
 set_accent set_appearance set_goal set_icons_download set_scale suggest_clear_history ui_ready ui_setting update_check
 update_download update_install update_opened update_set_prefs window_seen"""
 CLASSES = {kind: text.split() for kind, text in (("read", READ), ("tighten", TIGHTEN), ("loosen", LOOSEN), ("ui", UI))}
-COUNTS = {"read": 50, "tighten": 11, "loosen": 48, "ui": 47}           # 156 in all (R28; +1 allowed-site words switch; +3 for "Allowed during breaks", +1 site icons switch, +1 front warning steps, +1 window_seen, +3 App log, +5 password / authenticator / recovery code, +1 recovery code removed, +2 supervised codes, +2 Add time)
+COUNTS = {"read": 50, "tighten": 11, "loosen": 49, "ui": 47}
 # Loosen methods that are NOT a challenge: the emergency unlock's quota is their limit (BLUEPRINT 4: "not a challenge").
 QUOTA = ("emergency_unlock", "overlay_emergency")
 
@@ -81,7 +81,7 @@ def test_every_api_method_is_classified_here_and_the_count_is_known():
     table = {name: kind for kind, names in CLASSES.items() for name in names}
     assert sum(len(n) for n in CLASSES.values()) == len(table)              # (no name twice)
     assert dict(webapi.api_methods()) == table
-    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 156
+    assert {k: len(v) for k, v in CLASSES.items()} == COUNTS and len(table) == 157
 
 
 def test_every_public_function_of_a_webapi_module_is_an_api_method_or_marked_internal():
@@ -400,6 +400,8 @@ CASES = {
     "emergency_settings_save": Case(lambda e: [{"enabled": True, "tiers": [{"id": "t1", "uses": 5, "per": "week",
                                                                             "minutes": 5}]}],
                                     lambda e, r: emergency.tiers(_fresh(e))[0]["uses"] == 5),
+    "set_site_minimize_interval": Case(lambda e: [8],
+                                       lambda e, r: settings_api.minimize_interval(_fresh(e)) == 8),
     "lockdown_switch_off": Case(lambda e: [], lambda e, r: ab.is_off(_fresh(e))),
     "manual_remove": Case(lambda e: ["mine1"], lambda e, r: not _prot(e)["manual"]),
     "manual_save_entries": Case(lambda e: ["mine1", [["a.com", ""]]],

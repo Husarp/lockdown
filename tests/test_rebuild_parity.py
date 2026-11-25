@@ -172,7 +172,7 @@ LEFT_OUT = {
     "pause-limit-per-day": ["Pause time per day"],
     "word-option-ignore-accents": ["Ignore accents"],
     "word-option-wildcard-switch": ["as a wildcard"],
-    "notifications-sound-and-position": ["Lockdown pop-up only", "Windows notification"],
+    "notifications-sound-and-position": ["Lockdown pop-up only", '"Windows notification"', "'Windows notification'"],
     "notifications-quiet-hours": ["Hold notifications"],
     "settings-language": ["Polski", "'Language'", '"Language"'],
     "settings-start-in-tray": ["Start in the tray"],

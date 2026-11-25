@@ -157,21 +157,28 @@ function run(info) {
   const holdEsc = (e) => { if (e.key === "Escape" && (inflight || holding)) e.preventDefault(); };
   dlg.addEventListener("keydown", holdEsc, true);
 
-  // paste, drop and the context menu are off for anything typed here
-  body.addEventListener("paste", (e) => e.preventDefault(), true);
+  let supervisorInput = null;
+  const supervisorPaste = (e) => supervisorInput && e.target === supervisorInput;
+  const blockUnlessSupervisor = (e) => { if (!supervisorPaste(e)) e.preventDefault(); };
+  body.addEventListener("paste", blockUnlessSupervisor, true);
   body.addEventListener("drop", (e) => e.preventDefault(), true);
   body.addEventListener("dragover", (e) => e.preventDefault(), true);
-  body.addEventListener("contextmenu", (e) => e.preventDefault(), true);
+  body.addEventListener("contextmenu", blockUnlessSupervisor, true);
   body.addEventListener("copy", (e) => e.preventDefault(), true);
   body.addEventListener("cut", (e) => e.preventDefault(), true);
-  body.addEventListener("beforeinput", (e) => { if (BLOCKED_INPUT.has(e.inputType)) e.preventDefault(); }, true);
+  body.addEventListener("beforeinput", (e) => {
+    if (BLOCKED_INPUT.has(e.inputType) && !(supervisorPaste(e) && e.inputType.startsWith("insertFromPaste")))
+      e.preventDefault();
+  }, true);
   body.addEventListener("keydown", (e) => {
+    if (supervisorPaste(e)) return;
     if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) e.preventDefault();
     if (e.shiftKey && e.key === "Insert") e.preventDefault();
   }, true);
 
   function onClose() {
     closed = true;
+    supervisorInput = null;
     if (untick) { untick(); untick = null; }
     cancelAnimationFrame(raf);
     if (!inflight) conclude();      // (shut by force while Python is checking: the reply decides, see submit)
@@ -197,7 +204,7 @@ function run(info) {
       if (b.primary) btn.dataset.primary = "1";
       foot.append(btn);
     }
-    if (begun.info && begun.info.supervisor && !settled && !holding) {
+    if (begun.info && begun.info.supervisor && !settled && !holding && !q(".ch-supervisor")) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn";
@@ -210,6 +217,7 @@ function run(info) {
   function view(title, html, buttons, bare = false) {
     if (closed) return null;
     dlg.querySelector(".dlg-h h2").textContent = title;
+    supervisorInput = null;
     body.innerHTML = (bare ? "" : changesHtml(begun.info || info)) + html;
     let foot = dlg.querySelector(".dlg-f");
     if (!foot) { foot = document.createElement("div"); foot.className = "dlg-f"; dlg.append(foot); }
@@ -484,17 +492,27 @@ function run(info) {
     if (untick) { untick(); untick = null; }
     cancelAnimationFrame(raf);
     const foot = view("Supervisor code", `<p>Ask your supervisor for their current code. It authorizes only this action, skipping all challenges and waits.</p>
-      <input class="input ch-supervisor" inputmode="numeric" maxlength="6" autocomplete="off" aria-label="Supervisor code">
+      <input class="input ch-supervisor" inputmode="numeric" autocomplete="off" aria-label="Supervisor code">
       <p class="ch-err" role="alert"></p>`,
     [cancelBtn, { label: "Use code", primary: true, onClick: go }]);
     if (!foot) return;
     const input = q(".ch-supervisor"), err = q(".ch-err");
+    supervisorInput = input;
     function go() {
-      if (inflight) return;
+      if (inflight || supervisorInput !== input) return;
+      if (!/^[0-9]{6}$/.test(input.value)) {
+        err.textContent = "Enter the 6-digit supervisor code.";
+        input.focus();
+        return;
+      }
       submit({ supervisor: input.value }, (text, gone) => {
         err.textContent = text;
         input.value = "";
-        if (gone) onlyOk(foot); else input.focus();
+        if (gone) {
+          supervisorInput = null;
+          input.disabled = true;
+          onlyOk(foot);
+        } else input.focus();
       });
     }
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });

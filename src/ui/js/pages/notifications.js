@@ -64,8 +64,9 @@ const STYLE = `<style>
 
 const help = helpBtn;
 const HELP = {
-  fmt: "Windows draws its notifications, so they never cover a game the way a pop-up window can. While a full-screen app is in front, Lockdown always uses them (whatever you pick here). Windows' \"Do not disturb when playing a game\" keeps them out of games entirely - they wait in the notification centre (the bell) and clear themselves later.",
-  front: "A small card in the corner of your screen, on top of a window or a borderless game - without taking focus, and not held back by Windows' Do not disturb or game mode - and a short sound. A game in true full screen can't be drawn over: there only the sound gets through. Write one time, or up to three (1 to 30 minutes), like 5, 1 for a warning at 5 minutes and another at 1.",
+  fmt: "While a full-screen app is in front, regular notices use Windows notifications. Windows may hold them in the notification centre during a game.",
+  fullscreen: "Advance warnings use a corner card, a taskbar flash and an optional sound. The card stays on the active monitor without taking focus. In exclusive full-screen mode the card and taskbar may be hidden.",
+  front: "Pick up to three additional warning times for the app or site you're using. Enter whole minutes from 1 to 30, like 5, 1. These steps follow the full-screen warnings setting in true full screen too.",
   digest: "Screen time compared with the week before, blocked visits, your top app and site, the days within your goal and your streaks.",
 };
 const helpRow = (key) => helpText(key, HELP[key]);
@@ -96,6 +97,9 @@ function warnCard() {
       ${field("Warn me", "before something gets blocked", `${sw(false, 'data-k="warn-on" aria-label="Warn me before something gets blocked"')}${stepper(5, "min before", { min: WARN_MIN, max: WARN_MAX, label: "Minutes before" })}`)}
       ${field("While I'm using it, remind me again every", "until it's blocked (Off, 30s, 2 min)", `<input class="input nt-repeat" data-k="repeat" autocomplete="off" spellcheck="false" aria-label="Remind me again every">`)}
       <p class="nt-err" data-k="repeat-err" role="alert"></p>
+      ${field("Show warnings over full-screen apps and games", "", `${sw(true, 'data-k="fullscreen-warnings" aria-label="Show warnings over full-screen apps and games"')}${help("fullscreen", "full-screen warnings")}`)}
+      ${helpRow("fullscreen")}
+      ${field("Play a short sound", "", sw(true, 'data-k="front-sound" aria-label="Play a short sound for full-screen warnings"'))}
       ${field("Notify me when a block starts", "", sw(false, 'data-k="started" aria-label="Notify me when a block starts"'))}
     </div>
     <p class="nt-note">Blocks from the same group are announced together (&ldquo;Night schedule starts in 5 min: ...&rdquo;).</p>
@@ -106,11 +110,10 @@ function frontCard() {
   return `<section class="card" data-card="front">
     <header class="card-h">${kic("k-limit", "bell")}<h3>The app in front</h3></header>
     <div class="card-b" style="padding:0">
-      ${field("Warn before the app in front gets blocked - even in games and muting modes", "", `${sw(true, 'data-k="front-on" aria-label="Warn before the app in front gets blocked, even in games and muting modes"')}${help("front", "the warning for the app in front")}`)}
+      ${field("Warn before the app in front gets blocked - even in games and muting modes when full-screen warnings are on", "", `${sw(true, 'data-k="front-on" aria-label="Warn before the app in front gets blocked"')}${help("front", "the warning for the app in front")}`)}
       ${helpRow("front")}
       ${field("Minutes before", "one or more, like 5, 1", `<input class="input nt-steps" data-k="front-steps" autocomplete="off" spellcheck="false" aria-label="Minutes before">`)}
       <p class="nt-err" data-k="front-steps-err" role="alert"></p>
-      ${field("Play a short sound", "", sw(true, 'data-k="front-sound" aria-label="Play a short sound"'))}
     </div>
   </section>`;
 }
@@ -189,6 +192,7 @@ function fill(d) {
   textBoxes.repeat.last = w.repeat_text;
   if (!focused(rep) && rep.value !== w.repeat_text) rep.value = w.repeat_text;
   q("repeat-err").textContent = "";
+  q("fullscreen-warnings").checked = d.fullscreen_warnings ?? true;
   const f = d.front, steps = q("front-steps");
   if (q("front-on").checked !== f.enabled) q("front-on").checked = f.enabled;
   if (q("front-sound").checked !== f.sound) q("front-sound").checked = f.sound;
@@ -266,6 +270,7 @@ function onChange(e) {
     case "warn-on": return draftSetSetting("notify.warn.enabled", flagValue(t.checked), 0);
     case "started": return draftSetSetting("notify.started.enabled", flagValue(t.checked), 0);
     case "repeat": case "front-steps": return commitText(t.dataset.k);
+    case "fullscreen-warnings": return draftSetSetting("notify.warn.fullscreen", flagValue(t.checked), 0);
     case "front-on": return draftSetSetting("notify.front.enabled", flagValue(t.checked), 0);
     case "front-sound": return draftSetSetting("notify.front.sound", flagValue(t.checked), 0);
     case "dg-on": case "dg-day": case "dg-time": return saveDigest();

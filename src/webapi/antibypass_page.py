@@ -26,6 +26,7 @@ turned on, `force`); ending a pause and switching Lockdown on are free (`pause_r
 live in webapi/shell.py, as the top bar uses them).
 """
 import secrets
+import threading
 import time
 
 import antibypass
@@ -45,6 +46,7 @@ MAX_WINDOWS = 14
 SAVE_KEYS = ("phrase", "steps", "length", "grid", "complex", "use_own", "custom_phrase", "hours", "windows", "wait",
              "sort_unassigned")
 OFF_CHANGE = "Turn Lockdown off entirely (no blocking, no limits, no reminders, until you turn it back on)"
+_setup_lock = threading.Lock()
 TOTP_SETUP_SEC = 600                 # an authenticator setup that isn't confirmed within this is forgotten
 SECRET_WHAT = {"password": "password", "totp": "authenticator", "supervisor": "supervisor codes"}
 
@@ -459,11 +461,17 @@ def antibypass_totp_begin(ctx, kind="totp"):
     def apply():
         secret = challenge_secrets.new_totp_secret()
         token = secrets.token_urlsafe(18)
-        setattr(ctx, kind + "_pending", {"token": token, "secret": secret, "at": time.monotonic()})
-        name = challenge_secrets.pc_name() + " supervisor" if kind == "supervisor" else None
-        return {"token": token, "qr": challenge_secrets.qr_svg(challenge_secrets.otpauth_uri(secret, name)),
+        supervisor = kind == "supervisor"
+        period = challenge_secrets.SUPERVISOR_PERIOD if supervisor else challenge_secrets.TOTP_PERIOD
+        name = challenge_secrets.pc_name() + " supervisor" if supervisor else None
+        uri = challenge_secrets.otpauth_uri(secret, name, period)
+        with _setup_lock:
+            previous = challenge_secrets.load(ctx.db).get(kind, {}).get("secret")
+            setattr(ctx, kind + "_pending", {"token": token, "secret": secret, "at": time.monotonic(),
+                                             "period": period, "replaces": previous})
+        return {"token": token, "qr": challenge_secrets.qr_svg(uri), "uri": uri, "period": period,
                 "key": challenge_secrets.group_key(secret), "digits": challenge_secrets.TOTP_DIGITS,
-                "replaces": challenge_secrets.status(ctx.db)[kind]["set"]}
+                "replaces": previous is not None}
     # Supervisor codes pass every challenge and wait: creating this access also needs authorization.
     return ctx.guard.request(["Set up supervisor codes"], apply) if kind == "supervisor" else apply()
 
@@ -479,17 +487,27 @@ def antibypass_totp_confirm(ctx, token, code, kind="totp"):
     if (not isinstance(token, str) or not pending or not secrets.compare_digest(token, pending["token"])
             or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
         raise ApiError("Start the authenticator setup again.")
-    step = challenge_secrets.match_code(pending["secret"], code, challenge_secrets.trusted_epoch(ctx.db))
+    at = challenge_secrets.trusted_epoch(ctx.db)
+    step = (challenge_secrets.match_supervisor(pending["secret"], code, at, pending["period"])
+            if kind == "supervisor" else challenge_secrets.match_code(pending["secret"], code, at))
     if step is None:
         raise ApiError("That code doesn't match - type the 6-digit code your app shows for Lockdown now.")
     had = challenge_secrets.status(ctx.db)[kind]["set"]
 
     def apply():
-        if (getattr(ctx, kind + "_pending", None) is not pending
-                or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
-            raise ApiError("Start the authenticator setup again.")
-        setattr(ctx, kind + "_pending", None)                 # (one use)
-        challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now(), kind)
+        with _setup_lock:
+            if (getattr(ctx, kind + "_pending", None) is not pending
+                    or time.monotonic() - pending["at"] > TOTP_SETUP_SEC):
+                raise ApiError("Start the authenticator setup again.")
+            if kind == "supervisor":
+                try:
+                    challenge_secrets.confirm_supervisor(ctx.db, pending["secret"], step, ctx.now(),
+                                                         pending["period"], pending["replaces"])
+                except ValueError as exc:
+                    raise ApiError(str(exc)) from None
+            else:
+                challenge_secrets.set_totp(ctx.db, pending["secret"], step, ctx.now(), kind)
+            setattr(ctx, kind + "_pending", None)
         applog.record("antibypass_change", "Anti-Bypass: " + SECRET_WHAT[kind] + " " + (
             "set up again (the old one no longer works)" if had else "set up"), ctx.db)
         return _page(ctx)
@@ -523,8 +541,10 @@ def antibypass_recovery_remove(ctx):
 
 # Other people's keys are independent of the Anti-Bypass guard.
 def _supervised_pending(ctx):
+    now = time.monotonic()
     return [p["secret"] for kind in ("totp", "supervisor")
-            if (p := getattr(ctx, kind + "_pending", None))]
+            if (p := getattr(ctx, kind + "_pending", None))
+            and now - p.get("at", now) <= TOTP_SETUP_SEC]
 
 
 @core.read
@@ -534,10 +554,10 @@ def supervised_codes_get(ctx):
 
 
 @core.ui
-def supervised_codes_change(ctx, action, name="", value="", entry_id=""):
+def supervised_codes_change(ctx, action, name="", value="", entry_id="", period=challenge_secrets.SUPERVISOR_PERIOD):
     import supervised_codes
     try:
-        supervised_codes.change(ctx.db, action, name, value, entry_id, _supervised_pending(ctx))
+        supervised_codes.change(ctx.db, action, name, value, entry_id, _supervised_pending(ctx), period)
     except ValueError as e:
         raise ApiError(str(e)) from None
     return supervised_codes_get(ctx)

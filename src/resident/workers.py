@@ -5,8 +5,7 @@ runs here, each worker in a thread of its own with a database connection of its 
   publisher, the tray). Every other worker reads that snapshot instead of asking the database again.
 - BlockEventWorker (1 s): a blocked app was opened -> close/minimise its windows; a blocked site was opened -> say so
   (only if you were really opening it), through the Alerter (per-reason switch, cooldown, per-item override).
-- WatcherWorker (1 s): warnings before blocks start (and the one for the app in front, which gets through games and
-  muting modes), "block started", Pomodoro phases, the weekly summary.
+- WatcherWorker (1 s): advance warnings, "block started", Pomodoro phases, the weekly summary.
 - MinimizeWorker (250 ms): apps blocked with "Minimize" are sent down when they come to the front; a strict break keeps
   everything down. Win32 only - it reads the snapshot and the reminder engine, not the database.
 - GreyWorker (250 ms): the screen goes grey while an app blocked with "Grey it" is in front, and for bedtime grayscale;
@@ -33,7 +32,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from notification_batch import BlockingMessage
+from notification_batch import AdvanceWarning, BlockingMessage
 import alerts
 import digest
 import reminders
@@ -54,6 +53,7 @@ MINIMIZE_SEC = 0.25
 GREY_SEC = 0.25
 UPDATE_FIRST_SEC = 90      # let the agent settle before touching the network
 UPDATE_POLL_SEC = 60       # is a check due (updates.due decides: every EVERY_HOURS), has a snooze run out
+DESKTOP_RETRY_SEC = 5
 SETTINGS_SEC = 5           # the watcher reads the notification settings and the weekly summary's schedule this often
 LAST_ALERT_SAVE_SEC = 5    # "last notified" times are written at most this often (not on every alert)
 VISIT_FRONT_SEC = 10       # a blocked site is announced only if a browser window in front showed it within this long
@@ -166,14 +166,14 @@ class Notifier:
     `action`: (label, callback) for the one thing worth doing about this message ("See the week"). `actions` (a list of
     them) and `sticky` (stays on screen until answered) are for the update notice. Returns False if it was held.
 
-    `front`: the warning for the app in front (settings notify.front.*): it counts as `force` (a muting mode does not
-    hold it; only a silent pause does) and the sink is told (`front=True`, `sound`) to put it on the corner card even
-    over a full-screen app, instead of leaving it to a Windows notification that Do Not Disturb / game mode holds."""
+    `front`: the corner-card route for advance warnings, with optional sound. It bypasses mode mute. A silent
+    pause holds every notice."""
 
     def __init__(self, hub):
         self.hub = hub
         self.show = self._remember        # R07 sets: show(message, action=None, actions=None, sticky=False[, front, sound])
         self.recent: deque = deque(maxlen=50)
+        self._last_held_warning = float("-inf")
 
     def _remember(self, message, action=None, actions=None, sticky=False, front=False, sound=False):
         self.recent.append((message, action, actions, sticky))
@@ -193,6 +193,17 @@ class Notifier:
     def __call__(self, message: str, force: bool = False, action=None, *, actions=None, sticky: bool = False,
                  front: bool = False, sound: bool = False) -> bool:
         if self.muted(force or front):
+            if isinstance(message, AdvanceWarning):
+                now = self.hub.clock.mono()
+                if now - self._last_held_warning >= 30:
+                    self._last_held_warning = now
+                    snap = self.hub.snapshot
+                    lead, steps, repeat = message.timing
+                    self.hub.log_sink(
+                        f"Advance warning muted source={message.kind} in-use={message.in_use} "
+                        f"lead_sec={lead} steps_sec={steps} repeat_sec={repeat} "
+                        f"mode_mute={bool(snap.mode and snap.mode['mute'])} "
+                        f"silent={bool(snap.pause and snap.pause['silent'])}")
             return False
         if isinstance(message, BlockingMessage):
             message.force = force or front
@@ -641,6 +652,7 @@ class WatcherWorker(Worker):
         self._seen = snap
         if snap.off:     # switched off: nothing to warn about. Forget what was blocked, so switching back on takes
             self.watcher.prev_blocked = None      # a fresh baseline instead of announcing every rule as new
+            self.watcher.episodes.clear()
             return
         mono = hub.clock.mono()
         slow = self._slow_at is None or mono - self._slow_at >= SETTINGS_SEC
@@ -648,11 +660,15 @@ class WatcherWorker(Worker):
             self._slow_at = mono
             self._settings = {key: alerts.get(self.db, key) for key in alerts.DEFAULTS}
         self._announce_phase(snap)
-        sound = self._settings.get("notify.front.sound") == "1"
+        sound = self._settings["notify.front.sound"] == "1"
+        game_warnings = self._settings[alerts.FULLSCREEN_WARNINGS] == "1"
         for message in self.watcher.check(snap.items, snap.groups, snap.usage, snap.now, hub.in_use(), self._settings,
                                           active_blocks=snap.block_list):
-            if message in self.watcher.front:      # the app in front is about to be blocked: gets through games and mutes
-                hub.notify(BlockingMessage(message), force=True, front=True, sound=sound)
+            if isinstance(message, AdvanceWarning):
+                if game_warnings:
+                    hub.notify(message, force=True, front=True, sound=sound)
+                else:
+                    hub.notify(message, force=message.in_use)
             else:
                 hub.notify(BlockingMessage(message), force=message in self.watcher.urgent)
         if slow and digest.due(self.db, snap.now):       # the weekly summary
@@ -1021,7 +1037,7 @@ class Workers:
     so usage is never counted twice."""
 
     def __init__(self, db_path=None, hub: Hub | None = None, reminder_ui: ReminderUI | None = None, tracker=None,
-                 word_guard=None, retention=None, log_sink=None):
+                 word_guard=None, retention=None, log_sink=None, site_media=None, site_minimize=None):
         self.hub = hub or Hub(db_path, log_sink=log_sink)
         self.alerter = Alerter(self.hub)
         self.status = StatusWorker(self.hub)
@@ -1036,7 +1052,13 @@ class Workers:
         self.word_notices = WordNotices(self.hub)
         self.tracker, self.word_guard, self.retention = tracker, word_guard, retention
         self._startup = None
-        self._stopping = False
+        self.site_media, self.site_minimize = site_media, site_minimize
+        self._stopping = threading.Event()
+        self._desktop_lock = threading.Lock()
+        self._desktop_started = {}
+        self._media_action = None
+        self._site_action = self._before_site_action
+        self._com_ready = False
         self.workers = [self.status, self.block_events, self.watcher, self.minimize, self.grey, self.reminders,
                         self.updates, self.netlog]
 
@@ -1048,58 +1070,114 @@ class Workers:
         self._startup = threading.Thread(target=self._start_desktop_jobs, name="lockdown-startup", daemon=True)
         self._startup.start()
 
-    def _start_desktop_jobs(self):
-        """(its own thread) The existing threads of monitor/ and retention.py - the usage tracker (time on blocked
-        sites/apps, screen time), the bad-word check and the daily retention job - then what the old window did once
-        when it opened. They need the desktop, so tests leave them out by passing their own (or fakes)."""
-        try:
-            if self.tracker is None or self.word_guard is None:
-                # Both threads import the COM libraries; two threads importing them at the same time can deadlock,
-                # so they are imported once, here, before either starts.
-                import comtypes.client  # noqa: F401
-                import uiautomation  # noqa: F401
-            if self.tracker is None:
-                from monitor.usage import UsageTracker
-                self.tracker = UsageTracker()
-            if self.word_guard is None:
-                from monitor.word_guard import WordGuard
-                self.word_guard = WordGuard(self.word_notices.add)
-            if self.retention is None:
-                import retention
-                self.retention = retention.RetentionThread()
-            tracker = self.tracker
-            self.hub.in_use = lambda: tracker.in_use
-            for thread in (self.tracker, self.word_guard, self.retention):
-                if self._stopping:
-                    return
-                if not thread.is_alive():
-                    thread.start()
-            from importer import distracting
-            db = self.hub.open_db()
+    def _before_site_action(self, observation, blocked_hosts, action):
+        # Keep desktop enforcement available while the media worker is starting or retrying.
+        before_action = self._media_action
+        if before_action is not None:
+            return before_action(observation, blocked_hosts, action)
+
+    def _make_desktop_job(self, name):
+        if name in ("tracker", "word_guard") and not self._com_ready:
+            # Import shared COM libraries before either worker starts.
+            import comtypes.client  # noqa: F401
+            import uiautomation  # noqa: F401
+            self._com_ready = True
+        if name == "tracker":
+            from monitor.usage import UsageTracker
+            return UsageTracker()
+        if name == "word_guard":
+            from monitor.word_guard import WordGuard
+            return WordGuard(self.word_notices.add, before_action=self._site_action)
+        if name == "site_media":
+            from resident.site_media import SiteMediaWorker
+            return SiteMediaWorker(self.hub)
+        if name == "site_minimize":
+            from monitor.site_minimize import SiteMinimizeWorker
+            return SiteMinimizeWorker(self.hub, self._site_action)
+        import retention
+        return retention.RetentionThread()
+
+    def _start_desktop_job(self, name):
+        job = getattr(self, name)
+        if job is None:
+            job = self._make_desktop_job(name)
+        with self._desktop_lock:
+            if self._stopping.is_set():
+                return
+            is_alive = getattr(job, "is_alive", lambda: False)
             try:
-                distracting.seed(db)            # games, streaming ... are Distracting by default
-                updates.remove_downloads()      # the installer an in-app update downloaded has done its job
-            finally:
-                db.close()
-        except Exception as error:
-            self.hub.report("startup", error)
+                if not is_alive():
+                    job.start()
+            except Exception:
+                if is_alive():
+                    setattr(self, name, job)
+                    self._desktop_started[name] = job
+                raise
+            setattr(self, name, job)
+            self._desktop_started[name] = job
+            if name == "tracker":
+                self.hub.in_use = lambda: job.in_use
+            elif name == "site_media":
+                self._media_action = job.before_action
+
+    def _start_desktop_jobs(self):
+        """Run desktop startup off the GUI thread and retry failed jobs independently."""
+        pending = ["tracker", "site_media", "word_guard", "site_minimize", "retention"]
+        seed_pending = True
+        while not self._stopping.is_set():
+            for name in pending[:]:
+                if self._stopping.is_set():
+                    return
+                try:
+                    self._start_desktop_job(name)
+                except Exception as error:
+                    self.hub.report(f"startup: {name}", error)
+                else:
+                    pending.remove(name)
+            if seed_pending and not self._stopping.is_set():
+                try:
+                    from importer import distracting
+                    db = self.hub.open_db()
+                    try:
+                        distracting.seed(db)
+                        updates.remove_downloads()
+                    finally:
+                        db.close()
+                except Exception as error:
+                    self.hub.report("startup: initialization", error)
+                else:
+                    seed_pending = False
+            if not pending and not seed_pending:
+                return
+            self._stopping.wait(DESKTOP_RETRY_SEC)
 
     def stop(self, timeout: float = STOP_WAIT_SEC):
-        """Stop everything. The workers get `timeout` seconds in all; the usage tracker then writes what it has counted
-        but not written yet (up to its own 2 s)."""
-        self._stopping = True
+        """Signal desktop and resident workers, then wait for them to release their resources."""
+        self._stopping.set()
         for worker in self.workers:
             worker.stop()
-        self.word_notices.stop()
-        for thread in (self.word_guard, self.retention):
-            if thread is not None:
-                thread.stop_event.set()
+        with self._desktop_lock:
+            self._media_action = None
+            desktop = self._desktop_started.copy()
+            self._desktop_started.clear()
+        tracker = desktop.pop("tracker", None)
+        for name in ("site_minimize", "word_guard", "site_media", "retention"):
+            job = desktop.get(name)
+            if job is not None:
+                try:
+                    if name in ("site_media", "site_minimize"):
+                        job.stop()
+                    else:
+                        job.stop_event.set()
+                except Exception as error:
+                    self.hub.report(f"shutdown: {name}", error)
         deadline = time.monotonic() + timeout
-        for worker in self.workers:
-            if worker.is_alive():
-                worker.join(max(0.0, deadline - time.monotonic()))
-        self.alerter.close()                      # (writes the "last notified" times still waiting)
-        if self._startup is not None and self._startup.is_alive():
-            self._startup.join(max(0.0, deadline - time.monotonic()))
-        if self.tracker is not None:
-            self.tracker.stop()
+        for job in (*self.workers, self._startup):
+            if job is not None and job.is_alive():
+                job.join(max(0.0, deadline - time.monotonic()))
+        for job in desktop.values():
+            job.join(max(0.0, deadline - time.monotonic()))
+        self.word_notices.stop()
+        self.alerter.close()
+        if tracker is not None:
+            tracker.stop()

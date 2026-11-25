@@ -1,6 +1,10 @@
 package com.husarp.lockdown
 
 import com.husarp.lockdown.engine.AppTime
+import com.husarp.lockdown.engine.BlockPause
+import com.husarp.lockdown.engine.QuotaContribution
+import com.husarp.lockdown.engine.QuotaExemptions
+import com.husarp.lockdown.link.LinkUsage
 import com.husarp.lockdown.engine.IslandHourRow
 import com.husarp.lockdown.engine.IslandUse
 import com.husarp.lockdown.engine.IslandUseRow
@@ -132,4 +136,16 @@ class IslandUseTest {
         val h = IslandUse.hourMs(listOf(IslandHourRow("2026-10-10", 5, 3000), IslandHourRow("2026-10-10", 5, 3000)), LocalDate.of(2026, 10, 10))!!
         assertEquals(3_600_000L, h[5])
     }
+    @Test fun aPauseClipsQuotaWithoutAlteringInsightsInTheSameFrame() {
+        val key = "item:video\u0000day:2026-06-01"
+        val entry = QuotaContribution(key, listOf("video"), "2026-06-01T03:00:00", "2026-06-01T03:01:00")
+        val current = QuotaExemptions(listOf(BlockPause("2026-06-01T03:00:00", "2026-06-01T03:00:45")))
+        val quota = current.clip(entry)
+        val row = IslandUseRow("2026-06-01", "com.video", "Video", 60)
+        val body = SyncBody(seq = 1, quota = quota, use = listOf(row))
+        val received = LinkProtocol.json.decodeFromString<SyncBody>(LinkProtocol.json.encodeToString(SyncBody.serializer(), body))
+        assertEquals(mapOf(key to 15), LinkUsage.tally(received.quota.orEmpty(), current))
+        assertEquals(listOf(row), received.use)
+    }
+
 }

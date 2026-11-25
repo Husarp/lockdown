@@ -278,9 +278,10 @@ class GuardService:
                     return self._unavailable(ticket)
                 if pending.started is None or pending.mode is None:
                     return fail("Start the challenge first.")
-                if self.secrets.wait_left() > 0:
+                approved = self.secrets.check_supervisor(typed["supervisor"])
+                if approved is None:
                     return fail("Too many wrong tries - wait, then try again.")
-                if not self.secrets.check_totp(typed["supervisor"], "supervisor"):
+                if not approved:
                     applog.record("challenge_failed", self._failed(pending, "wrong supervisor code"), db)
                     return fail("That supervisor code isn't right (or it was used already).")
                 self._end_locked("has already been used")

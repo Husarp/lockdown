@@ -12,6 +12,9 @@ kind. (The uninstaller's challenge without the secret steps: test_rebuild_challe
 import base64
 import json
 import random
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import datetime
 
 import pytest
@@ -92,8 +95,8 @@ def step(kind, ident=None, level=0, times=1):
     return {"id": ident or kind, "kind": kind, "level": level, "times": times}
 
 
-def code_at(secret, t):
-    return cs.totp(cs.secret_key(secret), t)
+def code_at(secret, t, period=30):
+    return cs.totp(cs.secret_key(secret), t, period=period)
 
 
 def stored_secret(ctx):
@@ -642,25 +645,27 @@ def test_supervisor_setup_replacement_and_removal_are_gated(ctx, api, epoch):
     assert not cs.status(ctx.db)["supervisor"]["set"]
     setup = solve(ctx, api, ticket)["result"]
     secret = setup["key"].replace(" ", "")
+    assert setup["period"] == 40 and setup["uri"].endswith("&period=40")
     # Setup confirmation must still be gated if the earlier unlock window closed.
     locked(ctx, unlocked_from=None, unlocked_until=None)
-    ticket = needs_ticket(api.antibypass_totp_confirm(setup["token"], code_at(secret, epoch["t"]), "supervisor"))
+    ticket = needs_ticket(api.antibypass_totp_confirm(setup["token"], code_at(secret, epoch["t"], 40), "supervisor"))
     assert not cs.status(ctx.db)["supervisor"]["set"]
     solve(ctx, api, ticket)
     assert cs.load(ctx.db)["supervisor"]["secret"] == secret
+    assert cs.load(ctx.db)["supervisor"]["last"] == epoch["t"] // 40
     assert "totp" not in cs.load(ctx.db)
     locked(ctx, unlocked_from=None, unlocked_until=None, wait_min=9999)
     # The existing supervisor can authorize replacement without changing the normal wait.
     epoch["t"] += 60
     ticket = needs_ticket(api.antibypass_totp_begin("supervisor"))
     data(api.challenge_begin(ticket))
-    replacement = data(api.challenge_submit(ticket, {"supervisor": code_at(secret, epoch["t"])}))["result"]
+    replacement = data(api.challenge_submit(ticket, {"supervisor": code_at(secret, epoch["t"], 40)}))["result"]
     assert replacement["replaces"] and replacement["key"] != setup["key"]
     assert cs.load(ctx.db)["supervisor"]["secret"] == secret
     ticket = needs_ticket(api.antibypass_secret_remove("supervisor"))
     data(api.challenge_begin(ticket))
     epoch["t"] += 60
-    data(api.challenge_submit(ticket, {"supervisor": code_at(secret, epoch["t"])}))
+    data(api.challenge_submit(ticket, {"supervisor": code_at(secret, epoch["t"], 40)}))
     assert not cs.status(ctx.db)["supervisor"]["set"]
     assert error(api.antibypass_totp_begin("made-up"))
 
@@ -691,7 +696,7 @@ def test_new_supervisor_secret_cannot_authorize_its_own_replacement(ctx, api, ep
     data(api.challenge_begin(ticket))
     setup = data(api.challenge_submit(ticket, {"supervisor": old_code}))["result"]
     new_secret = setup["key"].replace(" ", "")
-    new_code = code_at(new_secret, epoch["t"])
+    new_code = code_at(new_secret, epoch["t"], 40)
     ticket = needs_ticket(api.antibypass_totp_confirm(setup["token"], new_code, "supervisor"))
     data(api.challenge_begin(ticket))
     assert error(api.challenge_submit(ticket, {"supervisor": new_code}))
@@ -700,7 +705,7 @@ def test_new_supervisor_secret_cannot_authorize_its_own_replacement(ctx, api, ep
     data(api.challenge_submit(ticket, {"supervisor": code_at(old_secret, epoch["t"])}))
     assert cs.load(ctx.db)["supervisor"]["secret"] == new_secret
     assert not ctx.guard.secrets.check_totp(code_at(old_secret, epoch["t"]), "supervisor")
-    assert ctx.guard.secrets.check_totp(code_at(new_secret, epoch["t"]), "supervisor")
+    assert ctx.guard.secrets.check_totp(code_at(new_secret, epoch["t"], 40), "supervisor")
 
 
 def test_supervisor_can_authorize_explicit_unlock_to_edit_without_wait(ctx, api, epoch):
@@ -713,3 +718,108 @@ def test_supervisor_can_authorize_explicit_unlock_to_edit_without_wait(ctx, api,
     cfg = ab.settings(ctx.db)
     assert ab.unlocked_until(cfg, NOW) and not ab.waiting_until(cfg, NOW)
     assert cfg["wait_min"] == 9999
+
+
+@pytest.mark.parametrize("period,at,expected", [
+    (30, 1234567890, "005924"), (30, 1111111109, "081804"),
+    (40, 1440, "003784"), (40, 79, "287082"), (40, 80, "359152"),
+])
+def test_supervisor_interop_vectors(period, at, expected):
+    secret = base64.b32encode(RFC_KEY).decode()
+    step = at // period
+    assert cs.totp(RFC_KEY, at, period=period) == expected
+    assert cs.match_supervisor(secret, expected, at, period) == step
+    assert cs.match_supervisor(secret, expected, (step + 1) * period - 1, period) == step
+    assert cs.match_supervisor(secret, expected, (step + 1) * period, period) == step
+    assert cs.match_supervisor(secret, expected, step * period - 1, period) is None
+    assert cs.match_supervisor(secret, expected, (step + 2) * period, period) is None
+    assert cs.match_supervisor(secret, " " + expected, at, period) is None
+
+
+def test_adjacent_collision_consumes_newest_unless_a_still_live_match_was_used(ctx, epoch):
+    secret = base64.b32encode(RFC_KEY).decode()
+    step = 910738
+    assert cs.hotp(RFC_KEY, step - 1) == cs.hotp(RFC_KEY, step) == "911617"
+    epoch["t"] = 40 * step
+    assert cs.match_supervisor(secret, "911617", epoch["t"], 40) == step
+    cs.set_totp(ctx.db, secret, step - 1, NOW, "supervisor", 40)
+    restarted = webapi.make_context(ctx.db.path)
+    assert not restarted.guard.secrets.check_supervisor("911617")
+    assert cs.load(restarted.db)["supervisor"]["last"] == step - 1
+
+
+def test_concurrent_guards_can_only_run_one_action_and_replay_stays_consumed(ctx, api, epoch):
+    code = supervisor(ctx, epoch)
+    stored = cs.load(ctx.db)
+    del stored["supervisor"]["period"]
+    ctx.db.set_setting(cs.SECRETS_KEY, json.dumps(stored))  # old database record
+    locked(ctx)
+    other = webapi.make_context(ctx.db.path, clock=lambda db: NOW)
+    done = []
+    pending = []
+    for guard in (ctx.guard, other.guard):
+        ticket = needs_ticket(guard.request(["one action"], lambda: done.append(1)))
+        data(guard.begin(ticket))
+        pending.append((guard, ticket))
+    race = Barrier(2)
+
+    def submit(item):
+        guard, ticket = item
+        guard._db()  # open the calling thread's connection before the race
+        race.wait(timeout=5)
+        return guard.submit(ticket, {"supervisor": code})["ok"]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(submit, pending)) == [False, True]
+    assert done == [1]
+    epoch["t"] += 30
+    restarted = webapi.make_context(ctx.db.path, clock=lambda db: NOW)
+    assert not restarted.guard.secrets.check_supervisor(code)
+
+
+def test_supervisor_slowdown_carries_across_cancel_and_reopen(ctx, api, epoch):
+    code = supervisor(ctx, epoch)
+    locked(ctx)
+    for _ in range(cs.FREE_TRIES):
+        ticket = needs_ticket(ctx.guard.request(["change"], lambda: None))
+        data(api.challenge_begin(ticket))
+        assert error(api.challenge_submit(ticket, {"supervisor": "not a code"}))
+        data(api.challenge_cancel(ticket))
+    done = []
+    ticket = needs_ticket(ctx.guard.request(["change"], lambda: done.append(1)))
+    data(api.challenge_begin(ticket))
+    assert "wait" in error(api.challenge_submit(ticket, {"supervisor": code}))
+    assert done == []
+    epoch["t"] += 1
+    assert data(api.challenge_submit(ticket, {"supervisor": code}))["passed"] and done == [1]
+
+
+def test_supervisor_action_waits_for_a_successful_database_commit(ctx, api, epoch):
+    code = supervisor(ctx, epoch)
+    locked(ctx)
+    done = []
+    ticket = needs_ticket(ctx.guard.request(["one action"], lambda: done.append(1)))
+    data(api.challenge_begin(ticket))
+    ctx.db.conn.execute("""
+        CREATE TRIGGER fail_secret_update BEFORE UPDATE ON settings
+        WHEN NEW.key = 'antibypass.secrets'
+        BEGIN SELECT RAISE(ABORT, 'test database write failure'); END
+    """)
+    with pytest.raises(sqlite3.IntegrityError):
+        ctx.guard.submit(ticket, {"supervisor": code})
+    assert done == [] and cs.load(ctx.db)["supervisor"]["last"] == -1
+    ctx.db.conn.execute("DROP TRIGGER fail_secret_update")
+    assert data(api.challenge_submit(ticket, {"supervisor": code}))["passed"]
+    assert done == [1]
+
+
+def test_stale_setup_cannot_replace_a_pairing_from_another_guard(ctx, api, epoch):
+    other = core.build_api(webapi.make_context(ctx.db.path, clock=lambda db: NOW))
+    first = data(api.antibypass_totp_begin("supervisor"))
+    second = data(other.antibypass_totp_begin("supervisor"))
+    first_secret = first["key"].replace(" ", "")
+    second_secret = second["key"].replace(" ", "")
+    data(other.antibypass_totp_confirm(second["token"], code_at(second_secret, epoch["t"], 40), "supervisor"))
+    assert "pairing changed" in error(
+        api.antibypass_totp_confirm(first["token"], code_at(first_secret, epoch["t"], 40), "supervisor"))
+    assert cs.load(ctx.db)["supervisor"]["secret"] == second_secret

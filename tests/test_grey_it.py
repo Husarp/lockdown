@@ -56,7 +56,8 @@ def test_strength_closing_covers_minimizing_and_both_cover_greying():
     assert s("minimize") == {"minimize", "grey"}
     assert s("grey") == {"grey"} and s("grey,internet") == {"grey", "internet"}
     assert s("internet") == {"internet"} and s(None) == {"close", "minimize", "grey"}
-    assert block_method.strength("site", "close") == {"close", "back"}      # (sites: unchanged)
+    assert block_method.strength("site", "close") == {"close", "back", "foreground"}
+    assert block_method.strength("site", "minimize") == {"minimize", "foreground"}
 
 
 def test_a_group_s_grey_is_the_way_of_a_member_that_has_none_of_its_own():

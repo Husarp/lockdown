@@ -16,6 +16,7 @@ from gui import icon_art
 from ui_theme import APP_ICON
 
 NIIF_USER, NIIF_LARGE_ICON = 0x4, 0x20
+WARNING_PULSE_SEC = 1.2
 
 
 class _Icon(pystray.Icon):
@@ -52,6 +53,8 @@ class Tray:
         self.paused_until = None                 # "Pause my blocks" is running until then (pause.py)
         self._title: str | None = None
         self._lock = threading.Lock()
+        self._pulse = None
+        self._stopped = False
         self.icon = _Icon(
             "Lockdown", icon_art.tray_icon("red"), "Lockdown",
             menu=pystray.Menu(
@@ -109,19 +112,44 @@ class Tray:
             self.icon.update_menu()
         return True
 
-    def _refresh_icon(self):
+    def _refresh_icon(self, *, force=False):
         """grey = switched off, green = blocking enforced, blue = your blocks are paused, yellow = a mode is on,
         red = service down."""
         state = ("grey" if self.off else "red" if not self.running else "blue" if self.paused_until
                  else "yellow" if self.active_mode else "green")
-        if state != self._icon_state:
-            self._icon_state = state
+        if self._pulse is None and (force or state != self._icon_state):
             self.icon.icon = icon_art.tray_icon(state)
+            self._icon_state = state
+
+    def pulse_warning(self):
+        """Briefly show the Lockdown mark, then restore the current tray status."""
+        with self._lock:
+            if self._stopped or not self.icon.visible:
+                return False
+            if self._pulse is not None:
+                return True
+            self.icon.icon = icon_art.app_icon(64, bold=True)
+            timer = threading.Timer(WARNING_PULSE_SEC, self._restore_pulse)
+            timer.daemon = True
+            self._pulse = timer
+            timer.start()
+            return True
+
+    def _restore_pulse(self):
+        with self._lock:
+            if self._pulse is not None:
+                self._pulse = None
+                self._refresh_icon(force=True)
 
     def start(self):
         self.icon.run_detached()
 
     def stop(self):
+        with self._lock:
+            self._stopped = True
+            if self._pulse is not None:
+                self._pulse.cancel()
+                self._pulse = None
         self.icon.stop()
 
     def notify(self, message: str):

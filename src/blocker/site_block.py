@@ -3,13 +3,20 @@
 - "dns"   - it can't load at all: the hosts file and the DNS filter send it nowhere (what Lockdown always did)
 - "close" - the tab in front is closed (the tray agent, like the bad-word check)
 - "back"  - the browser goes back instead; if that doesn't leave the page, the tab is closed
+- "minimize" - minimize a window showing the site, including behind other windows
 
-close and back exclude each other. None (everything before 0.66) = "dns".
+Close takes precedence over Back in the foreground. Minimize still applies in the background.
+None (everything before 0.66) = "dns".
 Standard library only: the service reads this too.
 """
 import re
 
-FLAGS = ("dns", "close", "back")
+FLAGS = ("dns", "close", "back", "minimize")
+CHOOSE_WAY = "Tick at least one of Can't load it / Close the tab / Go back / Minimize."
+MINIMIZE_INTERVAL_KEY = "site_minimize.interval_sec"
+MINIMIZE_INTERVAL_DEFAULT = 3
+MINIMIZE_INTERVAL_MIN = 2
+MINIMIZE_INTERVAL_MAX = 10
 _DASH = r"\s[-\u2013\u2014]\s"
 # the browser's own end of a window title: " — Mozilla Firefox", " — Mozilla Firefox Private Browsing",
 # " - Google Chrome", " - Brave", " - Microsoft\u200b Edge" ...
@@ -18,6 +25,15 @@ _BROWSER_END = re.compile(_DASH + r"(?:Mozilla Firefox|Firefox|Google Chrome|Mic
 # A tab-count decoration can use any script or word order; no translation table.
 _TAB_COUNT = re.compile(r"\d")
 TITLE_SITES = {"YouTube Music": "music.youtube.com", "YouTube Shorts": "youtube.com", "YouTube": "youtube.com"}
+
+
+def minimize_interval(db) -> int:
+    """The effective interval, including on old databases or after a damaged setting."""
+    try:
+        seconds = int(db.get_setting(MINIMIZE_INTERVAL_KEY, str(MINIMIZE_INTERVAL_DEFAULT)))
+    except (TypeError, ValueError):
+        return MINIMIZE_INTERVAL_DEFAULT
+    return seconds if MINIMIZE_INTERVAL_MIN <= seconds <= MINIMIZE_INTERVAL_MAX else MINIMIZE_INTERVAL_DEFAULT
 
 
 def site_flags(block_type: str | None) -> set[str]:
@@ -44,7 +60,7 @@ def text(block_type: str | None) -> str:
     """How it reads on the Blocking list: "can't load + closes the tab"."""
     flags = site_flags(block_type)
     return " + ".join(w for f, w in (("dns", "can't load"), ("close", "closes the tab"),
-                                     ("back", "goes back")) if f in flags)
+                                     ("back", "goes back"), ("minimize", "minimizes the window")) if f in flags)
 
 
 def title_site(title: str | None, exe: str | None = None, confirmed_host: str | None = None) -> str | None:

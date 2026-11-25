@@ -1,12 +1,14 @@
 """Alert settings, message formatting and the upcoming-block watcher (used by the tray agent)."""
+import itertools
 import math
 import re
 from datetime import datetime
 
 from blocker.apps import is_hosted
 from blocker.protection import LISTS
-from rules import (DAY_NAMES, TIME_FMT, allowance_left, allowance_owner, effective_rules, item_block,
-                   next_block)
+from notification_batch import AdvanceWarning
+from rules import (DAY_NAMES, DEFAULT_CLOCK, TIME_FMT, allowance_left, allowance_owner,
+                   effective_rules, item_block, next_block, time_bucket, time_limits)
 
 REASONS = {  # reason -> (label in settings, text for {reason})
     "permanent": ("Permanently blocked", "permanently blocked"),
@@ -32,12 +34,12 @@ WARN_MINUTE_OPTIONS = [1, 2, 5, 10, 15, 20, 30, 60]
 # notify.format defaults to Windows' own notifications (0.84.7): Windows draws them, so they never go over a game
 # the way Lockdown's pop-up window did (it made full-screen games stutter). While something is full-screen even
 # "Lockdown pop-ups" / "Both" use them (App._show).
-DEFAULTS = {"notify.cooldown_min": "30", "notify.format": "toast",
+FULLSCREEN_WARNINGS = "notify.warn.fullscreen"
+DEFAULTS = {FULLSCREEN_WARNINGS: "1","notify.cooldown_min": "30", "notify.format": "toast",
             "notify.warn.enabled": "1", "notify.warn.minutes": "5",
             "notify.warn.repeat_sec": "0",   # "remind me again every", in seconds (0 = don't); see get
             "notify.started.enabled": "1",
-            # the warning for the app in front (get through games, muting modes, Do Not Disturb): on / minutes before
-            # (steps, largest first) / a short sound
+            # Extra warning steps while in use, plus the existing warning sound preference.
             "notify.front.enabled": "1", "notify.front.steps": "1", "notify.front.sound": "1"}
 for _r in REASONS:
     DEFAULTS[f"notify.enabled.{_r}"] = "1"
@@ -181,27 +183,44 @@ class BlockWatcher:
     Blocks coming from the same group are announced together."""
 
     def __init__(self):
-        self.warned: dict[tuple, datetime] = {}   # warning key -> when last shown
+        self.episodes: dict[tuple, dict] = {}
+        self._occurrences = itertools.count(1)
+        self._blocked_limits = set()
         self.prev_blocked: set | None = None
-        # the messages from the last check that are about something you are using right now. Those get through
-        # a mode that mutes, or Do not disturb: being told the thing in front of you
-        # is about to go is the one notice that is worth interrupting a game for.
         self.urgent: set[str] = set()
-        # the messages from the last check that are the warning for the app in front (a subset of `urgent`): the
-        # worker shows those on the corner card even over a game, with a sound (settings notify.front.*)
-        self.front: set[str] = set()
-        self.front_warned: dict[tuple, datetime] = {}   # (block key, step in minutes) -> when it was shown
+        self.front: set[str] = set()  # warnings from an in-use step, for callers inspecting a check
 
     @staticmethod
-    def _key(item: dict, rule: dict, when: datetime) -> tuple:
-        source = ("group", rule["group"]["id"]) if rule.get("group") else ("item", item["id"])
-        if rule["rule_type"] == "time_limit":      # usage-based: the predicted time drifts, key by day
-            return source, "limit", when.date()
-        if rule["rule_type"] in ("unlock", "pause"):   # items unlocked together are announced together
-            return rule["rule_type"], when
-        if rule.get("allowance_min") and rule["rule_type"] == "scheduled":
-            return source, "allowance", when.strftime("%Y%m%d")
-        return source, "schedule", when.strftime("%Y%m%d%H%M")
+    def _limit_source(rule):
+        return rule["usage_owner"], rule["rule_key"]
+
+    @classmethod
+    def _episode(cls, rule, when, now, usage):
+        kind = rule["rule_type"]
+        if kind == "time_limit":
+            clock = getattr(usage, "clock", DEFAULT_CLOCK)
+            owner, key = cls._limit_source(rule)
+            limits = time_limits(rule, now, usage)
+            period = min(limits, key=lambda p: limits[p] * 60 - usage(owner, time_bucket(p, now, clock)))
+            bucket = time_bucket(period, now, clock)
+            return (kind, (owner, key), bucket), clock.period(period, now)[1]
+        if kind in ("unlock", "pause"):
+            return (kind, when), when
+        if spent := allowance_left(rule, now, usage):
+            return ("allowance", allowance_owner(rule), spent[2]), spent[2]
+        return ("schedule", rule["rule_key"], when), when
+
+    def _episode_state(self, key, expires):
+        state = self.episodes.setdefault(key, {"steps": set(), "last": None, "allowance": False, "expires": expires})
+        state["expires"] = expires
+        return state
+
+    def _warning_message(self, text, key, triggers, in_use, timing):
+        message = AdvanceWarning(text, kind=key[0], episode=key, occurrence=next(self._occurrences),
+                                 triggers=tuple(triggers), in_use=in_use, timing=timing)
+        if in_use:
+            self.urgent.add(message)
+        return message
 
     def check(self, items: list[dict], groups: list[dict], usage, now: datetime, in_use: set[int],
               settings: dict, active_blocks=None) -> list[str]:
@@ -211,63 +230,80 @@ class BlockWatcher:
         warn_on = settings["notify.warn.enabled"] == "1"
         warn_sec = int(settings["notify.warn.minutes"]) * 60
         repeat_sec = int(settings.get("notify.warn.repeat_sec") or 0)
-        # the warning for the app in front: its steps in seconds, largest first ([] = off; a settings dict without
-        # the keys - older callers - is off too)
         steps = [m * 60 for m in front_steps(settings.get("notify.front.steps"))] \
             if settings.get("notify.front.enabled") == "1" else []
+        timing = (warn_sec if warn_on else None, tuple(steps), repeat_sec)
         upcoming: dict[tuple, dict] = {}
-        near: dict[tuple, dict] = {}          # the same blocks, but only what is in front, within the biggest step
         blocked: dict[int, tuple] = {}
+        blocked_limits = set()
+        allowance_rules = {}
         for item in items:
             rules = effective_rules(item, groups)
             block = item_block(rules, now, usage)
             if block:
                 blocked[item["id"]] = (item, block)
+                if block[0] == "limit":
+                    blocked_limits.add(self._limit_source(block[2]))
                 continue
-            nb = next_block(rules, now, usage, in_use=item["id"] in in_use)
-            if not nb:
-                continue
-            when, rule = nb
-            left = (when - now).total_seconds()
-            if steps and item["id"] in in_use and left <= steps[0]:
-                entry = near.setdefault(self._key(item, rule, when),
-                                        {"when": when, "rule": rule, "names": [], "in_use": True})
-                entry["names"].append(item["display_name"])
-            if left > warn_sec:
-                continue
-            entry = upcoming.setdefault(self._key(item, rule, when),
-                                        {"when": when, "rule": rule, "names": [], "in_use": False})
-            entry["names"].append(item["display_name"])
-            entry["in_use"] |= item["id"] in in_use
+            using = item["id"] in in_use
+            nb = next_block(rules, now, usage, in_use=using)
+            if nb:
+                when, rule = nb
+                left = (when - now).total_seconds()
+                if 0 < left <= max(warn_sec if warn_on else 0, steps[0] if using and steps else 0):
+                    key, expires = self._episode(rule, when, now, usage)
+                    entry = upcoming.setdefault(key, {"when": when, "rule": rule, "names": [],
+                                                     "in_use": False, "in_use_names": [], "expires": expires})
+                    entry["when"] = min(entry["when"], when)
+                    entry["names"].append(item["display_name"])
+                    entry["in_use"] |= using
+                    if using:
+                        entry["in_use_names"].append(item["display_name"])
+            if warn_on and using and (not nb or nb[1]["rule_type"] not in ("pause", "unlock")):
+                allowance_rules[item["id"]] = rules
 
-        replaced = set()                      # blocks whose normal warning the front warning of this check stands in for
-        for key, e in near.items():
-            left = (e["when"] - now).total_seconds()
-            reached = [s for s in steps if left <= s]
-            if all((key, s) in self.front_warned for s in reached):
-                continue
-            for s in reached:                 # (joining at 30 s with steps "5, 1": one warning, both steps are done)
-                self.front_warned[(key, s)] = now
-            text = self._warning(e, now)
-            self.front.add(text)
-            self.urgent.add(text)
-            messages.append(text)
-            replaced.add(key)
+        ended = self._blocked_limits - blocked_limits
+        self._blocked_limits = blocked_limits
+        self.episodes = {key: state for key, state in self.episodes.items()
+                         if state["expires"] > now and not (key[0] == "time_limit" and key[1] in ended)}
+        allowance_messages = self._allowance_notices(items, groups, usage, now, in_use,
+                                                     eligible_rules=allowance_rules, timing=timing)
+        messages.extend(allowance_messages)
+        allowance_starts = {message.episode: message for message in allowance_messages}
 
-        if warn_on:
-            spending = self._allowance_notices(items, groups, usage, now, in_use)
-            self.urgent.update(spending)          # you are using it right now, by definition
-            messages += spending
-            for key, e in upcoming.items():
-                last = self.warned.get(key)
-                if last is None or (e["in_use"] and repeat_sec and (now - last).total_seconds() >= repeat_sec):
-                    self.warned[key] = now
-                    if key in replaced:           # the front warning just shown is this block's notice: not twice
-                        continue
-                    text = self._warning(e, now)
-                    if e["in_use"]:               # what you are using is the thing about to be blocked
-                        self.urgent.add(text)
-                    messages.append(text)
+        for key, entry in upcoming.items():
+            state = self._episode_state(key, entry["expires"])
+            left = (entry["when"] - now).total_seconds()
+            front_due = {s for s in steps if entry["in_use"] and left <= s}
+            general_due = warn_on and left <= warn_sec
+            due = front_due | ({warn_sec} if general_due else set())
+            fresh = due - state["steps"]
+            triggers = []
+            front_step = False
+            if fresh:
+                nearest = min(fresh)
+                front_step = nearest in front_due
+                if front_step:
+                    triggers.append(f"in-use:{nearest}s")
+                if general_due and nearest == warn_sec:
+                    triggers.append(f"lead:{nearest}s")
+                state["steps"].update(due)
+            elif (general_due and entry["in_use"] and repeat_sec and state["last"] is not None
+                  and (now - state["last"]).total_seconds() >= repeat_sec):
+                triggers.append("repeat")
+            if not triggers:
+                continue
+            message = allowance_starts.get(key)
+            if message is not None:
+                message.triggers += tuple(triggers)
+            else:
+                named = {**entry, "names": entry["in_use_names"]} if front_step else entry
+                text = self._warning(named, now, key[0])
+                message = self._warning_message(text, key, triggers, entry["in_use"], timing)
+                messages.append(message)
+            if front_step:
+                self.front.add(message)
+            state["last"] = now
 
         if active_blocks is not None:
             blocked = {(b["item"]["id"] if b["item"]["id"] is not None else
@@ -291,40 +327,39 @@ class BlockWatcher:
         self.prev_blocked = set(blocked)
         return messages
 
-    def _allowance_notices(self, items: list[dict], groups: list[dict], usage, now: datetime,
-                           in_use: set[int]) -> list[str]:
-        """You opened something inside its blocked hours and it has "N minutes allowed" left: say so once per
-        stretch, so you know you are spending the allowance rather than wondering why it isn't blocked."""
+    def _allowance_notices(self, items, groups, usage, now, in_use, *, eligible_rules=None, timing=(None, (), 0)):
+        """Announce the smallest remaining allowance once per pot and blocked stretch."""
         found = {}
         for item in items:
             if item["id"] not in in_use:
                 continue
-            for rule in effective_rules(item, groups):
-                spent = allowance_left(rule, now, usage)
-                if not spent:
+            rules = effective_rules(item, groups) if eligible_rules is None else eligible_rules.get(item["id"], ())
+            for rule in rules:
+                if not (spent := allowance_left(rule, now, usage)):
                     continue
                 used, allowed, until = spent
                 left = allowed - used
                 if left <= 0:
                     continue
-                pot = allowance_owner(rule)   # a shared group allowance is one notice, not one per member
-                key = (pot, "allowance", until)
-                if key in self.warned:
-                    continue
-                # two allowances on one pot (a group's per-member one and the member's own extra, ending at the
-                # same minute): the one with least left is what really limits it
+                pot = allowance_owner(rule)
+                key = ("allowance", pot, until)
                 if key not in found or left < found[key][0]:
                     name = rule["group"]["name"] if pot.startswith("group:") else item["display_name"]
                     found[key] = (left, allowed, until, name)
-        out = []
+        messages = []
         for key, (left, allowed, until, name) in found.items():
-            self.warned[key] = now
-            out.append(f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
-                       f"{allowed // 60} min allowance left (until {until:%H:%M}).")
-        return out
+            state = self._episode_state(key, until)
+            if state["allowance"]:
+                continue
+            text = (f"{name} is blocked now - you have {max(1, math.ceil(left / 60))} min of your "
+                    f"{allowed // 60} min allowance left (until {until:%H:%M}).")
+            messages.append(self._warning_message(text, key, ("start",), True, timing))
+            state["allowance"] = True
+            state["last"] = now
+        return messages
 
     @staticmethod
-    def _warning(e: dict, now: datetime) -> str:
+    def _warning(e: dict, now: datetime, kind: str) -> str:
         minutes = max(1, math.ceil((e["when"] - now).total_seconds() / 60))
         rule, names = e["rule"], _names(e["names"])
         if rule["rule_type"] == "time_limit":
@@ -336,7 +371,7 @@ class BlockWatcher:
             what = names
             return (f"Your blocks are back on in {minutes} min ({_when_text(e['when'], now)}): {what} will be "
                     "blocked again.")
-        if rule.get("allowance_min"):
+        if kind == "allowance":
             return f"{names}: {minutes} min of your allowance left - then it's blocked."
         if rule.get("group"):
             return f"{rule['group']['name']} starts in {minutes} min ({_when_text(e['when'], now)}): {names} will be blocked."

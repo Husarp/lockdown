@@ -76,3 +76,24 @@ def test_the_dns_filter_answers_nothing_for_the_video_host(tmp_path):
     assert reply[-4:] == bytes([127, 0, 0, 1])  # answered with "yourself", the way every block is
     other = server.answer(dnsfilter.query("example.com", dnsfilter.TYPE_A, qid))
     assert other[-4:] != bytes([127, 0, 0, 1])  # anything else is passed on, not blocked
+
+
+def test_dns_diagnostics_reflect_the_edited_rule_and_filter_answers(tmp_path, monkeypatch, caplog):
+    from blocker import dnsfilter, pause_request
+
+    db = Database(tmp_path / "t.db")
+    db.add_item("YouTube", ["youtube.com"], "site", rules=[{"rule_type": "permanent"}])
+    e = Enforcer(db)
+    monkeypatch.setattr(pause_request, "request",
+                        lambda names, **kw: pause_request.Receipt("test-episode", ("no_agent",)))
+    blocks, dns_blocks = e.site_scopes(db.blocks(NOW))
+    with caplog.at_level("INFO", logger="lockdown.service"):
+        e.update_dns_scope(blocks, dns_blocks, NOW)
+        server = dnsfilter.Server(e.blocked_name, port=0)
+        server.on_block = e.on_dns_answer
+        query = dnsfilter.query("www.youtube.com", dnsfilter.TYPE_A, b"\x12\x34")
+        assert server.answer(query).endswith(bytes([127, 0, 0, 1]))
+    assert set(e.dns_blocks) == {"youtube.com"}
+    assert e.blocked_name("rr1.googlevideo.com") is None
+    assert "configured media host googlevideo.com=False" in caplog.text
+    assert "generation=test-episode filter_answered=site" in caplog.text

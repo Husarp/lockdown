@@ -122,7 +122,7 @@ test("the group's own way boxes: closing excludes minimizing, and an app way of 
   assert.equal(typeof ways.createWays, "function");
   assert.equal(cm.createWays, undefined);                                       // (one implementation: js/ways.js)
   assert.deepEqual(ways.APP_WAYS.map((w) => w[0]), ["close", "background", "minimize", "grey", "internet"]);
-  assert.deepEqual(ways.SITE_WAYS.map((w) => w[0]), ["dns", "close", "back"]);
+  assert.deepEqual(ways.SITE_WAYS.map((w) => w[0]), ["dns", "close", "back", "minimize"]);
 });
 
 // ---------------------------------------------------------------- a group's icon and colour (js/groupicons.js)

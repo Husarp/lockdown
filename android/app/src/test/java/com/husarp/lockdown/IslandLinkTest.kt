@@ -2,6 +2,12 @@ package com.husarp.lockdown
 
 import com.husarp.lockdown.data.Config
 import com.husarp.lockdown.data.Settings
+import com.husarp.lockdown.data.Store
+import com.husarp.lockdown.data.UsageStore
+import com.husarp.lockdown.engine.BlockPause
+import com.husarp.lockdown.engine.EmergencyUse
+import com.husarp.lockdown.engine.QuotaContribution
+import com.husarp.lockdown.link.SyncBody
 import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Group
 import com.husarp.lockdown.engine.Item
@@ -380,4 +386,65 @@ class IslandLinkTest {
         once.succeed()
         assertFalse(once.open(1500))                                // single use
     }
+    @Test fun aDelayedBatchUsesMainAuthorizationAndItsRetryAfterRestartIsIdempotent() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        try {
+            val config = dir.resolve("config.json")
+            val usage = dir.resolve("usage.json")
+            val start = LocalDateTime.of(2026, 6, 1, 3, 0)
+            val end = start.plusSeconds(6)
+            Store.init(config)
+            Store.update { it.copy(pause = BlockPause(start.plusSeconds(1).toString(), end.toString())) }
+            assertTrue(Store.updatePersisted(at = start.plusSeconds(3)) { it.copy(
+                pause = null,
+                emergencyUses = listOf(EmergencyUse(start.plusSeconds(2).toString(), "1",
+                    start.plusSeconds(5).toString(), listOf("selected"))),
+            ) })
+            usage.writeText("""{"item:video\u0000day:2026-06-01":9}""")
+            UsageStore.init(usage)
+            val video = "item:video\u0000day:2026-06-01"
+            val group = "group:shared\u0000day:2026-06-01"
+            val entries = listOf(
+                QuotaContribution(video, listOf("selected"), start.toString(), end.toString()),
+                QuotaContribution(group, listOf("selected", "unrelated"), start.toString(), end.toString()),
+            )
+            val request = SyncBody(seq = 1, quota = entries, deltas = mapOf(video to 6))
+            val received = LinkProtocol.json.decodeFromString<SyncBody>(LinkProtocol.json.encodeToString(
+                SyncBody.serializer(), request))
+            val batch = Batch(received.seq, received.legacyDeltas.orEmpty(), received.quota.orEmpty())
+            assertTrue(UsageStore.applyIsland("paired-copy", batch, 0))
+            assertEquals(11, UsageStore.counter.usage("item:video", "day:2026-06-01"))
+            assertEquals(4, UsageStore.counter.usage("group:shared", "day:2026-06-01"))
+            Store.init(config)
+            UsageStore.init(usage)
+            assertEquals(1L, UsageStore.appliedSeq("paired-copy", 0))
+            assertTrue(UsageStore.applyIsland("paired-copy", batch, 0))
+            assertEquals(11, UsageStore.counter.usage("item:video", "day:2026-06-01"))
+            assertEquals(4, UsageStore.counter.usage("group:shared", "day:2026-06-01"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test fun theMainAndIslandFractionsAccumulateInTheSamePaidBucket() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        try {
+            Store.init(dir.resolve("config.json"))
+            val file = dir.resolve("usage.json")
+            UsageStore.init(file)
+            val item = Item("1", "Video", "video.example", ItemType.SITE)
+            val at = LocalDateTime.of(2026, 6, 1, 3, 0)
+            val active = listOf(Active(item, emptyList()))
+            val key = "item:1\u0000day:2026-06-01"
+            UsageStore.counter.record(active, at)
+            UsageStore.counter.record(active, at.plusNanos(600_000_000))
+            val remote = QuotaContribution(key, listOf("1"), at.toString(), at.plusNanos(600_000_000).toString())
+            assertTrue(UsageStore.applyIsland("pair", Batch(1, emptyMap(), listOf(remote)), 0))
+            UsageStore.init(file)
+            assertEquals(1, UsageStore.counter.usage("item:1", "day:2026-06-01"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
 }

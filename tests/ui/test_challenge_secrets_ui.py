@@ -203,10 +203,11 @@ def test_supervisor_setup_uses_separate_qr_and_secret(shell, page, harness):
     page.wait_for_selector('#dlg [data-k="sx-key"]')
     assert "Set up supervisor codes" in page.inner_text("#dlg h2")
     key = page.inner_text('#dlg [data-k="sx-key"]').replace(" ", "")
-    page.fill('#dlg [data-k="sx-code"]', code_now(harness, key))
+    page.fill('#dlg [data-k="sx-code"]', cs.totp(cs.secret_key(key), cs.trusted_epoch(harness.db), period=40))
     page.click("#dlg .dlg-f .btn-primary")
     dialog_closed(page)
     assert eventually(lambda: cs.status(harness.db)["supervisor"]["set"])
+    assert cs.status(harness.db)["supervisor"]["period"] == 40
     assert not cs.status(harness.db)["totp"]["set"]
     assert key not in page.content()
 
@@ -222,7 +223,22 @@ def test_supervisor_option_skips_an_existing_wait_for_one_action(shell, page, ha
     req, data = ask(harness)
     open_in_page(page, data)
     page.get_by_role("button", name="Supervisor code", exact=True).click()
-    page.fill("#dlg .ch-supervisor", code_now(harness, key))
+    field = page.locator("#dlg .ch-supervisor")
+    field.fill("1234567")
+    page.get_by_role("button", name="Use code", exact=True).click()
+    assert "6-digit" in page.locator("#dlg .ch-err").inner_text()
+    for event, init in [("paste", {}), ("beforeinput", {"inputType": "insertFromPaste"}),
+                        ("keydown", {"key": "v", "ctrlKey": True}), ("keydown", {"key": "v", "metaKey": True}),
+                        ("keydown", {"key": "Insert", "shiftKey": True}), ("contextmenu", {})]:
+        assert field.evaluate("""(el, [type, init]) => el.dispatchEvent(new
+          (type === "beforeinput" ? InputEvent : type === "keydown" ? KeyboardEvent : Event)
+          (type, {...init, cancelable: true, bubbles: true}))""", [event, init])
+    for event, init in [("copy", {}), ("cut", {}), ("drop", {}), ("beforeinput", {"inputType": "insertFromYank"})]:
+        assert not field.evaluate("""(el, [type, init]) => el.dispatchEvent(new
+          (type === "beforeinput" ? InputEvent : Event)
+          (type, {...init, cancelable: true, bubbles: true}))""", [event, init])
+    field.fill(code_now(harness, key))
+    assert req.ran == 0
     page.get_by_role("button", name="Use code", exact=True).click()
     assert result(page) == {"saved": 1} and req.ran == 1
     assert ab.settings(harness.db) == before

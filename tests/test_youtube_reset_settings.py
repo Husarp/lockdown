@@ -19,6 +19,7 @@ from resident.workers import Alerter
 from test_app_limit_enforcement import World
 from test_dnsfilter import query
 from test_firefox_youtube import FIREFOX, firefox
+from test_site_network_reconciliation import NativeFirewall
 
 
 START = datetime(2026, 9, 3, 2, 59, 58)
@@ -66,14 +67,14 @@ def pc(tmp_path, monkeypatch, firefox):
     monkeypatch.setattr(win, "window_pid", lambda hwnd: 4242)
     monkeypatch.setattr(win, "session_locked", lambda: False)
     monkeypatch.setattr(win, "front_windows", lambda: [])
+    monkeypatch.setattr(usage, "_tab_local", types.SimpleNamespace())
     hosts_file, backup_file = tmp_path / "hosts", tmp_path / "hosts.bak"
     hosts_file.write_text("127.0.0.1 localhost\n")
     monkeypatch.setattr(service.hosts, "_last", None)
     monkeypatch.setattr(service.hosts, "apply", lambda names: apply_hosts(names, hosts_file, backup_file))
-    flushes, video_removed = [], []
+    flushes = []
+    native = NativeFirewall(monkeypatch)
     monkeypatch.setattr(service.hosts, "flush_dns", lambda: flushes.append(w.now))
-    monkeypatch.setattr(service.firewall, "set_video_block", lambda ips: True)
-    monkeypatch.setattr(service.firewall, "remove_video_block", lambda: video_removed.append(w.now))
     server = dnsfilter.Server(w.enforcer.blocked_name,
                               safe=lambda name: keywords.safe_target(name, True, False))
     monkeypatch.setattr(server, "_forward", lambda msg, tcp: b"upstream")
@@ -85,7 +86,7 @@ def pc(tmp_path, monkeypatch, firefox):
 
     w.tracker.counted_ts = w.ts
     yield types.SimpleNamespace(w=w, browser=firefox, front=front, step=step, hosts=hosts_file,
-                                dns=server, flushes=flushes, video_removed=video_removed, old_alert=old_alert)
+                                dns=server, flushes=flushes, native=native, old_alert=old_alert)
     server.pool.shutdown()
 
 
@@ -102,6 +103,7 @@ def test_productive_firefox_counts_after_dns_limit_resets_with_old_settings(pc, 
     assert pc.dns.answer(query("www.youtube.com")).endswith(socket.inet_aton("127.0.0.1"))
     assert "youtube.com" in pc.hosts.read_text()
     assert w.enforcer.video_ips and w.enforcer.closing
+    assert pc.native.rules
     assert len(pc.flushes) == 1
 
     if bar in {"fullscreen", "autoplay"}:
@@ -109,26 +111,26 @@ def test_productive_firefox_counts_after_dns_limit_resets_with_old_settings(pc, 
     elif bar == "empty":
         pc.browser.url = ""
     pc.step(2)  # 03:00:00: separate tray/service connections use the new limit day.
-    assert w.used(w.youtube) == 2
+    assert w.used(w.youtube) == 0
     assert w.reason(w.youtube) is None
     assert w.enforcer.blocked_name("www.youtube.com") is None
     assert w.enforcer.blocked_name("rr1.googlevideo.com") is None
     assert pc.dns.answer(query("www.youtube.com")) == b"upstream"
     assert "youtube.com" not in pc.hosts.read_text()
     assert not w.enforcer.video_ips and not w.enforcer.closing
-    assert pc.video_removed and len(pc.flushes) == 2
+    assert not pc.native.rules and len(pc.flushes) == 2
     assert w.enforcer.blocked_name("bad.example") == "scam"
     # Ordinary and passive/fullscreen use keep counting, including after cache expiry.
     for _ in range(59):
         if bar == "autoplay":
             pc.browser.title = f"Clip {_} - YouTube — Mozilla Firefox"
         pc.step(30)
-    pc.step(28)
+    pc.step(30)
     assert w.used(w.youtube) == 1800
     assert w.reason(w.youtube) == "limit"
     assert w.enforcer.blocked_name("www.youtube.com") == "blocked"
     assert w.tray_db.get_setting(Alerter.KEY) == pc.old_alert
-    assert w.tray_db.usage_of([(f"item:{w.youtube}", old_bucket)])[(f"item:{w.youtube}", old_bucket)] == 1800
+    assert w.tray_db.usage_of([(f"item:{w.youtube}", old_bucket)])[(f"item:{w.youtube}", old_bucket)] == 1802
 
 
 def test_other_sites_and_apps_count_with_the_same_reset_and_notification_state(pc):
@@ -139,9 +141,9 @@ def test_other_sites_and_apps_count_with_the_same_reset_and_notification_state(p
     pc.step(30)
     w.tracker.flush(w.tray_db)
     assert w.used(w.other_site) == 30
-    assert w.used(w.youtube) == 2
+    assert w.used(w.youtube) == 0
     pc.front["exe"] = "game.exe"
     pc.step(30)
     w.tracker.flush(w.tray_db)
     assert w.used(w.other_app) == 30
-    assert w.used(w.youtube) == 2
+    assert w.used(w.youtube) == 0

@@ -107,24 +107,43 @@ class Server:
         self.upstreams: list[str] = []
         self.upstream_port = 53
         self.pool = ThreadPoolExecutor(max_workers=32)
+        self.on_block = None
+        self.sockets = []
+        self.stopped = threading.Event()
 
     def start(self):
         """Bind every address first (raises OSError if port 53 is taken), then serve in background threads."""
         sockets = []
-        for host, family in self.listen:
-            udp = socket.socket(family, socket.SOCK_DGRAM)
-            udp.bind((host, self.port))
-            tcp = socket.socket(family, socket.SOCK_STREAM)
-            tcp.bind((host, self.port))
-            tcp.listen(16)
-            sockets += [(self._serve_udp, udp), (self._serve_tcp, tcp)]
+        try:
+            for host, family in self.listen:
+                for target, socktype in ((self._serve_udp, socket.SOCK_DGRAM), (self._serve_tcp, socket.SOCK_STREAM)):
+                    sock = socket.socket(family, socktype)
+                    sockets.append((target, sock))
+                    sock.bind((host, self.port))
+                    if socktype == socket.SOCK_STREAM:
+                        sock.listen(16)
+                    sock.settimeout(0.5)
+        except OSError:
+            for _, sock in sockets:
+                sock.close()
+            raise
+        self.sockets = [sock for _, sock in sockets]
         for target, sock in sockets:
             threading.Thread(target=target, args=(sock,), daemon=True).start()
 
+    def close(self):
+        self.stopped.set()
+        for sock in self.sockets:
+            sock.close()
+        self.pool.shutdown(wait=False, cancel_futures=True)
+
     def answer(self, msg: bytes, tcp: bool = False) -> bytes | None:
         q = question(msg)
-        if q and self.blocked(q[0]):
-            return blocked_reply(msg, q[1], q[2])
+        if q and (category := self.blocked(q[0])):
+            reply = blocked_reply(msg, q[1], q[2])
+            if self.on_block:
+                self.on_block(q[0], category)
+            return reply
         target = q and self.safe(q[0])
         if target:
             name, qtype, end = q
@@ -159,12 +178,13 @@ class Server:
         return failure_reply(msg)
 
     def _serve_udp(self, sock):
-        while True:
+        while not self.stopped.is_set():
             try:
                 msg, addr = sock.recvfrom(65535)
             except OSError:   # e.g. "connection reset" after a reply to a client that gave up
                 continue
-            self.pool.submit(self._reply_udp, sock, msg, addr)
+            if not self.stopped.is_set():
+                self.pool.submit(self._reply_udp, sock, msg, addr)
 
     def _reply_udp(self, sock, msg, addr):
         try:
@@ -176,12 +196,15 @@ class Server:
                 self.log.exception("DNS filter: answering a query failed")
 
     def _serve_tcp(self, sock):
-        while True:
+        while not self.stopped.is_set():
             try:
                 conn, _ = sock.accept()
             except OSError:
                 continue
-            self.pool.submit(self._reply_tcp, conn)
+            if self.stopped.is_set():
+                conn.close()
+            else:
+                self.pool.submit(self._reply_tcp, conn)
 
     def _reply_tcp(self, conn):
         with conn:
@@ -309,9 +332,9 @@ def plan(current: dict[str, dict], saved: dict[str, dict]) -> tuple[dict, list, 
     changes, upstreams = [], []
     for guid, info in current.items():
         ours = _servers(info["v4"])[:1] == [FILTER_V4]
-        if guid not in saved or not ours:   # new adapter, or its DNS was changed since: remember the original
-            saved[guid] = {"v4": "" if ours else info["v4"],
-                           "v6": "" if info["v6"] == FILTER_V6 else info["v6"]}
+        old = saved.get(guid, {})
+        saved[guid] = {"v4": old.get("v4", "") if ours else info["v4"],
+                       "v6": old.get("v6", "") if info["v6"] == FILTER_V6 else info["v6"]}
         original = _servers(saved[guid]["v4"]) or _servers(info["dhcp"])
         upstream = [s for s in original if s not in (FILTER_V4, FILTER_V6) and not s.startswith("127.")]
         if not upstream:
@@ -332,9 +355,11 @@ def _load(db) -> dict:
         return {}
 
 
-def point_to_filter(db, log=None) -> list[str]:
+def point_to_filter(db, log=None, ready=None) -> list[str]:
     """Make every adapter use the filter (new networks too). Returns the upstream DNS servers."""
     saved, changes, upstreams = plan(adapters(), _load(db))
+    if ready is not None:
+        ready(upstreams)
     db.set_setting(SAVED_KEY, json.dumps(saved))
     for guid, servers, ipv6 in changes:
         err = set_dns(guid, servers, ipv6)
@@ -353,11 +378,15 @@ def restore(db, log=None):
     for guid, info in adapters().items():
         if guid not in saved and (_servers(info["v4"])[:1] == [FILTER_V4] or info["v6"] == FILTER_V6):
             saved[guid] = {"v4": "", "v6": ""}
+    pending = {}
     for guid, original in saved.items():
         for ipv6 in (False, True):
             err = set_dns(guid, original["v6" if ipv6 else "v4"], ipv6)
-            if log and err and err != 2:   # 2: adapter no longer exists
-                log.warning("DNS filter: couldn't restore DNS of adapter %s (error %d)", guid, err)
-    if saved and log:
+            if err and err != 2:   # 2: adapter no longer exists
+                pending[guid] = original
+                if log:
+                    log.warning("DNS filter: couldn't restore DNS of adapter %s (error %d)", guid, err)
+    if saved and not pending and log:
         log.info("DNS filter: original DNS settings restored")
-    db.set_setting(SAVED_KEY, "{}")
+    db.set_setting(SAVED_KEY, json.dumps(pending))
+    return not pending

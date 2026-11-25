@@ -25,6 +25,7 @@ from blocker.site_block import title_site
 from db import Database
 from monitor import browser_url, usage as usage_mod, win, word_guard
 from test_usage_counting import Clock, counting, reasons, _youtube_group
+from test_site_network_reconciliation import NativeFirewall
 
 OFF = {"enabled": False, "action": "close"}          # bad-word checking off: only blocked sites
 YT = {"youtube.com": "back", "googlevideo.com": "back"}
@@ -242,9 +243,9 @@ def enforcer(tmp_path, monkeypatch):
     e.db, e.closing, e.was_off = Database(tmp_path / "t.db"), {}, False
     e.protection = types.SimpleNamespace(which=lambda host: None)
     e.dns_blocks = {"youtube.com": {}, "googlevideo.com": {}}
-    e.rule = None
-    monkeypatch.setattr(firewall, "set_video_block", lambda ips: setattr(e, "rule", list(ips)) or True)
-    monkeypatch.setattr(firewall, "remove_video_block", lambda: setattr(e, "rule", "removed") or True)
+    e.native = NativeFirewall(monkeypatch)
+    e.video_state = firewall.SiteRules("video")
+    e.video_legacy = {}
     monkeypatch.setattr(netlog, "dns_names", lambda: dict(CACHE))
     return e
 
@@ -252,15 +253,15 @@ def enforcer(tmp_path, monkeypatch):
 def test_a_blocked_video_host_is_firewalled_ipv4_and_ipv6(enforcer):
     enforcer.cut_live_connections(EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule == ["172.217.1.10", "2a00:1450:4001:1::a"]
-    assert "142.250.75.14" in enforcer.closing                    # youtube.com's own: only cut, as before
-    assert json.loads(enforcer.db.get_setting(service.VIDEO_KEY)) == {
+    assert list(enforcer.video_state.installed.values())[0].target == ("172.217.1.10", "2a00:1450:4001:1::a")
+    assert "142.250.75.14" not in enforcer.closing                 # Google's shared page endpoint
+    assert json.loads(enforcer.db.get_setting(service.VIDEO_KEY))["addresses"] == {
         "172.217.1.10": "rr3---sn-u2oxu-f5fed.googlevideo.com",
         "2a00:1450:4001:1::a": "rr3---sn-u2oxu-f5fed.googlevideo.com"}
-    enforcer.rule = None
+    commands = list(enforcer.native.commands)
     enforcer.cut_live_connections(EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule is None                                  # nothing new: the rule isn't rewritten
+    assert enforcer.native.commands == commands                     # the rule isn't rewritten
 
 
 def test_the_video_host_seen_before_the_flush_is_firewalled(enforcer, monkeypatch):
@@ -270,7 +271,7 @@ def test_the_video_host_seen_before_the_flush_is_firewalled(enforcer, monkeypatc
     monkeypatch.setattr(netlog, "dns_names", lambda: {"127.0.0.1": "rr3---sn-u2oxu-f5fed.googlevideo.com"})
     enforcer.cut_live_connections(EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule == ["172.217.1.10", "2a00:1450:4001:1::a"]
+    assert list(enforcer.video_state.installed.values())[0].target == ("172.217.1.10", "2a00:1450:4001:1::a")
 
 
 def test_a_video_host_gone_from_the_dns_cache_is_firewalled_from_the_network_log(enforcer, monkeypatch):
@@ -280,7 +281,7 @@ def test_a_video_host_gone_from_the_dns_cache_is_firewalled_from_the_network_log
     enforcer.net_names = {"172.217.9.9": "rr5---sn-u2oxu-f5fed.googlevideo.com", "142.250.75.99": "youtube.com"}
     enforcer.close_cached(["youtube.com", "googlevideo.com"], EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule == ["172.217.9.9"]
+    assert list(enforcer.video_state.installed.values())[0].target == ("172.217.9.9",)
     assert "142.250.75.99" not in enforcer.closing                # (an old youtube.com address may be Gmail's now)
 
 
@@ -290,27 +291,29 @@ def test_the_rule_goes_when_the_block_ends(enforcer):
     enforcer.dns_blocks = {}                                      # 05:00 (or paused, or Lockdown switched off)
     enforcer.cut_live_connections(EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule == "removed" and json.loads(enforcer.db.get_setting(service.VIDEO_KEY)) == {}
+    assert not enforcer.native.rules and json.loads(enforcer.db.get_setting(service.VIDEO_KEY)) == {}
 
 
 def test_youtube_s_video_hosts_leave_the_rule_when_only_netflix_stays_blocked(enforcer):
     enforcer.dns_blocks = {"youtube.com": {}, "googlevideo.com": {}, "netflix.com": {}, "nflxvideo.net": {}}
     enforcer.cut_live_connections(EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule == ["172.217.1.10", "198.38.96.1", "2a00:1450:4001:1::a"]
+    assert list(enforcer.video_state.installed.values())[0].target == (
+        "172.217.1.10", "198.38.96.1", "2a00:1450:4001:1::a")
     enforcer.dns_blocks = {"netflix.com": {}, "nflxvideo.net": {}}
     enforcer.cut_live_connections(EVENING)
     enforcer.update_video_block()
-    assert enforcer.rule == ["198.38.96.1"]
+    assert list(enforcer.video_state.installed.values())[0].target == ("198.38.96.1",)
 
 
 def test_a_restart_rebuilds_the_rule_only_for_hosts_still_blocked(enforcer):
-    """main() takes the rule down and hands the saved addresses to the first pass (video_seen)."""
-    enforcer.video_ips = {}
-    enforcer.video_seen = {"172.217.1.10": "rr3---sn-u2oxu-f5fed.googlevideo.com",
-                           "198.38.96.1": "ipv4-c001-waw001-ix.1.oca.nflxvideo.net"}
+    """The first pass revalidates persisted evidence against the active DNS rules."""
+    enforcer.db.set_setting(service.VIDEO_KEY, json.dumps({
+        "172.217.1.10": "rr3---sn-u2oxu-f5fed.googlevideo.com",
+        "198.38.96.1": "ipv4-c001-waw001-ix.1.oca.nflxvideo.net"}))
+    enforcer._load_site_transport()
     enforcer.update_video_block()
-    assert enforcer.rule == ["172.217.1.10"]
+    assert list(enforcer.video_state.installed.values())[0].target == ("172.217.1.10",)
 
 
 def test_the_dns_filter_is_used_while_a_site_is_blocked():

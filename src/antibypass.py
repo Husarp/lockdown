@@ -45,7 +45,6 @@ from datetime import datetime, timedelta
 
 import block_method
 import challenges
-from blocker.site_block import site_flags
 from rules import (ALLOW, OPEN_LIMIT_FIELDS, TIME_FMT, TIME_LIMIT_FIELDS, allowance_shared, day_limits,
                    load_schedule, next_window_start, parse_hhmm, window_until)
 
@@ -339,20 +338,17 @@ def rules_looser(old: list[dict], new: list[dict], now: datetime) -> bool:
     return any(rule_looser(r, by_type.get(r["rule_type"]), now) for r in old)
 
 
-def _strength(block_type: str | None) -> set[str]:
-    """What an app way does, for comparing: closing is stronger than minimizing, which is stronger than Grey it."""
-    return block_method.strength("app", block_type)
-
-
 def item_looser(old: dict, new: dict | None, now: datetime) -> bool:
     if new is None:
         return True
+    k = block_method.kind(old)
+    if k == "site":
+        weaker = block_method.site_coverage_looser(block_method.site_ways([old]), block_method.site_ways([new]))
+    else:
+        weaker = (not set(old["target"].split()) <= set(new["target"].split())
+                  or not block_method.strength(k, old.get("block_type")) <= block_method.strength(k, new.get("block_type")))
     return (newly_disabled(old, new)
-            or not set(old["target"].split()) <= set(new["target"].split())
-            or (old["item_type"] != "site"      # (an app or a category: a category's way is an app way)
-                and not _strength(old.get("block_type")) <= _strength(new.get("block_type")))
-            or (old["item_type"] == "site"
-                and not site_flags(old.get("block_type")) <= site_flags(new.get("block_type")))
+            or weaker
             or rules_looser(old["rules"], new["rules"], now))
 
 

@@ -25,10 +25,11 @@ import json
 from datetime import datetime, timedelta
 
 import antibypass
+import block_method
 import modes
 from blocker import hosts
 from blocker.apps import PROTECTED, block_flags, exe_name, in_folder, is_hosted, make_block_type, typed_path
-from blocker.site_block import make_site_block_type, site_flags
+from blocker.site_block import CHOOSE_WAY, FLAGS as WAYS_SITE, make_site_block_type, site_flags
 from paths import APP_DIR
 from resident.tray_actions import locked_by_hand
 from rules import days_text, load_schedule, make_schedule, parse_hhmm, schedule_until
@@ -45,7 +46,7 @@ MAX_WINDOWS = 14
 MAX_MINUTES = 24 * 60            # "30 min" ... a day; longer than that is "Until I stop"
 POMODORO_KEYS = ("work", "break", "rounds", "long")
 POMODORO_LOW, POMODORO_HIGH = 1, 240
-WAYS_APP, WAYS_SITE = ("close", "background", "minimize", "internet"), ("dns", "close", "back")
+WAYS_APP = ("close", "background", "minimize", "internet")
 DEFAULT_WINDOW = {"days": [0, 1, 2, 3, 4], "start": "09:00", "end": "17:00"}
 
 
@@ -149,7 +150,8 @@ def _extras_key(extra: dict) -> str:
 
 
 @core.internal
-def loosenings(old: dict, new: dict, held: bool, categories_known: set | None = None) -> list[str]:
+def loosenings(old: dict, new: dict, held: bool, categories_known: set | None = None,
+               *, items=(), groups=(), category_map=None) -> list[str]:
     """Why saving `new` over `old` weakens the mode (each reason is a line for the challenge), [] when it doesn't.
     `held`: the mode is on and locked, or its schedule window is running. What no longer exists (a deleted category,
     item or group) is not counted as taken away."""
@@ -164,10 +166,16 @@ def loosenings(old: dict, new: dict, held: bool, categories_known: set | None = 
             out.append("add Pomodoro breaks, so it blocks less")
     if held:
         old_cats = [c for c in old.get("categories", []) if categories_known is None or c in categories_known]
+        old_extras = {_extras_key(e) for e in old.get("extra", []) if e["kind"] != "site"}
+        new_extras = {_extras_key(e) for e in new.get("extra", []) if e["kind"] != "site"}
+        categories = category_map or {}
         if (set(old_cats) - set(new.get("categories", [])) or set(old.get("items", [])) - set(new.get("items", []))
                 or set(old.get("groups", [])) - set(new.get("groups", []))
-                or {_extras_key(e) for e in old.get("extra", [])} - {_extras_key(e) for e in new.get("extra", [])}):
-            out.append("make it block less (take a category, site, app or group out of it)")
+                or old_extras - new_extras
+                or block_method.site_coverage_looser(
+                    block_method.site_ways(modes.targets(old, items, groups, categories)),
+                    block_method.site_ways(modes.targets(new, items, groups, categories)))):
+            out.append("make it block less (remove or weaken a category, site, app or group block)")
     return out
 
 
@@ -442,7 +450,7 @@ def _build_extra(spec: dict, cats: dict | None = None) -> dict:
         host = _site_target(text)
         flags = _ways(spec.get("ways"), WAYS_SITE, ("dns",))
         if not flags:
-            raise ApiError("Tick at least one of Can't load it / Close the tab / Go back.")
+            raise ApiError(CHOOSE_WAY)
         if {"close", "back"} <= flags:
             raise ApiError("Close the tab and Go back do the same thing: pick one.")
         entry = _popular(host)
@@ -476,7 +484,7 @@ def _build_extra(spec: dict, cats: dict | None = None) -> dict:
 @core.read
 def mode_extra_check(ctx, spec):
     """Check one "+ Other site or app" and return it ready to add: {kind, name, targets, block_type, app_path}.
-    `spec`: {kind: "site" | "app" | "category", text (a category: its key), name, ways: ["dns" | "close" | "back"] or
+    `spec`: {kind: "site" | "app" | "category", text (a category: its key), name, ways: ["dns" | "close" | "back" | "minimize"] or
     ["close" | "background" | "minimize" | "internet"], app_path}. Changes nothing; mode_save checks every extra again."""
     if not isinstance(spec, dict):
         raise ApiError("Bad request.")
@@ -586,7 +594,8 @@ def mode_save(ctx, mode):
         return save()
     state = modes.active(db, now, mode_list)
     held = held_now(mode_list, state, old["id"], now)
-    why = loosenings(old, new, held, known)
+    why = loosenings(old, new, held, known, items=[i for i in db.list_items() if not i["disabled"]],
+                      groups=db.list_groups(), category_map=db.categories())
     if not why:
         return save()
     by_hand = bool(state and state["mode"]["id"] == old["id"] and state["locked"] and not state["scheduled"])

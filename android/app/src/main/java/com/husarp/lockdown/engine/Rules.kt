@@ -203,6 +203,23 @@ object Rules {
         return out
     }
 
+    /** Schedule and natural period keys change on minute boundaries. A saved reset hold can end between them. */
+    internal fun usageEdges(start: LocalDateTime, end: LocalDateTime, clock: LimitClock,
+                            resetEdges: List<LocalDateTime>): List<LocalDateTime> = buildList {
+        add(start)
+        add(end)
+        addAll(resetEdges.filter { it > start && it < end })
+        for (period in listOf("day", "week", "month")) {
+            val boundary = clock.period(period, start).second
+            if (boundary > start && boundary < end) add(boundary)
+        }
+        var minute = start.withSecond(0).withNano(0).plusMinutes(1)
+        while (minute < end) {
+            add(minute)
+            minute = minute.plusMinutes(1)
+        }
+    }
+
     private fun openingTargets(eff: EffRule, now: LocalDateTime, clock: LimitClock): Set<Pair<String, String>> =
         switchLimits(eff.rule).keys.mapTo(HashSet()) { eff.usageOwner to openingBucket(eff, it, now, clock) }
 

@@ -33,7 +33,7 @@ export function secretLines(s) {
   return {
     password: s.password.set ? `Set${since(s.password.since)}.` : "Not set.",
     totp: s.totp.set ? `Set up${since(s.totp.since)}.` : "Not set up.",
-    supervisor: s.supervisor && s.supervisor.set ? `Set up${since(s.supervisor.since)}.` : "Not set up.",
+    supervisor: s.supervisor && s.supervisor.set ? `Set up${since(s.supervisor.since)}. ${s.supervisor.period || 30}-second codes.${(s.supervisor.period || 30) === 30 ? " Re-pair for 40-second codes." : ""}` : "Not set up.",
     recovery: s.recovery.exists ? `Made ${dayText(s.recovery.made, true) || "earlier"} - shown only then.` : "Off (none made).",
   };
 }
@@ -197,10 +197,10 @@ async function totpDialog(apply, kind = "totp") {
   const h = openDialog({
     key: "sx-totp", title: kind === "supervisor" ? "Set up supervisor codes" : setup.replaces ? "Set up the authenticator again" : "Set up an authenticator", wide: true,
     body: `<p><b>1.</b> ${kind === "supervisor"
-      ? "Have your trusted supervisor scan this separate secret with their authenticator app, or copy the key and send it to them. Their codes pass every challenge and timed wait for one action. They can use an authenticator app or Codes I supervise in Lockdown on their own PC."
+      ? "Share the pairing link with your trusted supervisor or have them scan the QR code. Use Codes I supervise in Lockdown on PC or phone, or an authenticator that honors the 40-second period. Authenticators fixed at 30 seconds work with existing 30-second pairings."
       : "Scan this with an authenticator app (Google or Microsoft Authenticator, 2FAS, Aegis ...) on the phone that will keep it - yours, or a trusted person's, so you can't loosen without them."}</p>
       ${qr}
-      <p class="small">Or type this key into the app: <span class="sx-key" data-k="sx-key">${esc(setup.key)}</span> <button class="btn btn-sm" type="button" data-k="sx-copy">Copy</button></p>
+      <p class="small">Or type this key into the app: <span class="sx-key" data-k="sx-key">${esc(setup.key)}</span> <button class="btn btn-sm" type="button" data-k="sx-copy">${kind === "supervisor" ? "Copy pairing link" : "Copy"}</button>${kind === "supervisor" ? " (40-second period)" : ""}</p>
       <p class="small muted">The QR code and the key are shown only now.${setup.replaces ? " Saving replaces the old authenticator: that asks the challenge, and the old one stops working." : ""}</p>
       ${kind === "supervisor" ? "<p class=\"small muted\">If your supervisor loses their authenticator, pass the normal challenges to replace or remove this secret.</p>" : `<p class="sx-forgot">${esc(FORGOTTEN)}</p>`}
       <label class="sx-l"><span><b>2.</b> Type the 6-digit code the app shows for Lockdown</span>
@@ -211,7 +211,7 @@ async function totpDialog(apply, kind = "totp") {
   if (!h) return;
   h.body.querySelector('[data-k="sx-copy"]').addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(setup.key);
+      await navigator.clipboard.writeText(kind === "supervisor" ? setup.uri : setup.key);
       toast("Copied");
     } catch (_) {
       toast("Couldn't copy the key.");

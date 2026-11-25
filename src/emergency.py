@@ -9,7 +9,7 @@ starts afresh). Every unlock is kept in the database (for history / graphs).
 
 An item can be unlocked whether it is blocked right now or not (0.84.7): inside a blocked stretch with allowance
 left, or before a limit runs out, the unlock still holds until it ends - the allowance or limit running out
-meanwhile doesn't block it. Time used during it keeps counting toward the limits and allowances as always.
+meanwhile doesn't block it. The selected activities spend no time, allowance or openings during the unlock.
 Permanently-blocked items (and the sites/apps of a permanently-blocked category) can never be unlocked.
 """
 import json

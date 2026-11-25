@@ -185,3 +185,18 @@ def test_bedtime_cover_fallback_joins_the_same_blocking_burst(tmp_path, monkeypa
         assert "Time for bed: Sleep well." in text and "YouTube blocked until 07:00." in text
     finally:
         publisher.stop()
+
+
+def test_warning_occurrences_dedupe_independently_of_rounded_text():
+    from notification_batch import AdvanceWarning
+
+    def warning(occurrence):
+        return AdvanceWarning("YouTube: 5 min of the time limit left.", kind="time_limit",
+                              episode=("time_limit", "item:3", "day:2026-11-24"),
+                              occurrence=occurrence, triggers=("repeat",), in_use=True, timing=(600, (), 5))
+
+    batch = NotificationBatch()
+    first = warning(1)
+    assert batch.merge([first, first], 0, keep_burst=False) == first
+    assert batch.merge([first], 2, keep_burst=False) is None
+    assert batch.merge([warning(2)], 5, keep_burst=False) == first

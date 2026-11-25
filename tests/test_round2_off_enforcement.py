@@ -9,6 +9,7 @@ import uiautomation
 import pytest
 from db import Database
 from monitor import browser_url, win, word_guard
+from test_browser_tab_reader import Node
 from tests.test_app_limit_enforcement import World
 
 NOW = datetime(2026, 10, 2, 12)
@@ -41,7 +42,11 @@ def test_global_off_stops_word_guard_and_on_restores_it(tmp_path, monkeypatch, b
     monkeypatch.setattr(uiautomation, "UIAutomationInitializerInThread", contextlib.nullcontext, raising=False)
     monkeypatch.setattr(win, "foreground", lambda: (7, "chrome.exe"))
     monkeypatch.setattr(win, "window_title", lambda hwnd: "porn - Google Search")
-    monkeypatch.setattr(browser_url, "browser_url", lambda hwnd: "https://www.google.com/search?q=porn")
+    monkeypatch.setattr(win, "window_pid", lambda hwnd: 42)
+    bar = Node("EditControl", cls="OmniboxViewViews", value="https://www.google.com/search?q=porn")
+    tab = Node("TabItemControl", token=(7, 1), selected=True)
+    root = Node("WindowControl", children=[Node("TabControl", children=[tab]), bar])
+    monkeypatch.setattr(browser_url.auto, "ControlFromHandle", lambda hwnd: root, raising=False)
     monkeypatch.setattr(browser_url, "tab_count", lambda hwnd: 2)
     pressed, notices = [], []
     monkeypatch.setattr(win, "chord", lambda *args: pressed.append(args) or True)

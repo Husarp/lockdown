@@ -12,6 +12,8 @@ Draft.save does through the guard (the challenge) - they are `loosen`. The emerg
 """
 import threading
 from datetime import datetime, timedelta
+from functools import cache
+from types import SimpleNamespace
 
 import emergency
 import group_look
@@ -141,6 +143,9 @@ class _Build:
 
     def __init__(self, d, now, usage, running: bool):
         self.d, self.now, self.usage, self.running = d, now, usage, running
+        # All rule chips and statuses use this request's limit clock, mostly at the same instant.
+        clock = usage.clock
+        usage.clock = SimpleNamespace(day=cache(clock.day), period=cache(clock.period))
         self.saved_groups = list(d.saved_groups.values())
         self.groups = list(d.groups.values())
         self.dirty = d.dirty
@@ -249,10 +254,9 @@ class _Build:
         status = self.status(item)
         own, note = [], ""
         if not item.get("disabled"):
-            own = _chips(effective_rules({**item, "rules": item["rules"]}, []), now, usage,
-                         effective_rules(item, [group]))
-            # what the group gives this member on top of its own rules ("customised")
             siblings = effective_rules(item, [group])
+            own = _chips(effective_rules(item, []), now, usage, siblings)
+            # what the group gives this member on top of its own rules ("customised")
             extras = [{**r, "in_box": True} for r in siblings if (r.get("extra_of") or {}).get("id") == group["id"]]
             if extras:
                 own += _chips(extras, now, usage, siblings)
@@ -284,17 +288,26 @@ class _Build:
             return sorted(entries, key=name)
         if how == "Date added":     # newest first; unsaved ones on top
             return sorted(entries, key=lambda e: e[1].get("created_at") or "~", reverse=True)
+        if how == "Blocked now first":
+            def blocked(e):
+                kind, thing = e
+                if kind == "item":
+                    return bool(self.block(thing["id"]))
+                return any(self.block(i) for i in thing["members"] if i in self.d.items)
 
-        def time_of(e) -> datetime:
+            return sorted(entries, key=lambda e: (not blocked(e), name(e)))
+
+        def next_block_key(e):
             kind, thing = e
             if kind == "item":
-                return self.next_time(thing)
-            return min((self.next_time(self.d.items[i]) for i in thing["members"] if i in self.d.items),
-                       default=datetime.max)
-        times = {id(e[1]): time_of(e) for e in entries}
-        if how == "Next block":     # soonest first, the ones blocked already after them
-            return sorted(entries, key=lambda e: (times[id(e[1])] == datetime.min, times[id(e[1])], name(e)))
-        return sorted(entries, key=lambda e: (times[id(e[1])] != datetime.min, name(e)))
+                when = self.next_time(thing)
+            else:
+                when = min((self.next_time(self.d.items[i]) for i in thing["members"] if i in self.d.items),
+                           default=datetime.max)
+            return when == datetime.min, when, name(e)
+
+        # Next block: soonest first, the ones blocked already after them.
+        return sorted(entries, key=next_block_key)
 
 
 def _sort(db, asked) -> str:

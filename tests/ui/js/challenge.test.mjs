@@ -62,3 +62,84 @@ test("guarded passes plain answers through", async () => {
   assert.equal(await guarded(() => Promise.resolve(null)), null);
   assert.equal(await guarded(Promise.resolve("text")), "text");
 });
+
+test("the dialog exempts the live supervisor field from paste protection and validates on explicit submit", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { runInNewContext } = await import("node:vm");
+  const source = readFileSync(new URL("../../../src/ui/js/challenge.js", import.meta.url), "utf8");
+  const runSource = source.slice(source.indexOf("function run("), source.lastIndexOf("// ---------------------------------------------------------------- wiring"));
+  const events = new Map(), calls = [], buttons = [];
+  const build = () => ({
+    dataset: {},
+    addEventListener(type, handler) { this[type] = handler; },
+    focus() {},
+  });
+  const capture = (type, target, detail = {}) => {
+    let prevented = false;
+    events.get(type)({ target, ...detail, preventDefault: () => { prevented = true; } });
+    return prevented;
+  };
+  const field = build(), err = {}, unrelated = build();
+  const body = {
+    addEventListener(type, handler, useCapture) {
+      if (useCapture) events.set(type, handler);
+    },
+    querySelector(selector) {
+      if (!this.innerHTML?.includes('class="input ch-supervisor"')) return null;
+      return selector === ".ch-supervisor" ? field : err;
+    },
+  };
+  const head = {};
+  const foot = {
+    set textContent(_) { buttons.length = 0; },
+    append: (button) => buttons.push(button),
+    prepend: (button) => buttons.unshift(button),
+  };
+  const dlg = {
+    querySelector: (selector) => selector === ".dlg-f" ? foot : head,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const run = runInNewContext(`(${runSource})`, {
+    active: null, TITLE: "Title", CANCELLED, changesHtml: () => "", esc: (s) => s,
+    performance, cancelAnimationFrame() {},
+    BLOCKED_INPUT: new Set(["insertFromPaste", "insertFromPasteAsQuotation", "insertFromDrop", "insertFromYank"]),
+    document: { createElement: build },
+    openDialog: ({ onClose }) => ({ el: dlg, body, close: onClose }),
+    ld: { call: async (method, ...args) => {
+      if (method === "challenge_begin") return { mode: "closed", supervisor: true };
+      calls.push([method, ...args]);
+      return { passed: true, result: "saved" };
+    } },
+  });
+  const result = run({ ticket: "ticket" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(capture("paste", field), true);
+  buttons.find((button) => button.textContent === "Supervisor code").click();
+  for (const [type, detail] of [
+    ["paste", {}], ["contextmenu", {}], ["beforeinput", { inputType: "insertFromPaste" }],
+    ["beforeinput", { inputType: "insertFromPasteAsQuotation" }],
+    ["keydown", { key: "v", ctrlKey: true }], ["keydown", { key: "V", metaKey: true }],
+    ["keydown", { key: "Insert", shiftKey: true }],
+  ]) {
+    assert.equal(capture(type, field, detail), false, type);
+    assert.equal(capture(type, unrelated, detail), true, type);
+  }
+  for (const [type, detail] of [
+    ["drop", {}], ["copy", {}], ["cut", {}], ["beforeinput", { inputType: "insertFromDrop" }],
+    ["beforeinput", { inputType: "insertFromYank" }],
+  ]) assert.equal(capture(type, field, detail), true, type);
+
+  const useCode = buttons.find((button) => button.textContent === "Use code");
+  field.value = "0037840";
+  useCode.click();
+  assert.match(err.textContent, /6-digit/);
+  assert.equal(calls.length, 0);
+  field.value = "003784";
+  assert.equal(calls.length, 0);
+  useCode.click();
+  assert.equal(await result, "saved");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].slice(0, 2), ["challenge_submit", "ticket"]);
+  assert.equal(calls[0][2].supervisor, "003784");
+});

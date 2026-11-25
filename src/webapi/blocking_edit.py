@@ -20,7 +20,7 @@ import search
 from blocker import hosts
 from blocker.apps import (FLAGS as APP_FLAGS, PROTECTED, block_flags, exe_name, in_folder, is_hosted, make_block_type,
                           typed_path)
-from blocker.site_block import FLAGS as SITE_FLAGS, make_site_block_type, site_flags
+from blocker.site_block import CHOOSE_WAY, FLAGS as SITE_FLAGS, make_site_block_type, site_flags
 from gui.draft import RULE_FIELDS
 from paths import APP_DIR
 
@@ -215,7 +215,7 @@ def _flag_set(value, allowed) -> set | None:
 
 def _site_way(flags: set) -> str:
     if not flags:
-        raise _bad("Tick at least one of Can't load it / Close the tab / Go back.", "ways")
+        raise _bad(CHOOSE_WAY, "ways")
     if {"close", "back"} <= flags:
         raise _bad("Close the tab and Go back do the same thing: pick one.", "ways")
     return make_site_block_type(flags)

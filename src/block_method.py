@@ -1,7 +1,7 @@
 """How a blocked site or app is dealt with when a GROUP blocks it (0.84.11): the group's "How members are blocked".
 
 A group can say how its members are blocked - apps: close (+ background) / minimize / cut internet; sites: can't
-load / close the tab / go back - the same flags as an item's own ("block_type", blocker.apps / blocker.site_block).
+load / close the tab / go back / minimize - the same flags as an item's own ("block_type", blocker.apps / blocker.site_block).
 A member may add to that in its extra-limits window, and only add: its own choice is merged ON TOP of the group's,
 like its extra rules (0.84.3), so it can make the member stricter, never weaker.
 
@@ -34,13 +34,18 @@ def flags(k: str, block_type: str | None) -> set[str]:
 
 
 def strength(k: str, block_type: str | None) -> set[str]:
-    """Everything this way does, for comparing two ways: closing a tab covers going back, closing an app covers
-    minimizing it and greying the screen, minimizing it covers greying (so Grey it is the lightest app way)."""
+    """Effective coverage for comparing ways, including independent background site coverage."""
     f = flags(k, block_type)
+    if k == "site":
+        if "close" in f:
+            f.add("back")
+        if f & {"back", "minimize"}:
+            f.add("foreground")
+        return f
     if "close" in f:
-        f = f | ({"back"} if k == "site" else {"minimize", "grey"})
-    elif "minimize" in f and k != "site":
-        f = f | {"grey"}
+        f.update({"minimize", "grey"})
+    elif "minimize" in f:
+        f.add("grey")
     return f
 
 
@@ -58,6 +63,41 @@ def merge(k: str, *block_types: str | None) -> str:
         if "minimize" in f:
             f.discard("grey")
     return make_block_type(f)
+
+
+def matching_sites(host: str, ways: dict[str, str | None]) -> dict[str, str | None]:
+    """All rules for the host and its parent domains, starting with the most specific."""
+    host = host.lower().rstrip(".")
+    matches = {}
+    while host:
+        if host in ways:
+            matches[host] = ways[host]
+        host = host.partition(".")[2]
+    return matches
+
+
+def site_ways(items) -> dict[str, str | None]:
+    """Combine the ways of active site items by hostname, including duplicate targets."""
+    ways = {}
+    for item in items:
+        if item["item_type"] != "site":
+            continue
+        way = item.get("block_type")
+        for host in item["target"].split():
+            host = host.lower().rstrip(".")
+            ways[host] = merge("site", ways[host], way) if host in ways else way
+    return ways
+
+
+def site_coverage_looser(old: dict[str, str | None], new: dict[str, str | None]) -> bool:
+    """A lost way at any old hostname also weakens coverage of its subtree."""
+    for host in old:
+        before = matching_sites(host, old)
+        after = matching_sites(host, new)
+        if not after or not strength("site", merge("site", *before.values())) <= strength(
+                "site", merge("site", *after.values())):
+            return True
+    return False
 
 
 def own_app_way(group_app_block: str | None, item_block_type: str | None, extra: str | None) -> str | None:

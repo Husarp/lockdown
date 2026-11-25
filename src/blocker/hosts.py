@@ -3,6 +3,7 @@
 Lockdown only ever touches the lines between START_MARKER and END_MARKER;
 everything else in the hosts file is preserved as-is.
 """
+import logging
 import re
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ START_MARKER = "# >>> Lockdown START (managed automatically - do not edit)"
 END_MARKER = "# <<< Lockdown END"
 REDIRECT_IP = "127.0.0.1"
 _last: tuple | None = None   # what apply() last saw (inputs + file size/time), to skip needless rebuilds
+log = logging.getLogger("lockdown.service")
 repaired = False             # the last apply() put Lockdown's entries back after something else edited the file
 
 _HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
@@ -88,5 +90,13 @@ def apply(hostnames: list[str], hosts_path: Path = HOSTS_PATH, backup_path: Path
     return changed
 
 
-def flush_dns():
-    subprocess.run(["ipconfig", "/flushdns"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+def flush_dns() -> bool:
+    try:
+        result = subprocess.run(["ipconfig", "/flushdns"], capture_output=True,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=4)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log.warning("Windows DNS cache flush failed: %s", type(error).__name__)
+        return False
+    if result.returncode:
+        log.warning("Windows DNS cache flush returned status %d", result.returncode)
+    return result.returncode == 0

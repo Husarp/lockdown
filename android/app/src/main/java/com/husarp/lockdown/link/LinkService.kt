@@ -40,11 +40,9 @@ import com.husarp.lockdown.block.Verdict
 import com.husarp.lockdown.data.ModesStore
 import com.husarp.lockdown.data.Store
 import com.husarp.lockdown.data.UsageStore
-import com.husarp.lockdown.engine.Active
 import com.husarp.lockdown.engine.Cadence
 import com.husarp.lockdown.engine.IslandSight
 import com.husarp.lockdown.engine.ItemType
-import com.husarp.lockdown.engine.Rules
 import com.husarp.lockdown.guard.TrustedTime
 import kotlin.concurrent.thread
 
@@ -184,7 +182,6 @@ class LinkService : Service() {
     private fun step() {
         val cfg = Store.config
         val now = Enforce.ldt(TrustedTime.now(this))
-        UsageStore.counter.clock = cfg.clock()
         val pkg = front
         if (!inUse() || pkg == null || pkg == packageName) {
             UsageStore.record(emptyList(), now)
@@ -192,9 +189,8 @@ class LinkService : Service() {
             hideBlock(); return
         }
         val item = cfg.items.firstOrNull { it.type == ItemType.APP && it.target.equals(pkg, true) }
-        val actives = if (item != null && !item.disabled && Enforce.counts(cfg, item, now))
-            listOf(Active(item, Rules.countedRules(item, cfg.groups), launched = pkg != prevPkg)) else emptyList()
-        UsageStore.record(actives, now)
+        val actives = item?.let { listOf(UsageStore.active(it, cfg, launched = pkg != prevPkg)) }.orEmpty()
+        UsageStore.record(actives, now, cfg)
         prevPkg = pkg
         val v = Enforce.app(cfg, pkg, now, ModesStore.current(now), item?.name ?: Apps.label(packageManager, pkg))
         // only greyed: it stays open here (main greys the screen - this copy can't)

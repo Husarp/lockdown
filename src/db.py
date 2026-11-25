@@ -1,4 +1,5 @@
 """SQLite database layer (shared by GUI and service)."""
+import contextlib
 import functools
 import json
 import logging
@@ -280,8 +281,36 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_daily_block_events_day ON daily_block_events(day)",
     "CREATE INDEX IF NOT EXISTS idx_daily_reminders_what_day ON daily_reminders(what, day)",
 ]
-# PRAGMA user_version of a database that has every table, column and index above. Bump it whenever SCHEMA,
-# MIGRATIONS or INDEXES change: a database already at this version skips the whole migration pass on open.
+QUOTA_SCHEMA = """
+-- Local accounting evidence, never imported and never used to authorize enforcement changes.
+CREATE TABLE IF NOT EXISTS quota_pauses (
+    started TEXT PRIMARY KEY,
+    until TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_quota_pause_until ON quota_pauses(until);
+CREATE INDEX IF NOT EXISTS idx_emergency_until ON emergency_unlocks(until);
+CREATE TABLE IF NOT EXISTS quota_carry (
+    owner TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    micros INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    PRIMARY KEY (owner, bucket)
+);
+CREATE TABLE IF NOT EXISTS quota_service_spans (
+    owner TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    started TEXT NOT NULL,
+    until TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_quota_service_until ON quota_service_spans(until);
+CREATE INDEX IF NOT EXISTS idx_quota_service_target ON quota_service_spans(owner, bucket, until);
+CREATE TABLE IF NOT EXISTS quota_writer_marks (
+    writer TEXT PRIMARY KEY,
+    counted_through REAL NOT NULL
+);
+"""
+
+# PRAGMA user_version of the shared schema. The local quota tables have a separate installation check.
 SCHEMA_VERSION = 11   # 2: change_counter + its triggers (0.84.0 review); 3: media hosts for www. sites (0.84.1)
 #                      4: emergency_unlocks.alerts (0.84.7); 5: how a group's members are blocked (0.84.11)
 #                      6: a daily time limit per weekday (0.84.12); 7: emergency_unlocks.tier (emergency kinds)
@@ -355,7 +384,13 @@ class Database:
         self._wal(BUSY_SEC)
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._migrate()
-        self._unassigned_categories()
+        has_quota, has_categories = self.conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quota_pauses'), "
+            "EXISTS(SELECT 1 FROM settings WHERE key = 'categories.unassigned' AND value = '1')").fetchone()
+        if not has_quota:
+            self._migrate_quota()
+        if not has_categories:
+            self._unassigned_categories()
         if ui:
             self.conn.execute(f"PRAGMA busy_timeout={int(UI_BUSY_SEC * 1000)}")
 
@@ -426,6 +461,21 @@ class Database:
         self.conn.execute("ANALYZE")
         self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.conn.commit()
+
+    def _migrate_quota(self):
+        """Install the local accounting tables and seed any saved pause exactly once."""
+        exists = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quota_pauses'"
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            if self.conn.execute(exists).fetchone():
+                return
+            for statement in QUOTA_SCHEMA.split(";"):
+                if statement.strip():
+                    self.conn.execute(statement)
+            saved = pause._load(self.get_setting(pause.KEY))
+            if saved:
+                self.conn.execute("INSERT INTO quota_pauses VALUES (?, ?)",
+                                  (self._quota_stamp(saved["started"]), self._quota_stamp(saved["until"])))
 
     def _merge_window_usage(self):
         """One-off upgrade: old window-end counters belong to their continuous blocked stretch.
@@ -742,6 +792,114 @@ class Database:
 
     # ---------- usage + history ----------
 
+    @staticmethod
+    def _quota_stamp(at: datetime) -> str:
+        return at.isoformat(" ", timespec="microseconds")
+
+    @_write
+    def change_pause(self, now: datetime, value: str):
+        """Close the previous interval and publish its replacement together."""
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            old = self.get_setting(pause.KEY) or ""
+            previous = pause._load(old)
+            current = pause._load(value)
+            stamp = self._quota_stamp(now)
+            if previous:
+                start = self._quota_stamp(previous["started"])
+                self.conn.execute("UPDATE quota_pauses SET until = min(until, ?) WHERE started = ?", (stamp, start))
+            if current:
+                self.conn.execute("INSERT OR REPLACE INTO quota_pauses VALUES (?, ?)",
+                                  (stamp, self._quota_stamp(current["until"])))
+            self.conn.execute("DELETE FROM quota_pauses WHERE until <= started OR until < ?",
+                              (self._quota_stamp(now - timedelta(days=2)),))
+            self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (pause.KEY, value))
+        if old != value and not applog.is_quiet():
+            display = json.dumps({**current, "started": current["started"].strftime(TIME_FMT),
+                                  "until": current["until"].strftime(TIME_FMT)}) if current else ""
+            applog_changes.setting_changed(self, pause.KEY, old, display)
+
+    def quota_pauses(self, start: datetime, end: datetime):
+        rows = self.conn.execute("SELECT started, until FROM quota_pauses WHERE until > ? AND started <= ?",
+                                 (self._quota_stamp(start), self._quota_stamp(end)))
+        for row in rows:
+            parsed = pause._load(json.dumps(dict(row)))
+            if parsed:
+                yield parsed["started"], parsed["until"]
+
+    def quota_writer_mark(self, writer: str) -> float:
+        row = self.conn.execute("SELECT counted_through FROM quota_writer_marks WHERE writer = ?",
+                                (writer,)).fetchone()
+        return row[0] if row else 0.0
+
+    @_write
+    def commit_quota(self, mark_key, now, spans, openings, activity=(), switches=(), *, service_mark=None):
+        """Commit sampled quota and the handoff mark. A stale service computation is retried next pass."""
+        from quota_accounting import log_accounting, mark_value, payable
+        stamp = self._quota_stamp
+        now_mark = f"{now.timestamp():.6f}"
+        service = service_mark is not None
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            current = self.get_setting(mark_key) or ""
+            if service and current != service_mark:
+                return False
+            previous = mark_value(current)
+            service_spans = {}
+            if spans and not service:
+                since = stamp(min(start for _, start, _ in spans))
+                for owner, bucket, start, end in self.conn.execute(
+                        "SELECT owner, bucket, started, until FROM quota_service_spans WHERE until > ?", (since,)):
+                    service_spans.setdefault((owner, bucket), []).append(
+                        (datetime.fromisoformat(start), datetime.fromisoformat(end)))
+            amounts = {}
+            for target, start, end in spans:
+                pieces = payable(start, end, service_spans.get(target, ()))
+                for lo, hi in pieces:
+                    micros = (hi - lo) // timedelta(microseconds=1)
+                    amounts[target] = amounts.get(target, 0) + micros
+            if service:
+                # Compact continuous service coverage and retain anything a stalled tray might still be retrying.
+                for target, start, end in spans:
+                    extension = self.conn.execute(
+                        "UPDATE quota_service_spans SET until = ? WHERE owner = ? AND bucket = ? AND until = ?",
+                        (stamp(end), *target, stamp(start)))
+                    if not extension.rowcount:
+                        self.conn.execute("INSERT INTO quota_service_spans VALUES (?, ?, ?, ?)",
+                                          (*target, stamp(start), stamp(end)))
+            if not service or not self.quota_writer_mark("tray"):
+                self.conn.execute("DELETE FROM quota_service_spans WHERE until < ?",
+                                  (stamp(now - timedelta(minutes=2)),))
+            usage = list(openings)
+            carry_micros = 0
+            for (owner, bucket), micros in amounts.items():
+                row = self.conn.execute("SELECT micros FROM quota_carry WHERE owner = ? AND bucket = ?",
+                                        (owner, bucket)).fetchone()
+                whole, rest = divmod(micros + (row[0] if row else 0), 1_000_000)
+                carry_micros += rest
+                if rest:
+                    self.conn.execute("INSERT OR REPLACE INTO quota_carry VALUES (?, ?, ?, ?)",
+                                      (owner, bucket, rest, now.date().isoformat()))
+                elif row:
+                    self.conn.execute("DELETE FROM quota_carry WHERE owner = ? AND bucket = ?", (owner, bucket))
+                if whole:
+                    usage.append((owner, bucket, now.date(), whole))
+            if 0 < previous < now.timestamp() and datetime.fromtimestamp(previous).date() < now.date():
+                cutoff = (now.date() - timedelta(days=45)).isoformat()
+                self.conn.execute("DELETE FROM quota_carry WHERE day < ? "
+                                  "AND (bucket NOT LIKE 'win:%' OR substr(bucket, -16) < ?)", (cutoff, cutoff))
+            settings = {mark_key: now_mark} if now.timestamp() >= previous else {}
+            writer = "service" if service else "tray"
+            self.conn.execute("INSERT INTO quota_writer_marks VALUES (?, ?) "
+                              "ON CONFLICT(writer) DO UPDATE SET counted_through = max(counted_through, excluded.counted_through)",
+                              (writer, now.timestamp()))
+            self.add_tracked(usage, activity, switches, settings)
+        if service_spans:
+            log_accounting("tray", "handoff", next(iter(service_spans)), spans[0][1], now,
+                           "paid_microseconds=%d carry_microseconds=%d openings=%d commit=ok",
+                           sum(amounts.values()), carry_micros, len(openings))
+        return True
+
     @_write
     def add_usage(self, targets, seconds: int, day: date):
         """Add seconds to every (owner, bucket) in targets."""
@@ -758,21 +916,24 @@ class Database:
         seconds instead of three or more on every tick: usage (owner, bucket, day, seconds), screen time
         (minute, exe, site, seconds, active seconds), switches (timestamp, exe, site) and settings (its
         counted-until mark, written with the time it covers so the two can never disagree)."""
-        with self.conn:
-            self.conn.executemany(
-                "INSERT INTO usage (owner, bucket, seconds, day) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(owner, bucket) DO UPDATE SET seconds = seconds + excluded.seconds",
-                [(owner, bucket, seconds, day.isoformat() if isinstance(day, date) else day)
-                 for owner, bucket, day, seconds in usage])
-            self.conn.executemany(
-                "INSERT INTO activity (minute, exe, site, seconds, active_seconds) VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(minute, exe, site) DO UPDATE SET seconds = seconds + excluded.seconds, "
-                "active_seconds = active_seconds + excluded.active_seconds", list(activity))
-            self.conn.executemany("INSERT INTO switch_events (timestamp, exe, site) VALUES (?, ?, ?)",
-                                  [(ts.strftime(TIME_FMT), exe, site) for ts, exe, site in switches])
-            for key, value in (settings or {}).items():
-                self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
-                                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+        with contextlib.nullcontext() if self.conn.in_transaction else self.conn:
+            self._insert_tracked(usage, activity, switches, settings)
+
+    def _insert_tracked(self, usage, activity, switches, settings):
+        self.conn.executemany(
+            "INSERT INTO usage (owner, bucket, seconds, day) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(owner, bucket) DO UPDATE SET seconds = seconds + excluded.seconds",
+            [(owner, bucket, seconds, day.isoformat() if isinstance(day, date) else day)
+             for owner, bucket, day, seconds in usage])
+        self.conn.executemany(
+            "INSERT INTO activity (minute, exe, site, seconds, active_seconds) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(minute, exe, site) DO UPDATE SET seconds = seconds + excluded.seconds, "
+            "active_seconds = active_seconds + excluded.active_seconds", list(activity))
+        self.conn.executemany("INSERT INTO switch_events (timestamp, exe, site) VALUES (?, ?, ?)",
+                              [(ts.strftime(TIME_FMT), exe, site) for ts, exe, site in switches])
+        for key, value in (settings or {}).items():
+            self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                              "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
     def usage_of(self, targets) -> dict[tuple[str, str], int]:
         """Seconds (or openings) used in each (owner, bucket) - 0 where nothing is written yet. A primary-key
@@ -809,16 +970,25 @@ class Database:
         with self.conn:
             self.conn.execute("INSERT INTO emergency_unlocks (started, until, item_ids, names, alerts, tier) "
                               "VALUES (?, ?, ?, ?, ?, ?)",
-                              (start.strftime(TIME_FMT), until.strftime(TIME_FMT), json.dumps(item_ids),
+                              (self._quota_stamp(start), self._quota_stamp(until), json.dumps(item_ids),
                                json.dumps(names), int(bool(alerts)), tier))
 
     def unlocks_since(self, since: datetime) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM emergency_unlocks WHERE until > ? ORDER BY started",
                                  (since.strftime(TIME_FMT),))
-        return [{"started": datetime.strptime(r["started"], TIME_FMT), "until": datetime.strptime(r["until"], TIME_FMT),
-                 "item_ids": json.loads(r["item_ids"]), "names": json.loads(r["names"]), "alerts": bool(r["alerts"]),
-                 "tier": r["tier"]}
-                for r in rows]
+        out = []
+        for r in rows:
+            try:
+                started, until = (datetime.fromisoformat(r[k]) for k in ("started", "until"))
+                item_ids, names = json.loads(r["item_ids"]), json.loads(r["names"])
+                if (started.tzinfo is None and until.tzinfo is None and until > since
+                        and isinstance(item_ids, list) and all(type(i) is int for i in item_ids)
+                        and isinstance(names, list)):
+                    out.append({"started": started, "until": until, "item_ids": item_ids, "names": names,
+                                "alerts": bool(r["alerts"]), "tier": r["tier"]})
+            except (TypeError, ValueError):
+                continue
+        return out
 
     def active_unlocks(self, now: datetime) -> dict[int, datetime]:
         """item id -> until, for items in an emergency unlock right now."""

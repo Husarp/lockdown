@@ -16,6 +16,8 @@ from blocker.hosts import normalize_host
 from db import Database
 from monitor import usage
 from monitor.address import LAST_VALID_SEC, valid_address
+from resident import diag
+from resident.site_media import FRESH_SEC, tab_token
 from trusted_time import now_from_db
 
 TICK_SEC = 0.5
@@ -64,17 +66,43 @@ def tab_address(hwnd: int, url: str | None, title: str, exe: str | None = None) 
             site_block.title_site(title, exe, usage.site_of(last[1]) if last else None)), True
 
 
-def act(hwnd: int, action: str) -> bool:
+def act(hwnd: int, action: str, recheck=None, original=None) -> bool:
     from monitor import browser_url, win
+    def same_tab():
+        if recheck is None:
+            return True
+        current = recheck()
+        if not current or not current.actionable or current.host != original.host:
+            return False
+        token = tab_token(original)
+        if token is not None:
+            return tab_token(current) == token
+        return bool(original.url and original.url == current.url and not original.bar_hidden and not current.bar_hidden)
+
     if action == "back":
-        return win.press(hwnd, win.VK_MENU, win.VK_LEFT)
+        return same_tab() and win.press(hwnd, win.VK_MENU, win.VK_LEFT)
     if browser_url.tab_count(hwnd) == 1:
-        # closing the only tab would close the whole browser window - open a fresh tab first, then close the bad one
-        win.chord(hwnd, win.VK_CONTROL, win.VK_T)
+        # A keyboard shortcut can only target the current tab. Check the newly opened tab
+        # before switching back and check the original again before closing.
+        if not same_tab() or (recheck is not None and tab_token(original) is None):
+            return False
+        if not win.chord(hwnd, win.VK_CONTROL, win.VK_T):
+            return False
         time.sleep(0.08)
-        win.chord(hwnd, win.VK_CONTROL, win.VK_SHIFT, win.VK_TAB)   # back to the blocked tab
+        if recheck is not None:
+            fresh = recheck()
+            fresh_url = (getattr(fresh, "url", None) or "").lower().rstrip("/")
+            if (not fresh or not tab_token(fresh) or tab_token(fresh) == tab_token(original)
+                    or fresh_url not in _NEW_TAB_URLS):
+                return False
+        if not win.chord(hwnd, win.VK_CONTROL, win.VK_SHIFT, win.VK_TAB):
+            return False
         time.sleep(0.05)
-    return win.chord(hwnd, win.VK_CONTROL, win.VK_W)
+    return same_tab() and win.chord(hwnd, win.VK_CONTROL, win.VK_W)
+
+
+_NEW_TAB_URLS = {"about:blank", "about:newtab", "about:home", "chrome://newtab", "edge://newtab",
+                 "brave://newtab", "vivaldi://newtab", "chrome://new-tab-page", "opera://startpage"}
 
 
 def blocked_sites(db) -> dict[str, str]:
@@ -87,9 +115,16 @@ def blocked_sites(db) -> dict[str, str]:
     (0.84.11). The network covers that page now: its open connections are cut, browsers can't use QUIC while a
     site is blocked, and its video hosts are firewalled, IPv4 and IPv6 (0.84.9, service.update_video_block)."""
     out = {}
-    for host, block in db.active_blocks(now_from_db(db)).items():
-        if block["item"]["item_type"] == "site" and (action := site_block.tab_action(block["item"].get("block_type"))):
-            out[host] = action
+    for block in db.blocks(now_from_db(db)):
+        item = block["item"]
+        if item["item_type"] != "site":
+            continue
+        flags = site_block.site_flags(item.get("block_type"))
+        action = "close" if "close" in flags else "back" if "back" in flags else None
+        if action:
+            for host in item["target"].split():
+                if out.get(host) != "close":
+                    out[host] = action
     return out
 
 
@@ -112,28 +147,30 @@ class BlockedSites:
         return self.sites
 
 
+def matching_sites(host, sites):
+    return {site: action for site, action in sites.items() if host == site or host.endswith("." + site)}
+
+
 def site_action(url: str | None, sites: dict) -> str | None:
-    """What to do about the address in front, if it is one of those sites (or below one of them)."""
+    """What to do about the address in front, combining applicable parent and exact host rules."""
     if not url or not sites:
         return None
     try:
         host = normalize_host(url)
     except ValueError:      # e.g. search text typed in the address bar
         return None
-    while host:
-        if host in sites:
-            return sites[host]
-        host = host.partition(".")[2]
-    return None
+    actions = matching_sites(host, sites).values()
+    return "close" if "close" in actions else "back" if "back" in actions else None
 
 
 class WordGuard(threading.Thread):
     """on_block(word, action) is called (from this thread) after a tab was closed / sent back for a bad word.
     A blocked site says nothing extra: visiting it already raises its own alert."""
 
-    def __init__(self, on_block):
+    def __init__(self, on_block, before_action=None):
         super().__init__(daemon=True)
         self.on_block = on_block
+        self.before_action = before_action
         self.stop_event = threading.Event()
         self.last: tuple | None = None   # ((hwnd, address, title), when we acted, "close" / "back")
 
@@ -150,28 +187,46 @@ class WordGuard(threading.Thread):
 
     def _check(self):
         import uiautomation as auto   # COM must be initialized in this thread
-        with auto.UIAutomationInitializerInThread():
-            db = Database()
-            blocked = BlockedSites()
-            while not self.stop_event.wait(TICK_SEC):
-                try:
-                    if antibypass.is_off(db):
-                        self.last = None
-                        continue
-                    now = time.monotonic()
-                    self.tick(keywords.settings_shared(db), sense_tab, act, now, blocked.get(db, now),
-                              protection.words_skip_sites(db))   # (read-only)
-                except Exception:
-                    log.exception("Word check failed")
+        from monitor import tab_reader, win
 
-    def tick(self, cfg: dict, sense, do, now: float, sites: dict | None = None, skip_sites=()):
+        def observe(refresh=False):
+            hwnd, exe = win.foreground()
+            return reader.read(hwnd, exe, role="foreground", refresh=refresh) if hwnd else None
+
+        def live_sites():
+            return {} if antibypass.is_off(db) else blocked_sites(db)
+
+        with auto.UIAutomationInitializerInThread():
+            db = Database(ui=True)
+            try:
+                reader = tab_reader.TabReader()
+                blocked = BlockedSites()
+                while not self.stop_event.wait(TICK_SEC):
+                    try:
+                        if antibypass.is_off(db):
+                            self.last = None
+                            continue
+                        now = time.monotonic()
+                        self.tick(keywords.settings_shared(db), observe, act, now, blocked.get(db, now),
+                                  protection.words_skip_sites(db), live_sites=live_sites)
+                    except Exception:
+                        log.exception("Word check failed")
+            finally:
+                db.close()
+
+    def tick(self, cfg: dict, sense, do, now: float, sites: dict | None = None, skip_sites=(), *, live_sites=None):
         """sites: {hostname: "close" / "back"} from blocked_sites(). skip_sites: allowed sites that skip blocked words.
-        sense() -> (window, address, title[, address bar hidden]) - sense_tab()."""
-        tab = sense() if (cfg["enabled"] or sites) else None
+        sense() returns the thread's observation. Tuple readings are accepted by the legacy keyword/guard tests."""
+        sensed = sense() if (cfg["enabled"] or sites) else None
+        obs = sensed if getattr(sensed, "hwnd", None) else None
+        tab = (obs.hwnd, obs.url or obs.host, obs.title, obs.bar_hidden, tab_token(obs)) if obs else sensed
         if tab:
-            usage.note_shown(tab[1])   # (a blocked-visit notice needs it: sent back before the tracker saw it)
+            usage.note_shown(tab[1])   # a blocked-visit notice needs it
         word = tab and cfg["enabled"] and keywords.find(tab[1], tab[2], cfg, skip_sites)
         action = cfg["action"] if word else (site_action(tab[1], sites or {}) if tab else None)
+        if not word and obs and (not obs.actionable or not 0 <= time.monotonic() - obs.observed_at <= FRESH_SEC):
+            action = None
+        expected = action
         if not action:
             self.last = None
             return
@@ -200,7 +255,28 @@ class WordGuard(threading.Thread):
             # no address bar (a full-screen video): going back would only seek the video or hop to the one
             # before - close the tab (0.84.9)
             action = "close"
-        if do(tab[0], action):
+        if obs and not word:
+            def recheck():
+                fresh = sense(refresh=True)
+                if (fresh and fresh.hwnd == obs.hwnd and fresh.pid and fresh.pid == obs.pid
+                        and fresh.process_started_at == obs.process_started_at
+                        and 0 <= time.monotonic() - fresh.observed_at <= FRESH_SEC
+                        and (live_sites is None or site_action(obs.host, live_sites()) == expected)):
+                    return fresh
+                return None
+
+            if self.before_action:
+                try:
+                    self.before_action(obs, frozenset(matching_sites(obs.host, sites or {})), action)
+                except Exception:
+                    log.exception("Couldn't request Pause before site action")
+            acted = do(tab[0], action, recheck=recheck, original=obs)
+            if acted:
+                stage = " after Pause preflight" if self.before_action else ""
+                diag.note(f"site_action {action} completed{stage}")
+        else:
+            acted = do(tab[0], action)
+        if acted:
             self.last = (tab, now, action)
             if first and word:  # one notice per detection; a blocked site has its own alert already
                 self.on_block(word, action)

@@ -27,7 +27,7 @@ def names(part):
 
 # ---------------------------------------------------------------- items that aren't blocked yet
 
-def test_emergency_on_an_item_with_allowance_left_holds_past_the_allowance(world):
+def test_emergency_preserves_the_allowance_until_it_ends(world):
     w = world(at(FRIDAY, "21:00"))
     item = add_game(w, [allow("16:00", "18:00", allowance_min=15)])     # outside its hours, 15 min allowed
     w.step()
@@ -37,16 +37,18 @@ def test_emergency_on_an_item_with_allowance_left_holds_past_the_allowance(world
     assert emergency.uses_left(w.gui, w.now)[0] == 2                    # one use spent
     game = w.launch("hollowgame.exe", BOOT)
     w.play(game)
-    w.run(19)                                                           # the 15 min allowance ran out at 15
-    assert w.alive(game) and w.reason(item) is None                     # ...but the emergency holds
-    allowance = w.gui.usage_lookup(w.now).data
-    assert max(v for (owner, bucket), v in allowance.items() if bucket.startswith("win:")) >= 18 * 60   # counted
-    w.run((until - w.now).total_seconds() / 60 + 15 / 60, every=2)     # the emergency ends: blocked, closed
+    w.run(19)
+    assert w.alive(game) and w.reason(item) is None
+    w.tracker.flush(w.tray_db)
+    assert not any(bucket.startswith("win:") for _, bucket in w.gui.usage_lookup(w.now).data)
+    w.run((until - w.now).total_seconds() / 60 + 14, every=2)
+    assert w.alive(game) and w.reason(item) is None
+    w.run(1.5, every=2)
     assert w.reason(item) == "schedule"
     assert not w.alive(game)
 
 
-def test_emergency_before_a_limit_runs_out_holds_until_it_ends(world):
+def test_emergency_preserves_the_rest_of_a_limit_until_it_ends(world):
     w = world(at(FRIDAY, "14:00"))
     item = add_game(w, [{"rule_type": "time_limit", "daily_limit_min": 30}])
     w.step()
@@ -54,10 +56,15 @@ def test_emergency_before_a_limit_runs_out_holds_until_it_ends(world):
     w.play(game)
     w.run(25)
     assert w.reason(item) is None
-    emergency.unlock(w.gui, [{"id": item, "display_name": "Hollow Game"}], w.now)
-    w.run(19)                                                           # 44 min played, limit 30
+    w.tracker.flush(w.tray_db)
+    paid = w.used(item)
+    until = emergency.unlock(w.gui, [{"id": item, "display_name": "Hollow Game"}], w.now)
+    w.run(19)
     assert w.alive(game) and w.reason(item) is None
-    assert w.used(item) >= 43 * 60                                      # counting never paused
+    w.tracker.flush(w.tray_db)
+    assert w.used(item) == paid
+    w.run((until - w.now).total_seconds() / 60 + 4, every=2)
+    assert w.alive(game) and w.reason(item) is None
     w.run(1.5, every=2)
     assert w.reason(item) == "limit" and not w.alive(game)
 

@@ -16,6 +16,7 @@ one transaction - at once when a limit or allowance is about to be reached, on a
 import logging
 import threading
 import time
+from datetime import datetime, timedelta
 
 import block_method
 import modes
@@ -27,9 +28,11 @@ from blocker.apps import (PROTECTED, app_folder, exe_name, in_folder, interprete
 from blocker.hosts import normalize_host
 from blocker.site_block import title_site
 from db import Database
+from quota_accounting import (COUNTED_KEY, MAX_GAP_SEC, Contributor, Exemptions, category_contributors,
+                              log_accounting, time_spans)
 from monitor.address import LAST_VALID_SEC, valid_address
 from rules import (Usage, block_targets, closed_opening, counted_rules, effective_rules, extra_time_bucket, limit_targets,
-                   switch_targets, usage_targets, visit_targets)
+                   switch_targets, visit_targets)
 from trusted_time import now_from_db
 
 TICK_SEC = 0.5         # (0.84.2: was 2) how soon things are noticed - not how much time is counted
@@ -37,13 +40,6 @@ FLUSH_SEC = 2          # counted time is written at most this often (sooner when
 URL_REFRESH_SEC = 2    # an unchanged browser window's address bar is read again this often (_read_url)
 PROCESS_REFRESH_SEC = 2   # the process list (to spot app launches) is read again this often (UsageTracker.running_now)
 RESTART_SEC = 30       # wait before starting the tracker again after it fell over
-# Time is counted as it really passed between two ticks, not as TICK_SEC per tick: a tick that comes late (the
-# window busy, a database lock, the PC under load) used to lose everything but 2 seconds of it. A longer gap than
-# this is the PC asleep, not play - and while the tray isn't counting at all, the service counts instead.
-MAX_GAP_SEC = 60
-# Setting: trusted unix time up to which use has been counted - by this tracker, or by the service's backstop
-# (service.Enforcer.count_unwatched_apps) while this tracker isn't running. One mark, so nothing is counted twice.
-COUNTED_KEY = "usage.counted_until"
 # Setting: JSON {pid: [exe, ...]} the service publishes - running processes that belong to a listed app by name,
 # what it started from its own folder (after the starter has gone too), or a program from its game folder
 # (service.Enforcer.publish_members). The tray counts the window in front by this as well.
@@ -79,7 +75,7 @@ def app_matches(item: dict, exe: str, path: str | None, owners: frozenset | set 
 
 def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict],
                  categories: dict[tuple[str, str], str] | None = None, path: str | None = None,
-                 owners: frozenset | set = frozenset()) -> list[dict]:
+                 owners: frozenset | set = frozenset(), *, expand_categories=True) -> list[dict]:
     """Items being used: the foreground app (games count even without keyboard/mouse input), and the site
     open in the foreground browser tab, with or without input. A blocker on a whole category counts as
     in use whenever one of its members is, so its time limit is one pot for everything in the category.
@@ -94,7 +90,7 @@ def items_in_use(exe: str | None, url: str | None, idle: bool, items: list[dict]
             # Overlapping entries all have rules to count, even when an earlier entry has no limit.
             used += [i for i in items if i["item_type"] == "site"
                      and any(host == h or host.endswith("." + h) for h in i["target"].split())]
-    cat_items = [i for i in items if i["item_type"] == "category"]
+    cat_items = [i for i in items if i["item_type"] == "category"] if expand_categories else []
     if cat_items:
         cats = used_categories(exe, url, idle, used, categories or {})
         used += [i for i in cat_items if modes.category_keys({i["target"]}) & cats]
@@ -129,7 +125,7 @@ def sense_desktop():
     than the foreground one (win.front_windows: not minimized, not behind another window, not on another virtual
     desktop): (exe, its active tab's URL if it is a browser, exe path or None, pid). They count towards limits and
     allowances only; screen time stays what you were doing (the foreground)."""
-    from monitor import browser_url, win
+    from monitor import win
     hwnd, exe, path = win.foreground_process()
     if win.session_locked():   # locked: nothing is being used, whatever window was in front
         return None, None, 0.0, None, None
@@ -138,14 +134,41 @@ def sense_desktop():
         for o_hwnd, o_pid, o_exe, o_path in win.front_windows():
             if o_hwnd == hwnd:
                 continue
-            others.append((o_exe, _read_url(browser_url, win, o_hwnd, True, o_exe) if o_exe in browser_url.BROWSERS
-                           else None, o_path or None, o_pid))
+            others.append((o_exe, _sample_tab(o_hwnd, o_exe, o_path, "visible"), o_path or None, o_pid))
     except Exception:
         log.exception("Couldn't list the windows in front on the other monitors")
     if not hwnd:
         return None, None, 0.0, None, None, others
-    url = _read_url(browser_url, win, hwnd, False, exe) if exe in browser_url.BROWSERS else None
+    url = _sample_tab(hwnd, exe, path, "foreground")
     return exe or None, url, 0.0, path or None, win.window_pid(hwnd) or None, others
+
+
+_tab_local = threading.local()
+
+
+def _sample_tab(hwnd, exe, path, role):
+    from monitor import browser_catalog, tab_reader
+
+    if not browser_catalog.identify(exe, path):
+        return None
+    if not hasattr(_tab_local, "reader"):
+        _tab_local.reader = tab_reader.TabReader()
+    observation = _tab_local.reader.read(hwnd, exe, role=role)
+    # The reader publishes current plain observations for media attribution in recent_observations.
+    if observation and observation.host:
+        return observation.url or observation.host
+    return None
+
+
+def window_contributors(exe, url, items, categories, path, owners):
+    direct = items_in_use(exe, url, False, items, {}, path, owners, expand_categories=False)
+    sources = {(modes.item_category(item, categories), item["id"]) for item in direct}
+    for kind, window_exe, window_url in (("app", exe, None), ("site", None, url)):
+        for cat in used_categories(window_exe, window_url, False, [], categories):
+            ids = [item["id"] for item in direct if item["item_type"] == kind]
+            sources.update((cat, item_id) for item_id in ids or [None])
+    return ([Contributor(item, item["id"]) for item in direct]
+            + list(category_contributors(items, sources)))
 
 
 NO_BAR_RETRY_SEC = 30
@@ -327,7 +350,9 @@ class UsageTracker(threading.Thread):
         self.carry = 0.0                       # screen time: fraction of a second not yet counted
         self.counted_ts: float | None = None   # trusted time of the last tick that counted
         # Counted but not yet written (0.84.2) - flush() writes it all in one transaction:
-        self.pending: dict[tuple[str, str], list] = {}   # (owner, bucket) -> [seconds, of which app-fed, day]
+        self.pending = {}                     # (owner, bucket) -> [payable seconds, payable intervals]
+        self.openings = []                    # (owner, bucket, day, count) sampled payable events
+        self.service_mark = None
         self.activity: dict[tuple[str, str, str], list[int]] = {}   # (minute, exe, site) -> [seconds, active]
         self.switches: list[tuple] = []        # (when, exe, site)
         self.unflushed = 0.0                   # seconds counted since the last write
@@ -383,32 +408,6 @@ class UsageTracker(threading.Thread):
         now = time.time() if now is None else now
         return now - self.last_tick if self.last_tick else 0.0
 
-    def elapsed(self, db: Database, now_ts: float) -> tuple[float, float]:
-        """(seconds, app seconds) to count for this tick: the time since the last tick really took - not a fixed
-        TICK_SEC - at least one tick, at most MAX_GAP_SEC. Fractions are kept: per usage bucket until they make
-        a whole second (pending), and for screen time in `carry`.
-
-        App seconds leave out what the service's backstop already counted for running apps while this tracker
-        was stalled (it moved COUNTED_KEY past the mark we last wrote); sites and screen time have no backstop,
-        so they get the whole gap. The app time still waiting to be written from before the stall is covered by
-        what the service counted, so it is dropped (for the part of it the service's count spans)."""
-        own = now_ts - self.counted_ts if self.counted_ts else TICK_SEC
-        seconds = min(max(own, TICK_SEC), MAX_GAP_SEC)
-        try:
-            mark = float(db.get_setting(COUNTED_KEY) or 0)
-        except ValueError:
-            mark = 0.0
-        if self.mark_ts and mark > self.mark_ts + 0.5:   # the service counted the apps in between
-            waited = (self.counted_ts or 0) - self.mark_ts
-            covered = min(max((mark - self.mark_ts) / waited, 0.0), 1.0) if waited > 0 else 1.0
-            for entry in self.pending.values():
-                entry[0] -= entry[1] * covered
-                entry[1] = 0.0
-            self.mark_ts = mark
-            self.urgent = True   # (write our own mark again soon: the service sees the tray counting)
-            return seconds, min(max(now_ts - mark, 0.0), seconds)
-        return seconds, seconds
-
     def running_now(self, pids: set[int]) -> set[str]:
         """Names of the running programs (to spot app launches), from a process list read at most every
         PROCESS_REFRESH_SEC - and at once when a window in front belongs to a process the last list didn't have
@@ -453,8 +452,16 @@ class UsageTracker(threading.Thread):
         grants = Usage(db.usage_of({(owner, extra_time_bucket(now, clock)) for owner in grant_owners}), clock)
         running = running_exes() if running_exes else self.running_now({p for p in (pid, *(o[3] for o in others)) if p})
         running = running | hosted_running(published)   # (launches of a Java game, a script)
-        seconds, app_seconds = self.elapsed(db, now_ts)
-        launched = running - self.running if self.running is not None else set()
+        own = now_ts - self.counted_ts if self.counted_ts is not None else TICK_SEC
+        seconds = min(max(own, TICK_SEC), MAX_GAP_SEC)
+        start = now - timedelta(seconds=seconds)
+        exemptions = Exemptions(db, start, now)
+        service_mark = db.quota_writer_mark("service")
+        handed_off = service_mark > (self.service_mark or 0)
+        self.service_mark = service_mark
+        if handed_off:
+            self.urgent = True
+        launched = running - self.running if self.running is not None and not handed_off else set()
         self.running = running
         total = seconds + self.carry   # screen time is whole seconds per minute row: the fraction waits
         screen = int(total)
@@ -464,53 +471,47 @@ class UsageTracker(threading.Thread):
         # 15 minutes without keyboard or mouse used to stop the count - and a video watched without touching
         # anything is exactly that, so a group's "15 min allowed during blocked hours" never ran out and YouTube
         # stayed open all night (0.84.1). Only a locked session stops it (sense_desktop: nothing in front).
-        used = items_in_use(exe, url, False, items, categories, path, owners)
-        focused_ids = {i["id"] for i in used}
-        # The window in front on each other monitor is in use too (0.84.2) - a game left on the second screen while
-        # you browse on the first. Each item counts once a tick, however many windows show it (never double time).
+        focused = window_contributors(exe, url, items, categories, path, owners)
+        used = focused.copy()
+        # Other visible windows spend quota while foreground activity alone feeds Screen Time.
         for o_exe, o_url, o_path, o_pid in others:
             if o_exe or o_url or o_pid:
-                used += items_in_use(o_exe, o_url, False, items, categories, o_path,
-                                     owners_of(db, o_pid, published))
-        used = list({i["id"]: i for i in used}.values())
-        used_ids = {i["id"] for i in used}
+                used.extend(window_contributors(o_exe, o_url, items, categories, o_path,
+                                                owners_of(db, o_pid, published)))
+        contributors = {(c.item["id"], c.source): c for c in used}
+        used_ids = {item_id for item_id, _ in contributors}
+        payable_ids = {c.item["id"] for c in contributors.values() if exemptions.allows_charge(c.scopes(groups), now)}
+        payable_focus = {c.item["id"] for c in focused if exemptions.allows_charge(c.scopes(groups), now)}
+        visits, switches = [], set()
+        limits: dict[tuple[str, str], int] = {}
         for item in items:
+            item_id = item["id"]
             is_app = item["item_type"] == "app"
-            app_launched = is_app and bool(names_of(item["target"]) & launched)   # (Steam may start the Shipping exe)
-            if not (app_launched or (not is_app and item["id"] in used_ids)):
+            app_launched = is_app and bool(names_of(item["target"]) & launched)
+            if item_id not in used_ids and not app_launched:
                 continue
             rules = counted_rules(item, groups)
-            last = self.last_used.get(item["id"])
-            away = None if last is None else now_ts - last
-            # opening limits in "launches / new visits" mode - one opening can go over one: written at once
-            if opened := self.unless_closed(db, item, groups, visit_targets(rules, item, now, app_launched, away,
-                                                                            clock), now, clock):
-                self._add(opened, 1, False, now)
-                self.urgent = self.opened = True
-        # Each bucket gets this tick's time once, however many items in use feed it: a shared group (or category)
-        # limit with the game on monitor 2 and YouTube on monitor 1 counts real time, not twice it. App time where
-        # an app feeds it (the service's backstop may already have counted the apps' part of the gap).
-        buckets: dict[tuple[str, str], tuple[float, bool]] = {}
-        limits: dict[tuple[str, str], int] = {}
-        switch_to: set[tuple[str, str]] = set()
-        for item in used:
-            rules = counted_rules(item, groups)
-            is_app = item["item_type"] == "app"
-            spent = app_seconds if is_app else seconds
-            for target in usage_targets(rules, item["id"], now, clock):
-                old = buckets.get(target)
-                buckets[target] = (min(old[0], spent), old[1] or is_app) if old else (spent, is_app)
-            for target, limit in limit_targets(rules, now, clock, grants).items():
-                limits[target] = min(limits.get(target, limit), limit)
-            if switched and item["id"] in focused_ids:   # you just switched to it ("every switch" opening limits)
-                switch_to |= self.unless_closed(db, item, groups, switch_targets(rules, item["id"], now, clock),
-                                                now, clock)   # (one switch: once per bucket too)
-            self.last_used[item["id"]] = now_ts
-        for target, (spent, app_fed) in buckets.items():
-            self._add((target,), spent, app_fed, now)
-        if switch_to:
-            self._add(switch_to, 1, False, now)
-            self.opened = True
+            if item_id in payable_ids or (app_launched and exemptions.allows_charge(
+                    Contributor(item, item_id).scopes(groups), now)):
+                last = self.last_used.get(item_id)
+                away = None if last is None else now_ts - last
+                visits.extend(self.unless_closed(db, item, groups, visit_targets(rules, item, now, app_launched,
+                                                                                away, clock), now, clock))
+            if switched and item_id in payable_focus:
+                switches |= self.unless_closed(db, item, groups, switch_targets(rules, item_id, now, clock),
+                                               now, clock)
+            if item_id in used_ids:
+                self.last_used[item_id] = now_ts
+                for target, limit in limit_targets(rules, now, clock, grants).items():
+                    limits[target] = min(limits.get(target, limit), limit)
+        for target, lo, hi in time_spans(contributors.values(), groups, exemptions, start, now, clock, "tray"):
+            entry = self.pending.setdefault(target, [0.0, []])
+            entry[0] += (hi - lo).total_seconds()
+            entry[1].append((lo, hi))
+        for targets in (visits, switches):
+            self.openings.extend((*target, now.date(), 1) for target in targets)
+        if self.openings:
+            self.urgent = self.opened = True
         self.in_use = used_ids
         self.limits = limits
         self.counted_ts = now_ts
@@ -537,23 +538,11 @@ class UsageTracker(threading.Thread):
                 return targets
             unlocks = {f"item:{i}": u for i, u in db.active_unlocks(now).items()}
             usage = Usage(db.usage_of(block_targets(rules, now, clock) | set(targets)), clock, unlocks,
-                          pause.until(db, now))   # (paused: it isn't closed, so its opening counts)
+                          pause.until(db, now))
             return closed_opening(rules, targets, now, usage)
         except Exception:
             log.exception("Could not tell whether %s is blocked - counting its opening", item["display_name"])
             return targets
-
-    def _add(self, targets, seconds: float, app_fed: bool, now):
-        """Count `seconds` (or openings) in every (owner, bucket) of `targets` - in memory until flush()."""
-        day = now.date()
-        for target in targets:
-            entry = self.pending.get(target)
-            if entry is None:
-                entry = self.pending[target] = [0.0, 0.0, day]
-            entry[0] += seconds
-            if app_fed:
-                entry[1] += seconds
-            entry[2] = day
 
     def near_limit(self, db: Database) -> bool:
         """Is a time limit or an allowance in use about to be reached - within FLUSH_SEC of what is counted - and
@@ -572,34 +561,35 @@ class UsageTracker(threading.Thread):
         return False
 
     def flush(self, db: Database):
-        """Write what has been counted since the last write - usage (whole seconds; the fractions wait in pending),
-        screen time and switches - and the counted-until mark, in one transaction. Nothing is forgotten until
-        it is written: if the write fails, it is all tried again on the next tick."""
-        usage = [(owner, bucket, entry[2], int(entry[0])) for (owner, bucket), entry in self.pending.items()
-                 if entry[0] >= 1]
+        """Commit quota, activity and the handoff mark together. Retain pending data if the write fails."""
         activity = [(*key, sec, active) for key, (sec, active) in self.activity.items() if sec or active]
-        mark = f"{self.counted_ts:.3f}" if self.counted_ts else None
-        if usage or activity or self.switches or (mark and float(mark) != self.mark_ts):
-            db.add_tracked(usage, activity, self.switches, {COUNTED_KEY: mark} if mark else {})
-        for owner, bucket, _day, whole in usage:
-            entry = self.pending[(owner, bucket)]
-            entry[0] -= whole
-            entry[1] = min(entry[1], entry[0])
-        if len(self.pending) > 1000:   # (old buckets' fractions of a second: days of them)
-            self.pending = {k: e for k, e in self.pending.items() if k in self.limits}
-        self.activity, self.switches = {}, []
+        mark = self.counted_ts
+        opening_target = self.openings[0][:2] if self.openings else None
+        start = datetime.fromtimestamp(self.mark_ts) if self.mark_ts is not None else None
+        end = datetime.fromtimestamp(mark) if mark is not None else None
+        if end is None:
+            if activity or self.switches:
+                db.add_tracked(activity=activity, switches=self.switches)
+        elif self.pending or self.openings or activity or self.switches or mark != self.mark_ts:
+            spans = [(target, lo, hi) for target, (_, pieces) in self.pending.items() for lo, hi in pieces]
+            db.commit_quota(COUNTED_KEY, end, spans, self.openings, activity, self.switches)
+        self.pending, self.openings, self.activity, self.switches = {}, [], {}, []
         self.unflushed, self.urgent = 0.0, False
-        if mark:
-            self.mark_ts = float(mark)
+        if mark is not None:
+            self.mark_ts = mark
         opened, self.opened = self.opened, False
         before, self.base = self.base, {}   # (until read again: a failed read leaves no stale counts behind)
         self.base = db.usage_of(self.limits) if self.limits else {}
         # Tell the tab check and the "Minimize" blocks (limit_writes) when this write made a limit or an allowance
         # run out - or counted an opening, which can go over an opening limit - so they act on it at once. Only
         # then: not on every write of the last FLUSH_SEC before it (each of those makes them read every block).
-        if opened or any(before.get(t, 0) < limit <= self.base.get(t, 0) for t, limit in self.limits.items()):
+        crossed = next((t for t, limit in self.limits.items() if before.get(t, 0) < limit <= self.base.get(t, 0)), None)
+        if opened or crossed:
             global limit_writes
             limit_writes += 1
+            target = crossed or opening_target
+            log_accounting("tray", "threshold", target, start or end, end, "before=%d after=%d opening=%s commit=ok",
+                           before.get(target, 0), self.base.get(target, 0), opened)
 
     def record_activity(self, exe: str | None, site: str, idle_sec: float, now, seconds: int) -> bool:
         """Screen time + switch log (written by flush()). Returns True on an app/site switch.

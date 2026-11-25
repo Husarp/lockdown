@@ -12,7 +12,7 @@ export function supervisedSection() {
 
 export function codeRows(data) {
   return data.entries.map((r) => `<div class="field"><div class="field-l"><b>${esc(r.name)}</b>
-    <div><span class="sx-key">${esc(r.code)}</span> <span class="small muted">${data.remaining}s left</span></div></div>
+    <div><span class="sx-key">${esc(r.code)}</span> <span class="small muted">${r.period}s period · Changes in ${r.remaining}s · Expires in ${r.expires_in}s${r.period === 30 ? " · Re-pair for 40-second codes" : ""}</span></div></div>
     ${["copy", "rename", "delete"].map((act) => `<button class="btn btn-sm" type="button" data-sc="${act}" data-id="${esc(r.id)}">${act[0].toUpperCase() + act.slice(1)}</button>`).join("")}</div>`).join("") || '<p class="muted">No supervised keys yet.</p>';
 }
 
@@ -48,7 +48,7 @@ export function wireSupervised(root, page) {
         let sending = false;
         const h = openDialog({ key: "sc-edit", title: act === "add" ? "Add someone else's supervisor key" : "Rename supervised key",
           body: `<label class="sx-l">Name<input class="input" data-name maxlength="100" value="${esc(row ? row.name : "")}" autocomplete="off"></label>
-            ${act === "add" ? '<label class="sx-l">Base32 key or otpauth:// URI<input class="input" data-key autocomplete="off" spellcheck="false"></label>' : ""}
+            ${act === "add" ? '<label class="sx-l">Base32 key or otpauth:// URI<input class="input" data-key autocomplete="off" spellcheck="false"></label><label class="sx-l">Period for a base32 key<select class="input" data-period><option value="40">40 seconds</option><option value="30">30 seconds (legacy)</option></select></label>' : ""}
             <p class="sx-err" data-error role="alert"></p>`,
           buttons: [{ label: "Cancel", value: false }, { label: "Save", kind: "primary", onClick: () => { save(); return false; } }],
         });
@@ -60,7 +60,9 @@ export function wireSupervised(root, page) {
           try {
             const name = h.body.querySelector("[data-name]").value;
             const key = h.body.querySelector("[data-key]");
-            paint(await ld.call("supervised_codes_change", act, name, key ? key.value : "", id));
+            const args = [act, name, key ? key.value : "", id];
+            if (key) args.push(Number(h.body.querySelector("[data-period]").value));
+            paint(await ld.call("supervised_codes_change", ...args));
             if (key) key.value = "";
             h.close(true);
           } catch (err) { h.body.querySelector("[data-error]").textContent = err.message || "Couldn't save key."; }
