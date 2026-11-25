@@ -36,7 +36,7 @@ android/local.properties
 # Local build tooling and archives (never published)
 _build/
 _archive/
-android/design/_ds/
+android/design/
 
 # Private plans: kept on disk, never published
 PLAN.md
